@@ -1,0 +1,21 @@
+{
+  "name": "skills",
+  "owner": {
+    "name": "SurveyMonkey Engineering",
+    "url": "https://github.com/SurveyMonkey"
+  },
+  "metadata": {
+    "description": "SurveyMonkey Claude Code plugins: job-scoped skills for engineering workflows.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "gh-security",
+      "source": "./plugins/gh-security",
+      "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation and major-bounded scoped overrides.",
+      "category": "devops",
+      "tags": ["github", "security", "dependabot", "cve", "overrides"],
+      "version": "0.1.0"
+    }
+  ]
+}
