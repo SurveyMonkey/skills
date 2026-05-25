@@ -14,7 +14,7 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 | Plugin | Namespace | Description |
 |---|---|---|
-| `gh-security` | `/gh-security:*` | Resolve Dependabot security alerts across repositories |
+| `gh-security` | `/gh-security:*` | Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation and major-bounded scoped overrides |
 
 ## Plugin Architecture
 
@@ -25,7 +25,9 @@ plugins/
   gh-security/
     .claude-plugin/
       plugin.json
-    skills/
+    commands/
+      ...
+    scripts/
       ...
 ```
 
