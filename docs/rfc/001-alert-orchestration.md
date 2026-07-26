@@ -10,7 +10,7 @@ related_adrs: []
 
 ## Summary
 
-Convert the `gh-security` plugin from a single-shot, one-package-per-invocation command into an orchestrated multi-agent workflow. An orchestrator skill discovers Dependabot alerts at repo, org, or user scope, asks the user how much to fix (one package, the highest severity tier, or everything), then spawns one fix subagent per vulnerable package in parallel, each working in an isolated git worktree through to an open PR. A separate audit subagent runs alongside to find previously pinned transitive dependencies whose pins are no longer needed. All deterministic work (alert discovery, scope detection, package manager detection, override insertion, lockfile validation) moves into scripts so agents consume structured JSON instead of re-deriving procedures each session, cutting token cost and variance and allowing subagents to run on a smaller model. Every PR opened carries a computed merge-risk rating (Low / Medium / High) derived from version delta, runtime exposure, usage surface, and test signal, so reviewers can calibrate scrutiny per PR.
+Convert the `gh-security` plugin from a single-shot, one-package-per-invocation command into an orchestrated multi-agent workflow. An orchestrator skill discovers Dependabot alerts at repo, org, or user scope, asks the user how much to fix (one package, the highest severity tier, or everything), then spawns one fix subagent per vulnerable package in parallel, each working in an isolated git worktree through to an open PR. An audit subagent, recommended by the orchestrator after fixes complete and also invocable directly, finds previously pinned transitive dependencies whose pins are no longer needed. All deterministic work (alert discovery, scope detection, package manager detection, override insertion, lockfile validation) moves into scripts so agents consume structured JSON instead of re-deriving procedures each session, cutting token cost and variance and allowing subagents to run on a smaller model. Every PR opened carries a computed merge-risk rating (Low / Medium / High) derived from version delta, runtime exposure, usage surface, and test signal, so reviewers can calibrate scrutiny per PR.
 
 ## Motivation
 
@@ -60,6 +60,7 @@ plugins/gh-security/
   commands/
     resolve-alerts.md       # thin wrapper: invokes the skill explicitly
     fix-alert.md            # compatibility shim: "one" path, no scope prompt
+    audit-pins.md           # direct entry: run the pin audit on demand
   scripts/
     detect-scope.sh         # cwd -> {scope: repo|org|user, owner, repo?}
     detect-pm.sh            # lockfile -> {pm, why_cmd, install_cmd, override_field}
@@ -83,12 +84,14 @@ flowchart TD
     O2 --> F1[fix-dependency\npkg A, worktree 1]
     O2 --> F2[fix-dependency\npkg B, worktree 2]
     O2 --> F3[fix-dependency\npkg C, worktree 3]
-    O2 --> P[audit-pins\nper touched repo]
     F1 --> PR1[PR]
     F2 --> PR2[PR]
     F3 --> PR3[PR]
+    PR1 & PR2 & PR3 --> Sum[Orchestrator summary table]
+    Sum --> Q2{Next batch?\nRun pin audit?}
+    Q2 -->|next batch| O2
+    Q2 -->|audit| P[audit-pins\nper touched repo]
     P --> R[Report or chore PR]
-    PR1 & PR2 & PR3 & R --> Sum[Orchestrator summary table]
 ```
 
 ### Orchestrator skill
@@ -102,9 +105,9 @@ The orchestrator is a skill (`resolve-alerts`) that runs in the main session. Fl
    - **Highest tier**: fix every group at the highest severity present. If no critical alerts exist, this means all high; if none, all medium, and so on.
    - **Everything**: fix all actionable groups.
 4. **Approve once.** Show the dispatch plan (package, repo, severity, action type, branch) and get a single confirmation. This replaces the current per-run "ready to ship?" pause: subagents run unattended through PR creation, and the PR itself becomes the review artifact.
-5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped at **3 worktree-running agents, machine-wide per invocation**, and `audit-pins` agents count against the same cap (their removability tests also run installs). The cap bounds local machine load, not the agent harness: each agent runs a dependency install plus the repo's scripts, and builds and test suites parallelize internally across cores, so a small number of concurrent agents saturates a typical engineer laptop well before any harness limit is reached. The baseline is sized to the older end of the laptops we expect this to run on.
-6. **Audit.** Spawn one `audit-pins` subagent per repo touched (or per repo in scope). Audits share the concurrency cap with fixes and yield to them: fix subagents get slot priority, and audits fill remaining slots or run as fixes drain.
-7. **Summarize.** Collect results and present a table: package, repo, PR URL, resolved version, script results, plus audit findings.
+5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped at **3 worktree-running agents, machine-wide per invocation**. The cap bounds local machine load, not the agent harness: each agent runs a dependency install plus the repo's scripts, and builds and test suites parallelize internally across cores, so a small number of concurrent agents saturates a typical engineer laptop well before any harness limit is reached. The baseline is sized to the older end of the laptops we expect this to run on. All three slots go to fix subagents; the audit does not run during dispatch (see step 7).
+6. **Summarize.** Collect results and present a table: package, repo, PR URL, resolved version, risk rating, script results.
+7. **Offer next steps.** If actionable groups remain (the user chose one or a tier), offer to dispatch the next batch. Then recommend the pin audit. The audit is deliberately opt-in rather than dispatched alongside fixes: an eager audit would consume a fix slot, turning a 3-slot dispatch into 2 fixes plus housekeeping. On acceptance, spawn one `audit-pins` subagent per repo touched (or per repo in scope); audit agents count against the same concurrency cap when they run, since their removability tests also run installs.
 
 ### Scope and endpoint strategy
 
@@ -166,7 +169,7 @@ The audit-pins subagent reuses the same rubric for its removal PRs, scoring the 
 
 ### Pin-audit subagent (`audit-pins`)
 
-The common lifecycle this addresses: we pin a transitive dependency (override/resolution) because a direct dependency has not yet updated past a vulnerable range. Later the direct dependency updates, and the pin becomes unnecessary. Input: one repo. The subagent:
+The common lifecycle this addresses: we pin a transitive dependency (override/resolution) because a direct dependency has not yet updated past a vulnerable range. Later the direct dependency updates, and the pin becomes unnecessary. Two entry points: the orchestrator recommends it after fixes complete (opt-in, step 7 above), and `commands/audit-pins.md` runs it directly on demand without going through alert resolution at all. Input: one repo. The subagent:
 
 1. Runs `list-pins.sh` to extract every override/resolution entry with its scoping parent and range.
 2. For each pin, gathers provenance: `git log -S` on the entry, linked PRs, and referenced alerts (including `state=fixed` Dependabot alerts for that package).
@@ -205,7 +208,7 @@ If experience shows the fix subagent is more mechanical than expected, dropping 
 
 Two changes:
 
-1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent plus the `audit-pins` subagent, which is behaviorally what the command does today. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points.
+1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent, which is behaviorally what the command does today; like any orchestrator run, it offers the next batch and recommends the pin audit after the fix completes. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points.
 2. **Proactive notice hook.** The plugin ships a PostToolUse hook on Bash that scans tool output for GitHub's push-time vulnerability notice (`GitHub found N vulnerabilities on ...`) and Dependabot URLs in `gh` output. On match, it emits additional context telling Claude to offer the `resolve-alerts` skill and ask whether to start. The hook is a fast grep (exit 0 on no match, no network calls), so per-Bash-call overhead is negligible. It suggests; it never auto-runs.
 
 ## Alternatives Considered
@@ -235,7 +238,7 @@ Phases are sequential PRs, each leaving the plugin fully working. Versions follo
 1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
 2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering and the 403 fallback. Orchestrator gains cross-repo dispatch.
-4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh` and `agents/audit-pins.md`, report-only. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
+4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
 5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
 
 Each phase gets a GitHub issue before implementation; hard decisions made during a phase get an ADR linked back here.
