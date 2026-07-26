@@ -2,7 +2,7 @@
 status: accepted
 created: 2026-07-26
 owner: brianespinosa
-related_issues: []
+related_issues: [4, 5, 6, 7, 8, 9]
 related_adrs: []
 ---
 
@@ -256,12 +256,12 @@ Two changes:
 
 Phases are sequential PRs, each leaving the plugin fully working. Versions follow the marketplace `version` field.
 
-1. **Phase 1: script extraction (v0.2.0).** Extract the deterministic surface into `scripts/common/` and define the adapter contract, landing `ecosystems/node.sh` as the first adapter. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos. Defining the contract now is deliberate: retrofitting adapters after five phases of node-shaped scripts is the expensive version of the same work.
-2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch with the capacity-derived cap (`detect-capacity.sh`), and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
-3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
-4. **Phase 4: pin audit (v0.5.0).** Add the adapter `list_pins` verb, `check-advisories.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
-5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
-6. **Phase 6: Python adapter (v0.7.0).** Add `ecosystems/python.sh`: uv/poetry/pip-tools/pipenv detection, PEP 440 version handling, environment-wide constraints, verification detection, and PyPI-to-import name mapping for F3. No changes to agents or the orchestrator; that is the adapter contract paying off.
+1. **Phase 1: script extraction (v0.2.0, [#4](https://github.com/SurveyMonkey/skills/issues/4)).** Extract the deterministic surface into `scripts/common/` and define the adapter contract, landing `ecosystems/node.sh` as the first adapter. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos. Defining the contract now is deliberate: retrofitting adapters after five phases of node-shaped scripts is the expensive version of the same work.
+2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0, [#5](https://github.com/SurveyMonkey/skills/issues/5)).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch with the capacity-derived cap (`detect-capacity.sh`), and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
+3. **Phase 3: org and user scope (v0.4.0, [#6](https://github.com/SurveyMonkey/skills/issues/6)).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
+4. **Phase 4: pin audit (v0.5.0, [#7](https://github.com/SurveyMonkey/skills/issues/7)).** Add the adapter `list_pins` verb, `check-advisories.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
+5. **Phase 5: proactive hook (v0.6.0, [#8](https://github.com/SurveyMonkey/skills/issues/8)).** Add `hooks/hooks.json` and `notice-scan.sh`.
+6. **Phase 6: Python adapter (v0.7.0, [#9](https://github.com/SurveyMonkey/skills/issues/9)).** Add `ecosystems/python.sh`: uv/poetry/pip-tools/pipenv detection, PEP 440 version handling, environment-wide constraints, verification detection, and PyPI-to-import name mapping for F3. No changes to agents or the orchestrator; that is the adapter contract paying off.
 
 Each phase gets a GitHub issue before implementation; hard decisions made during a phase get an ADR linked back here.
 
@@ -290,7 +290,7 @@ To be spawned as this RFC executes:
 - ADR: model tiering for subagents (and the Haiku re-evaluation criteria).
 - ADR: worktree isolation strategy and concurrency cap.
 - ADR: merge-risk rubric weights and bands, once calibrated against real PRs.
-- Issues: one per rollout phase, linked in `related_issues` as they are opened.
+- Issues: one per rollout phase, [#4](https://github.com/SurveyMonkey/skills/issues/4) through [#9](https://github.com/SurveyMonkey/skills/issues/9), linked in `related_issues` and on each phase above.
 - Skill/rule graduation: the constraint rules (major-bounded ranges, parent scoping where the ecosystem supports it) are already durable guidance; they move from command prose into the adapters' `apply_constraint` and the subagent prompt rather than a separate rule.
 
 ## Related
