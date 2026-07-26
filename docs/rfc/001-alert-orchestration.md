@@ -102,8 +102,8 @@ The orchestrator is a skill (`resolve-alerts`) that runs in the main session. Fl
    - **Highest tier**: fix every group at the highest severity present. If no critical alerts exist, this means all high; if none, all medium, and so on.
    - **Everything**: fix all actionable groups.
 4. **Approve once.** Show the dispatch plan (package, repo, severity, action type, branch) and get a single confirmation. This replaces the current per-run "ready to ship?" pause: subagents run unattended through PR creation, and the PR itself becomes the review artifact.
-5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped (proposed default: 3) to bound disk and install load.
-6. **Audit.** Spawn one `audit-pins` subagent per repo touched (or per repo in scope), in parallel with the fixes.
+5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped at **3 worktree-running agents, machine-wide per invocation**, and `audit-pins` agents count against the same cap (their removability tests also run installs). The cap bounds local machine load, not the agent harness: each agent runs a dependency install plus the repo's scripts, and builds and test suites parallelize internally across cores, so a small number of concurrent agents saturates a typical engineer laptop well before any harness limit is reached. The baseline is sized to the older end of the laptops we expect this to run on.
+6. **Audit.** Spawn one `audit-pins` subagent per repo touched (or per repo in scope). Audits share the concurrency cap with fixes and yield to them: fix subagents get slot priority, and audits fill remaining slots or run as fixes drain.
 7. **Summarize.** Collect results and present a table: package, repo, PR URL, resolved version, script results, plus audit findings.
 
 ### Scope and endpoint strategy
@@ -219,7 +219,7 @@ Two changes:
 
 ## Trade-offs & Risks
 
-- **Worktree install cost.** Each parallel subagent runs a full dependency install in its own worktree. For heavy repos this is minutes of wall clock and gigabytes of disk per concurrent fix. Mitigation: concurrency cap (default 3), and the caps are per-repo; cross-repo fixes do not compound on the same store. pnpm's content-addressable store softens this considerably for pnpm repos.
+- **Worktree install cost.** Each parallel subagent runs a full dependency install and the repo's scripts in its own worktree. For heavy repos this is minutes of wall clock and gigabytes of disk per concurrent agent, and script runs parallelize internally across cores, so machine saturation arrives before harness limits do. Cross-repo dispatch at org scope compounds on the same machine, which is why the cap is machine-wide rather than per-repo, and covers fix and audit agents alike. pnpm's content-addressable store softens the install cost considerably for pnpm repos.
 - **Batch approval reduces per-PR control.** The user approves a plan, not each commit. Mitigation: PRs are the review artifact, nothing merges automatically, and the summary table makes it easy to close any unwanted PR.
 - **Duplicate-PR races.** Two sessions running concurrently could both dispatch the same package. The branch-existence check in discovery mitigates the common case; the residual race window is accepted (the second PR fails on branch push and reports cleanly).
 - **Org endpoint permissions.** `GET /orgs/{org}/dependabot/alerts` requires org-level security visibility (security manager or admin). The script must detect a 403 and fall back to per-repo enumeration of repos the user can access, or report the limitation clearly.
@@ -243,7 +243,7 @@ Each phase gets a GitHub issue before implementation; hard decisions made during
 ## Open Questions
 
 - Should subagent-opened PRs be drafts by default, converting to ready only after the orchestrator's summary, or ready immediately?
-- Is 3 the right default concurrency cap, and should it be configurable per invocation?
+- Should the concurrency cap stay a fixed baseline of 3, be configurable per invocation, or be derived from the machine (core count, available memory) at dispatch time?
 - At org scope, should repos without push access get an issue filed instead of being silently skipped?
 - Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
 - Should the notice hook also match `npm audit` / `pnpm audit` output, or only GitHub-sourced notices?
