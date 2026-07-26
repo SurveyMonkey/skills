@@ -14,7 +14,7 @@ Convert the `gh-security` plugin from a single-shot, one-package-per-invocation 
 
 ## Motivation
 
-The current `/gh-security:fix-alert` command works well but resolves exactly one package group per invocation, with a developer driving each run interactively. A repo with six vulnerable packages needs six sequential sessions. An org with alerts across a dozen repos needs a developer to visit each repo and repeat the process. The work is highly repetitive: the judgment moments (is this direct or transitive, did the install break, is a script failure pre-existing) are small islands in an otherwise mechanical procedure.
+The current `/gh-security:fix-alert` command works well but resolves exactly one package group per invocation, with a developer driving each run interactively. Two parts are explicitly worth preserving because they already work: target selection (grouping alerts by package and ranking by severity then EPSS exploitability reliably surfaces the most impactful dependency first) and open-PR deduplication (skipping any package that already has a fix PR open on its `fix/dependabot-<package>` branch). Both already live script-side in `discover-alerts.sh` rather than in command prose, so the orchestrator inherits them unchanged and no extraction work is needed for either. A repo with six vulnerable packages needs six sequential sessions. An org with alerts across a dozen repos needs a developer to visit each repo and repeat the process. The work is highly repetitive: the judgment moments (is this direct or transitive, did the install break, is a script failure pre-existing) are small islands in an otherwise mechanical procedure.
 
 Three specific gaps:
 
