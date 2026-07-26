@@ -150,7 +150,7 @@ Phases 4 through 9 of the current command, parameterized. Input: one package gro
 2. Runs the adapter's `why` to classify direct vs transitive and identify parents.
 3. Applies the fix: direct version bump via Edit, or the adapter's `apply_constraint` for transitives (major-bounded; parent-scoped in node, environment-wide in Python).
 4. Installs, validates via the adapter, and runs the adapter's `verification_commands` (the one genuinely judgment-heavy step: diagnosing failures and distinguishing pre-existing breakage).
-5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report). PRs open ready for review, not as drafts; the merge-risk rating is the reviewer's caution signal.
+5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report). PRs open ready for review, not as drafts; the merge-risk rating is the reviewer's caution signal. The PR body's alerts table also gains an EPSS percentile column per alert (the data is already in the discovery JSON; the current command shows it pre-fix but never puts it on the PR). EPSS and the merge-risk rating are deliberately separate signals shown side by side: EPSS says how urgent the vulnerability is, the rubric says how risky the fix is to merge.
 
 A subagent that cannot complete safely (validation fails, scripts break in ways attributable to the update) stops, cleans up its worktree, and returns a failure report instead of asking the user mid-flight. The orchestrator surfaces failures in the summary for a human-driven follow-up session.
 
@@ -282,6 +282,7 @@ Settled during RFC review and incorporated above:
 - The concurrency cap is derived per machine at dispatch time (`detect-capacity.sh`, unprivileged core and RAM reads), clamped to 3-6 with 3 as the detection-failure fallback, instead of a fixed baseline.
 - Pin removability is judged against the full advisory database (`check-advisories.sh`), never the repo's own alert history alone: a pin keeps vulnerable versions out of the lockfile, so advisories published after the pin never generated alerts, and history-based judgment would reintroduce them.
 - Ecosystem support is adapter-based: `npm` and `pip` ship; alerts from the other eleven advisory ecosystems are skipped and reported in the summary like no-access repos, with new adapters added on team request rather than by default.
+- Fix PRs carry per-alert EPSS percentiles in the alerts table alongside the merge-risk rating: urgency of the vulnerability and merge risk of the fix as separate, side-by-side signals.
 
 To be spawned as this RFC executes:
 
