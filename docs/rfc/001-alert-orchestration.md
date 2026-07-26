@@ -42,6 +42,7 @@ Additionally, the current command embeds deterministic procedures (package manag
 
 - Auto-merging PRs. A human reviews and merges every PR this system opens.
 - Exhaustive ecosystem coverage. The adapter layer supports `npm` (pnpm, npm, yarn, bun) and `pip` (uv, poetry, pip-tools, pipenv) alerts. Alerts from the remaining advisory ecosystems (`rubygems`, `maven`, `nuget`, `composer`, `go`, `rust`, `erlang`, `actions`, `pub`, `swift`, `other`) are skipped and reported, and a new adapter gets built when someone on the team asks for one, not by default.
+- Eval tests for skill triggering. The `resolve-alerts` description is the only security-alert skill in the marketplace today, so there is nothing to mistrigger against. Evals become worthwhile once closely related skills exist in this or neighboring plugins and accidental cross-triggering becomes a real risk; until then they are deferred.
 - Scheduled or CI-driven execution (GitHub Actions, cron). This remains an interactive, developer-initiated tool.
 - Replacing Dependabot's own update PRs. This tool covers what Dependabot cannot: scoped overrides for transitives, full repo script validation, and batch judgment.
 - EMU (enterprise managed user) orgs. Only a few EMU members have access to the org-level alert endpoints, so the value is limited today. If EMU-wide alert counts warrant it later, a scheduled (weekly or daily) automated run built on these agents could be a future initiative; it is explicitly not this one.
