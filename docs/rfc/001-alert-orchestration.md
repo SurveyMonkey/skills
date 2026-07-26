@@ -70,6 +70,7 @@ plugins/gh-security/
     add-override.sh         # jq edit: insert scoped override into package.json
     validate-lockfile.sh    # per-PM grep: all resolved versions satisfy range
     list-pins.sh            # extract existing overrides/resolutions as JSON
+    check-advisories.sh     # union of vulnerable ranges for a pkg from the advisory DB
     score-merge-risk.sh     # compute merge-risk factors for the PR body
   hooks/
     hooks.json
@@ -175,7 +176,7 @@ The common lifecycle this addresses: we pin a transitive dependency (override/re
 
 1. Runs `list-pins.sh` to extract every override/resolution entry with its scoping parent and range.
 2. For each pin, gathers provenance: `git log -S` on the entry, linked PRs, and referenced alerts (including `state=fixed` Dependabot alerts for that package).
-3. Tests removability in a scratch worktree: remove the pin, install, and check the naturally resolved version against the range the pin enforced. If resolution without the pin satisfies the safe range, the pin is removable.
+3. Tests removability in a scratch worktree: remove the pin, install, and check the naturally resolved version for safety. The safe range comes from `check-advisories.sh`, which unions the vulnerable ranges of **every published advisory for the package** (`gh api /advisories?affects=<pkg>`), not just the advisory that prompted the pin. The repo's own alert history cannot be the source of truth here: the pin itself kept vulnerable versions out of the lockfile, so advisories published after the pin never surfaced as alerts, and removing the pin on history alone could reintroduce exactly what was published in the interim. The pin is removable only if the naturally resolved version clears every advisory's range.
 4. Reports findings; in a later phase, opens a `chore(deps): remove stale overrides` PR through the same validate-and-run-scripts pipeline as the fix subagent.
 
 Starting report-only keeps the blast radius small while we build confidence in step 3's correctness.
@@ -192,6 +193,7 @@ Principle: **agents decide, scripts do.** Anything with one correct procedure be
 | Phase 6 override JSON shapes | `add-override.sh` | jq insertion; merges with existing entries; per-PM syntax (`parent>dep`, nested, `parent/dep`, flat for bun) |
 | Phase 8b lockfile greps | `validate-lockfile.sh` | Exits non-zero with violating versions on failure |
 | (new) pin extraction | `list-pins.sh` | For the audit subagent |
+| (new) advisory ranges | `check-advisories.sh` | Unions vulnerable ranges across all published advisories for a package |
 | (new) risk scoring | `score-merge-risk.sh` | Computes F1-F3, applies bands to agent-supplied F4/F5 |
 | (new) capacity detection | `detect-capacity.sh` | Cores and total RAM to concurrency cap, clamped 3-6 |
 
@@ -230,7 +232,7 @@ Two changes:
 - **Duplicate-PR races.** Two sessions running concurrently could both dispatch the same package. The branch-existence check in discovery mitigates the common case; the residual race window is accepted (the second PR fails on branch push and reports cleanly).
 - **Org endpoint permissions.** `GET /orgs/{org}/dependabot/alerts` requires org-level security visibility (security manager or admin). The script must detect a 403 and fall back to per-repo enumeration of repos the user can access, or report the limitation clearly.
 - **Rate limits at user/org scope.** Fan-out over many repos plus per-package PR checks can burn REST quota. The script batches and paginates, but very large orgs may need a `--repo-limit` guard.
-- **Pin-removal false positives.** The audit subagent declaring a pin removable when it still matters would reintroduce a vulnerability. Mitigation: report-only first phase; removal PRs re-run the full lockfile validation against the originally enforced range.
+- **Pin-removal false positives.** The audit subagent declaring a pin removable when it still matters would reintroduce a vulnerability. Mitigation: report-only first phase; removability is judged against the full advisory database rather than the repo's own alert history (which the pin itself blinds); removal PRs re-run the full lockfile validation against the unioned vulnerable ranges.
 - **Hook noise.** A PostToolUse hook on every Bash call is a standing cost. The scan is a local grep with no network calls, and it emits context only on match, but it is one more moving part to keep silent when irrelevant.
 - **Subagents cannot ask questions.** Failure modes that today get interactive resolution (lockfile regeneration confirmation) become stop-and-report. Some fixes that would have succeeded interactively will land in the failure column and need a follow-up session.
 
@@ -241,14 +243,14 @@ Phases are sequential PRs, each leaving the plugin fully working. Versions follo
 1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
 2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch with the capacity-derived cap (`detect-capacity.sh`), and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
-4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
+4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh`, `check-advisories.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
 5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
 
 Each phase gets a GitHub issue before implementation; hard decisions made during a phase get an ADR linked back here.
 
 ## Open Questions
 
-- Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
+None currently open. Every question raised during review has been settled and incorporated; see Decisions & Follow-ups.
 
 ## Decisions & Follow-ups
 
@@ -261,6 +263,7 @@ Settled during RFC review and incorporated above:
 - The merge-risk rubric ships as-is as the starting baseline, adjusted from team feedback via the calibration ADR.
 - EMU support is explicitly out of scope (moved to Non-Goals); a scheduled EMU-wide run is a possible future initiative.
 - The concurrency cap is derived per machine at dispatch time (`detect-capacity.sh`, unprivileged core and RAM reads), clamped to 3-6 with 3 as the detection-failure fallback, instead of a fixed baseline.
+- Pin removability is judged against the full advisory database (`check-advisories.sh`), never the repo's own alert history alone: a pin keeps vulnerable versions out of the lockfile, so advisories published after the pin never generated alerts, and history-based judgment would reintroduce them.
 
 To be spawned as this RFC executes:
 
