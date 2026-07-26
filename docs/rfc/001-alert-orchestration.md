@@ -1,5 +1,5 @@
 ---
-status: in-review
+status: accepted
 created: 2026-07-26
 owner: brianespinosa
 related_issues: []
