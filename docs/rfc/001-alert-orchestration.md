@@ -64,6 +64,7 @@ plugins/gh-security/
     audit-pins.md           # direct entry: run the pin audit on demand
   scripts/
     detect-scope.sh         # cwd -> {scope: repo|org|user, owner, repo?}
+    detect-capacity.sh      # cores + total RAM -> concurrency cap (3-6)
     detect-pm.sh            # lockfile -> {pm, why_cmd, install_cmd, override_field}
     discover-alerts.sh      # extended: --scope repo|org|user
     add-override.sh         # jq edit: insert scoped override into package.json
@@ -106,9 +107,9 @@ The orchestrator is a skill (`resolve-alerts`) that runs in the main session. Fl
    - **Highest tier**: fix every group at the highest severity present. If no critical alerts exist, this means all high; if none, all medium, and so on.
    - **Everything**: fix all actionable groups.
 4. **Approve once.** Show the dispatch plan (package, repo, severity, action type, branch) and get a single confirmation. This replaces the current per-run "ready to ship?" pause: subagents run unattended through PR creation, and the PR itself becomes the review artifact.
-5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped at **3 worktree-running agents, machine-wide per invocation**. The cap bounds local machine load, not the agent harness: each agent runs a dependency install plus the repo's scripts, and builds and test suites parallelize internally across cores, so a small number of concurrent agents saturates a typical engineer laptop well before any harness limit is reached. The baseline is sized to the older end of the laptops we expect this to run on. Fix subagents get the slots first. If the approved batch needs fewer slots than the cap (one or two fix groups), the orchestrator dispatches the audit in a spare slot immediately, without asking; the opt-in flow in step 7 applies only when fixes fill all slots.
+5. **Dispatch.** Spawn one `fix-dependency` subagent per group, each receiving the group JSON, the PM detection JSON, and repo metadata as its prompt payload. No subagent re-discovers anything. Concurrency is capped **machine-wide per invocation**, derived at dispatch time by `detect-capacity.sh`: `clamp(min(floor(cores / 3), floor(total_ram_gb / 8)), 3, 6)`, read via unprivileged `sysctl` (macOS) or `nproc` and `/proc/meminfo` (Linux), no special permissions involved. Total RAM is used rather than available RAM so the cap is deterministic per machine instead of fluctuating per invocation. If detection fails, the cap falls back to 3. The cap bounds local machine load, not the agent harness: each agent runs a dependency install plus the repo's scripts, and builds and test suites parallelize internally across cores, so a small number of concurrent agents saturates a laptop well before any harness limit is reached. The floor of 3 is sized to the older end of the laptops we expect this to run on; larger machines earn more slots, and the ceiling of 6 reflects where registry bandwidth and disk contention dominate regardless of cores. Fix subagents get the slots first. If the approved batch has fewer fix groups than slots, the orchestrator dispatches the audit in a spare slot immediately, without asking; the opt-in flow in step 7 applies only when fixes fill all slots.
 6. **Summarize.** Collect results and present a table: package, repo, PR URL, resolved version, risk rating, script results.
-7. **Offer next steps.** If actionable groups remain (the user chose one or a tier), offer to dispatch the next batch. Then, unless the audit already ran in a spare slot during dispatch, recommend the pin audit. When fixes fill all slots the audit is deliberately opt-in rather than dispatched alongside them: an eager audit would consume a fix slot, turning a 3-slot dispatch into 2 fixes plus housekeeping. On acceptance, spawn one `audit-pins` subagent per repo touched (or per repo in scope); audit agents count against the same concurrency cap when they run, since their removability tests also run installs.
+7. **Offer next steps.** If actionable groups remain (the user chose one or a tier), offer to dispatch the next batch. Then, unless the audit already ran in a spare slot during dispatch, recommend the pin audit. When fixes fill all slots the audit is deliberately opt-in rather than dispatched alongside them: an eager audit would consume a fix slot, trading a fix for housekeeping in a full dispatch. On acceptance, spawn one `audit-pins` subagent per repo touched (or per repo in scope); audit agents count against the same concurrency cap when they run, since their removability tests also run installs.
 
 ### Scope and endpoint strategy
 
@@ -192,6 +193,7 @@ Principle: **agents decide, scripts do.** Anything with one correct procedure be
 | Phase 8b lockfile greps | `validate-lockfile.sh` | Exits non-zero with violating versions on failure |
 | (new) pin extraction | `list-pins.sh` | For the audit subagent |
 | (new) risk scoring | `score-merge-risk.sh` | Computes F1-F3, applies bands to agent-supplied F4/F5 |
+| (new) capacity detection | `detect-capacity.sh` | Cores and total RAM to concurrency cap, clamped 3-6 |
 
 What stays with the agent: interpreting install failures, judging script failures as pre-existing or caused, deciding when a lockfile regeneration is warranted, and writing PR prose.
 
@@ -237,7 +239,7 @@ Two changes:
 Phases are sequential PRs, each leaving the plugin fully working. Versions follow the marketplace `version` field.
 
 1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
-2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
+2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch with the capacity-derived cap (`detect-capacity.sh`), and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
 4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
 5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
@@ -246,7 +248,6 @@ Each phase gets a GitHub issue before implementation; hard decisions made during
 
 ## Open Questions
 
-- Should the concurrency cap stay a fixed baseline of 3, be configurable per invocation, or be derived from the machine (core count, available memory) at dispatch time?
 - Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
 
 ## Decisions & Follow-ups
@@ -259,6 +260,7 @@ Settled during RFC review and incorporated above:
 - The `fix-alert` shim is removed in the first release cut at least two months after it ships.
 - The merge-risk rubric ships as-is as the starting baseline, adjusted from team feedback via the calibration ADR.
 - EMU support is explicitly out of scope (moved to Non-Goals); a scheduled EMU-wide run is a possible future initiative.
+- The concurrency cap is derived per machine at dispatch time (`detect-capacity.sh`, unprivileged core and RAM reads), clamped to 3-6 with 3 as the detection-failure fallback, instead of a fixed baseline.
 
 To be spawned as this RFC executes:
 
