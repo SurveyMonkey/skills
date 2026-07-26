@@ -10,7 +10,7 @@ related_adrs: []
 
 ## Summary
 
-Convert the `gh-security` plugin from a single-shot, one-package-per-invocation command into an orchestrated multi-agent workflow. An orchestrator skill discovers Dependabot alerts at repo, org, or user scope, asks the user how much to fix (one package, the highest severity tier, or everything), then spawns one fix subagent per vulnerable package in parallel, each working in an isolated git worktree through to an open PR. A separate audit subagent runs alongside to find previously pinned transitive dependencies whose pins are no longer needed. All deterministic work (alert discovery, scope detection, package manager detection, override insertion, lockfile validation) moves into scripts so agents consume structured JSON instead of re-deriving procedures each session, cutting token cost and variance and allowing subagents to run on a smaller model.
+Convert the `gh-security` plugin from a single-shot, one-package-per-invocation command into an orchestrated multi-agent workflow. An orchestrator skill discovers Dependabot alerts at repo, org, or user scope, asks the user how much to fix (one package, the highest severity tier, or everything), then spawns one fix subagent per vulnerable package in parallel, each working in an isolated git worktree through to an open PR. A separate audit subagent runs alongside to find previously pinned transitive dependencies whose pins are no longer needed. All deterministic work (alert discovery, scope detection, package manager detection, override insertion, lockfile validation) moves into scripts so agents consume structured JSON instead of re-deriving procedures each session, cutting token cost and variance and allowing subagents to run on a smaller model. Every PR opened carries a computed merge-risk rating (Low / Medium / High) derived from version delta, runtime exposure, usage surface, and test signal, so reviewers can calibrate scrutiny per PR.
 
 ## Motivation
 
@@ -66,6 +66,7 @@ plugins/gh-security/
     add-override.sh         # jq edit: insert scoped override into package.json
     validate-lockfile.sh    # per-PM grep: all resolved versions satisfy range
     list-pins.sh            # extract existing overrides/resolutions as JSON
+    score-merge-risk.sh     # compute merge-risk factors for the PR body
   hooks/
     hooks.json
     notice-scan.sh          # PostToolUse: detect GitHub vulnerability notices
@@ -126,9 +127,41 @@ Phases 4 through 9 of the current command, parameterized. Input: one package gro
 2. Runs the "why" command to classify direct vs transitive and identify parents.
 3. Applies the fix: direct version bump via Edit, or `add-override.sh` for transitives (major-bounded, parent-scoped, per the existing rules).
 4. Installs, validates with `validate-lockfile.sh`, and runs every repo script (the one genuinely judgment-heavy step: diagnosing failures and distinguishing pre-existing breakage).
-5. Commits, pushes, opens the PR with the existing body format, and returns a structured result (PR URL, resolved version, script outcomes, or a failure report).
+5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report).
 
 A subagent that cannot complete safely (validation fails, scripts break in ways attributable to the update) stops, cleans up its worktree, and returns a failure report instead of asking the user mid-flight. The orchestrator surfaces failures in the summary for a human-driven follow-up session.
+
+### Merge-risk rubric
+
+Every PR the fix subagent opens carries a **merge risk** rating (Low / Medium / High) so a reviewer can calibrate scrutiny before reading a line of diff. The rating is computed, not vibes: five factors, each scored 0 to 2, summed to a 0-10 score with a factor breakdown table in the PR body.
+
+| # | Factor | 0 | 1 | 2 |
+|---|---|---|---|---|
+| F1 | **Version delta** (previously resolved version to newly resolved version, semver compare) | Patch | Minor | Major |
+| F2 | **Runtime exposure** (where the package sits in the graph) | Dev-only chain (every path enters via `devDependencies`) | Transitive under a runtime dependency | Direct runtime dependency |
+| F3 | **Usage surface** (for direct deps: modules importing the package; for transitives: modules importing its direct parent) | No source imports (build/tooling only) | 1-5 importing modules | More than 5 importing modules, or imports in entry points |
+| F4 | **Test signal** | Repo tests pass and test files exercise the importing modules | Tests pass but none clearly exercise the affected modules | No test script, or tests could not run |
+| F5 | **Verification completeness** (from the subagent's own run) | All repo scripts ran clean | Scripts ran; pre-existing failures noted | One or more scripts skipped or partially run |
+
+Bands: **Low** 0-3, **Medium** 4-6, **High** 7-10, with one escalation rule: a major version delta (F1 = 2) never rates Low, regardless of total. A major bump of an untested, widely imported runtime dependency lands where it should (High); a patch bump of a dev-only transitive with passing tests lands at Low.
+
+Division of labor follows the same principle as everything else here. `score-merge-risk.sh` computes F1 (semver compare of lockfile versions before and after), F2 (dependency graph classification from the "why" output and `package.json`), and F3 (import-site grep across source files, excluding tests and build output). F4 and F5 are facts the subagent already has from its verification phase and passes in as inputs; the script applies the scoring and emits the JSON breakdown. If the repo has coverage tooling configured, the subagent may refine F4 with actual coverage of the importing modules, noting in the PR body which signal was used.
+
+PR body addition:
+
+```markdown
+## Merge risk: Medium (5/10)
+
+| Factor | Score | Evidence |
+|---|---|---|
+| Version delta | 1 | 4.17.15 -> 4.18.2 (minor) |
+| Runtime exposure | 2 | Direct runtime dependency |
+| Usage surface | 1 | Imported in 3 modules |
+| Test signal | 1 | Tests pass; affected modules not directly exercised |
+| Verification | 0 | lint, test, build all clean |
+```
+
+The audit-pins subagent reuses the same rubric for its removal PRs, scoring the delta between pinned and naturally resolved versions.
 
 ### Pin-audit subagent (`audit-pins`)
 
@@ -153,6 +186,7 @@ Principle: **agents decide, scripts do.** Anything with one correct procedure be
 | Phase 6 override JSON shapes | `add-override.sh` | jq insertion; merges with existing entries; per-PM syntax (`parent>dep`, nested, `parent/dep`, flat for bun) |
 | Phase 8b lockfile greps | `validate-lockfile.sh` | Exits non-zero with violating versions on failure |
 | (new) pin extraction | `list-pins.sh` | For the audit subagent |
+| (new) risk scoring | `score-merge-risk.sh` | Computes F1-F3, applies bands to agent-supplied F4/F5 |
 
 What stays with the agent: interpreting install failures, judging script failures as pre-existing or caused, deciding when a lockfile regeneration is warranted, and writing PR prose.
 
@@ -197,7 +231,7 @@ Two changes:
 
 Phases are sequential PRs, each leaving the plugin fully working. Versions follow the marketplace `version` field.
 
-1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`. Rewrite `fix-alert.md` to consume them. Behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
+1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
 2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Remove `commands/fix-alert.md`, add thin `commands/resolve-alerts.md`. Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering and the 403 fallback. Orchestrator gains cross-repo dispatch.
 4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh` and `agents/audit-pins.md`, report-only. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
@@ -212,6 +246,7 @@ Each phase gets a GitHub issue before implementation; hard decisions made during
 - At org scope, should repos without push access get an issue filed instead of being silently skipped?
 - Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
 - Should the notice hook also match `npm audit` / `pnpm audit` output, or only GitHub-sourced notices?
+- Merge-risk rubric calibration: are the 0-3 / 4-6 / 7-10 bands and the 5-module F3 threshold right, and should factors be weighted unequally (e.g., version delta counting double) once we have a sample of real scored PRs?
 - EMU accounts: the org endpoint behaves differently under enterprise managed users. Is EMU support in scope for Phase 3 or explicitly deferred?
 
 ## Decisions & Follow-ups
@@ -221,6 +256,7 @@ To be spawned as this RFC executes:
 - ADR: batch approval model replacing per-PR confirmation.
 - ADR: model tiering for subagents (and the Haiku re-evaluation criteria).
 - ADR: worktree isolation strategy and concurrency cap.
+- ADR: merge-risk rubric weights and bands, once calibrated against real PRs.
 - Issues: one per rollout phase, linked in `related_issues` as they are opened.
 - Skill/rule graduation: the override-syntax rules (major-bounded ranges, parent scoping) are already durable guidance; they move from command prose into `add-override.sh` and the subagent prompt rather than a separate rule.
 
