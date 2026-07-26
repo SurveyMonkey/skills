@@ -59,6 +59,7 @@ plugins/gh-security/
     audit-pins.md           # override/resolution audit subagent
   commands/
     resolve-alerts.md       # thin wrapper: invokes the skill explicitly
+    fix-alert.md            # compatibility shim: "one" path, no scope prompt
   scripts/
     detect-scope.sh         # cwd -> {scope: repo|org|user, owner, repo?}
     detect-pm.sh            # lockfile -> {pm, why_cmd, install_cmd, override_field}
@@ -204,7 +205,7 @@ If experience shows the fix subagent is more mechanical than expected, dropping 
 
 Two changes:
 
-1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is removed in the same release (pre-1.0, single known user base; a deprecation window adds maintenance for no benefit).
+1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent plus the `audit-pins` subagent, which is behaviorally what the command does today. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points.
 2. **Proactive notice hook.** The plugin ships a PostToolUse hook on Bash that scans tool output for GitHub's push-time vulnerability notice (`GitHub found N vulnerabilities on ...`) and Dependabot URLs in `gh` output. On match, it emits additional context telling Claude to offer the `resolve-alerts` skill and ask whether to start. The hook is a fast grep (exit 0 on no match, no network calls), so per-Bash-call overhead is negligible. It suggests; it never auto-runs.
 
 ## Alternatives Considered
@@ -232,7 +233,7 @@ Two changes:
 Phases are sequential PRs, each leaving the plugin fully working. Versions follow the marketplace `version` field.
 
 1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
-2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Remove `commands/fix-alert.md`, add thin `commands/resolve-alerts.md`. Update README and marketplace description.
+2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering and the 403 fallback. Orchestrator gains cross-repo dispatch.
 4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh` and `agents/audit-pins.md`, report-only. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
 5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
@@ -246,6 +247,7 @@ Each phase gets a GitHub issue before implementation; hard decisions made during
 - At org scope, should repos without push access get an issue filed instead of being silently skipped?
 - Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
 - Should the notice hook also match `npm audit` / `pnpm audit` output, or only GitHub-sourced notices?
+- When does the `fix-alert` shim actually get removed: v1.0.0, or after some period of the deprecation notice running?
 - Merge-risk rubric calibration: are the 0-3 / 4-6 / 7-10 bands and the 5-module F3 threshold right, and should factors be weighted unequally (e.g., version delta counting double) once we have a sample of real scored PRs?
 - EMU accounts: the org endpoint behaves differently under enterprise managed users. Is EMU support in scope for Phase 3 or explicitly deferred?
 
