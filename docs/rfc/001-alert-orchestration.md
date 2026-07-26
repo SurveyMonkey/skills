@@ -43,6 +43,7 @@ Additionally, the current command embeds deterministic procedures (package manag
 - Ecosystems beyond the JavaScript package managers already supported (pnpm, npm, yarn, bun). The architecture should not preclude others, but they are out of scope here.
 - Scheduled or CI-driven execution (GitHub Actions, cron). This remains an interactive, developer-initiated tool.
 - Replacing Dependabot's own update PRs. This tool covers what Dependabot cannot: scoped overrides for transitives, full repo script validation, and batch judgment.
+- EMU (enterprise managed user) orgs. Only a few EMU members have access to the org-level alert endpoints, so the value is limited today. If EMU-wide alert counts warrant it later, a scheduled (weekly or daily) automated run built on these agents could be a future initiative; it is explicitly not this one.
 
 ## Proposed Approach
 
@@ -121,7 +122,7 @@ GitHub's aggregate endpoints are asymmetric, and the orchestrator must know this
 
 All three live behind `discover-alerts.sh --scope`, so the orchestrator prompt never contains endpoint logic. The user fan-out stays inside one script invocation: dozens of repo calls happen in bash, not as dozens of agent tool calls.
 
-At org and user scope, the script also records whether the authenticated user can push to each repo; repos without push access are reported but not dispatched.
+At org and user scope, the script also records whether the authenticated user can push to each repo. Repos without push access are not dispatched, and the orchestrator's summary lists each skipped repo by name so the user knows exactly what was left untouched. This should be rare in practice, but it must never be silent.
 
 ### Fix subagent (`fix-dependency`)
 
@@ -131,7 +132,7 @@ Phases 4 through 9 of the current command, parameterized. Input: one package gro
 2. Runs the "why" command to classify direct vs transitive and identify parents.
 3. Applies the fix: direct version bump via Edit, or `add-override.sh` for transitives (major-bounded, parent-scoped, per the existing rules).
 4. Installs, validates with `validate-lockfile.sh`, and runs every repo script (the one genuinely judgment-heavy step: diagnosing failures and distinguishing pre-existing breakage).
-5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report).
+5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report). PRs open ready for review, not as drafts; the merge-risk rating is the reviewer's caution signal.
 
 A subagent that cannot complete safely (validation fails, scripts break in ways attributable to the update) stops, cleans up its worktree, and returns a failure report instead of asking the user mid-flight. The orchestrator surfaces failures in the summary for a human-driven follow-up session.
 
@@ -147,7 +148,7 @@ Every PR the fix subagent opens carries a **merge risk** rating (Low / Medium / 
 | F4 | **Test signal** | Repo tests pass and test files exercise the importing modules | Tests pass but none clearly exercise the affected modules | No test script, or tests could not run |
 | F5 | **Verification completeness** (from the subagent's own run) | All repo scripts ran clean | Scripts ran; pre-existing failures noted | One or more scripts skipped or partially run |
 
-Bands: **Low** 0-3, **Medium** 4-6, **High** 7-10, with one escalation rule: a major version delta (F1 = 2) never rates Low, regardless of total. A major bump of an untested, widely imported runtime dependency lands where it should (High); a patch bump of a dev-only transitive with passing tests lands at Low.
+Bands: **Low** 0-3, **Medium** 4-6, **High** 7-10, with one escalation rule: a major version delta (F1 = 2) never rates Low, regardless of total. A major bump of an untested, widely imported runtime dependency lands where it should (High); a patch bump of a dev-only transitive with passing tests lands at Low. These bands and thresholds ship as-is as the starting baseline; feedback from engineers reviewing scored PRs drives adjustments, recorded in the calibration ADR (see Decisions & Follow-ups).
 
 Division of labor follows the same principle as everything else here. `score-merge-risk.sh` computes F1 (semver compare of lockfile versions before and after), F2 (dependency graph classification from the "why" output and `package.json`), and F3 (import-site grep across source files, excluding tests and build output). F4 and F5 are facts the subagent already has from its verification phase and passes in as inputs; the script applies the scoring and emits the JSON breakdown. If the repo has coverage tooling configured, the subagent may refine F4 with actual coverage of the importing modules, noting in the PR body which signal was used.
 
@@ -208,8 +209,8 @@ If experience shows the fix subagent is more mechanical than expected, dropping 
 
 Two changes:
 
-1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent, which is behaviorally what the command does today; with two slots spare, the pin audit runs automatically alongside, and the shim offers the next batch when the fix completes. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points.
-2. **Proactive notice hook.** The plugin ships a PostToolUse hook on Bash that scans tool output for GitHub's push-time vulnerability notice (`GitHub found N vulnerabilities on ...`) and Dependabot URLs in `gh` output. On match, it emits additional context telling Claude to offer the `resolve-alerts` skill and ask whether to start. The hook is a fast grep (exit 0 on no match, no network calls), so per-Bash-call overhead is negligible. It suggests; it never auto-runs.
+1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent, which is behaviorally what the command does today; with two slots spare, the pin audit runs automatically alongside, and the shim offers the next batch when the fix completes. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points. The shim is short-lived by design: it is removed in the first release cut at least two months after it ships.
+2. **Proactive notice hook.** The plugin ships a PostToolUse hook on Bash that scans tool output for GitHub's push-time vulnerability notice (`GitHub found N vulnerabilities on ...`) and Dependabot URLs in `gh` output. On match, it emits additional context telling Claude to offer the `resolve-alerts` skill and ask whether to start. The hook also matches package manager audit output (`npm audit` / `pnpm audit` summaries and install-time vulnerability warnings), with a deliberate asymmetry: PM audit findings may not correspond to any GitHub alert, and every prompt in this system is written against GitHub alert data, so a subagent handed raw audit output would be working outside its contract. A PM-audit match therefore only nudges: it suggests checking GitHub security alerts via the skill, discovery proceeds from GitHub as the sole source of truth, and if GitHub shows no open alerts the orchestrator reports that and stops rather than attempting to reconcile the package manager's findings. The hook is a fast grep (exit 0 on no match, no network calls), so per-Bash-call overhead is negligible. It suggests; it never auto-runs.
 
 ## Alternatives Considered
 
@@ -237,7 +238,7 @@ Phases are sequential PRs, each leaving the plugin fully working. Versions follo
 
 1. **Phase 1: script extraction (v0.2.0).** Add `detect-scope.sh`, `detect-pm.sh`, `add-override.sh`, `validate-lockfile.sh`, and `score-merge-risk.sh`. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos.
 2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch, and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
-3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering and the 403 fallback. Orchestrator gains cross-repo dispatch.
+3. **Phase 3: org and user scope (v0.4.0).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
 4. **Phase 4: pin audit (v0.5.0).** Add `list-pins.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
 5. **Phase 5: proactive hook (v0.6.0).** Add `hooks/hooks.json` and `notice-scan.sh`.
 
@@ -245,16 +246,19 @@ Each phase gets a GitHub issue before implementation; hard decisions made during
 
 ## Open Questions
 
-- Should subagent-opened PRs be drafts by default, converting to ready only after the orchestrator's summary, or ready immediately?
 - Should the concurrency cap stay a fixed baseline of 3, be configurable per invocation, or be derived from the machine (core count, available memory) at dispatch time?
-- At org scope, should repos without push access get an issue filed instead of being silently skipped?
 - Does the audit subagent need advisory-database cross-referencing (`gh api /advisories?affects=<pkg>`) beyond the repo's own fixed alerts to establish the safe range for a pin?
-- Should the notice hook also match `npm audit` / `pnpm audit` output, or only GitHub-sourced notices?
-- When does the `fix-alert` shim actually get removed: v1.0.0, or after some period of the deprecation notice running?
-- Merge-risk rubric calibration: are the 0-3 / 4-6 / 7-10 bands and the 5-module F3 threshold right, and should factors be weighted unequally (e.g., version delta counting double) once we have a sample of real scored PRs?
-- EMU accounts: the org endpoint behaves differently under enterprise managed users. Is EMU support in scope for Phase 3 or explicitly deferred?
 
 ## Decisions & Follow-ups
+
+Settled during RFC review and incorporated above:
+
+- PRs open ready for review, not as drafts; the merge-risk rating carries the caution signal.
+- At org scope, repos skipped for lack of push access are listed by name in the summary, never silently dropped.
+- The notice hook matches package manager audit output, but only as a nudge to check GitHub security alerts; GitHub remains the sole data source for the fix pipeline, and the orchestrator stops cleanly when GitHub shows no open alerts.
+- The `fix-alert` shim is removed in the first release cut at least two months after it ships.
+- The merge-risk rubric ships as-is as the starting baseline, adjusted from team feedback via the calibration ADR.
+- EMU support is explicitly out of scope (moved to Non-Goals); a scheduled EMU-wide run is a possible future initiative.
 
 To be spawned as this RFC executes:
 
