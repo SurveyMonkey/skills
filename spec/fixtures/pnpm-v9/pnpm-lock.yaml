@@ -1,0 +1,49 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  lodash: '>=4.17.21'
+  express>sha.js: '>=2.4.11 <3'
+
+importers:
+
+  .:
+    dependencies:
+      express:
+        specifier: ^4.18.2
+        version: 4.18.2
+
+packages:
+
+  '@babel/core@7.24.0':
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  express@4.18.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  lodash@4.17.21:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+  react-dom@18.2.0(react@18.2.0):
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000DDD==}
+
+  sha.js@2.4.11:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000EEE==}
+
+snapshots:
+
+  '@babel/core@7.24.0': {}
+
+  express@4.18.2:
+    dependencies:
+      lodash: 4.17.21
+      sha.js: 2.4.11
+
+  lodash@4.17.21: {}
+
+  react-dom@18.2.0(react@18.2.0): {}
+
+  sha.js@2.4.11: {}

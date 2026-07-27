@@ -3,6 +3,37 @@
 Claude Code plugin marketplace. Structure and installation: [README.md](README.md).
 Script conventions: [plugins/gh-security/scripts/CLAUDE.md](plugins/gh-security/scripts/CLAUDE.md).
 
+## Releasing a plugin
+
+**A plugin's version lives in its own `plugin.json` and nowhere else.** Bumping it is the entire
+release: Claude Code resolves the version from `plugin.json` first, and users only receive updates
+when that string changes.
+
+Do **not** add `version` to a plugin's entry in `.claude-plugin/marketplace.json`. Claude Code
+always prefers the `plugin.json` value **without warning**, so a version set in both places lets a
+forgotten `plugin.json` bump silently ship nothing. `metadata.version` in `marketplace.json` is the
+catalog's own version and is unrelated to plugin updates.
+
+No git tags and no GitHub releases. Plugins are installed from the default branch and refreshed
+with `/plugin marketplace update`. Tags would also be ambiguous once this marketplace carries
+several plugins at independent versions.
+
+## Testing
+
+Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
+`shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
+
+- **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
+  private repo into this one, which is public: internal package names, registry URLs, and the
+  shape of an internal dependency graph all leak that way.
+- **Specs never hit the network or run an install.** Anything reaching for `gh` is mocked with
+  shellspec's `Mock`.
+- **Assert JSON with the `adapter_jq` / `common_jq` helpers**, not string matching against
+  pretty-printed output. Both preserve the script's exit status, which matters because `validate`
+  deliberately emits its report *and* fails.
+- **Use `Parameters` blocks for table-driven cases** (version ordering, ecosystem routing, band
+  thresholds) rather than repeating near-identical examples.
+
 ## Working an issue
 
 > **Temporary.** This section is being extracted into a skill or rule; see

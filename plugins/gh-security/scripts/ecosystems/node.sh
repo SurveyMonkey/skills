@@ -313,7 +313,10 @@ yarn_versions() {
 }
 
 yarn_entry_count() {
-  grep -c 'resolution: "' yarn.lock 2>/dev/null || printf '0\n'
+  # `grep -c` prints 0 *and* exits 1 when there are no matches, so a `|| echo 0`
+  # fallback fires on top of the 0 grep already printed and yields "0\n0".
+  count=$(grep -c 'resolution: "' yarn.lock 2>/dev/null) || true
+  printf '%s\n' "${count:-0}"
 }
 
 verb_resolved_versions() {

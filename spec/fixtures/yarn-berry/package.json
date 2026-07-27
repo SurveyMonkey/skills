@@ -1,0 +1,23 @@
+{
+  "name": "demo-app",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "express": "^4.18.2",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "vitest": "4.0.18"
+  },
+  "resolutions": {
+    "@babel/core": "^7.24.0",
+    "express/sha.js": "^2.4.11"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "storybook:build": "storybook build",
+    "storybook": "storybook dev"
+  }
+}

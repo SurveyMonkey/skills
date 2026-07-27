@@ -20,8 +20,7 @@
         "dependabot",
         "cve",
         "overrides"
-      ],
-      "version": "0.2.0"
+      ]
     }
   ]
 }
