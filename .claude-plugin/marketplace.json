@@ -1,12 +1,9 @@
 {
   "name": "skills",
+  "description": "SurveyMonkey Claude Code plugins: job-scoped skills for engineering workflows.",
   "owner": {
     "name": "SurveyMonkey Engineering",
     "url": "https://github.com/SurveyMonkey"
-  },
-  "metadata": {
-    "description": "SurveyMonkey Claude Code plugins: job-scoped skills for engineering workflows.",
-    "version": "0.2.0"
   },
   "plugins": [
     {
