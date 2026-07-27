@@ -68,3 +68,13 @@ keeping the old pause would have meant testing a flow no shipped code path perfo
 `mark-ready.sh` duplicates part of the existing `gh:rebase-prs` skill. A plugin cannot depend on
 another plugin, so the duplication is unavoidable; the expectation is that `gh:rebase-prs`
 eventually evolves toward the shape this RFC is driving.
+
+**Draft state is a checkpoint only where promotion and merge are distinct steps** (added during
+Phase 2, from field data). arsenalamerica/app#233 was opened as a draft by the v0.2.0 flow, had
+auto-merge enabled on it, and merged itself the moment checks went green; nobody read the diff
+between "promote" and "merged". Where auto-merge is armed on a PR, promoting *is* merging, the
+merge-risk rating calibrates nobody, and a batch promotion would merge N changes on one
+confirmation. The decision above stands; what it demands of Phase 2's implementation is that
+`mark-ready.sh status` reports auto-merge as armed on the PR versus merely permitted by the
+repository, and that the orchestrator confirms armed PRs **per PR** — stating that promotion
+merges on green — while everything else keeps the one-batch offer.

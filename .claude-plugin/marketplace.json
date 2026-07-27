@@ -9,7 +9,7 @@
     {
       "name": "gh-security",
       "source": "./plugins/gh-security",
-      "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and a computed merge-risk rating on every PR.",
+      "description": "Resolve Dependabot alerts in parallel: one subagent per package in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow.",
       "category": "devops",
       "tags": [
         "github",

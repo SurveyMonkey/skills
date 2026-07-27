@@ -22,7 +22,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -56,6 +56,8 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 
 ## Testing
 
-No harness yet; tracked in [#10](https://github.com/SurveyMonkey/skills/issues/10). Until it
-lands, verify against real repositories with live alerts and check both the success path and the
-"parser found nothing" path.
+Shellspec suites live in `spec/` at the repo root; conventions are in the root `CLAUDE.md`
+(Testing section). CI automation for the suite is tracked in
+[#10](https://github.com/SurveyMonkey/skills/issues/10). Fixture tests do not replace verifying
+against real repositories with live alerts; check both the success path and the "parser found
+nothing" path.
