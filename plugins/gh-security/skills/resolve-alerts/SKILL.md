@@ -195,9 +195,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <approved-urls-only>
 ```
 
 The script rebases first (two fix PRs edit the same overrides block, so once one merges the next
-is behind), marks ready only after a successful rebase, and **reports conflicts without resolving
-them** — resolving a conflicted overrides block is judgment for a human-driven follow-up session.
-Report the per-PR outcomes, conflicts and errors included.
+is behind — and Dependabot's own merges race long batches the same way), marks ready only after a
+successful rebase, and **reports conflicts without resolving them**. For a conflicted PR,
+recommend regeneration over hand-resolution: these PRs are machine-generated, so closing the PR,
+deleting its branch, and re-running this skill for that package rebuilds the fix cleanly on the
+new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
+remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
 
 ## Phase 10: Offer the next batch
 
