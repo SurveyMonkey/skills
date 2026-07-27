@@ -14,8 +14,8 @@ verbatim:
 > top-ranked package.
 
 Then read `${CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/SKILL.md` and execute it exactly, with one
-change: in its Phase 3, do **not** ask how much to fix — the answer is pre-supplied as **One**
+change: in its Phase 4, do **not** ask how much to fix — the answer is pre-supplied as **One**
 (fix only the top-ranked group). Still present the ranked table so the user sees what was chosen
-and what remains, then continue directly to Phase 4. Every other part of the skill runs
-unchanged, including the dispatch-plan approval, the mark-ready decision flow, and the
-next-batch offer.
+and what remains, then continue directly to Phase 5. Every other part of the skill runs
+unchanged, including the permissions preflight, the dispatch-plan approval, the mark-ready
+decision flow, and the next-batch offer.

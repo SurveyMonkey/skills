@@ -7,7 +7,7 @@ description: >
   own subagent in an isolated worktree through to a draft PR carrying a
   computed merge-risk rating. Use when asked to fix security vulnerabilities in
   dependencies, resolve Dependabot alerts, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts for the current repository: discover and
@@ -19,8 +19,8 @@ do not reimplement them. Every script emits JSON on stdout and exits non-zero wi
 on failure; if one fails, report its error and stop.
 
 You are the control point the user approves. Subagents run unattended through PR creation, so
-**nothing dispatches before the user approves the plan in phase 4**, and **no PR leaves draft
-without the decision flow in phase 7**.
+**nothing dispatches before the user approves the plan in phase 5**, and **no PR leaves draft
+without the decision flow in phase 8**.
 
 ## Phase 1: Detect scope
 
@@ -37,7 +37,34 @@ convention is a heuristic and the remote is the fact.
 Carry `default_branch` from the same output into every dispatch. If it is null, the script could
 not resolve origin's default branch; report that and stop.
 
-## Phase 2: Discover and route
+## Phase 2: Permissions preflight
+
+Claude Code does not currently honor this skill's `allowed-tools` grants for plugin skills, so
+every prescribed command would otherwise prompt once per shape, per repo. With `nwo` and `repo_root` known from phase 1, run:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh check <repo_root> <nwo>
+```
+
+- If it errors (for example, an unparseable settings file), say so, **skip the preflight, and
+  continue** — the run proceeds with ordinary prompts; never block alert resolution on
+  permissions housekeeping. This is the one scripted step whose failure is not fatal.
+- If `missing_count` is 0 and `additional_directories_missing` is empty, continue silently.
+- Otherwise show the user the **exact** missing rules and the plugin directory to be granted
+  read access, note they land in `<repo_root>/.claude/settings.local.json` (gitignored,
+  revocable line by line), and AskUserQuestion: add them now, or continue without (every rule
+  then prompts individually as it comes up). On consent:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh apply <repo_root> <nwo>
+```
+
+Report what was added. The catalog is the plugin's prescribed surface only — its own scripts,
+the fix agent's mandated git shapes, and the push/PR tail that the phase 5 batch approval
+authorizes. Commands agents improvise are deliberately not covered: the spec'd path runs
+smooth, deviation still gets scrutiny.
+
+## Phase 3: Discover and route
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh <nwo> \
@@ -54,7 +81,7 @@ If `actionable` is empty, report every skipped group and stop. Reasons you will 
 - `ecosystem not supported yet` — no adapter; see `.github/CONTRIBUTING.md`
 - `PR check failed` — the PR lookup itself errored (`error` field)
 
-## Phase 3: Ask how much to fix
+## Phase 4: Ask how much to fix
 
 Present the ranked table:
 
@@ -68,7 +95,7 @@ Note skipped groups briefly. Then AskUserQuestion with three options:
   exist, that means all high; if none, all medium, and so on).
 - **Everything** — fix all actionable groups.
 
-## Phase 4: Present the dispatch plan and get one approval
+## Phase 5: Present the dispatch plan and get one approval
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-capacity.sh
@@ -87,7 +114,7 @@ scoped override) and is best-effort: the subagent's own `why` classification is 
 Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
 from here through draft-PR creation. Nothing dispatches without it.
 
-## Phase 5: Dispatch in waves
+## Phase 6: Dispatch in waves
 
 Take up to `cap` groups and dispatch them **in a single message with one Task tool call per
 group** so they run in parallel:
@@ -103,7 +130,7 @@ start the next wave until every agent in the current one has returned. There is 
 signal, so the barrier is the honest implementation of the cap (ADR 003). Repeat until the
 approved batch is exhausted.
 
-## Phase 6: Summarize the batch
+## Phase 7: Summarize the batch
 
 Parse each agent's fenced JSON result. **An unparseable or missing result block is a failure
 report** — record it as such; never guess fields.
@@ -122,7 +149,7 @@ deduplicate identical entries, and report once:
 A lead, not a finding. Do not act on them. Without deduplication a five-package dispatch would
 report the same bare overrides five times.
 
-## Phase 7: Decide what may leave draft
+## Phase 8: Decide what may leave draft
 
 Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
 work — but promotion is a decision, not a default. Gather the evidence:
@@ -153,7 +180,7 @@ Two more signals qualify the offer:
 Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
 The user can decline any subset and handle those by hand.
 
-## Phase 8: Promote
+## Phase 9: Promote
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <approved-urls-only>
@@ -164,7 +191,7 @@ is behind), marks ready only after a successful rebase, and **reports conflicts 
 them** — resolving a conflicted overrides block is judgment for a human-driven follow-up session.
 Report the per-PR outcomes, conflicts and errors included.
 
-## Phase 9: Offer the next batch
+## Phase 10: Offer the next batch
 
 If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
 back to phase 4 with the remaining groups. Otherwise report done, including anything left in the
