@@ -1,12 +1,21 @@
 # ShellCheck settings for the shellspec suites only.
 #
-# ShellCheck has no plugin mechanism, so it cannot be taught shellspec's DSL.
-# It parses `Describe` / `It` / `Mock` / `End` as ordinary commands, decides the
-# script cannot continue past a `Mock ... End` block, and reports every later
-# example as dead code. That is an inference failure, not a finding: 146 of them
-# across four files, none with any signal.
+# Checked against upstream before adding anything here: shellspec's own repo
+# ships a root `.shellcheckrc` containing exactly `disable=SC2317`, and its docs
+# say only that spec syntax "is compatible with shell scripts, and you can embed
+# shell functions and use ShellCheck to check the syntax". There is no published
+# strategy for the DSL itself.
 #
-# Scoped to spec/ on purpose rather than the repo root. SC2317 is a genuinely
-# useful check against the plugin scripts, which are real shell, so it has to
-# stay switched on there.
+# SC2317 (unreachable command) matches upstream. ShellCheck parses `Describe` /
+# `It` / `Mock` / `End` as ordinary commands, decides nothing can run past a
+# `Mock ... End` block, and reports every later example as dead code.
+#
+# SC2329 (function never invoked) goes beyond upstream, and each finding was
+# checked rather than assumed: all three are spec-local helpers invoked through
+# `When call`, which ShellCheck cannot see through. The check postdates
+# shellspec's config, which is likely why upstream has not hit it.
+#
+# Scoped to spec/ rather than the repo root, which is stricter than upstream:
+# both checks are worth keeping against the plugin scripts, which are real
+# shell. Do not promote this file to the root.
 disable=SC2317,SC2329

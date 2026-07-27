@@ -42,13 +42,44 @@ shellcheck plugins/gh-security/scripts/common/*.sh \
            spec/spec_helper.sh spec/*_spec.sh
 ```
 
-Both must stay clean. ShellCheck has no plugin mechanism and cannot be taught shellspec's DSL, so
-`spec/.shellcheckrc` disables SC2317 and SC2329 for the suites only; both checks stay on for the
-plugin scripts. ShellCheck resolves `.shellcheckrc` relative to the file being checked, so new
-spec files inherit it with nothing to remember.
+Both must stay clean.
 
-Suppress anything else only with a comment saying why ShellCheck is wrong. It is right far more
-often than not.
+### Suppression is a last resort
+
+**Read the tool's own guidance and try its recommended fix before overriding anything.** Both
+tools are right far more often than they are wrong, and most findings have a canonical rewrite
+that is genuinely better than the code that triggered them.
+
+For a ShellCheck finding, open `https://www.shellcheck.net/wiki/SCXXXX` for that code first. Real
+examples from this repo, both of which started as suppressions and became fixes:
+
+- **SC2016** fired on a `sed` character class because the ordering happened to spell the literal
+  `$(`. Reordering so `$` does not sit before `(` silenced it, verified byte-identical across nine
+  inputs. No directive needed.
+- **SC2086** fired on `jq $INDENT_ARGS`, which relied on the caller leaving the expansion
+  unquoted. An indexed array removed the warning and the fragility together, and doing so exposed
+  a real bug: the override container was created unconditionally, leaving an empty
+  `"resolutions": {}` in manifests that never had one.
+
+There are **no `shellcheck disable` directives in the shipped scripts**. Keep it that way; a
+finding you cannot fix is usually a design smell worth a second look.
+
+For a shellspec problem, check what upstream actually does before inventing something. A custom
+`satisfy jq` matcher written for this suite emitted stray output into the results and was dropped
+for plain helper functions plus exact JSON equality, which is both quieter and more idiomatic.
+
+### When an override really is warranted
+
+Only for a tool limitation you have confirmed, never for a finding you have not understood.
+
+- **Narrowest scope that works.** `spec/.shellcheckrc` disables SC2317 and SC2329 for the suites
+  only; both stay active against the plugin scripts. ShellCheck resolves `.shellcheckrc` relative
+  to the file being checked, so new spec files inherit it with nothing to remember. Do not promote
+  it to the repo root.
+- **Specific codes, never blanket.**
+- **Say why the tool is wrong, and say what you checked.** `spec/.shellcheckrc` records that
+  upstream shellspec ships `disable=SC2317`, that SC2329 goes beyond upstream, and that all three
+  SC2329 findings were individually confirmed as helpers invoked through `When call`.
 
 ## Working an issue
 
