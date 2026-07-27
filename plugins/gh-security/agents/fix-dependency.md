@@ -215,6 +215,16 @@ it and skip anything that is not a check: registry or preview servers, migration
 runners, release and publish scripts, and `postinstall` (already run by the install). Record what
 you skipped and why in your result's `scripts` array.
 
+Run each remaining candidate through the outcome runner, from the worktree:
+
+```bash
+<scripts_dir>/run-check.sh <pm_exec> <script-name>
+```
+
+It returns `{command, exit, log, lines, tail}` — the exit code and the last 60 lines are in the
+JSON, and the full output is in the named log (use Read if the tail is not enough). Never
+append exit markers or re-run a check to see its outcome; the outcome is the JSON.
+
 Run the rest — **one attempt each, then CI**. Local environments are not obligated to run a
 repository's whole check suite, and the scoring system treats "couldn't verify locally" as a
 first-class outcome, so never fight to avoid a skip:
