@@ -61,6 +61,27 @@ Describe 'node.sh detect'
     The output should equal 'true'
   End
 
+  # One scripted call replaces the hand-rolled mkdir/printf/chmod sequence
+  # agents otherwise improvise, each drawing its own permission review. The
+  # runner override keeps the examples deterministic across machines.
+  Describe 'shim'
+    It 'writes an executable shim delegating to the resolved runner'
+      use_fixture yarn-vendored
+      When call adapter_jq '{created, pm}' shim shim-bin 'corepack yarn'
+      The status should be success
+      The output should equal '{"created":true,"pm":"yarn"}'
+      The path shim-bin/yarn should be exist
+      The contents of file shim-bin/yarn should include 'exec corepack yarn "$@"'
+    End
+
+    It 'requires a target directory'
+      use_fixture yarn-vendored
+      When run script "$ADAPTER" shim
+      The status should not equal 0
+      The stderr should be present
+    End
+  End
+
   Describe 'unsupported toolchains are reported, not crashed on'
     Parameters
       bun           3  'bun is not a supported package manager'

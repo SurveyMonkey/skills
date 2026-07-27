@@ -13,6 +13,7 @@
 #   validate <pkg> <range>                     -> {ok, violations[]}
 #   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta}
+#   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> reserved, exits 2 (see issue #7)
 #
 # Exit codes: 0 ok | 1 error | 2 not implemented | 3 unsupported toolchain
@@ -676,6 +677,45 @@ verb_compare_versions() {
     {a: $a, b: $b, result: semver_cmp($a; $b), delta: semver_delta($a; $b)}'
 }
 
+# Some repo scripts invoke the bare package-manager name internally, which
+# fails when the toolchain is corepack-managed or vendored and no binary sits
+# on PATH. This writes a one-line shim that delegates to the resolved runner,
+# so callers prepend the directory to PATH instead of hand-rolling
+# mkdir/printf/chmod (three separate commands, each drawing its own
+# permission review). The optional runner override is a test seam
+# (precedent: detect-capacity.sh's meminfo path).
+verb_shim() {
+  dir="${1:?shim requires a target directory}"
+  runner="${2:-}"
+  case "$(detect_raw)" in
+    pnpm)       pm="pnpm" ;;
+    yarn-berry) pm="yarn" ;;
+    npm)        pm="npm" ;;
+    *) die "shim supports pnpm, Yarn Berry, and npm; detected: $(detect_raw)" ;;
+  esac
+  if [ -z "$runner" ]; then
+    runner=$(pm_runner "$pm")
+    if [ "$runner" = "$pm" ] && command -v "$pm" >/dev/null 2>&1; then
+      jq -n --arg pm "$pm" \
+        '{created: false, pm: $pm, reason: "\($pm) is already on PATH"}'
+      return 0
+    fi
+  fi
+  # A vendored runner is emitted relative to the repository root; the shim
+  # runs from arbitrary directories, so absolutize it.
+  case "$runner" in
+    "node .yarn/"*) runner="node $PWD/${runner#node }" ;;
+  esac
+  mkdir -p "$dir" || die "cannot create shim directory: $dir"
+  shim_file="$dir/$pm"
+  printf '#!/bin/sh\nexec %s "$@"\n' "$runner" > "$shim_file" \
+    || die "cannot write shim: $shim_file"
+  chmod +x "$shim_file"
+  jq -n --arg pm "$pm" --arg shim "$shim_file" --arg dir "$dir" \
+    --arg runner "$runner" \
+    '{created: true, pm: $pm, shim: $shim, path_prefix: $dir, runner: $runner}'
+}
+
 case "$VERB" in
   detect)                verb_detect ;;
   why)                   verb_why "$@" ;;
@@ -685,6 +725,7 @@ case "$VERB" in
   validate)              verb_validate "$@" ;;
   verification_commands) verb_verification_commands ;;
   compare_versions)      verb_compare_versions "$@" ;;
+  shim)                  verb_shim "$@" ;;
   list_pins)
     printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2
     exit 2
