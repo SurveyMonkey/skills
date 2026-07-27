@@ -165,7 +165,8 @@ Merge each PR's `checks` and `auto_merge` with the agent's own `f4`/`f5`, and gr
 
 | Group | Condition | Offer promotion? |
 |---|---|---|
-| Unverified | agent scored F4 = 2 or F5 = 2 | **No.** Report which checks could not run and why; CI on the draft (or after a human promotes) is the verifier. Offering would let "nobody has verified this" promote itself. |
+| Unverified | agent scored F4 = 2 or F5 = 2, and the checks the agent skipped did **not** run in CI | **No.** Report which checks could not run and why; CI on the draft (or after a human promotes) is the verifier. Offering would let "nobody has verified this" promote itself. |
+| Verified by CI | agent scored F4 = 2 or F5 = 2, but the rollup shows the **specific skipped checks** ran and passed | Offerable — the deferral resolved to the right actor. The offer must name what was skipped locally and which CI check covered it. |
 | Checks failing | `checks` = `failed` | No. List `failing_checks`. |
 | Checks pending | `checks` = `pending` | Not yet. Offer to re-run `status` once before moving on. |
 | No checks ran | `checks` = `none` | Offerable, flagged honestly: the repo runs no CI on drafts (or none at all), so promoting is what starts whatever exists. The user decides. |
@@ -179,6 +180,10 @@ Two more signals qualify the offer:
   a confirmation prompt. Merely `permitted` changes nothing.
 - **`merge_state` = `UNKNOWN`**: GitHub has not computed mergeability yet (common right after
   push). Say so; do not bucket it as clean or behind.
+- **Rollups populate as workflows spawn**, and jobs that have not been reported yet are
+  invisible — absent is not pending. On a PR created minutes ago, or one reporting materially
+  fewer checks than its batch siblings, treat `checks: passed` as provisional: hold the offer
+  and re-run `status` before treating the set as complete.
 
 Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
 The user can decline any subset and handle those by hand.
