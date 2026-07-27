@@ -1,0 +1,12 @@
+# ShellCheck settings for the shellspec suites only.
+#
+# ShellCheck has no plugin mechanism, so it cannot be taught shellspec's DSL.
+# It parses `Describe` / `It` / `Mock` / `End` as ordinary commands, decides the
+# script cannot continue past a `Mock ... End` block, and reports every later
+# example as dead code. That is an inference failure, not a finding: 146 of them
+# across four files, none with any signal.
+#
+# Scoped to spec/ on purpose rather than the repo root. SC2317 is a genuinely
+# useful check against the plugin scripts, which are real shell, so it has to
+# stay switched on there.
+disable=SC2317,SC2329

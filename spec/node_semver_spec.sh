@@ -1,9 +1,5 @@
 #!/bin/sh
 # shellcheck shell=sh
-# ShellCheck cannot follow shellspec's DSL: after a Mock/End block it treats
-# every later Describe/It as unreachable, and the DSL blocks as uncalled
-# functions. Both are inference failures, not findings.
-# shellcheck disable=SC2317,SC2329
 # node.sh compare_versions, and the range predicate behind validate.
 #
 # The ordering chain below is the example from semver.org section 11. It exists

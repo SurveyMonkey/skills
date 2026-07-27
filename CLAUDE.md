@@ -42,10 +42,13 @@ shellcheck plugins/gh-security/scripts/common/*.sh \
            spec/spec_helper.sh spec/*_spec.sh
 ```
 
-Both must stay clean. Spec files carry a file-level `disable=SC2317,SC2329` because ShellCheck
-cannot follow shellspec's DSL and reads everything after a `Mock`/`End` block as unreachable.
-Suppress a finding only with a comment saying why it is wrong; ShellCheck is right far more often
-than not.
+Both must stay clean. ShellCheck has no plugin mechanism and cannot be taught shellspec's DSL, so
+`spec/.shellcheckrc` disables SC2317 and SC2329 for the suites only; both checks stay on for the
+plugin scripts. ShellCheck resolves `.shellcheckrc` relative to the file being checked, so new
+spec files inherit it with nothing to remember.
+
+Suppress anything else only with a comment saying why ShellCheck is wrong. It is right far more
+often than not.
 
 ## Working an issue
 

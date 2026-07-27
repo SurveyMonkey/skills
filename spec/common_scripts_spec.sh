@@ -1,9 +1,5 @@
 #!/bin/sh
 # shellcheck shell=sh
-# ShellCheck cannot follow shellspec's DSL: after a Mock/End block it treats
-# every later Describe/It as unreachable, and the DSL blocks as uncalled
-# functions. Both are inference failures, not findings.
-# shellcheck disable=SC2317,SC2329
 # scripts/common/: detect-scope.sh, select-adapter.sh, score-merge-risk.sh.
 
 Describe 'detect-scope.sh'
