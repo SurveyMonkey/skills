@@ -35,6 +35,13 @@ Everything ecosystem-specific stays behind the verbs, **including version compar
 Python adapter implements PEP 440; node implements semver. Do not lift `compare_versions` into
 `common/`.
 
+## Prescribed shapes and the preflight catalog move together
+
+`preflight-permissions.sh` pre-approves exactly the command shapes the agent definition
+prescribes. Changing a prescribed shape in `agents/fix-dependency.md` without updating the
+catalog in the same commit reintroduces a permission prompt for spec'd behavior — caught live
+once already (the `rev-parse` → `branch --list` guard change). Keep them in lockstep.
+
 ## The rule that matters most
 
 **Zero resolved versions is an error, never a pass.** `resolved_versions` returning an empty list
