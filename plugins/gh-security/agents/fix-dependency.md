@@ -62,7 +62,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   without enabling anything and leaves the machine as you found it. If — and only if — a repo
   script has actually failed because it internally invokes the bare package-manager name, the
   sanctioned fix is `$ADAPTER shim "$WORK/bin"` — one silent call that writes the shim and
-  returns its `path_prefix` to prepend to PATH for the commands that need it. Never hand-roll
+  returns its `path_prefix` to prepend to PATH for the commands that need it. The commonest
+  such command is `git commit`: commit hooks (lefthook, husky) typically invoke the bare
+  package-manager name, so prepend the shim's `path_prefix` on your commit command when the
+  repository has hooks. Never hand-roll
   the shim (three separate commands, each drawing security review) and never place one in the
   session scratchpad: that directory is shared with agents running in parallel, so one agent's
   cleanup deletes another's tooling. `$WORK` is yours alone and your cleanup already removes
