@@ -67,6 +67,34 @@ Describe 'detect-scope.sh'
       The output should equal '{"scope":"user","owner":null}'
     End
   End
+
+  # Resolved script-side so no agent prompt carries a shell pipeline for it.
+  # The local origin/HEAD symref is how clones record the default branch, and
+  # reading it needs no network.
+  Describe 'default branch'
+    After 'cleanup_fixture'
+
+    make_repo() {
+      TEST_DIR=$(mktemp -d)
+      REPO_DIR="$TEST_DIR/@octo/app"
+      mkdir -p "$REPO_DIR"
+      git -C "$REPO_DIR" init -q
+      git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    }
+
+    It 'resolves default_branch from the origin/HEAD symref'
+      make_repo
+      When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
+      The status should be success
+      The output should equal '"main"'
+    End
+
+    It 'reports null where no repository exists'
+      When call common_jq detect-scope.sh '.default_branch' '/Code/@SurveyMonkey/skills'
+      The status should be success
+      The output should equal 'null'
+    End
+  End
 End
 
 Describe 'select-adapter.sh'

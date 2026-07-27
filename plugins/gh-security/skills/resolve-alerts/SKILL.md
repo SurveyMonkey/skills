@@ -14,8 +14,6 @@ allowed-tools:
   - Bash(*detect-capacity.sh*)
   - Bash(*mark-ready.sh status*)
   - Bash(*mark-ready.sh promote*)
-  - Bash(git remote *)
-  - Bash(git symbolic-ref *)
   - Read
   - Task
   - AskUserQuestion
@@ -45,14 +43,8 @@ resolution arrives with Phase 3 of RFC 001
 downstream. If `git_remote` disagrees with `nwo`, trust `git_remote` and say so; the directory
 convention is a heuristic and the remote is the fact.
 
-Also resolve the default branch once, for every dispatch:
-
-```bash
-git remote show origin | sed -n 's/.*HEAD branch: //p'
-```
-
-Fallback: `git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`. If both
-fail, report and stop.
+Carry `default_branch` from the same output into every dispatch. If it is null, the script could
+not resolve origin's default branch; report that and stop.
 
 ## Phase 2: Discover and route
 
