@@ -86,6 +86,15 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
   and one line in `.git/info/exclude` keeping it out of `git status` (local-only, never
   committed).
+- **Until `$WORK/fix` exists and you are working inside it, every command must be read-only.**
+  Your shell starts in `repo_root`, so a mutating command issued before worktree setup — the
+  adapter's `apply_constraint` or `install`, a package-manager invocation, an Edit of
+  `package.json` — lands in the user's tree. Phase 1 comes first, always; no fix work of any
+  kind before it.
+- **If you find changes in the user's tree — even changes you believe you caused — never
+  revert, checkout, stash, or clean them.** Attribution can be wrong and discards are
+  unrecoverable; the user adjudicates and decides. Report what you found and, if you caused
+  it, say exactly what you did.
 - **Clean up on every exit path.** Success, failure, or partial progress: the worktrees you
   created are removed before you return (see Cleanup).
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
