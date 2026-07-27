@@ -113,7 +113,7 @@ Setup, as separate simple steps, not one compound block:
 
 ```bash
 git -C <repo_root> fetch origin <default_branch>
-git -C <repo_root> rev-parse --verify --quiet "refs/heads/<branch_name>"   # exit 0 => stop
+git -C <repo_root> branch --list "<branch_name>"   # any output => branch exists => stop
 mkdir -p <repo_root>/.claude/worktrees
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
 cd "$WORK/fix"
