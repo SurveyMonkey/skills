@@ -6,16 +6,22 @@
   },
   "metadata": {
     "description": "SurveyMonkey Claude Code plugins: job-scoped skills for engineering workflows.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "gh-security",
       "source": "./plugins/gh-security",
-      "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation and major-bounded scoped overrides.",
+      "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and a computed merge-risk rating on every PR.",
       "category": "devops",
-      "tags": ["github", "security", "dependabot", "cve", "overrides"],
-      "version": "0.1.0"
+      "tags": [
+        "github",
+        "security",
+        "dependabot",
+        "cve",
+        "overrides"
+      ],
+      "version": "0.2.0"
     }
   ]
 }
