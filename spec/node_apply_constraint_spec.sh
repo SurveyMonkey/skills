@@ -1,5 +1,9 @@
 #!/bin/sh
 # shellcheck shell=sh
+# ShellCheck cannot follow shellspec's DSL: after a Mock/End block it treats
+# every later Describe/It as unreachable, and the DSL blocks as uncalled
+# functions. Both are inference failures, not findings.
+# shellcheck disable=SC2317,SC2329
 # node.sh apply_constraint.
 #
 # Every example works on a scratch copy of a fixture, because this verb writes

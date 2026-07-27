@@ -34,6 +34,19 @@ Bash scripts are covered by [shellspec](https://shellspec.info): `brew install s
 - **Use `Parameters` blocks for table-driven cases** (version ordering, ecosystem routing, band
   thresholds) rather than repeating near-identical examples.
 
+Lint with [ShellCheck](https://www.shellcheck.net) (`brew install shellcheck`):
+
+```bash
+shellcheck plugins/gh-security/scripts/common/*.sh \
+           plugins/gh-security/scripts/ecosystems/*.sh \
+           spec/spec_helper.sh spec/*_spec.sh
+```
+
+Both must stay clean. Spec files carry a file-level `disable=SC2317,SC2329` because ShellCheck
+cannot follow shellspec's DSL and reads everything after a `Mock`/`End` block as unreachable.
+Suppress a finding only with a comment saying why it is wrong; ShellCheck is right far more often
+than not.
+
 ## Working an issue
 
 > **Temporary.** This section is being extracted into a skill or rule; see

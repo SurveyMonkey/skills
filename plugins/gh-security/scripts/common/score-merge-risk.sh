@@ -123,6 +123,8 @@ fi
 # match `shaXjs`.
 pattern=""
 for target in $targets; do
+  # shellcheck disable=SC2016  # the $ ( ) are regex metacharacters being
+  # escaped inside a sed character class, not a command substitution.
   escaped=$(printf '%s' "$target" | sed 's/[.[\*^$()+?{}|\\]/\\&/g')
   alt="(from|import)[[:space:]]*\\(?[[:space:]]*['\"]${escaped}(/[^'\"]*)?['\"]"
   alt="${alt}|require[[:space:]]*\\([[:space:]]*['\"]${escaped}(/[^'\"]*)?['\"]"
