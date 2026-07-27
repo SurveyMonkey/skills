@@ -52,7 +52,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   the reason (a config that hard-fails on a missing variable is the repository's defect to
   note, not yours to work around), F5 says so, and CI or the repo owner is the right fixer. A
   check passed under fabricated environment is not verification — it is a claim the PR body
-  cannot honestly make.
+  cannot honestly make. **An error message saying "set X" is not permission to invent a
+  value**: it is scoped to the feature it belongs to (an e2e config wanting a real deployment
+  URL), and satisfying it with a placeholder so an unrelated tool can load the config is
+  fabrication with extra steps.
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
