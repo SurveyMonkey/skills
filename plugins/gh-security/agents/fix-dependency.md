@@ -44,6 +44,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   do silently. Bash is for the scripts, the package manager, git, and gh.
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you.
+- **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
+  `git config --global`, no installing tools. When a package manager is corepack-managed but not
+  on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
+  without enabling anything and leaves the machine as you found it.
 - **Never touch the user's checkout.** All work happens in your worktree. Never `git switch`,
   stash, or edit files under `repo_root` itself.
 - **Clean up on every exit path.** Success, failure, or partial progress: the worktrees you
