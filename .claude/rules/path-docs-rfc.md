@@ -71,6 +71,28 @@ An RFC drives an initiative; it does not replace the artifacts the initiative pr
   the RFC into a skill or a path-scoped rule, so it's enforced at the point of work rather
   than buried in prose.
 
+## Amending an accepted RFC
+
+An `accepted` RFC keeps being edited while its phases execute. Two rules keep that honest.
+
+**Amend in place; do not spawn an ADR for every change.** Scope reductions, dropped support, and
+settled facts go into the RFC's own **Decisions & Follow-ups**. Reserve ADRs for decisions a later
+phase has to *build against*. The heuristic: if it changes what gets built, it is an RFC
+amendment; if it changes how something must be built, it is an ADR.
+
+**When reversing a decision the RFC already records, strike it through and annotate it** rather
+than deleting it. The reasoning for the reversal is the valuable part, and a silently rewritten
+RFC cannot be audited.
+
+```markdown
+- ~~PRs open ready for review, not as drafts.~~ **Revised during Phase 1** ([ADR 002](...)):
+  PRs open as drafts. Opening ready left no checkpoint between approving a plan and N pull
+  requests existing.
+```
+
+Update the body text at the same time, so the prose and the decisions list do not disagree, and
+keep `related_adrs` / `related_issues` frontmatter current as artifacts are spawned.
+
 ## PR checklist
 
 - **New multi-decision initiative needing buy-in?** Author an RFC (`docs/rfc/NNN-<slug>.md`,
