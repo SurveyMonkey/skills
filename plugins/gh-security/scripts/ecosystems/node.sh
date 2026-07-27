@@ -532,6 +532,7 @@ set_indent_args() {
 }
 
 verb_apply_constraint() {
+  refuse_primary_checkout
   tighten_bare=false
   if [ "${1:-}" = "--tighten-bare" ]; then
     tighten_bare=true
@@ -644,7 +645,19 @@ verb_apply_constraint() {
 # ---------------------------------------------------------------------------
 # install / verification_commands / compare_versions / list_pins
 # ---------------------------------------------------------------------------
+# Mutating verbs refuse to run in a primary checkout. Fix agents work in git
+# worktrees, which carry a .git *file*; the user's checkout has a .git
+# *directory*, and a mutating verb running there (a cwd mistake before
+# worktree setup) silently edits the user's tree — observed live in Phase 2
+# testing. Spec fixtures have no .git at all and are unaffected.
+refuse_primary_checkout() {
+  if [ -d .git ]; then
+    die "refusing to run '$VERB' in a primary checkout (.git is a directory here); create the fix worktree and run from there"
+  fi
+}
+
 verb_install() {
+  refuse_primary_checkout
   cmd=$(verb_detect | jq -r '.install_cmd')
   printf 'Running: %s\n' "$cmd" >&2
   $cmd
