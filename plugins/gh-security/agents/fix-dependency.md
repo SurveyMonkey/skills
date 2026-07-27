@@ -48,6 +48,11 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
   without enabling anything and leaves the machine as you found it.
+- **Prefer small, single-purpose commands with literal paths.** Compound blocks with shell
+  variables, conditionals, or redirections draw manual security review that no permission rule
+  can cover, once per invocation; several plain commands each get approved once and then run
+  silently. Substitute the literal `$WORK` path into commands rather than assigning variables,
+  and split independent steps into separate calls.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
   switch`, stash, or edit checked-out files under `repo_root` itself. Exactly two writes into
   the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
@@ -60,29 +65,28 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 
 ## Phase 1: Create the isolated worktree
 
-Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>` (`$WORK` below) — a
-stable in-repo path, so permission rules users accept for it persist across runs, unlike a temp
-directory's. Keep it invisible to `git status` via the local exclude file before creating it:
+Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>` — written `$WORK` in
+this document as shorthand, but **substitute the literal path in every command** (see Hard
+rules). A stable in-repo path means permission rules users accept for it persist across runs.
+
+Setup, as separate simple steps, not one compound block:
+
+1. **Exclude line** (keeps the directory out of `git status`): Read
+   `<repo_root>/.git/info/exclude`; if no line reads exactly `.claude/worktrees/`, append it
+   with Edit (Write the file if it does not exist). Local-only, never committed.
+2. **Crashed-run guard**: if `$WORK` already exists (check with Glob or a bare `test -d`), a
+   previous run crashed before cleanup. Stop and return a failure (phase `worktree`) naming the
+   directory so the user can inspect and remove it
+   (`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse
+   or silently delete it.
+3. **Stale-branch guard**: if the fix branch already exists locally, stop and return a failure
+   (phase `worktree`): discovery only checked for open PRs, so a stale local branch may hold
+   someone's unpushed work.
 
 ```bash
-WORK=<repo_root>/.claude/worktrees/fix-dependabot-<package>
-grep -qxF '.claude/worktrees/' <repo_root>/.git/info/exclude 2>/dev/null \
-  || printf '.claude/worktrees/\n' >> <repo_root>/.git/info/exclude
 git -C <repo_root> fetch origin <default_branch>
-```
-
-If `$WORK` already exists, a previous run crashed before cleanup: stop and return a failure
-(phase `worktree`) naming the directory, so the user can inspect and remove it
-(`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse or
-silently delete it.
-
-If the fix branch already exists locally, stop and return a failure (phase `worktree`): discovery
-only checked for open PRs, so a stale local branch may hold someone's unpushed work. Never delete
-or reuse it.
-
-```bash
 git -C <repo_root> rev-parse --verify --quiet "refs/heads/<branch_name>"   # exit 0 => stop
-mkdir -p "$WORK"
+mkdir -p <repo_root>/.claude/worktrees
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
 cd "$WORK/fix"
 ```
