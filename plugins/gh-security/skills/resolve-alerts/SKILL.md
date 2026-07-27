@@ -7,16 +7,7 @@ description: >
   own subagent in an isolated worktree through to a draft PR carrying a
   computed merge-risk rating. Use when asked to fix security vulnerabilities in
   dependencies, resolve Dependabot alerts, or clean up npm audit findings.
-allowed-tools:
-  - Bash(*detect-scope.sh*)
-  - Bash(*discover-alerts.sh*)
-  - Bash(*select-adapter.sh*)
-  - Bash(*detect-capacity.sh*)
-  - Bash(*mark-ready.sh status*)
-  - Bash(*mark-ready.sh promote*)
-  - Read
-  - Task
-  - AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts for the current repository: discover and
