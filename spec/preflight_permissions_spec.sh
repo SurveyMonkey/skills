@@ -17,7 +17,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{exists, missing_count, present}' check "$REPO"
     The status should be success
-    The output should equal '{"exists":false,"missing_count":14,"present":[]}'
+    The output should equal '{"exists":false,"missing_count":7,"present":[]}'
   End
 
   It 'adds the gh rules only when an nwo is supplied'
@@ -27,12 +27,11 @@ Describe 'preflight-permissions.sh'
     The output should equal '2'
   End
 
-  It 'anchors script rules to real absolute paths'
+  It 'covers every bundled script with one absolute-path rule'
     make_repo
     When call common_jq preflight-permissions.sh '.missing[0]' check "$REPO"
     The status should be success
-    The output should include 'detect-scope.sh*'
-    The output should include 'scripts/common'
+    The output should include 'gh-security/scripts/*'
   End
 
   It 'check is read-only'
@@ -47,7 +46,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{added: (.added | length), dirs: (.additional_directories_added | length)}' apply "$REPO"
     The status should be success
-    The output should equal '{"added":14,"dirs":1}'
+    The output should equal '{"added":7,"dirs":1}'
     The path "$REPO/.claude/settings.local.json" should be exist
   End
 
@@ -67,7 +66,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call jq -c '{model, first: .permissions.allow[0], second: .permissions.allow[1], deny: .permissions.deny, total: (.permissions.allow | length)}' "$REPO/.claude/settings.local.json"
     The status should be success
-    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":16}'
+    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":9}'
   End
 
   It 'counts pre-existing catalog rules as present, not missing'
@@ -75,7 +74,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call common_jq preflight-permissions.sh '{missing_count, present: (.present | length)}' check "$REPO"
     The status should be success
-    The output should equal '{"missing_count":0,"present":14}'
+    The output should equal '{"missing_count":0,"present":7}'
   End
 
   It 'refuses to touch a settings file that is not valid JSON'

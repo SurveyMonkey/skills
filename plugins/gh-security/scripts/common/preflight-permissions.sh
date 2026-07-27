@@ -54,21 +54,16 @@ esac
 }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-ECOSYSTEMS_DIR=$(cd "$SCRIPT_DIR/../ecosystems" && pwd)
 PLUGIN_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 SETTINGS_DIR="$REPO_ROOT/.claude"
 SETTINGS="$SETTINGS_DIR/settings.local.json"
 
 # The catalog. Literal paths, so the rules a user reviews are exactly the
-# rules that match. Trailing * with no space also matches the bare command.
-RULES="Bash($SCRIPT_DIR/detect-scope.sh*)
-Bash($SCRIPT_DIR/discover-alerts.sh*)
-Bash($SCRIPT_DIR/select-adapter.sh*)
-Bash($SCRIPT_DIR/detect-capacity.sh*)
-Bash($SCRIPT_DIR/score-merge-risk.sh*)
-Bash($SCRIPT_DIR/mark-ready.sh*)
-Bash($SCRIPT_DIR/preflight-permissions.sh*)
-Bash($ECOSYSTEMS_DIR/node.sh*)
+# rules that match. One rule covers every bundled script: all of scripts/ is
+# the plugin's own deterministic tooling, a 9-line list is one a user
+# actually reads before consenting, and scripts added by future plugin
+# versions are covered without re-prompting after an upgrade.
+RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C $REPO_ROOT rev-parse *)
 Bash(git -C $REPO_ROOT fetch origin *)
 Bash(git -C $REPO_ROOT worktree *)

@@ -50,10 +50,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh check <repo_root> 
   continue** — the run proceeds with ordinary prompts; never block alert resolution on
   permissions housekeeping. This is the one scripted step whose failure is not fatal.
 - If `missing_count` is 0 and `additional_directories_missing` is empty, continue silently.
-- Otherwise show the user the **exact** missing rules and the plugin directory to be granted
-  read access, note they land in `<repo_root>/.claude/settings.local.json` (gitignored,
-  revocable line by line), and AskUserQuestion: add them now, or continue without (every rule
-  then prompts individually as it comes up). On consent:
+- Otherwise, **print every missing rule verbatim as a list, plus the plugin directory to be
+  granted read access, before asking anything.** Never ask with only a count: the user is
+  consenting to specific grants and must see them. Note they land in
+  `<repo_root>/.claude/settings.local.json` (gitignored, revocable line by line). Then
+  AskUserQuestion: add them now, or continue without (every rule then prompts individually as
+  it comes up). On consent:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh apply <repo_root> <nwo>
