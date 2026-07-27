@@ -47,6 +47,12 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   guaranteed to exist on the user's machine).
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you.
+- **Never fabricate environment to make a check run.** No invented env vars, placeholder URLs,
+  dummy tokens. A check that cannot run in your environment as-is is recorded as `skipped` with
+  the reason (a config that hard-fails on a missing variable is the repository's defect to
+  note, not yours to work around), F5 says so, and CI or the repo owner is the right fixer. A
+  check passed under fabricated environment is not verification — it is a claim the PR body
+  cannot honestly make.
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
