@@ -21,6 +21,10 @@
 
 set -euo pipefail
 
+# corepack prompts before downloading a package manager version; a fix run is
+# not an interactive session.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 VERB="${1:-}"
 if [ -z "$VERB" ]; then
   printf '{"error":"Usage: node.sh <verb> [args]"}\n' >&2
@@ -171,23 +175,50 @@ detect_raw() {
   fi
 }
 
+# How to actually invoke the package manager.
+#
+# Yarn Berry and modern pnpm are usually corepack-managed: `packageManager` is
+# declared in package.json and no binary sits on PATH unless the user's shell
+# shims one. Falling back to corepack keeps the adapter working regardless of
+# how the caller's environment is set up.
+pm_runner() {
+  candidate="$1"
+  if command -v "$candidate" >/dev/null 2>&1; then
+    printf '%s\n' "$candidate"
+  elif command -v corepack >/dev/null 2>&1 \
+    && jq -e '.packageManager // empty' package.json >/dev/null 2>&1; then
+    printf 'corepack %s\n' "$candidate"
+  else
+    printf '%s\n' "$candidate"
+  fi
+}
+
 verb_detect() {
   pm=$(detect_raw)
   case "$pm" in
     pnpm)
-      jq -n '{pm:"pnpm", lockfile:"pnpm-lock.yaml", install_cmd:"pnpm install",
-              why_cmd:"pnpm why", override_location:"pnpm.overrides",
-              override_syntax:"parent>dep", supports_scoping:true}'
+      run=$(pm_runner pnpm)
+      jq -n --arg run "$run" \
+             '{pm:"pnpm", pm_exec:$run, lockfile:"pnpm-lock.yaml",
+               install_cmd:"\($run) install", why_cmd:"\($run) why",
+               override_location:"pnpm.overrides",
+               override_syntax:"parent>dep", supports_scoping:true}'
       ;;
     yarn-berry)
-      jq -n '{pm:"yarn", lockfile:"yarn.lock", install_cmd:"yarn install",
-              why_cmd:"yarn why", override_location:"resolutions",
-              override_syntax:"parent/dep", supports_scoping:true}'
+      run=$(pm_runner yarn)
+      jq -n --arg run "$run" \
+             '{pm:"yarn", pm_exec:$run, lockfile:"yarn.lock",
+               install_cmd:"\($run) install", why_cmd:"\($run) why",
+               override_location:"resolutions",
+               override_syntax:"parent/dep", supports_scoping:true}'
       ;;
     npm)
-      jq -n '{pm:"npm", lockfile:"package-lock.json", install_cmd:"npm install",
-              why_cmd:"npm explain", override_location:"overrides",
-              override_syntax:"nested", supports_scoping:true}'
+      run=$(pm_runner npm)
+      jq -n --arg run "$run" \
+             '{pm:"npm", pm_exec:$run, lockfile:"package-lock.json",
+               install_cmd:"\($run) install", why_cmd:"\($run) explain",
+               override_location:"overrides",
+               override_syntax:"nested", supports_scoping:true}'
       ;;
     bun)
       printf '{"error":"bun is not a supported package manager. See .github/CONTRIBUTING.md to request support.","unsupported":"bun"}\n' >&2
@@ -367,6 +398,10 @@ yarn_parents() {
       rest = substr($0, i + 13)
       j = index(rest, "\"")
       res = substr(rest, 1, j - 1)
+      # Workspace entries are the repository`s own packages, not registry
+      # parents an override can be scoped to. npm filters its root equivalent
+      # the same way.
+      if (index(res, "@workspace:") > 0) { cur = ""; next }
       at = 0
       for (k = length(res); k > 1; k--) {
         if (substr(res, k, 1) == "@") { at = k; break }
@@ -411,11 +446,8 @@ verb_why() {
   # Best-effort human-readable chain for the PR body. Never fatal: these exit
   # non-zero in normal situations, such as a package present only as a peer.
   raw=""
-  case "$pm" in
-    npm)  raw=$(npm explain "$pkg" 2>&1 || true) ;;
-    pnpm) raw=$(pnpm why "$pkg" 2>&1 || true)    ;;
-    yarn) raw=$(yarn why "$pkg" 2>&1 || true)    ;;
-  esac
+  why_cmd=$(verb_detect | jq -r '.why_cmd')
+  raw=$($why_cmd "$pkg" 2>&1 || true)
 
   printf '%s' "$parents" \
     | jq --arg pkg "$pkg" --arg pm "$pm" --arg raw "$raw" \
@@ -534,9 +566,24 @@ verb_apply_constraint() {
       | if $tighten then
           set_entry($pkg; $range)
         elif ($parents | length) == 0 then
-          if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]    = $range
-          elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg] = $range
-          else set_entry($pkg; $range) end
+          # Direct dependency: match how the manifest already expresses
+          # versions. A repo that pins exactly (yarn `defaultSemverRangePrefix:
+          # ""`, or Dependabot-managed pins) should not acquire a lone range
+          # entry, and a caret repo should stay caret. The major bound still
+          # holds either way: an exact pin cannot cross a major, and `^` is
+          # already major-bounded.
+          ($range | sub("^>=[[:space:]]*"; "") | split(" ")[0]) as $lower
+          | (if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]
+             elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg]
+             else null end) as $existing
+          | (if   $existing == null              then $range
+             elif ($existing | test("^[0-9]"))   then $lower
+             elif ($existing | startswith("^"))  then "^" + $lower
+             elif ($existing | startswith("~"))  then "~" + $lower
+             else $range end) as $value
+          | if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]    = $value
+            elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg] = $value
+            else set_entry($pkg; $range) end
         else
           reduce $parents[] as $parent (.;
             if   $loc == "pnpm.overrides" then set_entry($parent + ">" + $pkg; $range)
@@ -578,13 +625,22 @@ verb_install() {
 }
 
 verb_verification_commands() {
-  pm=$(pm_of)
+  pm=$(verb_detect | jq -r '.pm_exec')
+  # Emits *candidates*, not a running order. Name-based filtering catches the
+  # obvious servers but cannot recognize every one (`start-verdaccio` is a
+  # registry, `nx-migrate` is a codemod), so the caller reviews the list and
+  # skips what is not a check. Matching the last colon-separated segment as
+  # well as the whole name keeps `storybook:build` while dropping `test:watch`
+  # and `storybook:dev`.
   jq --arg pm "$pm" '
-    ((.scripts // {}) | keys) as $all
-    | ["dev","start","serve","watch","storybook","preview"] as $long
+    ["dev","start","serve","watch","storybook","preview"] as $long
+    | def is_long: . as $s
+        | ($long | index($s)) != null
+          or ($long | index($s | split(":") | last)) != null;
+      ((.scripts // {}) | keys) as $all
     | {
-        commands: [ $all[] | select(. as $s | ($long | index($s)) | not) | "\($pm) \(.)" ],
-        skipped:  [ $all[] | select(. as $s | ($long | index($s))) ]
+        commands: [ $all[] | select(is_long | not) | "\($pm) \(.)" ],
+        skipped:  [ $all[] | select(is_long) ]
       }' package.json
 }
 

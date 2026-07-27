@@ -186,8 +186,13 @@ When `validate` fails, work through these in order:
 $ADAPTER verification_commands
 ```
 
-Run every command in `commands`. The `skipped` list is long-running servers, deliberately
-excluded.
+`commands` is a **candidate list**, not a running order. The script filters obvious long-running
+servers into `skipped` by name, but it cannot recognize every one. Review the list before running
+it and skip anything that is not a check: registry or preview servers (`start-verdaccio`),
+migration or codemod runners (`nx-migrate`), release and publish scripts, and `postinstall`
+(already run by the install). Say which ones you skipped and why.
+
+Run the rest.
 
 Judge each failure: caused by this update, or pre-existing? Check out the default branch and
 re-run if you are unsure. Pre-existing failures are noted and do not block; caused failures must
@@ -246,6 +251,14 @@ Push, then create the draft PR. Collect **all** required labels from every sourc
 together, each via its own `--label` flag. This skill always requires `Security`. Check every
 CLAUDE.md in context for additional required labels (for example `ai-claudecode`). No source
 overrides another; labels are additive.
+
+`gh pr create` fails outright if a label does not exist in the repository, so check first and
+create any that are missing rather than dropping them:
+
+```bash
+gh label list --repo <nwo> --json name --jq '.[].name'
+gh label create Security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
+```
 
 ```bash
 gh pr create --draft --label Security [--label ...] --title "..." --body "..."
