@@ -18,10 +18,9 @@ Describe 'mutating verbs refuse a primary checkout'
   It 'apply_constraint proceeds when .git is a worktree file'
     use_fixture yarn-berry
     printf 'gitdir: /elsewhere/.git/worktrees/fix\n' > .git
-    When call adapter_jq '.changes | length >= 1' apply_constraint lodash '>=4.17.21 <5'
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
     The status should be success
-    The output should equal 'true'
-    The stderr should be present
+    The output should equal '{"package":"lodash","pm":"yarn"}'
   End
 End
 # node.sh apply_constraint.
