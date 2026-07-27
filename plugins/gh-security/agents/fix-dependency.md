@@ -48,8 +48,11 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
   without enabling anything and leaves the machine as you found it.
-- **Never touch the user's checkout.** All work happens in your worktree. Never `git switch`,
-  stash, or edit files under `repo_root` itself.
+- **Never touch the user's working tree.** All work happens in your worktree. Never `git
+  switch`, stash, or edit checked-out files under `repo_root` itself. Exactly two writes into
+  the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
+  and one line in `.git/info/exclude` keeping it out of `git status` (local-only, never
+  committed).
 - **Clean up on every exit path.** Success, failure, or partial progress: the worktrees you
   created are removed before you return (see Cleanup).
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
@@ -57,10 +60,21 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 
 ## Phase 1: Create the isolated worktree
 
+Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>` (`$WORK` below) — a
+stable in-repo path, so permission rules users accept for it persist across runs, unlike a temp
+directory's. Keep it invisible to `git status` via the local exclude file before creating it:
+
 ```bash
-WORK=$(mktemp -d)
+WORK=<repo_root>/.claude/worktrees/fix-dependabot-<package>
+grep -qxF '.claude/worktrees/' <repo_root>/.git/info/exclude 2>/dev/null \
+  || printf '.claude/worktrees/\n' >> <repo_root>/.git/info/exclude
 git -C <repo_root> fetch origin <default_branch>
 ```
+
+If `$WORK` already exists, a previous run crashed before cleanup: stop and return a failure
+(phase `worktree`) naming the directory, so the user can inspect and remove it
+(`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse or
+silently delete it.
 
 If the fix branch already exists locally, stop and return a failure (phase `worktree`): discovery
 only checked for open PRs, so a stale local branch may hold someone's unpushed work. Never delete
@@ -68,6 +82,7 @@ or reuse it.
 
 ```bash
 git -C <repo_root> rev-parse --verify --quiet "refs/heads/<branch_name>"   # exit 0 => stop
+mkdir -p "$WORK"
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
 cd "$WORK/fix"
 ```
@@ -320,8 +335,10 @@ rm -rf "$WORK"
 ```
 
 The fix branch itself remains (it is pushed, or irrelevant on failure); the worktrees never
-survive you. If cleanup itself fails, say so in `detail` — an orphaned worktree in a temp
-directory is recoverable with `git worktree prune`, but only if someone knows it happened.
+survive you. If cleanup itself fails, say so in `detail` — an orphaned worktree under
+`.claude/worktrees/` is discoverable at a stable path and recoverable with
+`git worktree remove --force` plus `git worktree prune`, but only if the report says it
+happened.
 
 ## Result
 

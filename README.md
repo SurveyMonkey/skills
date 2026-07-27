@@ -24,9 +24,10 @@ Supports pnpm, npm, and Yarn Berry. Other ecosystems and package managers are re
 than attempted; see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to request one.
 
 **First-run permission prompts:** each bundled script asks for Bash approval the first time it
-runs in a repo — seven scripts total, six in `common/` plus the node ecosystem adapter. Rules
-keyed to the fix worktree's temp path recur per run; the script rules themselves persist. Choose
-"Yes, and don't ask again" and the rule lands in that repo's `.claude/settings.local.json`. The skill declares `allowed-tools` pre-approval, but
+runs in a repo — seven scripts total, six in `common/` plus the node ecosystem adapter. Choose
+"Yes, and don't ask again" and the rule lands in that repo's `.claude/settings.local.json`. Fix
+worktrees live at a stable `.claude/worktrees/` path inside the repo (kept out of `git status`
+via `.git/info/exclude`), so worktree-related approvals persist across runs too. The skill declares `allowed-tools` pre-approval, but
 Claude Code does not currently apply it to plugin skills
 ([anthropics/claude-code#80696](https://github.com/anthropics/claude-code/issues/80696),
 [#80802](https://github.com/anthropics/claude-code/issues/80802)); a hook-based fix is tracked in

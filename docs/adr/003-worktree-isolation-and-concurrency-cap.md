@@ -16,17 +16,27 @@ worktrees live, how the pre-existing-failure comparison works without `git switc
 is required, or how the concurrency cap is enforced by an orchestrator whose Task tool offers no
 completion signal short of the agent returning.
 
-A location question with a wrong-looking obvious answer: Claude Code's own worktree convention is
-`.claude/worktrees/` inside the repository. Verified against a clean checkout: a worktree created
-there appears as `?? .claude/worktrees/` in `git status` for any repository that does not ignore
-the path, and end users' repositories do not. A crashed agent would also strand a full checkout
-(plus `node_modules`) inside someone's project.
+The location question was decided twice. The first decision was temp directories outside the
+repository: `.claude/worktrees/` inside the repo appears as `?? .claude/worktrees/` in
+`git status` for any repository not ignoring the path (verified against a clean checkout), and a
+crashed agent would strand a full checkout inside someone's project. The first live parallel
+dispatch reversed it ([#5](https://github.com/SurveyMonkey/skills/issues/5), run report and
+worktree-placement comments): commands touching a temp-path worktree prompt as out-of-workspace
+access, the suggested permission rules are keyed to that run's `mktemp` path and so can never
+persist across runs, and the accumulated friction is what made the user abort the run. The
+`git status` objection has a mitigation the first decision missed — one line in
+`.git/info/exclude`, local-only and never committed.
 
 ## Decision
 
-**Worktrees live in a temp directory outside the repository.** Each agent creates
-`$(mktemp -d)/fix` via `git -C <repo_root> worktree add`, with the fix branch cut from a freshly
-fetched `origin/<default>`. The user's checkout is never touched: no switch, no stash, no edits.
+**Worktrees live at `.claude/worktrees/fix-dependabot-<package>` inside the target repository,
+kept out of `git status` via `.git/info/exclude`.** The stable in-workspace path means the
+permission rules a user accepts persist across runs, and matches the directory Claude Code's own
+worktree tooling uses. Before creating it, the agent ensures the exclude line exists; these are
+the only two writes into the user's repository the agent may make outside its own worktree. The
+fix branch is cut from a freshly fetched `origin/<default>`. The user's working tree is never
+touched: no switch, no stash, no edits. A pre-existing `$WORK` directory (a crashed prior run)
+stops the agent with a report naming the path, never a silent delete.
 
 **A pre-existing local fix branch stops the agent.** Discovery checks for open PRs, not local
 branches, so an existing `fix/dependabot-<pkg>` branch may hold unpushed work. The agent reports
@@ -40,10 +50,11 @@ whose default branch is checked out elsewhere. The agent creates
 actually needs attribution, because the cost is a second full install.
 
 **Cleanup runs on every exit path.** `git worktree remove --force` (installs make trees dirty to
-a plain remove) for both worktrees, then `worktree prune`, then `rm -rf` of the temp directory —
-on success and on failure alike. A cleanup failure is reported, never silent: an orphaned
-worktree in a temp directory is recoverable with `git worktree prune`, but only if someone knows
-it happened.
+a plain remove) for both worktrees, then `worktree prune`, then `rm -rf` of the `$WORK`
+directory — on success and on failure alike. A cleanup failure is reported, never silent; an
+orphan under `.claude/worktrees/` sits at a stable, discoverable path, which is the acceptable
+face of the in-repo trade-off (the crashed-agent stranding that argued for temp directories is
+now at least visible and named in the failure report).
 
 **The concurrency cap is computed per machine and enforced as a wave barrier.**
 `detect-capacity.sh` derives `clamp(min(floor(cores / 3), floor(total_ram_gb / 8)), 3, 6)` from
