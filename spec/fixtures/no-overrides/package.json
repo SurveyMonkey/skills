@@ -1,0 +1,7 @@
+{
+  "name": "no-overrides",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "lodash": "^4.17.20"
+  }
+}

@@ -136,6 +136,22 @@ Describe 'node.sh apply_constraint'
     End
   End
 
+  # A direct update writes into dependencies, so it must not leave an empty
+  # "resolutions": {} behind in a manifest that never had one.
+  It 'does not create an empty override block for a direct update'
+    use_fixture no-overrides
+    "$ADAPTER" apply_constraint lodash '>=4.17.21 <5' >/dev/null
+    When call manifest 'has("resolutions")'
+    The output should equal 'false'
+  End
+
+  It 'still updates the direct dependency in a manifest with no override block'
+    use_fixture no-overrides
+    "$ADAPTER" apply_constraint lodash '>=4.17.21 <5' >/dev/null
+    When call manifest '.dependencies.lodash'
+    The output should equal '"^4.17.21"'
+  End
+
   It 'creates the override block when the manifest has none'
     use_fixture yarn-berry
     "$ADAPTER" apply_constraint brand-new-pkg '>=1.0.0 <2' some-parent >/dev/null

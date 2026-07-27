@@ -504,11 +504,16 @@ verb_validate() {
 # ---------------------------------------------------------------------------
 set_indent_args() {
   # Keep the diff to the lines actually changed rather than reformatting.
+  #
+  # An array rather than a string: jq needs two argv entries for `--indent 4`,
+  # and passing them as one word relies on the caller leaving the expansion
+  # unquoted. bash 3.2 has indexed arrays, and this one is never empty, so the
+  # empty-array-under-`set -u` trap does not apply.
   first=$(grep -m1 '^[[:space:]][[:space:]]*"' package.json 2>/dev/null || true)
   case "$first" in
-    "	"*)     INDENT_ARGS="--tab" ;;
-    "    "*) INDENT_ARGS="--indent 4" ;;
-    *)       INDENT_ARGS="--indent 2" ;;
+    "	"*)     INDENT_ARGS=(--tab) ;;
+    "    "*) INDENT_ARGS=(--indent 4) ;;
+    *)       INDENT_ARGS=(--indent 2) ;;
   esac
 }
 
@@ -554,19 +559,22 @@ verb_apply_constraint() {
   set_indent_args
   tmp=$(mktemp)
 
-  # shellcheck disable=SC2086
-  if ! jq $INDENT_ARGS \
+  if ! jq "${INDENT_ARGS[@]}" \
       --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" \
       --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
+      # Create the override container only inside set_entry, so a direct
+      # dependency update never leaves an empty "resolutions": {} (or
+      # equivalent) behind in a manifest that had no override block.
       def set_entry($key; $val):
-        if   $loc == "pnpm.overrides" then .pnpm.overrides[$key] = $val
-        elif $loc == "resolutions"    then .resolutions[$key]    = $val
-        else .overrides[$key] = $val end;
+        if   $loc == "pnpm.overrides" then
+          ((.pnpm //= {}) | (.pnpm.overrides //= {}) | .pnpm.overrides[$key] = $val)
+        elif $loc == "resolutions" then
+          ((.resolutions //= {}) | .resolutions[$key] = $val)
+        else
+          ((.overrides //= {}) | .overrides[$key] = $val)
+        end;
 
-      (if $loc == "pnpm.overrides" then ((.pnpm //= {}) | (.pnpm.overrides //= {}))
-       elif $loc == "resolutions"  then (.resolutions //= {})
-       else (.overrides //= {}) end)
-      | if $tighten then
+      if $tighten then
           set_entry($pkg; $range)
         elif ($parents | length) == 0 then
           # Direct dependency: match how the manifest already expresses
@@ -591,9 +599,10 @@ verb_apply_constraint() {
           reduce $parents[] as $parent (.;
             if   $loc == "pnpm.overrides" then set_entry($parent + ">" + $pkg; $range)
             elif $loc == "resolutions"    then set_entry($parent + "/" + $pkg; $range)
-            else .overrides[$parent] =
-                   (((.overrides[$parent] // {})
-                     | if type == "string" then {} else . end) + {($pkg): $range})
+            else ((.overrides //= {})
+                  | .overrides[$parent] =
+                      (((.overrides[$parent] // {})
+                        | if type == "string" then {} else . end) + {($pkg): $range}))
             end)
         end' package.json > "$tmp"; then
     rm -f "$tmp"
