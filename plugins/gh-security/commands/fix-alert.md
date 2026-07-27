@@ -194,9 +194,31 @@ migration or codemod runners (`nx-migrate`), release and publish scripts, and `p
 
 Run the rest.
 
-Judge each failure: caused by this update, or pre-existing? Check out the default branch and
-re-run if you are unsure. Pre-existing failures are noted and do not block; caused failures must
-be fixed or the fix abandoned.
+Judge each failure: caused by this update, or pre-existing?
+
+**Never attribute a failure to pre-existing breakage without running the same check against the
+default branch.** Not "if unsure": always. This is the easiest call in the whole flow to get wrong
+while sounding certain, and being confident is not the same as having checked.
+
+A dependency bump routinely activates a latent defect that has sat green in the default branch for
+months. A weak test that never awaited an async render, a stricter runner that now reports what it
+previously ignored, a peer range that only now conflicts. Every one of those reads exactly like
+pre-existing breakage right up until you run both trees.
+
+To verify, keep the working tree intact and swap only the dependency change:
+
+```bash
+git stash                      # or commit first
+git switch <default-branch>
+<the failing command>          # same command, same environment
+git switch -
+git stash pop
+```
+
+Report both results explicitly, including in the PR body.
+
+Pre-existing failures are noted and do not block. Failures this update causes must be fixed here
+or the fix abandoned: landing one puts a red suite on the default branch.
 
 ## Phase 9: Score merge risk
 
