@@ -64,6 +64,7 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # actually reads before consenting, and scripts added by future plugin
 # versions are covered without re-prompting after an upgrade.
 RULES="Bash($PLUGIN_ROOT/scripts/*)
+Bash(git -C $REPO_ROOT status *)
 Bash(git -C $REPO_ROOT rev-parse *)
 Bash(git -C $REPO_ROOT fetch origin *)
 Bash(git -C $REPO_ROOT worktree *)

@@ -97,6 +97,10 @@ Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>` — w
 this document as shorthand, but **substitute the literal path in every command** (see Hard
 rules). A stable in-repo path means permission rules users accept for it persist across runs.
 
+You may run `git -C <repo_root> status --short` for context at any point. Its result gates
+nothing — your worktree never touches the user's tree, and their uncommitted work is theirs —
+so never stop, warn, or clean based on it.
+
 Setup, as separate simple steps, not one compound block:
 
 1. **Exclude line** (keeps the directory out of `git status`): Read
