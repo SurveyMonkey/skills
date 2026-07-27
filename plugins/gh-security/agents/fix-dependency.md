@@ -38,6 +38,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
+- **Denials are answers.** A declined permission on a verification command means skip that check
+  and defer to CI (phase 5). A declined permission on an essential step — worktree, install,
+  validate, commit, push, PR — ends the run with a failure report. Never respond to a denial by
+  engineering an alternative route to the denied thing.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
   via Bash.** That includes inspecting JSON: Read `package.json` directly instead of piping
   `cat` through a parser. Shell forms like `find -exec` and improvised `cat | python3` chains
@@ -59,13 +63,13 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
-  without enabling anything and leaves the machine as you found it. If — and only if — a repo
-  script has actually failed because it internally invokes the bare package-manager name, the
-  sanctioned fix is `$ADAPTER shim "$WORK/bin"` — one silent call that writes the shim and
-  returns its `path_prefix` to prepend to PATH for the commands that need it. The commonest
-  such command is `git commit`: commit hooks (lefthook, husky) typically invoke the bare
-  package-manager name, so prepend the shim's `path_prefix` on your commit command when the
-  repository has hooks. Never hand-roll
+  without enabling anything and leaves the machine as you found it. If — and only if — an
+  **essential step** (commit, most commonly: hooks from lefthook or husky invoke the bare
+  package-manager name) has actually failed on a missing bare `yarn`/`pnpm`, the sanctioned fix
+  is `$ADAPTER shim "$WORK/bin"` — one silent call that writes the shim and returns its
+  `path_prefix` to prepend to PATH for that command. The shim exists so commits can succeed; it
+  is not license to retry a verification check that could not run (phase 5: one attempt, then
+  CI). Never hand-roll
   the shim (three separate commands, each drawing security review) and never place one in the
   session scratchpad: that directory is shared with agents running in parallel, so one agent's
   cleanup deletes another's tooling. `$WORK` is yours alone and your cleanup already removes
@@ -207,7 +211,18 @@ it and skip anything that is not a check: registry or preview servers, migration
 runners, release and publish scripts, and `postinstall` (already run by the install). Record what
 you skipped and why in your result's `scripts` array.
 
-Run the rest. Judge each failure: caused by this update, or pre-existing?
+Run the rest — **one attempt each, then CI**. Local environments are not obligated to run a
+repository's whole check suite, and the scoring system treats "couldn't verify locally" as a
+first-class outcome, so never fight to avoid a skip:
+
+- A check that **cannot start** — missing environment, needs a deployed URL, a tool the machine
+  lacks — is recorded as `skipped` with the reason after **one** attempt. No second strategy,
+  no environment engineering, no alternative invocation hunting. CI on the PR is the verifier;
+  F5 says so; the mark-ready flow knows what to do with that.
+- A **declined permission** on a check command is an answer, not an obstacle: record the check
+  as `skipped` ("declined by user"), and never seek another route to run the same check.
+- A check that **runs and fails** is the case the attribution discipline below exists for —
+  judge it: caused by this update, or pre-existing?
 
 **Never attribute a failure to pre-existing breakage without running the same check against the
 default branch.** Not "if unsure": always. This is the easiest call in the whole flow to get
