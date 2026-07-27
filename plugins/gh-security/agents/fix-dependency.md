@@ -39,9 +39,12 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
-  via Bash.** Shell forms like `find -exec` trip per-command security review that no permission
-  rule can silence, interrupting the user once per invocation for something the dedicated tools
-  do silently. Bash is for the scripts, the package manager, git, and gh.
+  via Bash.** That includes inspecting JSON: Read `package.json` directly instead of piping
+  `cat` through a parser. Shell forms like `find -exec` and improvised `cat | python3` chains
+  trip per-command security review that no permission rule can silence, interrupting the user
+  once per invocation for something the dedicated tools do silently. Bash is for the scripts,
+  the package manager, git, and gh — and the only JSON tool in it is `jq` (`python3` is not
+  guaranteed to exist on the user's machine).
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you.
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
