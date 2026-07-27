@@ -1,0 +1,612 @@
+#!/usr/bin/env bash
+# node.sh — ecosystem adapter for GitHub advisory ecosystem `npm`
+#
+# Usage: node.sh <verb> [args]
+# Contract: docs/adr/001-ecosystem-adapter-contract.md
+#
+# Verbs:
+#   detect                                     -> toolchain metadata
+#   why <pkg>                                  -> {relationship, parents[], raw}
+#   resolved_versions <pkg>                    -> {present, versions[], lockfile_entries}
+#   apply_constraint <pkg> <range> [parent...] -> {changes, observations[]}
+#   install                                    -> pass-through, exit code is the signal
+#   validate <pkg> <range>                     -> {ok, violations[]}
+#   verification_commands                      -> {commands[], skipped[]}
+#   compare_versions <a> <b>                   -> {result, delta}
+#   list_pins                                  -> reserved, exits 2 (see issue #7)
+#
+# Exit codes: 0 ok | 1 error | 2 not implemented | 3 unsupported toolchain
+#
+# Run from the repository root. Targets bash 3.2; depends only on bash, jq, gh.
+
+set -euo pipefail
+
+VERB="${1:-}"
+if [ -z "$VERB" ]; then
+  printf '{"error":"Usage: node.sh <verb> [args]"}\n' >&2
+  exit 1
+fi
+shift || true
+
+die() {
+  printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
+  exit "${2:-1}"
+}
+
+# ---------------------------------------------------------------------------
+# Semver, in jq.
+#
+# Lives in the adapter rather than common/ because Phase 6's Python adapter
+# implements PEP 440 behind the same verb. Rules follow semver.org: numeric
+# core, a prerelease sorts below its release, dotted identifiers compare left
+# to right with numeric ranking below alphanumeric, build metadata ignored.
+# ---------------------------------------------------------------------------
+SEMVER_JQ=$(cat <<'JQLIB'
+def semver_parse:
+  (. // "") | tostring
+  | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")
+  | sub("^[v=]+"; "")
+  | split("+")[0]
+  | (split("-")) as $parts
+  | {
+      core: ($parts[0] | split(".") | map(tonumber? // 0)),
+      pre:  (if ($parts | length) > 1
+             then ($parts[1:] | join("-") | split("."))
+             else [] end)
+    };
+
+def cmp_num($a; $b): if $a < $b then -1 elif $a > $b then 1 else 0 end;
+
+def cmp_core($a; $b):
+  ([range(0;3)] | map(cmp_num($a[.] // 0; $b[.] // 0))
+   | map(select(. != 0)) | first) // 0;
+
+def cmp_id($x; $y):
+  # `tonumber?` emits *empty* for a non-numeric string, not null. Without the
+  # `// null` the `as` binding would produce no output at all and the whole
+  # identifier would vanish from the comparison, silently reversing results
+  # like rc.1 vs beta.11.
+  ($x | tonumber? // null) as $nx | ($y | tonumber? // null) as $ny
+  | if $nx != null and $ny != null then cmp_num($nx; $ny)
+    elif $nx != null then -1
+    elif $ny != null then 1
+    else (if $x < $y then -1 elif $x > $y then 1 else 0 end)
+    end;
+
+def cmp_pre($a; $b):
+  if ($a | length) == 0 and ($b | length) == 0 then 0
+  elif ($a | length) == 0 then 1
+  elif ($b | length) == 0 then -1
+  else
+    ([range(0; ([($a | length), ($b | length)] | max))]
+     | map(. as $i
+           | if   $i >= ($a | length) then -1
+             elif $i >= ($b | length) then 1
+             else cmp_id($a[$i]; $b[$i]) end)
+     | map(select(. != 0)) | first) // 0
+  end;
+
+def semver_cmp($a; $b):
+  ($a | semver_parse) as $pa | ($b | semver_parse) as $pb
+  | (cmp_core($pa.core; $pb.core)) as $c
+  | if $c != 0 then $c else cmp_pre($pa.pre; $pb.pre) end;
+
+def semver_delta($a; $b):
+  ($a | semver_parse) as $pa | ($b | semver_parse) as $pb
+  | if cmp_core($pa.core; $pb.core) != 0 then
+      (if   ($pa.core[0] // 0) != ($pb.core[0] // 0) then "major"
+       elif ($pa.core[1] // 0) != ($pb.core[1] // 0) then "minor"
+       else "patch" end)
+    elif cmp_pre($pa.pre; $pb.pre) != 0 then "prerelease"
+    else "none" end;
+
+def caret_upper:
+  semver_parse | .core as $c
+  | if   ($c[0] // 0) > 0 then "\($c[0] + 1).0.0"
+    elif ($c[1] // 0) > 0 then "0.\($c[1] + 1).0"
+    else "0.0.\(($c[2] // 0) + 1)" end;
+
+def tilde_upper:
+  semver_parse | .core as $c | "\($c[0] // 0).\(($c[1] // 0) + 1).0";
+
+def expand_token:
+  . as $t
+  | if   ($t | startswith("^")) then [(">=" + $t[1:]), ("<" + ($t[1:] | caret_upper))]
+    elif ($t | startswith("~")) then [(">=" + $t[1:]), ("<" + ($t[1:] | tilde_upper))]
+    else [$t] end;
+
+def eval_token($version):
+  . as $tok
+  | (if   ($tok | startswith(">=")) then {op: ">=", v: $tok[2:]}
+     elif ($tok | startswith("<=")) then {op: "<=", v: $tok[2:]}
+     elif ($tok | startswith(">"))  then {op: ">",  v: $tok[1:]}
+     elif ($tok | startswith("<"))  then {op: "<",  v: $tok[1:]}
+     elif ($tok | startswith("="))  then {op: "=",  v: $tok[1:]}
+     else {op: "=", v: $tok} end)
+  | (semver_cmp($version; .v)) as $c
+  | if   .op == ">=" then $c >= 0
+    elif .op == "<=" then $c <= 0
+    elif .op == ">"  then $c >  0
+    elif .op == "<"  then $c <  0
+    else $c == 0 end;
+
+# Alternatives separated by || are OR'd; comparators within one are AND'd.
+# Covers every range this adapter emits (">=X <Y") plus the common forms
+# already present in real manifests.
+def satisfies($version; $range):
+  ($range // "") | tostring
+  | split("||")
+  | map(
+      [splits("[[:space:],]+")]
+      | map(select(length > 0))
+      | map(expand_token) | add
+      | map(eval_token($version))
+      | all
+    )
+  | any;
+JQLIB
+)
+
+# ---------------------------------------------------------------------------
+# detect
+# ---------------------------------------------------------------------------
+detect_raw() {
+  if [ -f pnpm-lock.yaml ]; then
+    printf 'pnpm\n'
+  elif [ -f yarn.lock ]; then
+    # Berry (v2+) lockfiles carry a __metadata block. Classic v1 does not, and
+    # its format is entirely different: `pkg@^1.0.0:` keys with `version "X"`
+    # values rather than `"pkg@npm:range":` keys with `version: X`.
+    if grep -q '^__metadata:' yarn.lock 2>/dev/null; then
+      printf 'yarn-berry\n'
+    else
+      printf 'yarn-classic\n'
+    fi
+  elif [ -f package-lock.json ]; then
+    printf 'npm\n'
+  elif [ -f bun.lock ] || [ -f bun.lockb ]; then
+    printf 'bun\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+verb_detect() {
+  pm=$(detect_raw)
+  case "$pm" in
+    pnpm)
+      jq -n '{pm:"pnpm", lockfile:"pnpm-lock.yaml", install_cmd:"pnpm install",
+              why_cmd:"pnpm why", override_location:"pnpm.overrides",
+              override_syntax:"parent>dep", supports_scoping:true}'
+      ;;
+    yarn-berry)
+      jq -n '{pm:"yarn", lockfile:"yarn.lock", install_cmd:"yarn install",
+              why_cmd:"yarn why", override_location:"resolutions",
+              override_syntax:"parent/dep", supports_scoping:true}'
+      ;;
+    npm)
+      jq -n '{pm:"npm", lockfile:"package-lock.json", install_cmd:"npm install",
+              why_cmd:"npm explain", override_location:"overrides",
+              override_syntax:"nested", supports_scoping:true}'
+      ;;
+    bun)
+      printf '{"error":"bun is not a supported package manager. See .github/CONTRIBUTING.md to request support.","unsupported":"bun"}\n' >&2
+      exit 3
+      ;;
+    yarn-classic)
+      printf '{"error":"Yarn Classic (v1) is not supported; only Yarn Berry (v2+). See .github/CONTRIBUTING.md to request support.","unsupported":"yarn-classic"}\n' >&2
+      exit 3
+      ;;
+    *)
+      die "No supported lockfile found in $(pwd). Expected pnpm-lock.yaml, yarn.lock, or package-lock.json."
+      ;;
+  esac
+}
+
+pm_of() { verb_detect | jq -r '.pm'; }
+
+# ---------------------------------------------------------------------------
+# resolved_versions
+#
+# Parses the lockfile rather than querying the package manager. The lockfile is
+# the artifact the PR commits, and parsing works before any install, which the
+# pre-fix merge-risk baseline needs.
+#
+# `lockfile_entries` exists so callers can distinguish "this package is absent"
+# from "the parser is broken". v0.1.0 could not make that distinction: its yarn
+# regex could never match, so every yarn repo got a validation claim backed by
+# nothing.
+# ---------------------------------------------------------------------------
+npm_versions() {
+  jq --arg pkg "$1" '
+    if (.packages | type) != "object" then
+      error("package-lock.json has no .packages object (lockfileVersion 1 is unsupported)")
+    else
+      [ .packages | to_entries[]
+        | select(.key | endswith("node_modules/" + $pkg))
+        | select(.value.version != null)
+        | {version: .value.version, path: .key} ]
+    end' package-lock.json
+}
+
+npm_entry_count() {
+  jq '[.packages // {} | keys[] | select(. != "")] | length' package-lock.json
+}
+
+pnpm_versions() {
+  awk -v pkg="$1" '
+    /^packages:/ { inpkgs = 1; next }
+    /^[a-zA-Z]/  { inpkgs = 0 }
+    inpkgs {
+      line = $0
+      sub(/^  /, "", line)
+      gsub(/^\x27|\x27$/, "", line)
+      prefix = pkg "@"
+      if (substr(line, 1, length(prefix)) == prefix) {
+        rest = substr(line, length(prefix) + 1)
+        p = index(rest, "(")
+        if (p > 0) rest = substr(rest, 1, p - 1)
+        sub(/:$/, "", rest)
+        gsub(/\x27/, "", rest)
+        if (rest ~ /^[0-9]/) printf "%s\t%s@%s\n", rest, pkg, rest
+      }
+    }
+  ' pnpm-lock.yaml \
+    | jq -Rs 'split("\n") | map(select(length > 0) | split("\t") | {version: .[0], path: .[1]})'
+}
+
+pnpm_entry_count() {
+  awk '/^packages:/ { inpkgs = 1; next }
+       /^[a-zA-Z]/  { inpkgs = 0 }
+       inpkgs && /^  [^ ]/ { n++ }
+       END { print n + 0 }' pnpm-lock.yaml
+}
+
+# Berry keys the canonical resolution on a `resolution:` line, which stays
+# stable even when several descriptors share a single block.
+yarn_versions() {
+  awk -v pkg="$1" '
+    {
+      i = index($0, "resolution: \"")
+      if (i == 0) next
+      rest = substr($0, i + 13)
+      j = index(rest, "\"")
+      if (j == 0) next
+      res = substr(rest, 1, j - 1)
+      prefix = pkg "@npm:"
+      if (substr(res, 1, length(prefix)) == prefix)
+        printf "%s\t%s\n", substr(res, length(prefix) + 1), res
+    }
+  ' yarn.lock \
+    | jq -Rs 'split("\n") | map(select(length > 0) | split("\t") | {version: .[0], path: .[1]})'
+}
+
+yarn_entry_count() {
+  grep -c 'resolution: "' yarn.lock 2>/dev/null || printf '0\n'
+}
+
+verb_resolved_versions() {
+  pkg="${1:?resolved_versions requires a package name}"
+  pm=$(pm_of)
+  case "$pm" in
+    npm)  versions=$(npm_versions "$pkg");  entries=$(npm_entry_count)  ;;
+    pnpm) versions=$(pnpm_versions "$pkg"); entries=$(pnpm_entry_count) ;;
+    yarn) versions=$(yarn_versions "$pkg"); entries=$(yarn_entry_count) ;;
+    *)    die "resolved_versions: unsupported pm '$pm'" ;;
+  esac
+
+  # A lockfile that yields nothing at all means the parser failed, not that the
+  # repo has no dependencies. Never report that as a clean result.
+  if [ "$entries" -eq 0 ]; then
+    die "Parsed 0 entries from the lockfile for pm '$pm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result."
+  fi
+
+  printf '%s' "$versions" \
+    | jq --arg pkg "$pkg" --arg pm "$pm" --argjson entries "$entries" \
+        'unique_by(.version + .path)
+         | {pm: $pm, package: $pkg, present: (length > 0), count: length,
+            versions: ., lockfile_entries: $entries}'
+}
+
+# ---------------------------------------------------------------------------
+# why — relationship plus the parents a scoped override must target
+#
+# Parents come from the lockfile, not from parsing `pnpm why` tree output. The
+# PM's own text is captured as `raw` so an agent can sanity-check the result.
+# ---------------------------------------------------------------------------
+npm_parents() {
+  jq --arg pkg "$1" '
+    [ .packages | to_entries[]
+      | select((.value.dependencies // {}) | has($pkg))
+      | .key
+      | if . == "" then "__root__" else (split("node_modules/") | last) end ]
+    | unique' package-lock.json
+}
+
+pnpm_parents() {
+  awk -v pkg="$1" '
+    /^snapshots:/ { insnap = 1; next }
+    /^[a-zA-Z]/   { insnap = 0 }
+    insnap {
+      if ($0 ~ /^  [^ ]/) {
+        cur = $0
+        sub(/^  /, "", cur)
+        sub(/:[[:space:]]*(\{\})?[[:space:]]*$/, "", cur)
+        gsub(/\x27/, "", cur)
+        p = index(cur, "(")
+        if (p > 0) cur = substr(cur, 1, p - 1)
+        indeps = 0
+        next
+      }
+      if ($0 ~ /^    dependencies:/) { indeps = 1; next }
+      if ($0 ~ /^    [a-zA-Z]/)      { indeps = 0 }
+      if (indeps && $0 ~ /^      /) {
+        dep = $0
+        sub(/^      /, "", dep)
+        c = index(dep, ":")
+        if (c == 0) next
+        name = substr(dep, 1, c - 1)
+        gsub(/\x27/, "", name)
+        if (name == pkg && cur != "") {
+          at = 0
+          for (k = length(cur); k > 1; k--) {
+            if (substr(cur, k, 1) == "@") { at = k; break }
+          }
+          if (at > 1) print substr(cur, 1, at - 1); else print cur
+        }
+      }
+    }
+  ' pnpm-lock.yaml | sort -u | jq -Rs 'split("\n") | map(select(length > 0))'
+}
+
+yarn_parents() {
+  awk -v pkg="$1" '
+    /^[^[:space:]#]/ { cur = ""; indeps = 0 }
+    /resolution: "/ {
+      i = index($0, "resolution: \"")
+      rest = substr($0, i + 13)
+      j = index(rest, "\"")
+      res = substr(rest, 1, j - 1)
+      at = 0
+      for (k = length(res); k > 1; k--) {
+        if (substr(res, k, 1) == "@") { at = k; break }
+      }
+      cur = (at > 1) ? substr(res, 1, at - 1) : res
+      next
+    }
+    /^  dependencies:/ { indeps = 1; next }
+    /^  [a-zA-Z]/      { indeps = 0 }
+    indeps && /^    / {
+      dep = $0
+      sub(/^    /, "", dep)
+      c = index(dep, ":")
+      if (c == 0) next
+      name = substr(dep, 1, c - 1)
+      gsub(/"/, "", name)
+      if (name == pkg && cur != "") print cur
+    }
+  ' yarn.lock | sort -u | jq -Rs 'split("\n") | map(select(length > 0))'
+}
+
+verb_why() {
+  pkg="${1:?why requires a package name}"
+  pm=$(pm_of)
+
+  direct=$(jq --arg pkg "$pkg" '
+    [ (.dependencies // {}), (.devDependencies // {}),
+      (.optionalDependencies // {}), (.peerDependencies // {}) ]
+    | map(has($pkg)) | any' package.json)
+
+  dev_only=$(jq --arg pkg "$pkg" '
+    ((.devDependencies // {}) | has($pkg))
+    and (((.dependencies // {}) | has($pkg)) | not)' package.json)
+
+  case "$pm" in
+    npm)  parents=$(npm_parents "$pkg")  ;;
+    pnpm) parents=$(pnpm_parents "$pkg") ;;
+    yarn) parents=$(yarn_parents "$pkg") ;;
+    *)    die "why: unsupported pm '$pm'" ;;
+  esac
+
+  # Best-effort human-readable chain for the PR body. Never fatal: these exit
+  # non-zero in normal situations, such as a package present only as a peer.
+  raw=""
+  case "$pm" in
+    npm)  raw=$(npm explain "$pkg" 2>&1 || true) ;;
+    pnpm) raw=$(pnpm why "$pkg" 2>&1 || true)    ;;
+    yarn) raw=$(yarn why "$pkg" 2>&1 || true)    ;;
+  esac
+
+  printf '%s' "$parents" \
+    | jq --arg pkg "$pkg" --arg pm "$pm" --arg raw "$raw" \
+         --argjson direct "$direct" --argjson dev_only "$dev_only" '
+      (map(select(. != "__root__"))) as $pkgparents
+      | {
+          pm: $pm,
+          package: $pkg,
+          relationship: (if $direct then "direct" else "transitive" end),
+          dev_only: $dev_only,
+          parents: $pkgparents,
+          parent_count: ($pkgparents | length),
+          raw: $raw
+        }'
+}
+
+# ---------------------------------------------------------------------------
+# validate — composes resolved_versions and applies the constraint
+# ---------------------------------------------------------------------------
+verb_validate() {
+  pkg="${1:?validate requires a package name}"
+  range="${2:?validate requires a range}"
+
+  resolved=$(verb_resolved_versions "$pkg")
+  if [ "$(printf '%s' "$resolved" | jq -r '.present')" != "true" ]; then
+    die "validate: '$pkg' resolves to no versions in the lockfile. Nothing to validate."
+  fi
+
+  result=$(printf '%s' "$resolved" | jq --arg range "$range" "$SEMVER_JQ"'
+    . as $r
+    | ([ $r.versions[] | select(satisfies(.version; $range) | not) ]) as $bad
+    | {ok: (($bad | length) == 0), package: $r.package, range: $range,
+       checked: $r.count, violations: $bad,
+       resolved_versions: ([$r.versions[].version] | unique)}')
+
+  printf '%s\n' "$result"
+  printf '%s' "$result" | jq -e '.ok' >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# apply_constraint
+#
+# Default is scoped entries, major-bounded, merged into whatever the manifest
+# already has. Pre-existing bare global overrides are reported as observations
+# rather than rewritten: they are usually someone reaching for the blunt tool,
+# and converting them is a separate concern from fixing today's alert.
+#
+# --tighten-bare is the escalation an agent reaches for only after scoped
+# entries alone fail validation, because a bare override still governs paths
+# the scoped entries do not cover.
+# ---------------------------------------------------------------------------
+set_indent_args() {
+  # Keep the diff to the lines actually changed rather than reformatting.
+  first=$(grep -m1 '^[[:space:]][[:space:]]*"' package.json 2>/dev/null || true)
+  case "$first" in
+    "	"*)     INDENT_ARGS="--tab" ;;
+    "    "*) INDENT_ARGS="--indent 4" ;;
+    *)       INDENT_ARGS="--indent 2" ;;
+  esac
+}
+
+verb_apply_constraint() {
+  tighten_bare=false
+  if [ "${1:-}" = "--tighten-bare" ]; then
+    tighten_bare=true
+    shift
+  fi
+  pkg="${1:?apply_constraint requires a package name}"
+  range="${2:?apply_constraint requires a range}"
+  shift 2
+  parents_json=$(printf '%s\n' "$@" | jq -Rs 'split("\n") | map(select(length > 0))')
+
+  pm=$(pm_of)
+  loc=$(verb_detect | jq -r '.override_location')
+
+  # Observations: unscoped global entries in the override block. A lead for the
+  # pin audit (issue #7), not a finding: removability needs a real test.
+  #
+  # "Bare" is per-syntax. pnpm scopes with `>`, so anything without one is
+  # bare. yarn scopes with `/`, which collides with scoped package names, so
+  # `@scope/name` is bare while `@scope/name/dep` and `parent/dep` are not.
+  observations=$(jq --arg pkg "$pkg" --arg loc "$loc" '
+    def is_bare($key):
+      if $loc == "pnpm.overrides" then (($key | test(">")) | not)
+      elif $loc == "resolutions" then
+        (($key | split("/")
+          | (if ($key | startswith("@")) then .[2:] else .[1:] end)
+          | length) == 0)
+      else true end;
+
+    (if   $loc == "pnpm.overrides" then (.pnpm.overrides // {})
+     elif $loc == "resolutions"    then (.resolutions // {})
+     else (.overrides // {}) end) as $block
+    | [ $block | to_entries[]
+        | select((.value | type) == "string")
+        | select(is_bare(.key))
+        | {type: "unscoped_override", key: .key, range: .value,
+           targets_this_package: (.key == $pkg or (.key | startswith($pkg + "@")))} ]
+    ' package.json)
+
+  set_indent_args
+  tmp=$(mktemp)
+
+  # shellcheck disable=SC2086
+  if ! jq $INDENT_ARGS \
+      --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" \
+      --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
+      def set_entry($key; $val):
+        if   $loc == "pnpm.overrides" then .pnpm.overrides[$key] = $val
+        elif $loc == "resolutions"    then .resolutions[$key]    = $val
+        else .overrides[$key] = $val end;
+
+      (if $loc == "pnpm.overrides" then ((.pnpm //= {}) | (.pnpm.overrides //= {}))
+       elif $loc == "resolutions"  then (.resolutions //= {})
+       else (.overrides //= {}) end)
+      | if $tighten then
+          set_entry($pkg; $range)
+        elif ($parents | length) == 0 then
+          if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]    = $range
+          elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg] = $range
+          else set_entry($pkg; $range) end
+        else
+          reduce $parents[] as $parent (.;
+            if   $loc == "pnpm.overrides" then set_entry($parent + ">" + $pkg; $range)
+            elif $loc == "resolutions"    then set_entry($parent + "/" + $pkg; $range)
+            else .overrides[$parent] =
+                   (((.overrides[$parent] // {})
+                     | if type == "string" then {} else . end) + {($pkg): $range})
+            end)
+        end' package.json > "$tmp"; then
+    rm -f "$tmp"
+    die "apply_constraint: failed to rewrite package.json"
+  fi
+
+  mv "$tmp" package.json
+
+  printf '%s' "$observations" \
+    | jq --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" --arg pm "$pm" \
+         --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
+      {
+        pm: $pm,
+        package: $pkg,
+        range: $range,
+        override_location: $loc,
+        mode: (if $tighten then "tighten-bare"
+               elif ($parents | length) == 0 then "direct"
+               else "scoped" end),
+        parents: $parents,
+        observations: .
+      }'
+}
+
+# ---------------------------------------------------------------------------
+# install / verification_commands / compare_versions / list_pins
+# ---------------------------------------------------------------------------
+verb_install() {
+  cmd=$(verb_detect | jq -r '.install_cmd')
+  printf 'Running: %s\n' "$cmd" >&2
+  $cmd
+}
+
+verb_verification_commands() {
+  pm=$(pm_of)
+  jq --arg pm "$pm" '
+    ((.scripts // {}) | keys) as $all
+    | ["dev","start","serve","watch","storybook","preview"] as $long
+    | {
+        commands: [ $all[] | select(. as $s | ($long | index($s)) | not) | "\($pm) \(.)" ],
+        skipped:  [ $all[] | select(. as $s | ($long | index($s))) ]
+      }' package.json
+}
+
+verb_compare_versions() {
+  a="${1:?compare_versions requires two versions}"
+  b="${2:?compare_versions requires two versions}"
+  jq -n --arg a "$a" --arg b "$b" "$SEMVER_JQ"'
+    {a: $a, b: $b, result: semver_cmp($a; $b), delta: semver_delta($a; $b)}'
+}
+
+case "$VERB" in
+  detect)                verb_detect ;;
+  why)                   verb_why "$@" ;;
+  resolved_versions)     verb_resolved_versions "$@" ;;
+  apply_constraint)      verb_apply_constraint "$@" ;;
+  install)               verb_install ;;
+  validate)              verb_validate "$@" ;;
+  verification_commands) verb_verification_commands ;;
+  compare_versions)      verb_compare_versions "$@" ;;
+  list_pins)
+    printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2
+    exit 2
+    ;;
+  *) die "Unknown verb '$VERB'" ;;
+esac

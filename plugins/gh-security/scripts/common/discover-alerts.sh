@@ -15,10 +15,42 @@
 set -euo pipefail
 
 REPO="${1:?Usage: discover-alerts.sh <owner/repo>}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Single source of truth for branch naming
 branch_name() {
   printf 'fix/dependabot-%s' "$1"
+}
+
+# Pick the highest fixed version across a group's advisories.
+#
+# Version comparison belongs to the ecosystem adapter, not here: semver and
+# PEP 440 disagree about prereleases, and a shared implementation would have to
+# be wrong for one of them. Reads candidate versions on stdin.
+highest_version() {
+  eco="$1"
+  adapter=$("$SCRIPT_DIR/select-adapter.sh" --ecosystem "$eco" 2>/dev/null \
+    | jq -r '.adapter_path // empty' 2>/dev/null || printf '')
+  best=""
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if [ -z "$best" ]; then
+      best="$candidate"
+      continue
+    fi
+    if [ -n "$adapter" ]; then
+      if [ "$("$adapter" compare_versions "$candidate" "$best" | jq -r '.result')" = "1" ]; then
+        best="$candidate"
+      fi
+    else
+      # No adapter for this ecosystem. The group is going to be skipped anyway;
+      # this only decides whether *some* fix exists to report.
+      if [ "$(printf '%s\n%s\n' "$best" "$candidate" | sort -V | tail -1)" = "$candidate" ]; then
+        best="$candidate"
+      fi
+    fi
+  done
+  printf '%s\n' "$best"
 }
 
 ERR_FILE=$(mktemp)
@@ -110,9 +142,10 @@ while IFS= read -r group; do
   pkg=$(printf '%s' "$group" | jq -r '.package')
 
   versions=$(printf '%s' "$group" | jq -r '.fixed_versions[]')
+  ecosystem=$(printf '%s' "$group" | jq -r '.ecosystem // "unknown"')
   if [ -n "$versions" ]; then
-    highest=$(printf '%s\n' "$versions" | jq -Rn \
-      '[inputs | split(".") | map(tonumber? // 0)] | sort | last | map(tostring) | join(".")')
+    highest=$(printf '%s\n' "$versions" | highest_version "$ecosystem")
+    [ -n "$highest" ] || highest="none"
   else
     highest="none"
   fi
