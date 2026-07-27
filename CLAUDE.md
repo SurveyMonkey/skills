@@ -9,10 +9,21 @@ Script conventions: [plugins/gh-security/scripts/CLAUDE.md](plugins/gh-security/
 release: Claude Code resolves the version from `plugin.json` first, and users only receive updates
 when that string changes.
 
-Do **not** add `version` to a plugin's entry in `.claude-plugin/marketplace.json`. Claude Code
-always prefers the `plugin.json` value **without warning**, so a version set in both places lets a
-forgotten `plugin.json` bump silently ship nothing. `metadata.version` in `marketplace.json` is the
-catalog's own version and is unrelated to plugin updates.
+`.claude-plugin/marketplace.json` carries **no version at all**, in either place it accepts one:
+
+- Not in a `plugins[]` entry. Claude Code prefers the `plugin.json` value **without warning**, so a
+  version in both places lets a forgotten `plugin.json` bump silently ship nothing.
+- Not as a top-level `version` (nor the back-compat `metadata.version`). That field is the
+  *catalog's* own version and never affects plugin resolution, so its only real effect is sitting
+  next to a plugin version that legitimately differs and inviting the question of which one is
+  authoritative.
+
+Validate both manifests before shipping:
+
+```bash
+claude plugin validate .claude-plugin/marketplace.json --strict
+claude plugin validate plugins/<name> --strict
+```
 
 No git tags and no GitHub releases. Plugins are installed from the default branch and refreshed
 with `/plugin marketplace update`. Tags would also be ambiguous once this marketplace carries
