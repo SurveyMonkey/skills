@@ -1,0 +1,9 @@
+{
+  "name": "demo-npm",
+  "dependencies": { "express": "^4.18.2", "lodash": "^4.17.21" },
+  "overrides": {
+    "lodash": "^4.17.21",
+    "test-exclude": { "lodash": "3.10.1" }
+  },
+  "scripts": { "build": "webpack", "test": "jest", "start": "node server.js" }
+}
