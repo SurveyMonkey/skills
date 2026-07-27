@@ -123,6 +123,9 @@ Take up to `cap` groups and dispatch them **in a single message with one Task to
 group** so they run in parallel:
 
 - `subagent_type`: `fix-dependency`
+- `model`: `sonnet` — the agent's frontmatter already pins this (ADR 004), but pass it
+  explicitly too: scripted work needs no larger model, and an unpinned agent inheriting an
+  expensive session model burns tokens for nothing.
 - prompt: the group JSON verbatim, plus `adapter_path`, `nwo`, `default_branch`,
   `repo_root` (absolute path to this checkout), `scripts_dir`
   (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
