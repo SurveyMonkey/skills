@@ -56,7 +56,11 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
-  without enabling anything and leaves the machine as you found it.
+  without enabling anything and leaves the machine as you found it. If — and only if — a repo
+  script has actually failed because it internally invokes the bare package-manager name, the
+  sanctioned fix is a shim in your session scratchpad whose entire body is
+  `exec corepack <pm> "$@"`, prepended to PATH for the commands that need it. Note in the
+  script's `detail` that it ran under the shim.
 - **Prefer small, single-purpose commands with literal paths.** Compound blocks with shell
   variables, conditionals, or redirections draw manual security review that no permission rule
   can cover, once per invocation; several plain commands each get approved once and then run
