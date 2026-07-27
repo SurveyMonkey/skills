@@ -16,6 +16,38 @@ A plugin should represent a distinct job or tool scope. Before creating one, che
 2. Once approved, create the plugin directory under `plugins/` following the structure in the README.
 3. Open a PR with the plugin scaffold and at least one working skill.
 
+## Requesting Ecosystem or Package Manager Support
+
+The `gh-security` plugin routes each Dependabot alert to an adapter chosen by the alert's own
+ecosystem. Support is deliberately narrow: an adapter gets built when someone asks for it, not by
+default.
+
+Supported today:
+
+| Ecosystem | Toolchains |
+|---|---|
+| `npm` | pnpm, npm, Yarn Berry (v2+) |
+
+Anything else is **reported, not attempted**. If you hit one of these, the tool tells you rather
+than guessing:
+
+- **bun** — dropped in v0.2.0; nobody internally uses it
+- **Yarn Classic (v1)** — a different lockfile format from Berry, and no repo we support uses it
+- **Other advisory ecosystems** — `pip`, `rubygems`, `maven`, `nuget`, `composer`, `go`, `rust`,
+  `erlang`, `actions`, `pub`, `swift`
+
+To request support, open an issue with:
+
+1. The ecosystem or package manager, and the repositories that need it.
+2. A link to a real repository using it, so the adapter can be verified against something other
+   than a fixture.
+3. Anything unusual about how that toolchain constrains transitive dependencies, which is the part
+   that differs most between ecosystems.
+
+`pip` is already planned as Phase 6 of
+[RFC 001](../docs/rfc/001-alert-orchestration.md). The adapter contract is documented in
+[ADR 001](../docs/adr/001-ecosystem-adapter-contract.md).
+
 ## Local Development
 
 To test a plugin locally without installing it, use `--plugin-dir` pointing to the plugin root (the directory that contains the `.claude-plugin/` folder):

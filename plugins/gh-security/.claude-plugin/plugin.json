@@ -1,9 +1,18 @@
 {
   "name": "gh-security",
-  "version": "0.1.0",
-  "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation and major-bounded scoped overrides.",
-  "author": { "name": "Brian Espinosa", "email": "b@bje.co" },
+  "version": "0.2.0",
+  "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and a computed merge-risk rating on every PR.",
+  "author": {
+    "name": "Brian Espinosa",
+    "email": "b@bje.co"
+  },
   "homepage": "https://github.com/SurveyMonkey/skills/tree/main/plugins/gh-security",
   "license": "MIT",
-  "keywords": ["github", "security", "dependabot", "cve", "overrides"]
+  "keywords": [
+    "github",
+    "security",
+    "dependabot",
+    "cve",
+    "overrides"
+  ]
 }

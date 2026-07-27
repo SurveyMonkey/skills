@@ -3,7 +3,7 @@ status: accepted
 created: 2026-07-26
 owner: brianespinosa
 related_issues: [4, 5, 6, 7, 8, 9]
-related_adrs: []
+related_adrs: [1, 2]
 ---
 
 # RFC 001: Orchestrated Multi-Agent Security Alert Resolution
@@ -41,7 +41,7 @@ Additionally, the current command embeds deterministic procedures (package manag
 **Non-Goals**
 
 - Auto-merging PRs. A human reviews and merges every PR this system opens.
-- Exhaustive ecosystem coverage. The adapter layer supports `npm` (pnpm, npm, yarn, bun) and `pip` (uv, poetry, pip-tools, pipenv) alerts. Alerts from the remaining advisory ecosystems (`rubygems`, `maven`, `nuget`, `composer`, `go`, `rust`, `erlang`, `actions`, `pub`, `swift`, `other`) are skipped and reported, and a new adapter gets built when someone on the team asks for one, not by default.
+- Exhaustive ecosystem coverage. The adapter layer supports `npm` (pnpm, npm, Yarn Berry) and `pip` (uv, poetry, pip-tools, pipenv) alerts. bun and Yarn Classic v1 are explicitly out of scope (see Decisions & Follow-ups); the node adapter detects both and reports them as unsupported rather than failing. Alerts from the remaining advisory ecosystems (`rubygems`, `maven`, `nuget`, `composer`, `go`, `rust`, `erlang`, `actions`, `pub`, `swift`, `other`) are skipped and reported, and a new adapter gets built when someone on the team asks for one, not by default.
 - Eval tests for skill triggering. The `resolve-alerts` description is the only security-alert skill in the marketplace today, so there is nothing to mistrigger against. Evals become worthwhile once closely related skills exist in this or neighboring plugins and accidental cross-triggering becomes a real risk; until then they are deferred.
 - Scheduled or CI-driven execution (GitHub Actions, cron). This remains an interactive, developer-initiated tool.
 - Replacing Dependabot's own update PRs. This tool covers what Dependabot cannot: scoped overrides for transitives, full repo script validation, and batch judgment.
@@ -73,7 +73,7 @@ plugins/gh-security/
       check-advisories.sh   # union of vulnerable ranges for a pkg from the advisory DB
       score-merge-risk.sh   # compute merge-risk factors for the PR body
     ecosystems/
-      node.sh               # npm alerts: pnpm/npm/yarn/bun
+      node.sh               # npm alerts: pnpm/npm/Yarn Berry
       python.sh             # pip alerts: uv/poetry/pip-tools/pipenv
   hooks/
     hooks.json
@@ -150,7 +150,7 @@ Phases 4 through 9 of the current command, parameterized. Input: one package gro
 2. Runs the adapter's `why` to classify direct vs transitive and identify parents.
 3. Applies the fix: direct version bump via Edit, or the adapter's `apply_constraint` for transitives (major-bounded; parent-scoped in node, environment-wide in Python).
 4. Installs, validates via the adapter, and runs the adapter's `verification_commands` (the one genuinely judgment-heavy step: diagnosing failures and distinguishing pre-existing breakage).
-5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report). PRs open ready for review, not as drafts; the merge-risk rating is the reviewer's caution signal. The PR body's alerts table also gains an EPSS percentile column per alert (the data is already in the discovery JSON; the current command shows it pre-fix but never puts it on the PR). EPSS and the merge-risk rating are deliberately separate signals shown side by side: EPSS says how urgent the vulnerability is, the rubric says how risky the fix is to merge.
+5. Commits, pushes, opens the PR with the existing body format plus a merge-risk rating (see rubric below), and returns a structured result (PR URL, resolved version, risk rating, script outcomes, or a failure report). PRs open **as drafts**; the orchestrator collects the URLs and asks once whether to mark the batch ready (see [ADR 002](../adr/002-pr-draft-state-and-approval-flow.md)). The merge-risk rating remains the reviewer's calibration signal. The PR body's alerts table also gains an EPSS percentile column per alert (the data is already in the discovery JSON; the current command shows it pre-fix but never puts it on the PR). EPSS and the merge-risk rating are deliberately separate signals shown side by side: EPSS says how urgent the vulnerability is, the rubric says how risky the fix is to merge.
 
 A subagent that cannot complete safely (validation fails, scripts break in ways attributable to the update) stops, cleans up its worktree, and returns a failure report instead of asking the user mid-flight. The orchestrator surfaces failures in the summary for a human-driven follow-up session.
 
@@ -256,7 +256,7 @@ Two changes:
 
 Phases are sequential PRs, each leaving the plugin fully working. Versions follow the marketplace `version` field.
 
-1. **Phase 1: script extraction (v0.2.0, [#4](https://github.com/SurveyMonkey/skills/issues/4)).** Extract the deterministic surface into `scripts/common/` and define the adapter contract, landing `ecosystems/node.sh` as the first adapter. Rewrite `fix-alert.md` to consume them and add the merge-risk section to the PR body. Otherwise behavior identical to today; the command shrinks and the deterministic surface moves to scripts with tests run against real repos. Defining the contract now is deliberate: retrofitting adapters after five phases of node-shaped scripts is the expensive version of the same work.
+1. **Phase 1: script extraction (v0.2.0, [#4](https://github.com/SurveyMonkey/skills/issues/4)).** Extract the deterministic surface into `scripts/common/` and define the adapter contract, landing `ecosystems/node.sh` as the first adapter. Rewrite `fix-alert.md` to consume them and add the merge-risk section plus the per-alert EPSS column to the PR body. Defining the contract now is deliberate: retrofitting adapters after five phases of node-shaped scripts is the expensive version of the same work. Scope settled during the phase: `check-advisories.sh` and `list_pins` moved to Phase 4 (no consumer until then), `mark-ready.sh` to Phase 2, and unit tests to [#10](https://github.com/SurveyMonkey/skills/issues/10); the draft-PR flow was pulled forward from Phase 2 and bun was dropped. Verified against four real repositories covering pnpm, npm, and Yarn Berry.
 2. **Phase 2: subagent + orchestrator, repo scope (v0.3.0, [#5](https://github.com/SurveyMonkey/skills/issues/5)).** Add `agents/fix-dependency.md` and `skills/resolve-alerts/SKILL.md` with the one/tier/all question, worktree isolation, parallel dispatch with the capacity-derived cap (`detect-capacity.sh`), and batch approval. Add thin `commands/resolve-alerts.md`; convert `commands/fix-alert.md` to the deprecation shim (pre-answered "one" scope, migration notice). Update README and marketplace description.
 3. **Phase 3: org and user scope (v0.4.0, [#6](https://github.com/SurveyMonkey/skills/issues/6)).** Extend `discover-alerts.sh` with `--scope`, add push-access filtering (with skipped repos listed in the summary) and the 403 fallback. Orchestrator gains cross-repo dispatch. EMU orgs are out of scope (see Non-Goals).
 4. **Phase 4: pin audit (v0.5.0, [#7](https://github.com/SurveyMonkey/skills/issues/7)).** Add the adapter `list_pins` verb, `check-advisories.sh`, `agents/audit-pins.md`, and the direct `commands/audit-pins.md` entry point, report-only. Wire the orchestrator's post-fix recommendation. Graduate to chore-PR mode in a subsequent minor once findings prove reliable.
@@ -273,7 +273,10 @@ None currently open. Every question raised during review has been settled and in
 
 Settled during RFC review and incorporated above:
 
-- PRs open ready for review, not as drafts; the merge-risk rating carries the caution signal.
+- ~~PRs open ready for review, not as drafts.~~ **Revised during Phase 1** ([ADR 002](../adr/002-pr-draft-state-and-approval-flow.md)): PRs open as drafts and the orchestrator asks once whether to mark the batch ready. Opening ready left no checkpoint at all between approving a dispatch plan described in prose and N pull requests existing against real repositories; batch approval had removed the control point rather than relocating it. Draft state restores it for one interaction per batch. Phase 1 adopts the single-PR form, so `fix-alert.md` drops its pre-commit pause.
+- bun is dropped from the node adapter, and Yarn Classic v1 is never added. Nobody internally uses bun, and it was the only package manager without parent-scoped overrides, so removing it deletes the sole asymmetric branch in `apply_constraint`. Both are detected and reported as unsupported, pointing at `.github/CONTRIBUTING.md`, which gains a section for requesting toolchain support.
+- The adapter contract gains a `resolved_versions` verb that `validate` composes on ([ADR 001](../adr/001-ecosystem-adapter-contract.md)); the merge-risk baseline needs to enumerate resolved versions before any constraint exists to check them against.
+- `check-advisories.sh` and the `list_pins` implementation moved from Phase 1 to Phase 4, where their only consumer lives. A bash unit test harness became its own issue ([#10](https://github.com/SurveyMonkey/skills/issues/10)), and `mark-ready.sh` moved to Phase 2.
 - At org scope, repos skipped for lack of push access are listed by name in the summary, never silently dropped.
 - The notice hook matches package manager audit output, but only as a nudge to check GitHub security alerts; GitHub remains the sole data source for the fix pipeline, and the orchestrator stops cleanly when GitHub shows no open alerts.
 - The `fix-alert` shim is removed in the first release cut at least two months after it ships.
@@ -295,6 +298,8 @@ To be spawned as this RFC executes:
 
 ## Related
 
-- Current implementation: `plugins/gh-security/commands/fix-alert.md`, `plugins/gh-security/scripts/discover-alerts.sh`
+- Current implementation: `plugins/gh-security/commands/fix-alert.md`, `plugins/gh-security/scripts/`
+- [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
+- [ADR 002: PR draft state and the approval flow](../adr/002-pr-draft-state-and-approval-flow.md)
 - RFC process rule: `.claude/rules/path-docs-rfc.md` (adopted from `sm-incubator/beta-recognition`)
 - GitHub REST: [Dependabot alerts endpoints](https://docs.github.com/en/rest/dependabot/alerts)
