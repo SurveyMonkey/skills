@@ -38,6 +38,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
+- **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
+  via Bash.** Shell forms like `find -exec` trip per-command security review that no permission
+  rule can silence, interrupting the user once per invocation for something the dedicated tools
+  do silently. Bash is for the scripts, the package manager, git, and gh.
 - **Never touch the user's checkout.** All work happens in your worktree. Never `git switch`,
   stash, or edit files under `repo_root` itself.
 - **Clean up on every exit path.** Success, failure, or partial progress: the worktrees you
