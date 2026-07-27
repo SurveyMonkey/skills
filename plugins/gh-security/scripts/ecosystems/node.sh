@@ -177,15 +177,28 @@ detect_raw() {
 
 # How to actually invoke the package manager.
 #
-# Yarn Berry and modern pnpm are usually corepack-managed: `packageManager` is
-# declared in package.json and no binary sits on PATH unless the user's shell
-# shims one. Falling back to corepack keeps the adapter working regardless of
-# how the caller's environment is set up.
+# Order matters. A bare binary on PATH comes first: when yarnPath is set it
+# re-execs the vendored release anyway, and it matches whatever permission
+# rules the user already has. Second, Yarn Berry repos commonly vendor the
+# exact release they pin — `yarnPath` in .yarnrc.yml names a checked-in
+# bundle that node runs directly, with no corepack indirection and no
+# cold-cache download. Corepack is the last resort, not the default: it can
+# prompt to download a package manager mid-run.
 pm_runner() {
   candidate="$1"
   if command -v "$candidate" >/dev/null 2>&1; then
     printf '%s\n' "$candidate"
-  elif command -v corepack >/dev/null 2>&1 \
+    return 0
+  fi
+  if [ "$candidate" = "yarn" ] && [ -f .yarnrc.yml ] \
+    && command -v node >/dev/null 2>&1; then
+    yarn_path=$(sed -n 's/^yarnPath:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' .yarnrc.yml | head -1)
+    if [ -n "$yarn_path" ] && [ -f "$yarn_path" ]; then
+      printf 'node %s\n' "$yarn_path"
+      return 0
+    fi
+  fi
+  if command -v corepack >/dev/null 2>&1 \
     && jq -e '.packageManager // empty' package.json >/dev/null 2>&1; then
     printf 'corepack %s\n' "$candidate"
   else

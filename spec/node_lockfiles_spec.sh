@@ -42,6 +42,25 @@ Describe 'node.sh detect'
     The output should equal 'true'
   End
 
+  # Most Yarn Berry repos vendor the release they pin (yarnPath in
+  # .yarnrc.yml). When the bare binary is absent, the vendored bundle beats
+  # corepack: exact pinned version, no indirection, no cold-cache download.
+  # On machines with yarn on PATH the bare binary still wins, so the
+  # assertion tolerates both, like the pnpm example above.
+  It 'prefers the vendored yarnPath release over corepack'
+    use_fixture yarn-vendored
+    When call adapter_jq '.pm_exec | test("^(yarn|node .yarn/releases/yarn-4.13.0.cjs)$")' detect
+    The status should be success
+    The output should equal 'true'
+  End
+
+  It 'falls through to corepack when nothing is vendored'
+    use_fixture yarn-berry
+    When call adapter_jq '.pm_exec | test("^(corepack )?yarn$")' detect
+    The status should be success
+    The output should equal 'true'
+  End
+
   Describe 'unsupported toolchains are reported, not crashed on'
     Parameters
       bun           3  'bun is not a supported package manager'
