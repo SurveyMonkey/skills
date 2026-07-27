@@ -1,6 +1,6 @@
 {
   "name": "gh-security",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and a computed merge-risk rating on every PR.",
   "author": {
     "name": "Brian Espinosa",
