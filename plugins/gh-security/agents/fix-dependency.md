@@ -52,7 +52,9 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   variables, conditionals, or redirections draw manual security review that no permission rule
   can cover, once per invocation; several plain commands each get approved once and then run
   silently. Substitute the literal `$WORK` path into commands rather than assigning variables,
-  and split independent steps into separate calls.
+  and split independent steps into separate calls. Never append `; echo "exit:$?"` or similar
+  markers: the tool result already reports the exit status, and the extra segment breaks
+  permission matching for the whole command.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
   switch`, stash, or edit checked-out files under `repo_root` itself. Exactly two writes into
   the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
