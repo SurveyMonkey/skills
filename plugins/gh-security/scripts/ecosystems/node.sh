@@ -18,8 +18,12 @@
 #                                                 (--line requires --vulnerable)
 #   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta, major_distance}
-#   range_facts <range> <version>              -> {satisfied, pinned,
+#   range_facts <range> <version>              -> {parseable, satisfied, pinned,
 #                                                  floor_major, majors_ahead}
+#                                                 (all null when not parseable)
+#   declared_ranges <pkg>                      -> {ranges[], root_range,
+#                                                  parents_read[],
+#                                                  parents_unreadable[]}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> reserved, exits 2 (see issue #7)
 #
@@ -130,9 +134,27 @@ def caret_upper:
 def tilde_upper:
   semver_parse | .core as $c | "\($c[0] // 0).\(($c[1] // 0) + 1).0";
 
+# Wildcards, as comparator pairs. `*` (or a bare `x`) admits every version, so
+# it expands to a floor nothing can fall below, prerelease included. An x-range
+# bounds a line exactly the way the caret and tilde forms do: `1.x` is `^1`,
+# `1.2.x` is `~1.2`. Anything else returns null, which is how the callers below
+# tell a wildcard from an ordinary comparator.
+def wildcard_expand:
+  . as $t
+  | ($t | sub("^[v=]+"; "") | split(".")) as $p
+  | if   ($t | test("^[*xX]$")) then [">=0.0.0-0"]
+    elif ($p | length) == 2 and ($p[0] | test("^[0-9]+$")) and ($p[1] | test("^[xX*]$"))
+      then [">=\($p[0]).0.0", "<\(($p[0] | tonumber) + 1).0.0"]
+    elif ($p | length) == 3 and ($p[0] | test("^[0-9]+$")) and ($p[1] | test("^[0-9]+$"))
+         and ($p[2] | test("^[xX*]$"))
+      then [">=\($p[0]).\($p[1]).0", "<\($p[0]).\(($p[1] | tonumber) + 1).0"]
+    else null end;
+
 def expand_token:
   . as $t
-  | if   ($t | startswith("^")) then [(">=" + $t[1:]), ("<" + ($t[1:] | caret_upper))]
+  | ($t | wildcard_expand) as $w
+  | if   $w != null            then $w
+    elif ($t | startswith("^")) then [(">=" + $t[1:]), ("<" + ($t[1:] | caret_upper))]
     elif ($t | startswith("~")) then [(">=" + $t[1:]), ("<" + ($t[1:] | tilde_upper))]
     else [$t] end;
 
@@ -185,13 +207,46 @@ def range_tokens:
   | [splits("[[:space:],|]+")]
   | map(select(length > 0));
 
-# A tilde, an exact version, or an explicit upper bound. A caret is not a pin:
-# it admits the whole major line, which is the ordinary declaration.
+# A tilde, an exact version, an x-range bounded to one minor line, or an
+# explicit upper bound. A caret is not a pin: it admits the whole major line,
+# which is the ordinary declaration, and `1.x` says the same thing.
 def range_pinned:
   range_tokens
   | map(select(startswith("~") or startswith("<")
-               or test("^=?[0-9]+\\.[0-9]+\\.[0-9]+")))
+               or test("^=?[0-9]+\\.[0-9]+\\.[0-9]+")
+               or test("^=?[0-9]+\\.[0-9]+\\.[xX*]$")))
   | length > 0;
+
+# Can this range be read at all?
+#
+# `satisfies` answers false for a token it cannot parse, so a specifier like
+# `workspace:^`, `latest`, or a git URL would otherwise come back as a
+# confident "this version is not admitted" and be reported as a dependent left
+# behind. Unreadable is a third answer, and the callers below return it rather
+# than guessing (review follow-up on issue #21).
+#
+# Deliberately separate from validate's `--vulnerable` parse check, which is
+# stricter on purpose: an advisory range is copied verbatim from the API and a
+# wildcard there means the tokenizer misread it, while a manifest legitimately
+# declares `*`.
+def range_alternatives:
+  (. // "") | tostring
+  | gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")
+  | split("||")
+  | map([splits("[[:space:],]+")] | map(select(length > 0)));
+
+def token_parseable:
+  if (wildcard_expand) != null then true
+  else
+    sub("^(>=|<=|>|<|=)"; "") | sub("^[~^]"; "")
+    | test("^[v=]*[0-9]+(\\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$")
+  end;
+
+def range_parseable:
+  range_alternatives as $alts
+  | (($alts | length) > 0)
+    and ($alts | all(length > 0))
+    and ($alts | all(.[][]; token_parseable));
 
 # The major of the lowest version the range admits. Upper-bound comparators
 # are excluded: `<10` says nothing about where the range starts.
@@ -866,22 +921,106 @@ verb_compare_versions() {
 # The scorer needs to know how far outside a declared range a fix lands, and
 # whether the range it crossed was a pin. Both are semver questions, so they
 # live behind a verb like every other version comparison (ADR 001).
+#
+# `parseable` is the first field to read. A manifest may declare `workspace:^`,
+# `latest`, or a git URL, none of which is a version range; reporting those as
+# `satisfied: false` told the scorer a dependent had been left behind by the
+# fix, which is a fabricated fact. When `parseable` is false every other answer
+# is null, because there is nothing to answer from. Every key is always
+# present: a caller that has to distinguish "no floor" from "field missing"
+# cannot do it if the field can also be absent.
 verb_range_facts() {
   range="${1:?range_facts requires a range and a version}"
   version="${2:?range_facts requires a range and a version}"
   jq -n --arg range "$range" --arg version "$version" "$SEMVER_JQ"'
-    ($range | range_floor_major) as $floor
+    ($range | range_parseable) as $ok
+    | ($range | range_floor_major) as $floor
     | (($version | semver_parse).core[0] // 0) as $major
     | {
         range: $range,
         version: $version,
-        satisfied: satisfies($version; $range),
-        pinned: ($range | range_pinned),
-        floor_major: $floor,
-        majors_ahead: (if $floor == null then null
+        parseable: $ok,
+        satisfied: (if $ok then satisfies($version; $range) else null end),
+        pinned: (if $ok then ($range | range_pinned) else null end),
+        floor_major: (if $ok then $floor else null end),
+        majors_ahead: (if $ok | not then null
+                       elif $floor == null then null
                        elif $major > $floor then $major - $floor
                        else 0 end)
       }'
+}
+
+# declared_ranges — the ranges this package's dependents declare for it
+#
+# The scorer's F7 needs these, and collecting them used to be a shell loop in
+# the agent definition: a `for` over a command substitution, which the
+# preflight catalog cannot pre-approve (so it prompted on every run), which
+# discarded every per-parent error (so a partial read was indistinguishable
+# from a complete one), and which missed optionalDependencies. It is a single
+# flat command here instead, and the partial read is reported rather than
+# hidden (review follow-up on issue #21).
+#
+# Parents come from the lockfile, the ranges from each parent's installed
+# manifest. A parent whose manifest is not on disk is not an error: Yarn PnP
+# installs no node_modules at all, and pnpm only links direct dependencies
+# there. Those parents are listed in `parents_unreadable` so the caller can say
+# in the PR body which ranges nobody could read.
+verb_declared_ranges() {
+  pkg="${1:?declared_ranges requires a package name}"
+  pm=$(pm_of)
+  case "$pm" in
+    npm)  parents=$(npm_parents "$pkg")  ;;
+    pnpm) parents=$(pnpm_parents "$pkg") ;;
+    yarn) parents=$(yarn_parents "$pkg") ;;
+    *)    die "declared_ranges: unsupported pm '$pm'" ;;
+  esac
+
+  # A direct dependency's own declaration in the root manifest counts: the
+  # repository is a dependent like any other.
+  root_range=$(jq -r --arg pkg "$pkg" '
+    [ (.dependencies // {}), (.optionalDependencies // {}),
+      (.peerDependencies // {}), (.devDependencies // {}) ]
+    | map(.[$pkg]?) | map(select(type == "string")) | first // empty' package.json)
+
+  ranges=""
+  read_parents=""
+  unreadable=""
+  while IFS= read -r parent; do
+    [ -n "$parent" ] || continue
+    [ "$parent" != "__root__" ] || continue
+    manifest="node_modules/$parent/package.json"
+    if [ -f "$manifest" ]; then
+      read_parents="$read_parents$parent
+"
+      found=$(jq -r --arg pkg "$pkg" '
+        [ (.dependencies // {}), (.optionalDependencies // {}),
+          (.peerDependencies // {}) ]
+        | map(.[$pkg]?) | map(select(type == "string")) | .[]' "$manifest" 2>/dev/null || true)
+      [ -z "$found" ] || ranges="$ranges$found
+"
+    else
+      unreadable="$unreadable$parent
+"
+    fi
+  done <<EOF
+$(printf '%s' "$parents" | jq -r '.[]')
+EOF
+
+  [ -z "$root_range" ] || ranges="$ranges$root_range
+"
+
+  printf '%s' "$ranges" | jq -Rs \
+    --arg pkg "$pkg" --arg pm "$pm" --arg root "$root_range" \
+    --argjson read_parents "$(printf '%s' "$read_parents" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+    --argjson unreadable "$(printf '%s' "$unreadable" | jq -Rs 'split("\n") | map(select(length > 0))')" '
+    {
+      pm: $pm,
+      package: $pkg,
+      ranges: (split("\n") | map(select(length > 0)) | unique),
+      root_range: (if $root == "" then null else $root end),
+      parents_read: $read_parents,
+      parents_unreadable: $unreadable
+    }'
 }
 
 # Some repo scripts invoke the bare package-manager name internally, which
@@ -933,6 +1072,7 @@ case "$VERB" in
   verification_commands) verb_verification_commands ;;
   compare_versions)      verb_compare_versions "$@" ;;
   range_facts)           verb_range_facts "$@" ;;
+  declared_ranges)       verb_declared_ranges "$@" ;;
   shim)                  verb_shim "$@" ;;
   list_pins)
     printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2

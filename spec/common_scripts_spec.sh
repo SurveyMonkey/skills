@@ -197,10 +197,15 @@ Describe 'score-merge-risk.sh'
     if [ -n "$_before" ]; then
       set -- "$@" --before "$_before"
     fi
+    _stated=0
     while IFS= read -r _range; do
       [ -n "$_range" ] || continue
       set -- "$@" --declared-range "$_range"
+      _stated=1
     done < ranges.txt
+    # The flag is required, so an example with no ranges states the sentinel
+    # rather than omitting it: "nobody could read one" is the fact it asserts.
+    [ "$_stated" -eq 1 ] || set -- "$@" --declared-range none
     "$COMMON/score-merge-risk.sh" "$@" | jq -c "$_filter"
   }
 
@@ -388,11 +393,109 @@ Describe 'score-merge-risk.sh'
     The output should equal '"one major line crossed; dependents declare ~6.14.0; crosses the pinned range ~6.14.0"'
   End
 
-  It 'says so when no dependent ranges were supplied'
+  It 'says so when the caller states no dependent ranges could be read'
     use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.0.1 0 0 '.factors[6].evidence'
+    When call score direct false '[]' 1.0.0 1.0.1 0 0 '{e: .factors[6].evidence, declared_ranges}'
     The status should be success
-    The output should equal '"no major line crossed; no dependent ranges supplied"'
+    The output should equal '{"e":"no major line crossed; caller stated no dependent ranges could be read","declared_ranges":"none-stated"}'
+  End
+
+  # A satisfied range is a dependent declaring support for the line the fix
+  # landed on, however permissive the declaration. Counting its distance made a
+  # patch bump under `>=1` score ten major lines crossed and force-escalate to
+  # High (review follow-up on issue #21).
+  Describe 'a range the fix satisfies is not a line crossed'
+    Parameters
+      # before   after     declared      f7 majors
+      11.0.0     11.1.1    '>=1'         0  0
+      11.0.0     11.1.1    '^9 || ^11'   0  0
+      11.0.0     11.1.1    '*'           0  0
+      9.0.1      11.1.1    '^9'          1  2   # unsatisfied: scores as before
+    End
+
+    It "scores '$3' against $2 as F7 $4"
+      use_fixture yarn-berry
+      When call score direct false '[]' "$1" "$2" 0 0 '{f7: .factors[6].score, majors_crossed}' none "$3"
+      The status should be success
+      The output should equal "{\"f7\":$4,\"majors_crossed\":$5}"
+    End
+  End
+
+  It 'does not escalate a patch bump under a permissive satisfied range'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' 11.0.0 11.1.1 2 0 '{band, escalated}' scoped '>=1'
+    The status should be success
+    The output should equal '{"band":"Medium","escalated":false}'
+  End
+
+  # `workspace:^`, `latest` and git URLs are not version ranges. Reported as
+  # unsatisfied they became dependents the fix had supposedly left behind.
+  It 'counts an unreadable specifier separately instead of calling it left behind'
+    use_fixture yarn-berry
+    When call score direct false '[]' 1.0.0 1.0.1 0 0 '{f1: .factors[0].evidence, f7: .factors[6].evidence}' none 'workspace:^' '^1.0.0'
+    The status should be success
+    The output should equal '{"f1":"1.0.0 -> 1.0.1 (patch)","f7":"no major line crossed; dependents declare ^1.0.0; 1 dependent range not evaluated (workspace:^)"}'
+  End
+
+  # Without a baseline there is no resolved-version distance, so the declared
+  # floors are the only thing that can drive the escalation.
+  It 'measures distance from the declared floors alone when there is no baseline'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' '' 11.1.1 2 0 '{majors_crossed, band, escalated}' scoped '^9'
+    The status should be success
+    The output should equal '{"majors_crossed":2,"band":"High","escalated":true}'
+  End
+
+  # A pin crossed inside one major line is the whole finding; prefixing it with
+  # "no major line crossed" contradicted it.
+  It 'states a crossed pin without denying it in the same breath'
+    use_fixture yarn-berry
+    When call score direct false '[]' 6.14.0 6.15.0 0 0 '.factors[6].evidence' none '~6.14.0'
+    The status should be success
+    The output should equal '"crosses the pinned range ~6.14.0; dependents declare ~6.14.0"'
+  End
+
+  # An adapter that does not answer must fail loudly. Read straight, a missing
+  # field arrives as the string "null", the integer test errors only on stderr
+  # inside an `if`, and the script exits 0 having silently disabled the
+  # escalation it exists to apply.
+  Describe 'adapter contract violations'
+    # The stub answers from files rather than from an interpolated body, so its
+    # own positional parameter stays out of the spec's quoting entirely.
+    stub_adapter() {
+      printf '%s\n' "$1" > cmp.json
+      printf '%s\n' "$2" > facts.json
+      cat <<'STUB' > stub.sh
+#!/bin/sh
+here=$(dirname "$0")
+case "$1" in
+  compare_versions) cat "$here/cmp.json" ;;
+  range_facts)      cat "$here/facts.json" ;;
+esac
+STUB
+      chmod +x stub.sh
+      printf '{"relationship":"direct","dev_only":false,"parents":[]}\n' > why.json
+    }
+
+    It 'refuses a compare_versions result with no major_distance'
+      use_fixture yarn-berry
+      stub_adapter '{"result":1,"delta":"patch"}' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'major_distance'
+    End
+
+    It 'refuses a range_facts result with no majors_ahead key'
+      use_fixture yarn-berry
+      stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":false,"floor_major":9}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range '^9'
+      The status should not equal 0
+      The stderr should include 'majors_ahead'
+    End
   End
 
   # Nobody has evidence the tree still works, and the fix dragged a runtime
@@ -433,9 +536,25 @@ Describe 'score-merge-risk.sh'
   Describe 'argument validation'
     It 'rejects an out-of-range factor score'
       use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 5 --f5 0 --override-scope none
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 5 --f5 0 --override-scope none --declared-range none
       The status should not equal 0
       The stderr should include 'must be 0, 1, or 2'
+    End
+
+    # Optional, its absence made the multi-major escalation unreachable however
+    # far the fix jumped, and looked exactly like a package with no dependents.
+    It 'requires the declared ranges, or an explicit statement that there are none'
+      use_fixture yarn-berry
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none
+      The status should not equal 0
+      The stderr should include 'Missing required argument: --declared-range'
+    End
+
+    It 'refuses the none sentinel alongside stated ranges'
+      use_fixture yarn-berry
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none --declared-range none --declared-range '^1'
+      The status should not equal 0
+      The stderr should include 'cannot be combined'
     End
 
     It 'rejects a missing required argument'
@@ -456,7 +575,7 @@ Describe 'score-merge-risk.sh'
 
     It 'rejects an unknown override scope'
       use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope global
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope global --declared-range none
       The status should not equal 0
       The stderr should include 'must be none, scoped, bare-tightened, or bare-added'
     End

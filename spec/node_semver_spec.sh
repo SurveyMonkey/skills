@@ -95,6 +95,10 @@ Describe 'node.sh range_facts'
       ">=1.0.0 <2.0.0"     3.0.0     false     true   1     2
       ">=1.0.0"            3.0.0     true      false  1     2
       "^5.28.0 || ^6.19.0" 6.19.8    true      false  5     1
+      "^9"                 7.0.0     false     false  9     0   # below the floor
+      "1.x"                1.9.9     true      false  1     0   # x-range is ^1
+      "1.x"                2.0.0     false     false  1     1
+      "1.2.x"              1.2.9     true      true   1     0   # bounded to a minor
     End
 
     It "reads '$1' against $2"
@@ -108,15 +112,81 @@ Describe 'node.sh range_facts'
   # A wildcard has no floor to measure from. Reporting 0 would be a lie the
   # scorer could not tell apart from "declared exactly this major".
   It 'reports no floor for a range with no lower bound'
-    When call adapter_jq '{floor_major, majors_ahead}' range_facts '*' 11.1.1
+    When call adapter_jq '{parseable, satisfied, floor_major, majors_ahead}' range_facts '*' 11.1.1
     The status should be success
-    The output should equal '{"floor_major":null,"majors_ahead":null}'
+    The output should equal '{"parseable":true,"satisfied":true,"floor_major":null,"majors_ahead":null}'
+  End
+
+  # A specifier that is not a version range at all. `satisfies` answers false
+  # for anything it cannot tokenize, which read as "this dependent was left
+  # behind by the fix" — a fact nobody established.
+  Describe 'specifiers that are not version ranges'
+    Parameters
+      "latest"
+      "workspace:^"
+      "git+https://github.com/example/pkg.git"
+      "npm:other-pkg@^1.0.0"
+      "file:../local"
+    End
+
+    It "reports '$1' as unreadable rather than unsatisfied"
+      When call adapter_jq '[.parseable, .satisfied, .pinned, .floor_major, .majors_ahead]' \
+        range_facts "$1" 11.2.0
+      The status should be success
+      The output should equal '[false,null,null,null,null]'
+    End
   End
 
   It 'requires a range and a version'
     When run script "$ADAPTER" range_facts '^9'
     The status should not equal 0
     The stderr should be present
+  End
+End
+
+# declared_ranges replaces a shell loop in the agent definition that the
+# preflight catalog could not pre-approve, discarded every per-parent error,
+# and never looked at optionalDependencies.
+Describe 'node.sh declared_ranges'
+  After 'cleanup_fixture'
+
+  # The npm fixture installs express and not test-exclude, which is the normal
+  # partial read: pnpm links only direct dependencies into node_modules.
+  It 'unions the parent and root manifests'
+    use_fixture npm-v3
+    When call adapter_jq '{ranges, root_range}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"ranges":["^4.17.20","^4.17.21"],"root_range":"^4.17.21"}'
+  End
+
+  It 'names the parents it could not read rather than dropping them'
+    use_fixture npm-v3
+    When call adapter_jq '{parents_read, parents_unreadable}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"parents_read":["express"],"parents_unreadable":["test-exclude"]}'
+  End
+
+  It 'reads optionalDependencies, which the loop it replaced did not'
+    use_fixture npm-v3
+    When call adapter_jq '.ranges' declared_ranges 'sha.js'
+    The status should be success
+    The output should equal '["^2.4.11"]'
+  End
+
+  # Yarn PnP installs no node_modules at all: every parent is unreadable and
+  # the root manifest is all there is. Partial, and visibly so.
+  It 'still reports the root range when no parent manifest is installed'
+    use_fixture yarn-berry
+    When call adapter_jq '{ranges, parents_unreadable}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"ranges":["^4.17.21"],"parents_unreadable":["express"]}'
+  End
+
+  It 'requires a package name'
+    use_fixture npm-v3
+    When run script "$ADAPTER" declared_ranges
+    The status should not equal 0
+    The stderr should include 'requires a package name'
   End
 End
 

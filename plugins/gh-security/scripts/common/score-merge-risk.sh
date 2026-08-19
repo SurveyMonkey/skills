@@ -5,22 +5,31 @@
 #   score-merge-risk.sh --package <pkg> --after <version> --adapter <path>
 #                       --why-json <file|-> --f4 <0|1|2> --f5 <0|1|2>
 #                       --override-scope <none|scoped|bare-tightened|bare-added>
-#                       [--before <version>] [--declared-range <range>]...
+#                       --declared-range <range|none> [--declared-range <range>]...
+#                       [--before <version>]
 #                       [--f4-evidence <text>] [--f5-evidence <text>]
 #
-# Output: {score, band, escalated, escalation_reason, factors: [...], markdown}
+# Output: {score, max, band, escalated, escalation_reason, delta,
+#          majors_crossed, declared_ranges, override_scope, factors: [...],
+#          markdown}
 #
 # Seven factors, each 0-2, summed to 0-14. Bands: Low 0-3, Medium 4-6, High 7+,
 # with three escalation rules: neither a major version delta nor a newly added
 # unscoped override ever rates Low, and a multi-major jump on a runtime
 # dependency with no test signal never rates below High.
 #
-# The band thresholds are absolute risk points, not proportions of the
-# maximum, so they did not move when F6 was added (issue #20) and do not move
-# for F7 (issue #21). Both are 0 in the ordinary case: F6 for every direct
-# update and every scoped override, F7 for every fix that crosses at most one
-# major line and no pin. No fix that scored a band before scores a different
-# one now.
+# The band thresholds are absolute risk points, not proportions of the maximum,
+# so they did not move when F6 was added (issue #20) and did not move for F7
+# (issue #21). What changes a band is a fix that scores on the new factors or
+# trips the new escalation, which is the point of adding them: the sweep case
+# bork#350 goes from Medium 6 to High 7 on exactly that route. A fix that
+# scores 0 on both new factors, as every direct update with a scoped override
+# and at most one major line crossed does, keeps the band it had.
+#
+# `--declared-range` is required, with an explicit `none` sentinel for "no
+# dependent range could be read". Left optional, its absence made the
+# multi-major escalation unreachable without saying so, and a caller whose
+# collection step half-failed looked identical to one with nothing to report.
 #
 # The split of labour is deliberate. F1-F3 are derivable from the repository
 # and the lockfile, so they are computed here. F4 (test signal), F5
@@ -59,6 +68,9 @@ F4_EVIDENCE=""
 F5_EVIDENCE=""
 OVERRIDE_SCOPE=""
 DECLARED_RANGES=""
+DECLARED_RANGES_SEEN=false
+DECLARED_RANGES_STATED=false
+DECLARED_RANGES_NONE=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -72,11 +84,19 @@ while [ $# -gt 0 ]; do
     --f4-evidence)    F4_EVIDENCE="${2:?}"; shift 2 ;;
     --f5-evidence)    F5_EVIDENCE="${2:?}"; shift 2 ;;
     --override-scope) OVERRIDE_SCOPE="${2:?}"; shift 2 ;;
-    # Repeatable: one flag per distinct range a dependent declares for the
-    # package. Ranges may contain spaces (">=1 <2"), so they accumulate one
-    # per line rather than space-separated.
-    --declared-range) DECLARED_RANGES="${DECLARED_RANGES}${2:?}
-"; shift 2 ;;
+    # Repeatable and required: one flag per distinct range a dependent declares
+    # for the package, or the single sentinel `none`. Ranges may contain spaces
+    # (">=1 <2"), so they accumulate one per line rather than space-separated.
+    --declared-range)
+      DECLARED_RANGES_SEEN=true
+      if [ "${2:?}" = "none" ]; then
+        DECLARED_RANGES_NONE=true
+      else
+        DECLARED_RANGES_STATED=true
+        DECLARED_RANGES="${DECLARED_RANGES}${2:?}
+"
+      fi
+      shift 2 ;;
     *) printf '{"error":"Unknown argument: %s"}\n' "$1" >&2; exit 1 ;;
   esac
 done
@@ -89,6 +109,18 @@ for required in PACKAGE AFTER ADAPTER WHY_JSON F4 F5 OVERRIDE_SCOPE; do
     exit 1
   fi
 done
+
+# The multi-major escalation is the whole point of F7, and it is unreachable
+# when no ranges arrive. Omitting the flag used to be silent, which made the
+# safety rule opt-in; a caller that could read no ranges now has to say so.
+if [ "$DECLARED_RANGES_SEEN" != true ]; then
+  printf '{"error":"Missing required argument: --declared-range. Pass one per distinct range a dependent declares, or --declared-range none if none could be read."}\n' >&2
+  exit 1
+fi
+if [ "$DECLARED_RANGES_NONE" = true ] && [ "$DECLARED_RANGES_STATED" = true ]; then
+  printf '{"error":"--declared-range none states that no ranges could be read; it cannot be combined with declared ranges"}\n' >&2
+  exit 1
+fi
 
 case "$F4" in 0|1|2) ;; *) printf '{"error":"--f4 must be 0, 1, or 2"}\n' >&2; exit 1 ;; esac
 case "$F5" in 0|1|2) ;; *) printf '{"error":"--f5 must be 0, 1, or 2"}\n' >&2; exit 1 ;; esac
@@ -108,32 +140,75 @@ fi
 # Declared ranges — asked of the adapter, because what "^9" admits is a semver
 # question and the next adapter answers it under PEP 440 instead.
 #
-# The caller states the ranges; it does not state what they are worth. Ranges
-# are optional: a fix run against a package with no readable dependents still
-# scores, it just scores on the version delta alone, and says so.
+# The caller states the ranges; it does not state what they are worth. A fix
+# run against a package with no readable dependents still scores, on the
+# version delta alone, but it has to say `--declared-range none` to get there.
+#
+# Only a range the landed version escapes counts as distance. A satisfied
+# range, however wide, is a dependent that declared support for the line the
+# fix landed on, which is the factor's own rationale.
 # ---------------------------------------------------------------------------
 MAJORS_CROSSED=0
 PIN_CROSSED=false
 PINNED_RANGE=""
 DECLARED_LIST=""
 UNSATISFIED_LIST=""
+UNPARSEABLE_LIST=""
+UNPARSEABLE_COUNT=0
 
 join_range() {
   if [ -z "$1" ]; then printf '%s' "$2"; else printf '%s, %s' "$1" "$2"; fi
 }
 
-if [ -n "$DECLARED_RANGES" ]; then
+contract_error() {
+  printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
+  exit 1
+}
+
+# Absent is not the same as null, and only one of them is survivable. A range
+# with no parseable floor legitimately reports majors_ahead: null and
+# contributes nothing; a missing key means the adapter does not implement this
+# side of the contract, and reading it as "0 majors ahead" would silently score
+# the fix low. One pass answers both: __absent__, __null__, or the value.
+read_field() {
+  printf '%s' "$2" | jq -r --arg k "$1" \
+    'if has($k) | not then "__absent__" elif .[$k] == null then "__null__"
+     else (.[$k] | tostring) end'
+}
+
+if [ "$DECLARED_RANGES_STATED" = true ]; then
   # Duplicates are expected: several parents commonly declare the same range,
   # and repeating it in the evidence tells a reviewer nothing.
   deduped=$(printf '%s' "$DECLARED_RANGES" | awk 'NF && !seen[$0]++')
   while IFS= read -r declared; do
     [ -n "$declared" ] || continue
     facts=$("$ADAPTER" range_facts "$declared" "$AFTER")
-    ahead=$(printf '%s' "$facts" | jq -r '.majors_ahead // 0')
-    satisfied=$(printf '%s' "$facts" | jq -r '.satisfied')
-    pinned=$(printf '%s' "$facts" | jq -r '.pinned')
-    if [ "$ahead" -gt "$MAJORS_CROSSED" ]; then MAJORS_CROSSED=$ahead; fi
+    for field in parseable satisfied pinned majors_ahead; do
+      if [ "$(read_field "$field" "$facts")" = "__absent__" ]; then
+        contract_error "adapter $ADAPTER: range_facts '$declared' emitted no '$field' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must fail, not score the fix as low risk."
+      fi
+    done
+    parseable=$(read_field parseable "$facts")
+    if [ "$parseable" != "true" ]; then
+      # Not a version range at all (`workspace:^`, `latest`, a git URL). It is
+      # named in the evidence so it stays visible, and it is never asserted as
+      # a dependent this fix left behind.
+      UNPARSEABLE_LIST=$(join_range "$UNPARSEABLE_LIST" "$declared")
+      UNPARSEABLE_COUNT=$((UNPARSEABLE_COUNT + 1))
+      continue
+    fi
+    ahead=$(read_field majors_ahead "$facts")
+    satisfied=$(read_field satisfied "$facts")
+    pinned=$(read_field pinned "$facts")
     if [ "$satisfied" = "false" ]; then
+      # Only a range the landed version *escapes* contributes its distance. A
+      # satisfied range is a dependent declaring support for the line the fix
+      # landed on, however permissive the declaration: `>=1` against an 11.1.1
+      # patch bump used to score ten major lines crossed and force the PR to
+      # High (review follow-up on issue #21).
+      if [ "$ahead" != "__null__" ] && [ "$ahead" -gt "$MAJORS_CROSSED" ]; then
+        MAJORS_CROSSED=$ahead
+      fi
       UNSATISFIED_LIST=$(join_range "$UNSATISFIED_LIST" "$declared")
       if [ "$pinned" = "true" ]; then
         PIN_CROSSED=true
@@ -159,7 +234,16 @@ if [ -z "$BEFORE" ]; then
 else
   cmp=$("$ADAPTER" compare_versions "$BEFORE" "$AFTER")
   DELTA=$(printf '%s' "$cmp" | jq -r '.delta')
-  distance=$(printf '%s' "$cmp" | jq -r '.major_distance')
+  # An adapter that does not report the distance cannot be scored against it.
+  # Read straight, jq hands back the string "null", `[ "null" -ge 2 ]` errors
+  # only on stderr inside an `if`, `set -e` does not see it, and the script
+  # exits 0 reporting majors_crossed: 0 — the escalation this factor exists
+  # for, silently switched off (review follow-up on issue #21).
+  distance=$(read_field major_distance "$cmp")
+  case "$distance" in
+    __absent__|__null__)
+      contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' emitted no usable 'major_distance'. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); without it the multi-major escalation cannot fire and the fix would score as though it crossed nothing." ;;
+  esac
   case "$DELTA" in
     major) F1=2 ;;
     minor) F1=1 ;;
@@ -333,21 +417,51 @@ if [ "$MAJORS_CROSSED" -ge 2 ]; then F7=$((MAJORS_CROSSED - 1)); fi
 if [ "$PIN_CROSSED" = true ]; then F7=$((F7 + 1)); fi
 if [ "$F7" -gt 2 ]; then F7=2; fi
 
-case "$MAJORS_CROSSED" in
-  0) F7_EVIDENCE="no major line crossed" ;;
-  1) F7_EVIDENCE="one major line crossed" ;;
-  *) F7_EVIDENCE="$MAJORS_CROSSED major lines crossed" ;;
-esac
+# "no major line crossed; ...; crosses the pinned range ^5" contradicted
+# itself: a crossed pin below the two-major threshold is the whole finding, so
+# it stands on its own rather than behind a denial of it.
+if [ "$MAJORS_CROSSED" -eq 0 ] && [ "$PIN_CROSSED" = true ]; then
+  F7_EVIDENCE="crosses the pinned range $PINNED_RANGE"
+  PIN_STATED=true
+else
+  PIN_STATED=false
+  case "$MAJORS_CROSSED" in
+    0) F7_EVIDENCE="no major line crossed" ;;
+    1) F7_EVIDENCE="one major line crossed" ;;
+    *) F7_EVIDENCE="$MAJORS_CROSSED major lines crossed" ;;
+  esac
+fi
 if [ -n "$DECLARED_LIST" ]; then
   F7_EVIDENCE="$F7_EVIDENCE; dependents declare $DECLARED_LIST"
+elif [ "$DECLARED_RANGES_STATED" = true ]; then
+  F7_EVIDENCE="$F7_EVIDENCE; no dependent range could be evaluated"
 else
-  F7_EVIDENCE="$F7_EVIDENCE; no dependent ranges supplied"
+  F7_EVIDENCE="$F7_EVIDENCE; caller stated no dependent ranges could be read"
 fi
-if [ "$PIN_CROSSED" = true ]; then
+if [ "$UNPARSEABLE_COUNT" -gt 0 ]; then
+  if [ "$UNPARSEABLE_COUNT" -eq 1 ]; then
+    F7_EVIDENCE="$F7_EVIDENCE; 1 dependent range not evaluated ($UNPARSEABLE_LIST)"
+  else
+    F7_EVIDENCE="$F7_EVIDENCE; $UNPARSEABLE_COUNT dependent ranges not evaluated ($UNPARSEABLE_LIST)"
+  fi
+fi
+if [ "$PIN_CROSSED" = true ] && [ "$PIN_STATED" = false ]; then
   F7_EVIDENCE="$F7_EVIDENCE; crosses the pinned range $PINNED_RANGE"
 fi
 
+# Either the ranges the caller stated, in the order it stated them, or the
+# sentinel: "nobody could read a range here" is a different fact from "no range
+# is out of date", and the output says which one this score rests on.
+if [ "$DECLARED_RANGES_STATED" = true ]; then
+  DECLARED_JSON=$(printf '%s' "$DECLARED_RANGES" | jq -Rs '
+    split("\n") | map(select(length > 0))
+    | reduce .[] as $r ([]; if index($r) then . else . + [$r] end)')
+else
+  DECLARED_JSON='"none-stated"'
+fi
+
 jq -n \
+  --argjson declared_ranges "$DECLARED_JSON" \
   --argjson f1 "$F1" --argjson f2 "$F2" --argjson f3 "$F3" \
   --argjson f4 "$F4" --argjson f5 "$F5" --argjson f6 "$F6" \
   --argjson f7 "$F7" --argjson majors "$MAJORS_CROSSED" \
@@ -401,6 +515,7 @@ jq -n \
       ),
       delta: $delta,
       majors_crossed: $majors,
+      declared_ranges: $declared_ranges,
       override_scope: $override_scope,
       factors: $factors,
       markdown: (

@@ -80,6 +80,26 @@ scorer ([#21](https://github.com/SurveyMonkey/skills/issues/21)), for the same r
 `compare_versions`: what `^9` or `~6.14.0` admits is a semver answer, and the Python adapter's is
 different. The scorer asks; it does not parse.
 
+**A range the adapter cannot read is a third answer, not a false one.** `range_facts` leads with
+`parseable`, and answers `satisfied`, `pinned`, `floor_major` and `majors_ahead` as null when it is
+false. Manifests declare things that are not version ranges at all (`workspace:^`, `latest`, a git
+URL), and reporting those as "this version is not admitted" fabricated a dependent the fix had
+left behind. Every key is always present, whatever the answer, because a caller distinguishing "no
+floor" from "field missing" cannot do it against a field that is sometimes absent: absence means
+the adapter does not implement this side of the contract, and `score-merge-risk.sh` treats it as a
+hard error rather than scoring the fix low on a fact nobody supplied. `major_distance` on
+`compare_versions` carries the same obligation.
+
+**`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
+`dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents
+plus the root manifest, with `parents_read[]` and `parents_unreadable[]` naming both halves of a
+partial read. It belongs behind the contract because finding a parent's manifest is an ecosystem
+question (`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and
+because the shell loop it replaced in the agent definition could not be pre-approved by the
+preflight catalog, discarded every per-parent error, and missed optional dependencies. A parent
+whose manifest is not installed is reported, never guessed at: Yarn PnP has no `node_modules`,
+and pnpm links only direct dependencies into one.
+
 **`list_pins` is reserved but unimplemented.** It is part of the contract and returns exit code 2
 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is its only
 consumer. Declaring the verb now keeps the contract complete; implementing it now would land code

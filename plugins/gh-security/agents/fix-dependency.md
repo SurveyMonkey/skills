@@ -367,16 +367,15 @@ has been tested against `9.x` and never saw `10.x`, so how far past that a fix l
 number that predicts breakage, and it is not visible in the before/after delta:
 
 ```bash
-cd "$WORK/fix" && for parent in $(jq -r '.parents[]' "$WORK/why.json"); do
-  jq -r --arg pkg "<package>" '.dependencies[$pkg] // .peerDependencies[$pkg] // empty' \
-    "node_modules/$parent/package.json" 2>/dev/null
-done | sort -u
+cd "$WORK/fix" && $ADAPTER declared_ranges <package>
 ```
 
-Add the root manifest's own range for a direct dependency. If the install left no `node_modules`
-(Yarn PnP), the `raw` field in `why.json` carries the ranges the package manager printed. This is
-best effort: pass every distinct range you find, and pass none if you can read none. The score
-says which case it was.
+It returns `ranges[]` (every distinct range its parents and the root manifest declare, across
+`dependencies`, `optionalDependencies` and `peerDependencies`), plus `parents_read[]` and
+`parents_unreadable[]`. Unreadable parents are normal, not a failure: Yarn PnP installs no
+`node_modules` at all and pnpm links only direct dependencies there. **Name every unreadable
+parent in the PR body**, so a reviewer knows the distance was measured against a partial view;
+`why.json`'s `raw` field often carries the ranges the package manager printed for them.
 
 ```bash
 cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
@@ -387,12 +386,17 @@ cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --why-json "$WORK/why.json" \
   --f4 <0|1|2> --f5 <0|1|2> \
   --override-scope <none|scoped|bare-tightened|bare-added> \
-  [--declared-range <range>]...
+  --declared-range <range> [--declared-range <range>]...
 ```
 
 Pass each range verbatim, one `--declared-range` per distinct range: `^9`, `~6.14.0`, `>=1 <2`.
 State them, do not interpret them. The adapter decides what a range admits and the script decides
 what crossing it is worth; a range you "simplified" first is a fact you changed.
+
+`--declared-range` is **required**. If `ranges[]` came back empty, pass `--declared-range none`,
+which records in the score that nobody could read a range rather than that none was out of date.
+Omitting the flag is a usage error, because its silent absence made the multi-major escalation
+unreachable no matter how far the fix actually jumped.
 
 The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface), and F7
 (distance from the declared ranges). You supply the three factors only you know:

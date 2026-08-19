@@ -37,6 +37,13 @@ semantics**. Phase 6's Python adapter implements PEP 440; node implements semver
 it needs to know how far past `^9` a fix landed, and it asks the adapter rather than reaching for
 a leading digit itself.
 
+**A field the contract promises is either present or a hard error, never a default.** `jq -r` on
+a missing key yields the string `null`, and `[ "null" -ge 2 ]` fails only on stderr inside an
+`if`, which `set -e` never sees: an adapter missing `major_distance` made the whole multi-major
+escalation vanish while the script still exited 0. Callers distinguish absent from null
+explicitly (`has($k)`), because null is often a legitimate answer — a range with no floor has no
+`majors_ahead` — and absence never is. The same rule is why `range_facts` always emits every key.
+
 ## One group per package major line, and validate decides completeness
 
 `discover-alerts.sh` groups by package **and** the major of `first_patched_version`. Grouping by

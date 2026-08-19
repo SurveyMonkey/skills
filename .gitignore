@@ -1,4 +1,7 @@
 node_modules/
+# Except the hand-authored ones under spec/fixtures: declared_ranges reads a
+# parent's installed manifest, so a fixture has to carry one.
+!spec/fixtures/*/node_modules/
 .DS_Store
 *.log
 .env
