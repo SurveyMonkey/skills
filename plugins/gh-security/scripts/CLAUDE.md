@@ -31,9 +31,11 @@ See `docs/adr/001-ecosystem-adapter-contract.md`. Adapters are invoked as
 `<adapter>.sh <verb> [args]`, emit JSON on stdout, human-readable detail on stderr, and exit
 non-zero with `{"error": "..."}` on failure.
 
-Everything ecosystem-specific stays behind the verbs, **including version comparison**. Phase 6's
-Python adapter implements PEP 440; node implements semver. Do not lift `compare_versions` into
-`common/`.
+Everything ecosystem-specific stays behind the verbs, **including version comparison and range
+semantics**. Phase 6's Python adapter implements PEP 440; node implements semver. Do not lift
+`compare_versions` or `range_facts` into `common/`. `score-merge-risk.sh` is the pattern to copy:
+it needs to know how far past `^9` a fix landed, and it asks the adapter rather than reaching for
+a leading digit itself.
 
 ## One group per package major line, and validate decides completeness
 

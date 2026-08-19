@@ -180,18 +180,28 @@ Describe 'score-merge-risk.sh'
   # Helper: write a why payload, then score against it. The override scope is
   # optional here and defaults to `none` (a plain direct update), so the
   # examples that predate F6 read unchanged; scope-specific examples pass it.
+  # Anything after the scope is a declared range, passed through as its own
+  # --declared-range flag. Ranges reach the script as positional arguments
+  # rather than a word-split string because a range may contain a space
+  # (">=1 <2"), which word splitting would tear in half.
   score() {
     _rel=$1; _dev=$2; _parents=$3; _before=$4; _after=$5; _f4=$6; _f5=$7; _filter=$8
     _scope=${9:-none}
+    if [ $# -gt 9 ]; then shift 9; else shift $#; fi
+    : > ranges.txt
+    for _range in "$@"; do printf '%s\n' "$_range" >> ranges.txt; done
     jq -n --arg rel "$_rel" --argjson dev "$_dev" --argjson parents "$_parents" \
       '{relationship: $rel, dev_only: $dev, parents: $parents, package: "lodash"}' > why.json
-    _args="--package lodash --after $_after --adapter $ADAPTER --why-json why.json --f4 $_f4 --f5 $_f5"
-    _args="$_args --override-scope $_scope"
+    set -- --package lodash --after "$_after" --adapter "$ADAPTER" \
+           --why-json why.json --f4 "$_f4" --f5 "$_f5" --override-scope "$_scope"
     if [ -n "$_before" ]; then
-      _args="$_args --before $_before"
+      set -- "$@" --before "$_before"
     fi
-    # shellcheck disable=SC2086
-    "$COMMON/score-merge-risk.sh" $_args | jq -c "$_filter"
+    while IFS= read -r _range; do
+      [ -n "$_range" ] || continue
+      set -- "$@" --declared-range "$_range"
+    done < ranges.txt
+    "$COMMON/score-merge-risk.sh" "$@" | jq -c "$_filter"
   }
 
   Describe 'factor scoring'
@@ -279,13 +289,14 @@ Describe 'score-merge-risk.sh'
   End
 
   # The thresholds are absolute risk points, not proportions of the maximum,
-  # so adding a sixth factor must not reband a fix that introduced no
-  # override. Same inputs, same band as before F6 existed.
+  # so neither the sixth nor the seventh factor may reband a fix that
+  # introduced no override and crossed no line. Same inputs, same band as
+  # before either existed.
   It 'reports the new maximum without moving the bands'
     use_fixture yarn-berry
     When call score direct false '[]' 1.0.0 1.1.0 1 1 '{score, max, band}'
     The status should be success
-    The output should equal '{"score":5,"max":12,"band":"Medium"}'
+    The output should equal '{"score":5,"max":14,"band":"Medium"}'
   End
 
   # Everything else clean would total 1 and rate Low; a global pin this PR
@@ -317,6 +328,106 @@ Describe 'score-merge-risk.sh'
     The status should be success
     The output should include 'Merge risk:'
     The output should include '| Factor | Score | Evidence |'
+  End
+
+  # F7, declared-range distance (issue #21). F1 says "major" whether the fix
+  # crosses one major line or three, so the distance is scored separately and
+  # F1's weights stay where they were.
+  Describe 'declared-range distance'
+    Parameters
+      # before  after   declared   expected F7
+      1.0.0     2.0.0   ''         0   # one major line: the ordinary case, unchanged
+      1.0.0     3.0.0   ''         1   # skips 2.x entirely
+      1.0.0     4.0.0   ''         2
+      1.0.0     7.0.0   ''         2   # capped at 2 like every other factor
+      9.0.1     9.1.0   '^7'       1   # minor delta, but dependents never saw 8.x or 9.x
+      1.0.0     1.0.1   '~1.0.0'   0   # inside the pin: nothing crossed
+      1.0.0     1.1.0   '~1.0.0'   1   # crosses a tilde pin without crossing a major
+      1.0.0     2.0.0   '1.0.0'    1   # crosses an exact pin
+      1.0.0     3.0.0   '~1.0.0'   2   # two majors and a pin
+      1.0.0     2.0.0   '>=1 <2'   1   # an explicit upper bound is a pin too
+    End
+
+    It "scores $1 -> $2 against '$3' as $4"
+      use_fixture yarn-berry
+      When call score direct false '[]' "$1" "$2" 0 0 '.factors[6].score' none "$3"
+      The status should be success
+      The output should equal "$4"
+    End
+  End
+
+  # The headline complaint: with everything else held equal, a jump that skips
+  # a major line must not tie a single-major bump.
+  It 'ranks a two-major jump above a comparable one-major bump'
+    use_fixture yarn-berry
+    When call score direct false '[]' 9.0.1 10.0.0 1 1 '.score'
+    The status should be success
+    The output should equal '6'
+  End
+
+  It 'scores the same fix higher when it skips a major line'
+    use_fixture yarn-berry
+    When call score direct false '[]' 9.0.1 11.1.1 1 1 '.score'
+    The status should be success
+    The output should equal '7'
+  End
+
+  # Item 4 of the issue: the evidence carries the signal even before the
+  # weights do. This is the string it asks for, verbatim.
+  It 'names the number of majors and the ranges being left behind'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' 9.0.1 11.1.1 0 0 '.factors[0].evidence' scoped '^9'
+    The status should be success
+    The output should equal '"9.0.1 -> 11.1.1 (2 majors; parents declare ^9)"'
+  End
+
+  It 'reports a crossed pin in the evidence'
+    use_fixture yarn-berry
+    When call score direct false '[]' 6.14.0 7.0.0 0 0 '.factors[6].evidence' none '~6.14.0'
+    The status should be success
+    The output should equal '"one major line crossed; dependents declare ~6.14.0; crosses the pinned range ~6.14.0"'
+  End
+
+  It 'says so when no dependent ranges were supplied'
+    use_fixture yarn-berry
+    When call score direct false '[]' 1.0.0 1.0.1 0 0 '.factors[6].evidence'
+    The status should be success
+    The output should equal '"no major line crossed; no dependent ranges supplied"'
+  End
+
+  # Nobody has evidence the tree still works, and the fix dragged a runtime
+  # dependency across two major lines. Medium reads as "skim it".
+  It 'never rates an unverified multi-major runtime jump below High'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' 9.0.1 11.1.1 2 0 '{score, band, escalated, escalation_reason}' scoped '^9'
+    The status should be success
+    The output should equal '{"score":6,"band":"High","escalated":true,"escalation_reason":"a multi-major jump on a runtime dependency with no test signal never rates below High"}'
+  End
+
+  It 'leaves a dev-only multi-major jump where the total puts it'
+    use_fixture yarn-berry
+    When call score direct true '[]' 9.0.1 11.1.1 2 0 '{band, escalated}' scoped '^9'
+    The status should be success
+    The output should equal '{"band":"Medium","escalated":false}'
+  End
+
+  # The three PRs from the sweep in issue #21. F3 is 0 against this fixture,
+  # and F4/F5 are set to the values that reproduce the totals the issue
+  # reported, so the before column here is the score those PRs carried.
+  Describe 'the sweep cases from issue #21'
+    Parameters
+      # case    rel        before  after   f4 f5 scope  declared  was  expected
+      "bork#350"  transitive 9.0.1  11.1.1  2  1  scoped '^9'  6 '{"score":7,"band":"High"}'
+      "gcal#63"   transitive 9.0.1  11.1.1  1  0  scoped '^9'  4 '{"score":5,"band":"Medium"}'
+      "bork#351"  direct     2.4.2  3.0.6   1  1  none   ''    6 '{"score":6,"band":"Medium"}'
+    End
+
+    It "rescores $1 from $9"
+      use_fixture yarn-berry
+      When call score "$2" false '["express"]' "$3" "$4" "$5" "$6" '{score, band}' "$7" "$8"
+      The status should be success
+      The output should equal "${10}"
+    End
   End
 
   Describe 'argument validation'

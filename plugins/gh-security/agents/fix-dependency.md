@@ -360,6 +360,25 @@ Capture the post-fix version with `cd "$WORK/fix" && $ADAPTER resolved_versions 
 
 ```bash
 cd "$WORK/fix" && $ADAPTER why <package> > "$WORK/why.json"
+```
+
+Then collect the ranges the dependents actually declare for the package. A parent declaring `^9`
+has been tested against `9.x` and never saw `10.x`, so how far past that a fix lands is the
+number that predicts breakage, and it is not visible in the before/after delta:
+
+```bash
+cd "$WORK/fix" && for parent in $(jq -r '.parents[]' "$WORK/why.json"); do
+  jq -r --arg pkg "<package>" '.dependencies[$pkg] // .peerDependencies[$pkg] // empty' \
+    "node_modules/$parent/package.json" 2>/dev/null
+done | sort -u
+```
+
+Add the root manifest's own range for a direct dependency. If the install left no `node_modules`
+(Yarn PnP), the `raw` field in `why.json` carries the ranges the package manager printed. This is
+best effort: pass every distinct range you find, and pass none if you can read none. The score
+says which case it was.
+
+```bash
 cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --package <package> \
   --before <lowest version from phase 2, omit entirely if there was no baseline> \
@@ -367,11 +386,16 @@ cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --adapter $ADAPTER \
   --why-json "$WORK/why.json" \
   --f4 <0|1|2> --f5 <0|1|2> \
-  --override-scope <none|scoped|bare-tightened|bare-added>
+  --override-scope <none|scoped|bare-tightened|bare-added> \
+  [--declared-range <range>]...
 ```
 
-The script computes F1 (version delta), F2 (runtime exposure), and F3 (usage surface). You supply
-the three factors only you know:
+Pass each range verbatim, one `--declared-range` per distinct range: `^9`, `~6.14.0`, `>=1 <2`.
+State them, do not interpret them. The adapter decides what a range admits and the script decides
+what crossing it is worth; a range you "simplified" first is a fact you changed.
+
+The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface), and F7
+(distance from the declared ranges). You supply the three factors only you know:
 
 - **F4 test signal** (phase 5): `0` tests pass and exercise the affected modules; `1` tests pass
   but nothing clearly exercises them; `2` no test script, or tests could not run.
@@ -386,8 +410,10 @@ the three factors only you know:
   `scoped`.
 
 Be honest about all three. F4 and F5 gate whether the orchestrator may even offer to promote your
-PR out of draft, and a `bare-added` fix never rates Low; scoring them generously defeats the
-signals that say "nobody has verified this" and "this pins the whole tree".
+PR out of draft, a `bare-added` fix never rates Low, and a fix crossing two or more major lines on
+a runtime dependency with `--f4 2` rates High outright; scoring them generously defeats the
+signals that say "nobody has verified this", "this pins the whole tree", and "nothing here has
+ever run against the version we just landed on".
 
 Use the returned `markdown` verbatim in the PR body.
 

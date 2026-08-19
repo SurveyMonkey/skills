@@ -17,7 +17,9 @@
 #                                                  requires_major_bump[]}
 #                                                 (--line requires --vulnerable)
 #   verification_commands                      -> {commands[], skipped[]}
-#   compare_versions <a> <b>                   -> {result, delta}
+#   compare_versions <a> <b>                   -> {result, delta, major_distance}
+#   range_facts <range> <version>              -> {satisfied, pinned,
+#                                                  floor_major, majors_ahead}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> reserved, exits 2 (see issue #7)
 #
@@ -105,6 +107,11 @@ def semver_cmp($a; $b):
   | (cmp_core($pa.core; $pb.core)) as $c
   | if $c != 0 then $c else cmp_pre($pa.pre; $pb.pre) end;
 
+def major_distance($a; $b):
+  (($a | semver_parse).core[0] // 0) as $ma
+  | (($b | semver_parse).core[0] // 0) as $mb
+  | if $ma > $mb then $ma - $mb else $mb - $ma end;
+
 def semver_delta($a; $b):
   ($a | semver_parse) as $pa | ($b | semver_parse) as $pb
   | if cmp_core($pa.core; $pb.core) != 0 then
@@ -164,6 +171,37 @@ def satisfies($version; $range):
       | all
     )
   | any;
+
+# Range shape, for the merge-risk scorer (issue #21). A dependent declaring
+# `^9` has been tested against the 9.x line and nothing above it, so how far
+# past that floor a fix lands is a risk signal the before/after delta cannot
+# express. Alternatives are flattened here rather than evaluated separately:
+# the floor of a union is the lowest floor in it, and a range carrying a pin
+# in any alternative is reported as pinned. Whether the version is actually
+# admitted is answered by `satisfies`, which does respect alternatives.
+def range_tokens:
+  (. // "") | tostring
+  | gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")
+  | [splits("[[:space:],|]+")]
+  | map(select(length > 0));
+
+# A tilde, an exact version, or an explicit upper bound. A caret is not a pin:
+# it admits the whole major line, which is the ordinary declaration.
+def range_pinned:
+  range_tokens
+  | map(select(startswith("~") or startswith("<")
+               or test("^=?[0-9]+\\.[0-9]+\\.[0-9]+")))
+  | length > 0;
+
+# The major of the lowest version the range admits. Upper-bound comparators
+# are excluded: `<10` says nothing about where the range starts.
+def range_floor_major:
+  range_tokens
+  | map(select(startswith("<") | not))
+  | map(sub("^[><=~^v]+"; ""))
+  | map(select(test("^[0-9]")))
+  | map(semver_parse | .core[0] // 0)
+  | if length == 0 then null else min end;
 JQLIB
 )
 
@@ -819,7 +857,31 @@ verb_compare_versions() {
   a="${1:?compare_versions requires two versions}"
   b="${2:?compare_versions requires two versions}"
   jq -n --arg a "$a" --arg b "$b" "$SEMVER_JQ"'
-    {a: $a, b: $b, result: semver_cmp($a; $b), delta: semver_delta($a; $b)}'
+    {a: $a, b: $b, result: semver_cmp($a; $b), delta: semver_delta($a; $b),
+     major_distance: major_distance($a; $b)}'
+}
+
+# range_facts — what a dependent's declared range says about this version
+#
+# The scorer needs to know how far outside a declared range a fix lands, and
+# whether the range it crossed was a pin. Both are semver questions, so they
+# live behind a verb like every other version comparison (ADR 001).
+verb_range_facts() {
+  range="${1:?range_facts requires a range and a version}"
+  version="${2:?range_facts requires a range and a version}"
+  jq -n --arg range "$range" --arg version "$version" "$SEMVER_JQ"'
+    ($range | range_floor_major) as $floor
+    | (($version | semver_parse).core[0] // 0) as $major
+    | {
+        range: $range,
+        version: $version,
+        satisfied: satisfies($version; $range),
+        pinned: ($range | range_pinned),
+        floor_major: $floor,
+        majors_ahead: (if $floor == null then null
+                       elif $major > $floor then $major - $floor
+                       else 0 end)
+      }'
 }
 
 # Some repo scripts invoke the bare package-manager name internally, which
@@ -870,6 +932,7 @@ case "$VERB" in
   validate)              verb_validate "$@" ;;
   verification_commands) verb_verification_commands ;;
   compare_versions)      verb_compare_versions "$@" ;;
+  range_facts)           verb_range_facts "$@" ;;
   shim)                  verb_shim "$@" ;;
   list_pins)
     printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2

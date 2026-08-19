@@ -73,6 +73,13 @@ in `common/`. The node adapter implements semver in jq; Phase 6's Python adapter
 PEP 440 behind the same verb. Callers that need to rank versions, including
 `discover-alerts.sh`, route through the adapter rather than sorting themselves.
 
+**Range semantics stay inside the adapter too.** `range_facts <range> <version>` reports whether a
+dependent's declared range still admits the version, how many major lines past the range's floor
+it sits, and whether the range was a pin rather than a caret. Added in Phase 2 for the merge-risk
+scorer ([#21](https://github.com/SurveyMonkey/skills/issues/21)), for the same reason as
+`compare_versions`: what `^9` or `~6.14.0` admits is a semver answer, and the Python adapter's is
+different. The scorer asks; it does not parse.
+
 **`list_pins` is reserved but unimplemented.** It is part of the contract and returns exit code 2
 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is its only
 consumer. Declaring the verb now keeps the contract complete; implementing it now would land code

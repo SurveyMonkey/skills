@@ -54,8 +54,67 @@ Describe 'node.sh compare_versions'
     End
   End
 
+  # The delta saturates at "major" by design; the distance is what tells a
+  # one-major bump apart from a jump that skips a whole line (issue #21).
+  Describe 'major distance'
+    Parameters
+      "9.0.1"    "11.1.1"   2
+      "9.0.1"    "10.0.0"   1
+      "1.0.0"    "1.9.9"    0
+      "11.1.1"   "9.0.1"    2   # a downgrade is the same distance
+      "0.5.3"    "0.6.0"    0
+    End
+
+    It "measures $1 -> $2 as $3 major line(s)"
+      When call adapter_jq '.major_distance' compare_versions "$1" "$2"
+      The status should be success
+      The output should equal "$3"
+    End
+  End
+
   It 'requires two versions'
     When run script "$ADAPTER" compare_versions 1.0.0
+    The status should not equal 0
+    The stderr should be present
+  End
+End
+
+# range_facts answers what a dependent's declared range says about the version
+# a fix landed on: is it still admitted, how many major lines past the range's
+# floor is it, and was the range a pin rather than a caret.
+Describe 'node.sh range_facts'
+  Describe 'floor, distance, and pin shape'
+    Parameters
+      # range              version   satisfied pinned floor ahead
+      "^9"                 11.1.1    false     false  9     2
+      "^9"                 9.5.0     true      false  9     0
+      "^11"                11.1.1    true      false  11    0
+      "~6.14.0"            6.14.3    true      true   6     0
+      "~6.14.0"            7.0.0     false     true   6     1
+      "1.0.0"              2.0.0     false     true   1     1
+      ">=1.0.0 <2.0.0"     3.0.0     false     true   1     2
+      ">=1.0.0"            3.0.0     true      false  1     2
+      "^5.28.0 || ^6.19.0" 6.19.8    true      false  5     1
+    End
+
+    It "reads '$1' against $2"
+      When call adapter_jq '[.satisfied, .pinned, .floor_major, .majors_ahead]' \
+        range_facts "$1" "$2"
+      The status should be success
+      The output should equal "[$3,$4,$5,$6]"
+    End
+  End
+
+  # A wildcard has no floor to measure from. Reporting 0 would be a lie the
+  # scorer could not tell apart from "declared exactly this major".
+  It 'reports no floor for a range with no lower bound'
+    When call adapter_jq '{floor_major, majors_ahead}' range_facts '*' 11.1.1
+    The status should be success
+    The output should equal '{"floor_major":null,"majors_ahead":null}'
+  End
+
+  It 'requires a range and a version'
+    When run script "$ADAPTER" range_facts '^9'
     The status should not equal 0
     The stderr should be present
   End
