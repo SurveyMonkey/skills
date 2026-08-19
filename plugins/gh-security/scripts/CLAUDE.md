@@ -46,7 +46,10 @@ keep one branch, one worktree and one PR per line.
 Discovery cannot tell which resolved copy an alert matched: the API does not say, and discovery
 has no lockfile. **Only the adapter's `validate` can answer whether the alerts were actually
 cleared**, and it must be given the group's `vulnerable_range`s (`--vulnerable`) to do it. A
-constraint check alone passes a partial fix.
+constraint check alone passes a partial fix, so the guarantee is enforced rather than requested:
+`--line` without `--vulnerable` is an error, and so is a `--vulnerable` range that does not parse
+(range satisfaction answers false for a token it cannot read, which on this side means "nothing is
+vulnerable").
 
 ## Prescribed shapes and the preflight catalog move together
 

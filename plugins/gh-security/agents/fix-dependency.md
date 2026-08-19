@@ -1,10 +1,11 @@
 ---
 name: fix-dependency
 description: >
-  Fix every Dependabot alert for a single package in an isolated git worktree,
-  through to a draft PR carrying a computed merge-risk rating. Dispatched by
-  the gh-security resolve-alerts orchestrator with a package group JSON
-  payload; not intended for direct invocation.
+  Fix every Dependabot alert for a single package major line in an isolated git
+  worktree, through to a draft PR carrying a computed merge-risk rating.
+  Dispatched by the gh-security resolve-alerts orchestrator with one group's
+  JSON payload (one major line of one package); not intended for direct
+  invocation.
 model: sonnet
 tools: Bash, Read, Edit, Glob, Grep
 ---
@@ -208,8 +209,10 @@ cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' -
 
 Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
 verbatim and single-quoted. They are advisory ranges (`>= 7.0.0, < 7.29.0`, `< 6.28.0`) and never
-contain a quote character. Omitting them is not a shortcut: without them validate cannot tell a
-finished fix from a partial one.
+contain a quote character. This is enforced, not advisory: `--line` with no `--vulnerable` is a
+hard error, because without the ranges validate cannot tell a finished fix from a partial one.
+Copy each range exactly: a range validate cannot parse is also a hard error naming it, since an
+unreadable range would otherwise mark every resolved copy not vulnerable.
 
 `validate` answers two separate questions and fails if either does:
 
@@ -246,8 +249,9 @@ When `validate` fails, work through these in order:
    `validate`) naming the copies in `requires_major_bump`. Never open a PR for a no-op change.
 
 **`requires_major_bump[]` is reported, never attempted.** These are copies resolved *below* your
-line whose only patched version lives in it: no override bounded to their major can fix them, and
-widening yours to reach them would break the parent that pinned them. They do not fail validation,
+line whose only patched version **among this group's alerts** lives in it: no override bounded to
+their major can fix them from here, and widening yours to reach them would break the parent that
+pinned them. They do not fail validation,
 because nothing this flow does can clear them, and they must never be silently dropped either. On
 a non-empty list:
 

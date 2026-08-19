@@ -3,15 +3,17 @@ name: resolve-alerts
 description: >
   Resolve Dependabot security alerts for the current repository. Discovers open
   alerts, ranks them by severity and EPSS exploitability, and fixes one
-  package, the highest severity tier, or everything — each package fixed by its
-  own subagent in an isolated worktree through to a draft PR carrying a
-  computed merge-risk rating. Use when asked to fix security vulnerabilities in
-  dependencies, resolve Dependabot alerts, or clean up npm audit findings.
+  package, the highest severity tier, or everything — one subagent per group
+  (one major line of one package) in an isolated worktree through to a draft PR
+  carrying a computed merge-risk rating. Use when asked to fix security
+  vulnerabilities in dependencies, resolve Dependabot alerts, or clean up npm
+  audit findings.
 allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts for the current repository: discover and
-rank, ask how much to fix, dispatch one `fix-dependency` subagent per package in parallel, and
+rank, ask how much to fix, dispatch one `fix-dependency` subagent per group (one major line of one
+package) in parallel, and
 walk the resulting draft PRs through an evidence-based mark-ready decision.
 
 The deterministic work lives in scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/common/`. Call them;

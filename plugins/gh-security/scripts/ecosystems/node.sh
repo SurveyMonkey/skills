@@ -11,9 +11,11 @@
 #   apply_constraint <pkg> <range> [parent...] -> {changes, observations[]}
 #   install                                    -> pass-through, exit code is the signal
 #   validate [--line <major>] [--vulnerable <range>]... <pkg> <range>
-#                                              -> {ok, violations[],
+#                                              -> {ok, line_present, checked,
+#                                                  violations[],
 #                                                  unresolved_alerts[],
 #                                                  requires_major_bump[]}
+#                                                 (--line requires --vulnerable)
 #   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
@@ -520,6 +522,17 @@ verb_why() {
 # `--vulnerable` takes advisory range syntax verbatim (">= 7.0.0, < 7.29.0",
 # "< 6.28.0"). Ranges are passed rather than whole alert JSON because advisory
 # summaries carry apostrophes and an agent has no safe way to quote them.
+#
+# Two guards keep the completeness check from passing vacuously, because both
+# failure modes look exactly like a clean result:
+#
+#   * `--line` without any `--vulnerable` is refused. A constraint check alone
+#     cannot tell a finished fix from a partial one, and prose asking callers to
+#     pass the ranges is not a mechanism.
+#   * Every `--vulnerable` range is parsed strictly before it is evaluated. Range
+#     satisfaction answers false for a token it cannot read, which on this side
+#     of the check means "no copy is vulnerable", the unsafe direction. A typo
+#     or an advisory form the tokenizer does not know is an error, not a pass.
 # ---------------------------------------------------------------------------
 verb_validate() {
   line=""
@@ -550,8 +563,39 @@ verb_validate() {
       ;;
   esac
 
+  if [ -n "$line" ] && [ -z "$vuln_ranges" ]; then
+    die "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19)."
+  fi
+
   vuln_json=$(printf '%s' "$vuln_ranges" \
     | jq -Rs 'split("\n") | map(select(length > 0)) | unique')
+
+  # Strict parse of the advisory ranges, deliberately separate from `satisfies`,
+  # which stays false-on-garbage: on the constraint side an unreadable range
+  # failing every copy is the safe answer, and here it is the dangerous one.
+  # A range is valid when every ||-alternative is non-empty and each of its
+  # comparators is a known operator applied to a parseable version.
+  bad_range=$(printf '%s' "$vuln_json" | jq -r '
+    def token_ok:
+      sub("^(>=|<=|>|<|=)"; "") | sub("^[~^]"; "")
+      | test("^[v=]*[0-9]+(\\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$");
+
+    def alternatives:
+      gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")
+      | split("||")
+      | map([splits("[[:space:],]+")] | map(select(length > 0)));
+
+    def range_ok:
+      alternatives as $alts
+      | (($alts | length) > 0)
+        and ($alts | all(length > 0))
+        and ($alts | all(.[][]; token_ok));
+
+    [ .[] | select(range_ok | not) ] | first // empty')
+
+  if [ -n "$bad_range" ]; then
+    die "validate: --vulnerable range '$bad_range' is not a parseable version range. Copy the alert's vulnerable_range verbatim; an unreadable range would silently mark every resolved copy as not vulnerable."
+  fi
 
   resolved=$(verb_resolved_versions "$pkg")
   if [ "$(printf '%s' "$resolved" | jq -r '.present')" != "true" ]; then

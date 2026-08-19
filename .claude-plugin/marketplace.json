@@ -9,7 +9,7 @@
     {
       "name": "gh-security",
       "source": "./plugins/gh-security",
-      "description": "Resolve Dependabot alerts in parallel: one subagent per package in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow.",
+      "description": "Resolve Dependabot alerts in parallel: one subagent per package major line in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow.",
       "category": "devops",
       "tags": [
         "github",

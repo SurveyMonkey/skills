@@ -13,6 +13,11 @@
 Describe 'node.sh validate --line'
   After 'cleanup_fixture'
 
+  # `--line` refuses to run without alert ranges (see the completeness Describe
+  # below), so the line-scoping examples pass one that no resolved copy matches.
+  # It exercises the scoping question and nothing else.
+  NOHIT='< 1.0.0'
+
   # Without scoping, no single major-bounded range can pass a package resolved
   # at three majors, so every line's fix would look like a failure.
   It 'fails an unscoped major-bounded range against a multi-major package'
@@ -24,7 +29,8 @@ Describe 'node.sh validate --line'
 
   It 'checks only the targeted line and ignores the other lines'
     use_fixture yarn-multi-major
-    When call adapter_jq '{ok, line, checked, resolved_count, violations}' validate --line 7 undici '>=7.0.0 <8'
+    When call adapter_jq '{ok, line, checked, resolved_count, violations}' \
+      validate --line 7 --vulnerable "$NOHIT" undici '>=7.0.0 <8'
     The status should be success
     The output should equal '{"ok":true,"line":"7","checked":1,"resolved_count":3,"violations":[]}'
   End
@@ -40,7 +46,7 @@ Describe 'node.sh validate --line'
 
     It "counts the copies in the $1.x line"
       use_fixture yarn-multi-major
-      When call adapter_jq '.checked' validate --line "$1" undici "$2"
+      When call adapter_jq '.checked' validate --line "$1" --vulnerable "$NOHIT" undici "$2"
       The status should equal "$4"
       The output should equal "$3"
     End
@@ -51,7 +57,8 @@ Describe 'node.sh validate --line'
   # as a clean result.
   It 'refuses to pass a line with no resolved copy'
     use_fixture yarn-multi-major
-    When call adapter_jq '{ok, line_present, checked}' validate --line 9 undici '>=9.0.0 <10'
+    When call adapter_jq '{ok, line_present, checked}' \
+      validate --line 9 --vulnerable "$NOHIT" undici '>=9.0.0 <10'
     The status should not equal 0
     The output should equal '{"ok":false,"line_present":false,"checked":0}'
   End
@@ -61,6 +68,17 @@ Describe 'node.sh validate --line'
     When run script "$ADAPTER" validate --line six undici '>=6.0.0 <7'
     The status should not equal 0
     The stderr should include 'must be a major number'
+  End
+
+  # The completeness guarantee has to be a mechanism, not prose in the agent
+  # definition: a line-scoped run with no alert ranges checked one narrow
+  # constraint and reported ok, while copies in the line still matched the
+  # group's advisories.
+  It 'refuses a line-scoped run carrying no alert ranges'
+    use_fixture yarn-multi-major
+    When run script "$ADAPTER" validate --line 7 undici '>=7.0.0 <8'
+    The status should not equal 0
+    The stderr should include '--line requires at least one --vulnerable range'
   End
 
   It 'rejects an unknown option rather than treating it as a package name'
@@ -133,6 +151,54 @@ Describe 'node.sh validate --vulnerable (completeness)'
         validate --vulnerable "$1" undici '>=5.0.0'
       The status should equal "$3"
       The output should equal "$2"
+    End
+  End
+
+  # Range satisfaction answers false for a token it cannot read. On the
+  # constraint side that is the safe answer; here it would mark every resolved
+  # copy not vulnerable, so an unreadable range has to be an error naming
+  # itself rather than a silent pass.
+  Describe 'unparseable alert ranges'
+    Parameters
+      typo       'foo'
+      wildcard   '*'
+      operator   '>= '
+      words      'all versions before 6.28.0'
+    End
+
+    It "refuses the range $2"
+      use_fixture yarn-multi-major
+      When run script "$ADAPTER" validate --vulnerable "$2" undici '>=5.0.0'
+      The status should not equal 0
+      The stderr should include 'is not a parseable version range'
+    End
+  End
+
+  It 'refuses an empty alert range rather than dropping it'
+    use_fixture yarn-multi-major
+    When run script "$ADAPTER" validate --vulnerable '' undici '>=5.0.0'
+    The status should not equal 0
+    The stderr should include '--vulnerable requires a range'
+  End
+
+  # The forms real advisories use. Each is chosen to match no resolved copy, so
+  # a pass here means the strict parse accepted it, not that the fixture
+  # happened to be clean of that range. The matching side is covered above.
+  Describe 'accepted advisory range forms'
+    Parameters
+      simple     '< 1.0.0'
+      comma      '>= 7.0.0, < 7.27.0'
+      spaceless  '>=6.0.0 <6.24.0'
+      alternates '>= 2.0.0, < 3.0.0 || >= 8.0.0, < 9.0.0'
+      exact      '= 4.0.0'
+      prerelease '>= 1.0.0-beta.1, < 1.0.0'
+    End
+
+    It "accepts $2"
+      use_fixture yarn-multi-major
+      When call adapter_jq '{ok, unresolved_alerts}' validate --vulnerable "$2" undici '>=5.0.0'
+      The status should be success
+      The output should equal '{"ok":true,"unresolved_alerts":[]}'
     End
   End
 

@@ -123,9 +123,20 @@ Describe 'discover-alerts.sh'
     # already produced.
     It 'recognizes a PR opened under the pre-per-line branch name'
       stub_open_pr 'fix/dependabot-lodash' 'https://github.com/octo/app/pull/3'
-      When call discover '[.skipped[] | select(.reason == "open PR exists") | {package, open_pr_url}]'
+      When call discover '[.skipped[] | select(.open_pr_url) | {package, reason, open_pr_url}]'
       The status should be success
-      The output should equal '[{"package":"lodash","open_pr_url":"https://github.com/octo/app/pull/3"}]'
+      The output should equal '[{"package":"lodash","reason":"open PR exists (legacy branch fix/dependabot-lodash)","open_pr_url":"https://github.com/octo/app/pull/3"}]'
+    End
+
+    # A legacy PR was produced by the grouping that described a package by one
+    # highest_fixed_version, so it fixed the newest line only. Matching it
+    # against every line would re-suppress the older vulnerable ones, which is
+    # the bug this whole branch exists to fix.
+    It 'applies a legacy PR to the newest line only'
+      stub_open_pr 'fix/dependabot-undici' 'https://github.com/octo/app/pull/5'
+      When call discover '{actionable: [.actionable[].branch_name], skipped: [.skipped[] | select(.open_pr_url) | {major_line, reason}]}'
+      The status should be success
+      The output should equal '{"actionable":["fix/dependabot-undici-6x","fix/dependabot-lodash-4x"],"skipped":[{"major_line":"7","reason":"open PR exists (legacy branch fix/dependabot-undici)"}]}'
     End
 
     It 'reports a failed PR lookup as a skip reason, not a crash'
@@ -133,6 +144,46 @@ Describe 'discover-alerts.sh'
       When call discover '{actionable: (.actionable | length), reasons: ([.skipped[].reason] | unique)}'
       The status should be success
       The output should equal '{"actionable":0,"reasons":["PR check failed","no fix available"]}'
+    End
+  End
+
+  # `first_patched_version.identifier` is advisory-supplied text, not a
+  # validated version. Anything without a plain integer leading component would
+  # otherwise reach a group key, a branch name, and a `gh pr list --search`
+  # whose embedded space returns no results, leaving a malformed group
+  # actionable.
+  Describe 'patched version identifiers'
+    stub_single_alert() {
+      jq -n --arg id "$1" '[[{
+        number: 1,
+        dependency: {
+          package: {ecosystem: "npm", name: "undici"},
+          manifest_path: "package.json",
+          relationship: "transitive"
+        },
+        security_advisory: {
+          ghsa_id: "GHSA-undici-x", cve_id: "CVE-2000-0009",
+          severity: "high", summary: "s", epss: {percentile: 0.1}
+        },
+        security_vulnerability: {
+          vulnerable_version_range: "< 7.29.0",
+          first_patched_version: {identifier: $id}
+        }
+      }]]' > "$MOCK_DIR/alerts.json"
+    }
+
+    Parameters
+      v-prefixed 'v7.29.0'             '{"a":[{"major_line":"7","branch_name":"fix/dependabot-undici-7x"}],"s":[]}'
+      whitespace '  7.29.0 '           '{"a":[{"major_line":"7","branch_name":"fix/dependabot-undici-7x"}],"s":[]}'
+      prose      'See vendor advisory' '{"a":[],"s":[{"major_line":"none","reason":"no fix available"}]}'
+      empty      ''                    '{"a":[],"s":[{"major_line":"none","reason":"no fix available"}]}'
+    End
+
+    It "reads the line from a $1 identifier"
+      stub_single_alert "$2"
+      When call discover '{a: [.actionable[] | {major_line, branch_name}], s: [.skipped[] | {major_line, reason}]}'
+      The status should be success
+      The output should equal "$3"
     End
   End
 

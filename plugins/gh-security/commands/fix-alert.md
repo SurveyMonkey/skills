@@ -11,7 +11,7 @@ verbatim:
 > **`/gh-security:fix-alert` is deprecated** and will be removed in the first release cut at
 > least two months after v0.3.0 shipped. Use `/gh-security:resolve-alerts`, or simply ask Claude
 > to fix this repo's security alerts. Continuing with the previous behavior: fixing the single
-> top-ranked package.
+> top-ranked group.
 
 Then read `${CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/SKILL.md` and execute it exactly, with one
 change: in its Phase 4, do **not** ask how much to fix — the answer is pre-supplied as **One**
