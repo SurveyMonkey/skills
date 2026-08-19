@@ -90,6 +90,17 @@ Describe 'mutating verbs run only in a linked worktree'
     The stderr should include 'primary checkout'
   End
 
+  # shim creates a directory and an executable, and absolutizes a vendored
+  # runner from the cwd, so it writes into whatever tree it is pointed at.
+  It 'shim refuses in a primary checkout'
+    use_fixture yarn-vendored
+    fake_primary_checkout
+    When run script "$ADAPTER" shim shim-bin 'corepack yarn'
+    The status should equal 1
+    The stderr should include 'primary checkout'
+    The path shim-bin should not be exist
+  End
+
   It 'apply_constraint proceeds in a linked worktree'
     use_fixture yarn-berry
     When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'

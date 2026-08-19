@@ -24,7 +24,9 @@
 # trips the new escalation, which is the point of adding them: the sweep case
 # bork#350 goes from Medium 6 to High 7 on exactly that route. A fix that
 # scores 0 on both new factors, as every direct update with a scoped override
-# and at most one major line crossed does, keeps the band it had.
+# crossing at most one major line and no pin does, keeps the band it had. The
+# "no pin" half is not decoration: a single-major bump past a dependent's
+# `~1.2.3` scores 1 on F7 and can move Medium to High on that alone.
 #
 # `--declared-range` is required, with an explicit `none` sentinel for "no
 # dependent range could be read". Left optional, its absence made the
@@ -72,32 +74,47 @@ DECLARED_RANGES_SEEN=false
 DECLARED_RANGES_STATED=false
 DECLARED_RANGES_NONE=false
 
+# Every failure this script reports leaves the same shape behind, so a caller
+# parsing stdout+stderr never has to special-case one of them. `${2:?}` did not:
+# an empty-string argument tripped bash's own "parameter null or not set"
+# message, which is neither JSON nor named after the flag that was wrong
+# (review follow-up on issue #21).
+json_error() {
+  printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
+  exit 1
+}
+
+need_value() {
+  [ -n "${2:-}" ] || json_error "$1 requires a value"
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --package)        PACKAGE="${2:?}"; shift 2 ;;
-    --before)         BEFORE="${2:?}"; shift 2 ;;
-    --after)          AFTER="${2:?}"; shift 2 ;;
-    --adapter)        ADAPTER="${2:?}"; shift 2 ;;
-    --why-json)       WHY_JSON="${2:?}"; shift 2 ;;
-    --f4)             F4="${2:?}"; shift 2 ;;
-    --f5)             F5="${2:?}"; shift 2 ;;
-    --f4-evidence)    F4_EVIDENCE="${2:?}"; shift 2 ;;
-    --f5-evidence)    F5_EVIDENCE="${2:?}"; shift 2 ;;
-    --override-scope) OVERRIDE_SCOPE="${2:?}"; shift 2 ;;
+    --package)        need_value "$1" "${2-}"; PACKAGE="$2"; shift 2 ;;
+    --before)         need_value "$1" "${2-}"; BEFORE="$2"; shift 2 ;;
+    --after)          need_value "$1" "${2-}"; AFTER="$2"; shift 2 ;;
+    --adapter)        need_value "$1" "${2-}"; ADAPTER="$2"; shift 2 ;;
+    --why-json)       need_value "$1" "${2-}"; WHY_JSON="$2"; shift 2 ;;
+    --f4)             need_value "$1" "${2-}"; F4="$2"; shift 2 ;;
+    --f5)             need_value "$1" "${2-}"; F5="$2"; shift 2 ;;
+    --f4-evidence)    need_value "$1" "${2-}"; F4_EVIDENCE="$2"; shift 2 ;;
+    --f5-evidence)    need_value "$1" "${2-}"; F5_EVIDENCE="$2"; shift 2 ;;
+    --override-scope) need_value "$1" "${2-}"; OVERRIDE_SCOPE="$2"; shift 2 ;;
     # Repeatable and required: one flag per distinct range a dependent declares
     # for the package, or the single sentinel `none`. Ranges may contain spaces
     # (">=1 <2"), so they accumulate one per line rather than space-separated.
     --declared-range)
+      need_value "$1" "${2-}"
       DECLARED_RANGES_SEEN=true
-      if [ "${2:?}" = "none" ]; then
+      if [ "$2" = "none" ]; then
         DECLARED_RANGES_NONE=true
       else
         DECLARED_RANGES_STATED=true
-        DECLARED_RANGES="${DECLARED_RANGES}${2:?}
+        DECLARED_RANGES="${DECLARED_RANGES}$2
 "
       fi
       shift 2 ;;
-    *) printf '{"error":"Unknown argument: %s"}\n' "$1" >&2; exit 1 ;;
+    *) json_error "Unknown argument: $1" ;;
   esac
 done
 
@@ -160,10 +177,7 @@ join_range() {
   if [ -z "$1" ]; then printf '%s' "$2"; else printf '%s, %s' "$1" "$2"; fi
 }
 
-contract_error() {
-  printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
-  exit 1
-}
+contract_error() { json_error "$1"; }
 
 # Absent is not the same as null, and only one of them is survivable. A range
 # with no parseable floor legitimately reports majors_ahead: null and
@@ -176,6 +190,30 @@ read_field() {
      else (.[$k] | tostring) end'
 }
 
+# Every check below reads the adapter's answer through jq, so "is there an
+# answer at all" has to be settled first. An adapter exiting 0 with empty
+# stdout sailed past all of it: jq on empty input emits nothing, `read_field`
+# hands back the empty string, the `__absent__` case never matches, and the
+# integer test that follows fails on stderr only, inside an `if` that `set -e`
+# never sees. A 1.0.0 -> 3.0.0 bump scored majors_crossed 0 and exited 0.
+# Non-JSON garbage and a non-zero exit already die (jq under `set -e`, and the
+# assignment itself); empty-or-not-an-object was the hole.
+require_object() {
+  printf '%s' "$1" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || contract_error "adapter $ADAPTER: $2 emitted no JSON object on stdout. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must exit non-zero, not answer with nothing and let the fix score as low risk."
+}
+
+# The type a field carries is as much of the promise as the key. A present but
+# non-numeric `"major_distance":"lots"` passes `has()`, and `[ "lots" -ge 2 ]`
+# then errors only on stderr: the same silent zero the absence check exists to
+# prevent, reached by a different route.
+require_count() {
+  case "$2" in
+    ''|*[!0-9]*)
+      contract_error "adapter $ADAPTER: $1 must be a non-negative integer, got '$2'. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); a value the script cannot compare with would silently score the fix as crossing nothing." ;;
+  esac
+}
+
 if [ "$DECLARED_RANGES_STATED" = true ]; then
   # Duplicates are expected: several parents commonly declare the same range,
   # and repeating it in the evidence tells a reviewer nothing.
@@ -183,6 +221,7 @@ if [ "$DECLARED_RANGES_STATED" = true ]; then
   while IFS= read -r declared; do
     [ -n "$declared" ] || continue
     facts=$("$ADAPTER" range_facts "$declared" "$AFTER")
+    require_object "$facts" "range_facts '$declared' '$AFTER'"
     for field in parseable satisfied pinned majors_ahead; do
       if [ "$(read_field "$field" "$facts")" = "__absent__" ]; then
         contract_error "adapter $ADAPTER: range_facts '$declared' emitted no '$field' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must fail, not score the fix as low risk."
@@ -198,6 +237,7 @@ if [ "$DECLARED_RANGES_STATED" = true ]; then
       continue
     fi
     ahead=$(read_field majors_ahead "$facts")
+    [ "$ahead" = "__null__" ] || require_count "range_facts majors_ahead for '$declared'" "$ahead"
     satisfied=$(read_field satisfied "$facts")
     pinned=$(read_field pinned "$facts")
     if [ "$satisfied" = "false" ]; then
@@ -233,6 +273,10 @@ if [ -z "$BEFORE" ]; then
   DELTA="unknown"
 else
   cmp=$("$ADAPTER" compare_versions "$BEFORE" "$AFTER")
+  require_object "$cmp" "compare_versions '$BEFORE' '$AFTER'"
+  if [ "$(read_field delta "$cmp")" = "__absent__" ]; then
+    contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' emitted no 'delta' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); read as a default it would score every unanswered bump as a patch."
+  fi
   DELTA=$(printf '%s' "$cmp" | jq -r '.delta')
   # An adapter that does not report the distance cannot be scored against it.
   # Read straight, jq hands back the string "null", `[ "null" -ge 2 ]` errors
@@ -244,6 +288,7 @@ else
     __absent__|__null__)
       contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' emitted no usable 'major_distance'. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); without it the multi-major escalation cannot fire and the fix would score as though it crossed nothing." ;;
   esac
+  require_count "compare_versions major_distance" "$distance"
   case "$DELTA" in
     major) F1=2 ;;
     minor) F1=1 ;;

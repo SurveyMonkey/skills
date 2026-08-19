@@ -243,11 +243,16 @@ Describe 'node.sh why'
     The output should equal '{"relationship":"direct","dev_only":true}'
   End
 
-  It 'reports the parents of a transitive dependency'
+  # A lockfile v3 entry keeps each dependency block under its own key, so
+  # `express` (which declares sha.js optionally) and `serve-static` (which
+  # declares it as a peer) are both parents. Matching `.dependencies` alone
+  # found neither, and a scoped override then skipped the parent that pulled
+  # the vulnerable copy in.
+  It 'reports the parents of a transitive dependency, optional and peer included'
     use_fixture npm-v3
     When call adapter_jq '{relationship, parents}' why 'sha.js'
     The status should be success
-    The output should equal '{"relationship":"transitive","parents":["express"]}'
+    The output should equal '{"relationship":"transitive","parents":["express","serve-static"]}'
   End
 
   # A root entry is not a registry parent an override can be scoped to.

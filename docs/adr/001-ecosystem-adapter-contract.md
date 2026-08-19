@@ -36,8 +36,11 @@ would have to be wrong for one of them.
 ## Decision
 
 **Invocation.** Adapters are executables at `scripts/ecosystems/<name>.sh`, invoked as
-`<adapter> <verb> [args]`, run from the repository root. JSON on stdout, human-readable detail on
-stderr. `select-adapter.sh` resolves ecosystem to adapter path; nothing else hardcodes it.
+`<adapter> <verb> [args]`, run from the root of the tree being operated on. For the verbs that
+write (`apply_constraint`, `install`, `shim`) that root must be a **linked git worktree**, never
+the user's own checkout: each of them refuses to run there, through the shared guard in
+`common/require-linked-worktree.sh`. JSON on stdout, human-readable detail on stderr.
+`select-adapter.sh` resolves ecosystem to adapter path; nothing else hardcodes it.
 
 **Exit codes** distinguish four outcomes, because callers respond differently to each:
 
@@ -88,17 +91,30 @@ left behind. Every key is always present, whatever the answer, because a caller 
 floor" from "field missing" cannot do it against a field that is sometimes absent: absence means
 the adapter does not implement this side of the contract, and `score-merge-risk.sh` treats it as a
 hard error rather than scoring the fix low on a fact nobody supplied. `major_distance` on
-`compare_versions` carries the same obligation.
+`compare_versions` carries the same obligation, and so does the *type*: a numeric field arriving as
+`"lots"` is present, passes `has()`, and then fails its integer test on stderr only, which is the
+same silent zero by another route. The obligation starts one step earlier still: an adapter that
+exits 0 with empty stdout answers nothing, and jq reading empty input emits nothing rather than
+failing, so every `has()` check downstream is skipped instead of tripped. A reply is asserted to be
+a JSON object before any field of it is read.
 
 **`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
-`dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents
-plus the root manifest, with `parents_read[]` and `parents_unreadable[]` naming both halves of a
-partial read. It belongs behind the contract because finding a parent's manifest is an ecosystem
-question (`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and
-because the shell loop it replaced in the agent definition could not be pre-approved by the
-preflight catalog, discarded every per-parent error, and missed optional dependencies. A parent
-whose manifest is not installed is reported, never guessed at: Yarn PnP has no `node_modules`,
-and pnpm links only direct dependencies into one.
+`dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
+plus the root manifest's own declaration, which is read from those three and `devDependencies` too:
+the repository is a dependent like any other, and a dev-only direct dependency still declares a
+range a fix can leave behind. Parent discovery covers the same three blocks, because a lockfile
+entry records each of them under its own key and a parent that declares the package only optionally
+or as a peer still resolves it. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
+(read, but declaring the package in no block, which version skew produces legitimately),
+`parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
+disk but does not parse, kept inside `parents_unreadable` so every consumer of that list stays
+correct while the corrupt case remains distinguishable from the merely uninstalled one. The verb
+belongs behind the contract because finding a parent's manifest is an ecosystem question
+(`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and because the
+shell loop it replaced in the agent definition could not be pre-approved by the preflight catalog,
+discarded every per-parent error, and missed optional dependencies. A parent whose manifest is not
+installed is reported, never guessed at: Yarn PnP has no `node_modules`, and pnpm links only direct
+dependencies into one.
 
 **`list_pins` is reserved but unimplemented.** It is part of the contract and returns exit code 2
 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is its only

@@ -496,6 +496,69 @@ STUB
       The status should not equal 0
       The stderr should include 'majors_ahead'
     End
+
+    # Exit 0 with nothing on stdout answered no question at all, and every
+    # check downstream reads the answer through jq: on empty input jq emits
+    # nothing, the absence check never matches, and 1.0.0 -> 3.0.0 scored
+    # majors_crossed 0 with an empty delta and exit 0.
+    It 'refuses a compare_versions call that answers with empty stdout'
+      use_fixture yarn-berry
+      stub_adapter '' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'no JSON object'
+      The stderr should include 'compare_versions'
+    End
+
+    # Same hole on the other verb, with a worse outcome: an empty answer read
+    # `parseable` as neither true nor absent, so the range was silently
+    # reclassified as unreadable and both its distance and its pin vanished.
+    It 'refuses a range_facts call that answers with empty stdout'
+      use_fixture yarn-berry
+      stub_adapter '{"delta":"patch","major_distance":0}' ''
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range '^1'
+      The status should not equal 0
+      The stderr should include 'no JSON object'
+      The stderr should include 'range_facts'
+    End
+
+    # The type is part of the promise: "lots" is present, so the absence check
+    # passes it through, and `[ "lots" -ge 2 ]` then fails on stderr only.
+    It 'refuses a major_distance that is not a number'
+      use_fixture yarn-berry
+      stub_adapter '{"delta":"major","major_distance":"lots"}' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'non-negative integer'
+    End
+
+    It 'refuses a majors_ahead that is not a number'
+      use_fixture yarn-berry
+      stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":false,"floor_major":9,"majors_ahead":"two"}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range '^9'
+      The status should not equal 0
+      The stderr should include 'non-negative integer'
+    End
+
+    # An adapter that does not report the delta cannot have F1 read off a
+    # default: the fall-through case scores 0, which is "patch".
+    It 'refuses a compare_versions result with no delta'
+      use_fixture yarn-berry
+      stub_adapter '{"result":1,"major_distance":2}' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'delta'
+    End
   End
 
   # Nobody has evidence the tree still works, and the fix dragged a runtime
@@ -555,6 +618,15 @@ STUB
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none --declared-range none --declared-range '^1'
       The status should not equal 0
       The stderr should include 'cannot be combined'
+    End
+
+    # `${2:?}` answered an empty-string argument with bash's own "parameter
+    # null or not set", which is neither JSON nor named after the flag.
+    It 'reports an empty flag value in the script own error shape'
+      use_fixture yarn-berry
+      When run script "$COMMON/score-merge-risk.sh" --package '' --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should equal '{"error":"--package requires a value"}'
     End
 
     It 'rejects a missing required argument'

@@ -92,7 +92,8 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Every Bash call starts fresh; nothing carries over from the last one.** The tool resets cwd
   to the session directory between invocations and shell variables do not survive, so a `cd`
   issued once does not govern the calls after it. **Every command locates itself**: git uses
-  `git -C <literal path>`, and every non-git command carries its own `cd "$WORK/fix" && ` prefix.
+  `git -C <literal path>`, the `gh` calls in phase 7 locate themselves with `--repo <nwo>` and
+  take no prefix, and every other non-git command carries its own `cd "$WORK/fix" && ` prefix.
   A command that relies on an earlier `cd` runs in `repo_root` instead, which is exactly how a
   live run bumped a package and regenerated a lockfile in the user's checkout.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
@@ -103,8 +104,8 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Until `$WORK/fix` exists and your commands name it, every command must be read-only.**
   Every Bash call starts in `repo_root`, so a mutating command issued before worktree setup, or
   one issued afterwards without the prefix — the adapter's `apply_constraint` or `install`, a
-  package-manager invocation, an Edit of `package.json` — lands in the user's tree. Phase 1 comes first, always; no fix work of any
-  kind before it.
+  package-manager invocation, an Edit of `package.json` — lands in the user's tree. Phase 1
+  comes first, always; no fix work of any kind before it.
 - **If you find changes in the user's tree — even changes you believe you caused — never
   revert, checkout, stash, or clean them.** Attribution can be wrong and discards are
   unrecoverable; the user adjudicates and decides. Report what you found and, if you caused
@@ -370,12 +371,19 @@ number that predicts breakage, and it is not visible in the before/after delta:
 cd "$WORK/fix" && $ADAPTER declared_ranges <package>
 ```
 
-It returns `ranges[]` (every distinct range its parents and the root manifest declare, across
-`dependencies`, `optionalDependencies` and `peerDependencies`), plus `parents_read[]` and
-`parents_unreadable[]`. Unreadable parents are normal, not a failure: Yarn PnP installs no
-`node_modules` at all and pnpm links only direct dependencies there. **Name every unreadable
-parent in the PR body**, so a reviewer knows the distance was measured against a partial view;
-`why.json`'s `raw` field often carries the ranges the package manager printed for them.
+It returns `ranges[]` (every distinct range its parents declare across `dependencies`,
+`optionalDependencies` and `peerDependencies`, plus the root manifest's own declaration, which is
+read from those three and `devDependencies` as well: a dev-only direct dependency still declares a
+range this fix can leave behind). Alongside it: `parents_read[]`, `parents_without_range[]` (read,
+but the installed manifest declares the package in no block, which happens under version skew),
+`parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
+disk but does not parse.
+
+Unreadable parents are usually normal rather than a failure: Yarn PnP installs no `node_modules` at
+all and pnpm links only direct dependencies there. A **malformed** one is not normal, and says the
+install is damaged. **Name every unreadable parent in the PR body**, marking any malformed ones as
+such, so a reviewer knows the distance was measured against a partial view; `why.json`'s `raw`
+field often carries the ranges the package manager printed for them.
 
 ```bash
 cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
@@ -393,8 +401,16 @@ Pass each range verbatim, one `--declared-range` per distinct range: `^9`, `~6.1
 State them, do not interpret them. The adapter decides what a range admits and the script decides
 what crossing it is worth; a range you "simplified" first is a fact you changed.
 
-`--declared-range` is **required**. If `ranges[]` came back empty, pass `--declared-range none`,
-which records in the score that nobody could read a range rather than that none was out of date.
+`--declared-range` is **required**. An empty `ranges[]` is passed as `--declared-range none`, but
+the two ways of arriving there are different facts and the PR body must say which one it was:
+
+- **Nothing could be read** (`parents_read[]` empty, everything in `parents_unreadable[]`): the
+  distance rests on the resolved versions alone. Say in the PR body that no dependent range could
+  be read, and name the parents.
+- **Parents were read and declared nothing** (`parents_read[]` non-empty): the view was not
+  partial, the dependents simply do not constrain this package. Say that, not that nothing could
+  be read; the sentinel is the same, the reviewer's conclusion is not.
+
 Omitting the flag is a usage error, because its silent absence made the multi-major escalation
 unreachable no matter how far the fix actually jumped.
 
@@ -446,10 +462,10 @@ Refs: https://github.com/<nwo>/security/dependabot/<number>
 ```
 
 Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the draft PR. The `gh`
-calls below are location-independent because every one of them carries `--repo`. Collect **all** required
-labels from every source and apply them together, each via its own `--label` flag. This flow
-always requires `Security`. Check every CLAUDE.md in your context for additional required labels.
-No source overrides another; labels are additive.
+calls below are location-independent because every one of them carries `--repo`, so they take no
+`cd` prefix. Collect **all** required labels from every source and apply them together, each via
+its own `--label` flag. This flow always requires `Security`. Check every CLAUDE.md in your
+context for additional required labels. No source overrides another; labels are additive.
 
 `gh pr create` fails outright if a label does not exist in the repository, so check first and
 create any that are missing rather than dropping them:

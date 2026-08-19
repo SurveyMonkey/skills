@@ -166,11 +166,35 @@ Describe 'node.sh declared_ranges'
     The output should equal '{"parents_read":["express"],"parents_unreadable":["test-exclude"]}'
   End
 
+  # The lockfile records sha.js only under express's optionalDependencies, so
+  # this reads a range that the `.dependencies`-only parent query never reached
+  # the manifest to find.
   It 'reads optionalDependencies, which the loop it replaced did not'
     use_fixture npm-v3
     When call adapter_jq '.ranges' declared_ranges 'sha.js'
     The status should be success
     The output should equal '["^2.4.11"]'
+  End
+
+  # A parent whose installed manifest declares the package in no block at all
+  # is legitimate under version skew, and it is not the same fact as a parent
+  # nobody could read. `express` is a lockfile parent of @babel/core; its
+  # installed manifest never mentions it.
+  It 'separates a parent that declared nothing from one it could not read'
+    use_fixture npm-v3
+    When call adapter_jq '{ranges, parents_read, parents_without_range, parents_unreadable}' declared_ranges '@babel/core'
+    The status should be success
+    The output should equal '{"ranges":[],"parents_read":["express"],"parents_without_range":["express"],"parents_unreadable":[]}'
+  End
+
+  # A manifest on disk that will not parse dropped its range and still counted
+  # as read, so the partial-view disclosure in the PR body never fired for it.
+  It 'files a parent with an unparseable manifest as unreadable, not read'
+    use_fixture npm-v3
+    printf 'not json at all\n' > node_modules/express/package.json
+    When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_malformed}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"ranges":["^4.17.21"],"parents_read":[],"parents_unreadable":["express","test-exclude"],"parents_malformed":["express"]}'
   End
 
   # Yarn PnP installs no node_modules at all: every parent is unreadable and
