@@ -56,6 +56,18 @@ Describe 'mutating verbs run only in a linked worktree'
     The stderr should include 'submodule'
   End
 
+  # A submodule whose own path begins with worktrees/ writes a gitdir like
+  # .git/modules/worktrees/foo, where the last marker is `worktrees` and the
+  # last-marker rule alone would misread it as a linked worktree. Only the
+  # `.git/modules/` probe inside the worktrees arm catches it.
+  It 'apply_constraint refuses in a submodule whose path begins with worktrees/'
+    use_fixture yarn-berry
+    fake_linked_worktree '../../.git/modules/worktrees/foo'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
   # A repo that lives under a directory named `modules` is an ordinary
   # monorepo, and its worktrees are ordinary worktrees. Matching `modules`
   # unanchored refused every one of them with a false diagnosis.
