@@ -66,7 +66,9 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   without enabling anything and leaves the machine as you found it. If — and only if — an
   **essential step** (commit, most commonly: hooks from lefthook or husky invoke the bare
   package-manager name) has actually failed on a missing bare `yarn`/`pnpm`, the sanctioned fix
-  is `$ADAPTER shim "$WORK/bin"` — one silent call that writes the shim and returns its
+  is `cd "$WORK/fix" && $ADAPTER shim "$WORK/bin"` — one silent call that writes the shim (it
+  detects the package manager from the worktree, so it needs the prefix like every other adapter
+  call) and returns its
   `path_prefix` to prepend to PATH for that command. The shim exists so commits can succeed; it
   is not license to retry a verification check that could not run (phase 5: one attempt, then
   CI). Never hand-roll
@@ -81,15 +83,21 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   and split independent steps into separate calls. Never append `; echo "exit:$?"` or similar
   markers: the tool result already reports the exit status, and the extra segment breaks
   permission matching for the whole command.
+- **Every Bash call starts fresh; nothing carries over from the last one.** The tool resets cwd
+  to the session directory between invocations and shell variables do not survive, so a `cd`
+  issued once does not govern the calls after it. **Every command locates itself**: git uses
+  `git -C <literal path>`, and every non-git command carries its own `cd "$WORK/fix" && ` prefix.
+  A command that relies on an earlier `cd` runs in `repo_root` instead, which is exactly how a
+  live run bumped a package and regenerated a lockfile in the user's checkout.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
   switch`, stash, or edit checked-out files under `repo_root` itself. Exactly two writes into
   the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
   and one line in `.git/info/exclude` keeping it out of `git status` (local-only, never
   committed).
-- **Until `$WORK/fix` exists and you are working inside it, every command must be read-only.**
-  Your shell starts in `repo_root`, so a mutating command issued before worktree setup — the
-  adapter's `apply_constraint` or `install`, a package-manager invocation, an Edit of
-  `package.json` — lands in the user's tree. Phase 1 comes first, always; no fix work of any
+- **Until `$WORK/fix` exists and your commands name it, every command must be read-only.**
+  Every Bash call starts in `repo_root`, so a mutating command issued before worktree setup, or
+  one issued afterwards without the prefix — the adapter's `apply_constraint` or `install`, a
+  package-manager invocation, an Edit of `package.json` — lands in the user's tree. Phase 1 comes first, always; no fix work of any
   kind before it.
 - **If you find changes in the user's tree — even changes you believe you caused — never
   revert, checkout, stash, or clean them.** Attribution can be wrong and discards are
@@ -129,23 +137,23 @@ git -C <repo_root> fetch origin <default_branch>
 git -C <repo_root> branch --list "<branch_name>"   # any output => branch exists => stop
 mkdir -p <repo_root>/.claude/worktrees
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
-cd "$WORK/fix"
 ```
 
-Run every subsequent command from `$WORK/fix`. Worktrees do not share installed dependencies, so
-your install in phase 4 is a full one.
+No `cd` of its own follows the worktree creation, here or anywhere in this document: cwd does not
+survive to the next call, so every later command carries its own location instead (see Hard
+rules). Worktrees do not share installed dependencies, so your install in phase 4 is a full one.
 
 **Never combine `cd` with `git` in one command — no exceptions.** Every git invocation uses
 `git -C <literal path>`. The compound form (`cd "$WORK/fix" && git diff`) trips a per-command
 "cd before git" security review that no permission rule can silence, interrupting the user once
 per invocation, while the `-C` form is covered by the standing rules and runs silently. Non-git
-commands (the adapter, package manager scripts) do run with the worktree as cwd; only git needs
-the `-C` form.
+commands (the adapter, the check runner, the risk scorer) take the `cd "$WORK/fix" && ` prefix
+instead, which is covered too; only git needs the `-C` form.
 
 ## Phase 2: Record the pre-fix baseline
 
 ```bash
-$ADAPTER resolved_versions <package>
+cd "$WORK/fix" && $ADAPTER resolved_versions <package>
 ```
 
 Keep this output. The merge-risk rating needs the version resolved *before* the fix, and once you
@@ -160,7 +168,7 @@ failure (phase `baseline`). Do not treat a failed parse as an empty result.
 ## Phase 3: Classify the dependency
 
 ```bash
-$ADAPTER why <package>
+cd "$WORK/fix" && $ADAPTER why <package>
 ```
 
 `relationship` is `direct` or `transitive`, and `parents` lists the direct parents a scoped
@@ -173,10 +181,10 @@ Derive a **major-bounded** range from `highest_fixed_version`: `3.1.2` becomes `
 
 ```bash
 # direct dependency
-$ADAPTER apply_constraint <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>'
 
 # transitive: pass every parent from phase 3
-$ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
+cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
 ```
 
 The adapter picks the right syntax per package manager, merges into existing entries rather than
@@ -185,8 +193,8 @@ replacing them, and preserves the manifest's formatting. Its `observations` arra
 into your result JSON, where the orchestrator aggregates them across the batch.
 
 ```bash
-$ADAPTER install
-$ADAPTER validate <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER install
+cd "$WORK/fix" && $ADAPTER validate <package> '>=<version> <<next_major>'
 ```
 
 `validate` checks **every** resolved version against the constraint and lists `violations` on
@@ -202,7 +210,7 @@ When `validate` fails, work through these in order:
    scoped entries do not cover. Escalate:
 
    ```bash
-   $ADAPTER apply_constraint --tighten-bare <package> '>=<version> <<next_major>'
+   cd "$WORK/fix" && $ADAPTER apply_constraint --tighten-bare <package> '>=<version> <<next_major>'
    ```
 
    Record it: the PR body must say the bare override was tightened because scoped entries alone
@@ -215,7 +223,7 @@ When `validate` fails, work through these in order:
 ## Phase 5: Run the repository's own checks
 
 ```bash
-$ADAPTER verification_commands
+cd "$WORK/fix" && $ADAPTER verification_commands
 ```
 
 `commands` is a **candidate list**, not a running order. The script filters obvious long-running
@@ -227,7 +235,7 @@ you skipped and why in your result's `scripts` array.
 Run each remaining candidate through the outcome runner, from the worktree:
 
 ```bash
-<scripts_dir>/run-check.sh <pm_exec> <script-name>
+cd "$WORK/fix" && <scripts_dir>/run-check.sh <pm_exec> <script-name>
 ```
 
 It returns `{command, exit, log, lines, tail}` — the exit code and the last 60 lines are in the
@@ -262,11 +270,11 @@ full install, so create it lazily, only when needed:
 
 ```bash
 git -C <repo_root> worktree add --detach "$WORK/base" "origin/<default_branch>"
-cd "$WORK/base"
-$ADAPTER install
-<the failing command>          # same command, same environment
-cd "$WORK/fix"
+cd "$WORK/base" && $ADAPTER install
+cd "$WORK/base" && <scripts_dir>/run-check.sh <the failing command>   # same command, same environment
 ```
+
+Nothing switches you back afterwards; the next phase's commands carry `$WORK/fix` themselves.
 
 Report both results explicitly, including in the PR body.
 
@@ -276,11 +284,11 @@ default branch.
 
 ## Phase 6: Score merge risk
 
-Capture the post-fix version with `$ADAPTER resolved_versions <package>`, then:
+Capture the post-fix version with `cd "$WORK/fix" && $ADAPTER resolved_versions <package>`, then:
 
 ```bash
-$ADAPTER why <package> > "$WORK/why.json"
-<scripts_dir>/score-merge-risk.sh \
+cd "$WORK/fix" && $ADAPTER why <package> > "$WORK/why.json"
+cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --package <package> \
   --before <lowest version from phase 2, omit entirely if there was no baseline> \
   --after <resolved version now> \
@@ -305,11 +313,13 @@ Use the returned `markdown` verbatim in the PR body.
 
 ## Phase 7: Commit, push, open the draft PR
 
-Commit and push from the worktree. Do not pause first: the PR is the review artifact, and it goes
-up as a draft precisely so nothing is final until a human says so.
+Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
+first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
+until a human says so.
 
 ```bash
-git add package.json <lockfile>
+git -C "$WORK/fix" add package.json <lockfile>
+git -C "$WORK/fix" commit -m "..."
 ```
 
 Commit message:
@@ -325,7 +335,8 @@ Alerts resolved:
 Refs: https://github.com/<nwo>/security/dependabot/<number>
 ```
 
-Push with `git push -u origin <branch_name>`, then create the draft PR. Collect **all** required
+Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the draft PR. The `gh`
+calls below are location-independent because every one of them carries `--repo`. Collect **all** required
 labels from every source and apply them together, each via its own `--label` flag. This flow
 always requires `Security`. Check every CLAUDE.md in your context for additional required labels.
 No source overrides another; labels are additive.
@@ -395,7 +406,6 @@ and auto-merge state in front of the user.
 Before returning — on success **and** on every failure path:
 
 ```bash
-cd <repo_root>
 git -C <repo_root> worktree remove --force "$WORK/fix"     # --force: installs dirty the tree
 git -C <repo_root> worktree remove --force "$WORK/base" 2>/dev/null || true
 git -C <repo_root> worktree prune

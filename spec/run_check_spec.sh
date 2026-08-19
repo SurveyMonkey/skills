@@ -34,6 +34,26 @@ Describe 'run-check.sh'
     The contents of file "$TEST_DIR/.gh-security-check.log" should equal 'captured'
   End
 
+  # A check runs the repository's own scripts, so running it in the user's
+  # checkout is the contamination this plugin exists to avoid. Worktrees carry
+  # a .git file, primary checkouts a .git directory.
+  It 'refuses to run when .git is a directory'
+    setup_dir
+    mkdir .git
+    When run script "$COMMON/run-check.sh" sh -c 'echo ok'
+    The status should equal 1
+    The stderr should include 'primary checkout'
+    The path "$TEST_DIR/.gh-security-check.log" should not be exist
+  End
+
+  It 'proceeds when .git is a worktree file'
+    setup_dir
+    printf 'gitdir: /elsewhere/.git/worktrees/fix\n' > .git
+    When call common_jq run-check.sh '{exit, tail}' sh -c 'echo ok'
+    The status should be success
+    The output should equal '{"exit":0,"tail":["ok"]}'
+  End
+
   It 'requires a command'
     setup_dir
     When run script "$COMMON/run-check.sh"

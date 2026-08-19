@@ -23,6 +23,17 @@ if [ "$#" -lt 1 ]; then
   exit 1
 fi
 
+# A check runs the repository's own scripts and drops a log beside them, so it
+# is as cwd-sensitive as the mutating adapter verbs and refuses a primary
+# checkout on the same test: worktrees carry a .git *file*, the user's checkout
+# a .git *directory*. Without this, a lost cwd (no Bash call inherits the
+# previous one's) runs the suite in the user's tree. Fixtures have no .git and
+# are unaffected.
+if [ -d .git ]; then
+  printf '{"error":"refusing to run a check in a primary checkout (.git is a directory here); run from the fix worktree"}\n' >&2
+  exit 1
+fi
+
 LOG="$PWD/.gh-security-check.log"
 
 "$@" > "$LOG" 2>&1

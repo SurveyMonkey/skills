@@ -34,6 +34,24 @@ Describe 'preflight-permissions.sh'
     The output should include 'gh-security/scripts/*'
   End
 
+  # No Bash call inherits the previous call's cwd, so every non-git command the
+  # fix agent runs is prescribed as `cd <worktree> && ...` and needs a rule.
+  It 'covers the cd prefix into the worktree'
+    make_repo
+    When call common_jq preflight-permissions.sh '[.missing[] | select(startswith("Bash(cd "))]' check "$REPO"
+    The status should be success
+    The output should equal "[\"Bash(cd *$REPO/.claude/worktrees/*)\"]"
+  End
+
+  # Push is `git -C <worktree> push ...` like every other git call, so the
+  # worktree rule covers it and a bare-push rule would be dead weight.
+  It 'carries no bare git push rule'
+    make_repo
+    When call common_jq preflight-permissions.sh '[.missing[] | select(startswith("Bash(git push"))] | length' check "$REPO"
+    The status should be success
+    The output should equal '0'
+  End
+
   It 'check is read-only'
     make_repo
     When call common_jq preflight-permissions.sh '.exists' check "$REPO"
