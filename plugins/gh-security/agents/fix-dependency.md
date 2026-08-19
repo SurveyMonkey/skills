@@ -200,7 +200,9 @@ cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>
 The adapter picks the right syntax per package manager, merges into existing entries rather than
 replacing them, and preserves the manifest's formatting. Its `observations` array lists
 **unscoped global overrides** already in the manifest. Do not act on them; carry them verbatim
-into your result JSON, where the orchestrator aggregates them across the batch.
+into your result JSON, where the orchestrator aggregates them across the batch. Keep this first
+array: it is the only record of what the manifest looked like before you touched it, and it is
+what tells a bare override you *tightened* from one you *added*.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
@@ -230,16 +232,35 @@ When `validate` fails, work through these in order:
 
 1. **Uncovered parents.** A violating version usually arrives via a parent not in your override
    list. Add scoped entries for those parents and re-run install and validate.
-2. **A bare global override.** If the manifest already has an unscoped override for this package
-   (check the `observations`) with a range below the fixed version, it governs every path your
-   scoped entries do not cover. Escalate:
+2. **A bare global override.** Two different situations reach the same command, and they are not
+   the same change:
+
+   - **Tightening.** The manifest already has an unscoped override for this package (it is in
+     the `observations` from your first `apply_constraint` call, with `targets_this_package`
+     true) and its range sits below the fixed version, so it governs every path your scoped
+     entries do not cover.
+   - **Adding.** No unscoped override for this package exists, and no set of scoped parents
+     covers every resolved copy. Adding one pins the package for **every** consumer in the tree,
+     including copies that were never vulnerable, so it is the widest change this flow can make
+     and the last thing to reach for. Exhaust step 1 first: a parent you have not added yet is
+     the far more common cause.
+
+   Either way:
 
    ```bash
    cd "$WORK/fix" && $ADAPTER apply_constraint --tighten-bare <package> '>=<version> <<next_major>'
    ```
 
-   Record it: the PR body must say the bare override was tightened because scoped entries alone
-   could not satisfy the constraint.
+   The flag writes the bare entry whether or not one was already there; the `observations` you
+   captured **before** this call are what distinguish the two cases. Then report it in all three
+   of these places. None is optional:
+
+   - `bare_override` in your result JSON: `"tightened"` or `"added"`. Either way `action` is
+     `"bare-override"`, not `"scoped-override"`, even though you also wrote scoped entries.
+   - **Adding only:** one entry appended to your result's `observations[]` (shape and required
+     content under Result). The orchestrator aggregates unscoped overrides from that array, so a
+     pin this run created and did not record there is debt no later audit can trace back.
+   - A section in the PR body (phase 7).
 3. **A stale lockfile.** If validation still fails, the lockfile may hold pinned versions that
    resist overrides. Deleting a lockfile needs interactive confirmation you cannot obtain: stop,
    clean up, and return a failure (phase `validate`, detail noting that lockfile regeneration
@@ -345,20 +366,28 @@ cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --after <resolved version now> \
   --adapter $ADAPTER \
   --why-json "$WORK/why.json" \
-  --f4 <0|1|2> --f5 <0|1|2>
+  --f4 <0|1|2> --f5 <0|1|2> \
+  --override-scope <none|scoped|bare-tightened|bare-added>
 ```
 
 The script computes F1 (version delta), F2 (runtime exposure), and F3 (usage surface). You supply
-the two factors only you know, from phase 5:
+the three factors only you know:
 
-- **F4 test signal**: `0` tests pass and exercise the affected modules; `1` tests pass but
-  nothing clearly exercises them; `2` no test script, or tests could not run.
-- **F5 verification**: `0` every script ran clean; `1` scripts ran with pre-existing failures;
-  `2` one or more scripts skipped or partially run.
+- **F4 test signal** (phase 5): `0` tests pass and exercise the affected modules; `1` tests pass
+  but nothing clearly exercises them; `2` no test script, or tests could not run.
+- **F5 verification** (phase 5): `0` every script ran clean; `1` scripts ran with pre-existing
+  failures; `2` one or more scripts skipped or partially run.
+- **F6 override blast radius** (phase 4), via `--override-scope`: `none` you updated the direct
+  dependency and added no override; `scoped` parent-scoped entries only; `bare-tightened` you
+  tightened a pre-existing unscoped override; `bare-added` you introduced one. It scores 0, 0, 1,
+  2 respectively, because a bare override constrains every consumer in the tree while a scoped
+  one constrains only the paths that carried the alerts. Report the **widest** shape you applied:
+  scoped entries plus an escalation to a bare override is `bare-tightened` or `bare-added`, never
+  `scoped`.
 
-Be honest about F4 and F5. They gate whether the orchestrator may even offer to promote your PR
-out of draft; scoring them generously defeats the one signal that says "nobody has verified
-this".
+Be honest about all three. F4 and F5 gate whether the orchestrator may even offer to promote your
+PR out of draft, and a `bare-added` fix never rates Low; scoring them generously defeats the
+signals that say "nobody has verified this" and "this pins the whole tree".
 
 Use the returned `markdown` verbatim in the PR body.
 
@@ -378,7 +407,7 @@ Commit message:
 ```
 fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x
 
-<Direct update | Scoped override> to >=<version> via <override location>.
+<Direct update | Scoped override | Bare override> to >=<version> via <override location>.
 
 Alerts resolved:
 - #<number>: <CVE> (<severity>)
@@ -410,7 +439,7 @@ PR body:
 ```markdown
 ## Summary
 
-- Resolves <N> Dependabot alert(s) for `<package>` in the <major_line>.x line by <updating the direct dependency | adding scoped overrides>
+- Resolves <N> Dependabot alert(s) for `<package>` in the <major_line>.x line by <updating the direct dependency | adding scoped overrides | adding an unscoped override>
 - Target version: >=<highest_fixed_version>
 - Resolved version: <post-fix resolved version>
 - Other major lines of this package, if any, are fixed by their own PRs
@@ -458,9 +487,21 @@ PR body:
 EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
 
-If you tightened a bare override in phase 4, add a short section saying so and why. Do **not**
-mark the PR ready or offer to: promotion is the orchestrator's decision, made with check state
-and auto-merge state in front of the user.
+If you tightened **or added** a bare override in phase 4, the body gets a `## Global override`
+section after `## Changes`. It is required, not a nicety: a reviewer seeing a new unscoped entry
+in the diff has no other way to learn why it is there. Say which of the two happened, name the
+package and the range, list
+the scoped parents you tried, and name the resolved copies that survived them. For an added
+override, also say which copies were already safe and are now pinned anyway.
+
+> ## Global override
+>
+> Added an unscoped override `sharp: ">=0.35.0 <1"`. Scoped entries on `@vercel/analytics` and
+> `astro` left `0.34.5` resolving under `next > @vercel/analytics`, and no single parent covered
+> both copies. This also pins `astro`'s `0.35.3`, which was never vulnerable.
+
+Do **not** mark the PR ready or offer to: promotion is the orchestrator's decision, made with
+check state and auto-merge state in front of the user.
 
 ## Cleanup
 
@@ -491,7 +532,7 @@ End your final message with exactly one fenced JSON block:
   "repo": "<nwo>",
   "branch": "<branch_name>",
   "pr_url": "https://github.com/<nwo>/pull/<n>",
-  "action": "direct-update | scoped-override",
+  "action": "direct-update | scoped-override | bare-override",
   "resolved_version": "<post-fix resolved version>",
   "risk": {"band": "Low", "score": 3, "f4": 0, "f5": 0},
   "scripts": [
@@ -500,18 +541,42 @@ End your final message with exactly one fenced JSON block:
   ],
   "observations": [],
   "requires_major_bump": [],
-  "bare_override_tightened": false,
+  "bare_override": "none",
   "failure": null
 }
 ```
 
+- `action` is `direct-update` when you changed the dependency's own version, `scoped-override`
+  when every override entry you wrote names a parent, and `bare-override` whenever you wrote or
+  tightened an unscoped entry. The widest shape wins, so scoped entries alongside a bare one are
+  still `bare-override`.
+- `bare_override` is `none`, `added`, or `tightened`, and it must agree with `action`: anything
+  other than `none` means `action` is `bare-override`, and `bare-override` never pairs with
+  `none`. `tightened` requires a matching pre-fix observation (`targets_this_package` true);
+  without one, what you did was `added`.
 - `scripts[].result` is `pass`, `fail-preexisting`, `fail-caused`, or `skipped`; `detail` carries
   the judgment (for `fail-preexisting`, what the default-branch run showed).
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can
   reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
   the orchestrator reports it.
 - `observations` is the adapter's `apply_constraint` observations array, passed through
-  **verbatim** so the orchestrator can deduplicate across agents.
+  **verbatim** so the orchestrator can deduplicate across agents, plus **one entry of your own
+  appended to it when, and only when, `bare_override` is `added`**:
+
+  ```json
+  {
+    "type": "unscoped_override_added",
+    "key": "sharp",
+    "range": ">=0.35.0 <1",
+    "targets_this_package": true,
+    "reason": "0.34.5 resolves via next > @vercel/analytics and 0.35.3 via astro; scoped entries on @vercel/analytics and astro left 0.34.5 violating, and no single parent covers both copies"
+  }
+  ```
+
+  `reason` must name **the resolved copies and the scoped parents you actually tried**. "No
+  scoped form covered every path" restates the situation instead of evidencing it and does not
+  satisfy this; a reader of the pin audit must be able to tell from the entry alone why a global
+  pin was the remaining option.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
   `null`, and `failure` is `{"phase": "input | worktree | baseline | install | validate | verify | push | pr", "detail": "..."}`.
   Everything you completed before stopping still gets reported (`scripts`, `observations`).

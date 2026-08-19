@@ -177,12 +177,16 @@ End
 Describe 'score-merge-risk.sh'
   After 'cleanup_fixture'
 
-  # Helper: write a why payload, then score against it.
+  # Helper: write a why payload, then score against it. The override scope is
+  # optional here and defaults to `none` (a plain direct update), so the
+  # examples that predate F6 read unchanged; scope-specific examples pass it.
   score() {
     _rel=$1; _dev=$2; _parents=$3; _before=$4; _after=$5; _f4=$6; _f5=$7; _filter=$8
+    _scope=${9:-none}
     jq -n --arg rel "$_rel" --argjson dev "$_dev" --argjson parents "$_parents" \
       '{relationship: $rel, dev_only: $dev, parents: $parents, package: "lodash"}' > why.json
     _args="--package lodash --after $_after --adapter $ADAPTER --why-json why.json --f4 $_f4 --f5 $_f5"
+    _args="$_args --override-scope $_scope"
     if [ -n "$_before" ]; then
       _args="$_args --before $_before"
     fi
@@ -247,6 +251,59 @@ Describe 'score-merge-risk.sh'
     The output should equal '{"score":2,"band":"Medium","escalated":true}'
   End
 
+  # F6, override blast radius (issue #20). A bare override pins the package
+  # for every consumer in the tree, including copies that were never
+  # vulnerable, so it must not score the same as a parent-scoped entry.
+  Describe 'override blast radius'
+    Parameters
+      # scope           expected F6
+      none              0
+      scoped            0
+      bare-tightened    1
+      bare-added        2
+    End
+
+    It "scores $1 as $2"
+      use_fixture yarn-berry
+      When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '.factors[5].score' "$1"
+      The status should be success
+      The output should equal "$2"
+    End
+  End
+
+  It 'says what an added bare override does, in the evidence'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '.factors[5].evidence' bare-added
+    The status should be success
+    The output should equal '"new unscoped override pins lodash for every consumer, including copies that were never vulnerable"'
+  End
+
+  # The thresholds are absolute risk points, not proportions of the maximum,
+  # so adding a sixth factor must not reband a fix that introduced no
+  # override. Same inputs, same band as before F6 existed.
+  It 'reports the new maximum without moving the bands'
+    use_fixture yarn-berry
+    When call score direct false '[]' 1.0.0 1.1.0 1 1 '{score, max, band}'
+    The status should be success
+    The output should equal '{"score":5,"max":12,"band":"Medium"}'
+  End
+
+  # Everything else clean would total 1 and rate Low; a global pin this PR
+  # created belongs where a reviewer will look at it.
+  It 'never rates an added bare override as Low'
+    use_fixture yarn-berry
+    When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '{score, band, escalated, escalation_reason}' bare-added
+    The status should be success
+    The output should equal '{"score":3,"band":"Medium","escalated":true,"escalation_reason":"a newly added unscoped override never rates Low"}'
+  End
+
+  It 'names the blocker that escalated a major delta'
+    use_fixture yarn-berry
+    When call score direct true '[]' 1.0.0 2.0.0 0 0 '{escalation_reason, markdown: (.markdown | split("\n")[2])}'
+    The status should be success
+    The output should equal '{"escalation_reason":"a major version delta never rates Low","markdown":"> Escalated from Low: a major version delta never rates Low."}'
+  End
+
   It 'scores a missing baseline as a major delta and says so'
     use_fixture yarn-berry
     When call score direct true '[]' '' 2.0.0 0 0 '{f1: .factors[0].score, evidence: .factors[0].evidence}'
@@ -265,7 +322,7 @@ Describe 'score-merge-risk.sh'
   Describe 'argument validation'
     It 'rejects an out-of-range factor score'
       use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 5 --f5 0
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 5 --f5 0 --override-scope none
       The status should not equal 0
       The stderr should include 'must be 0, 1, or 2'
     End
@@ -275,6 +332,22 @@ Describe 'score-merge-risk.sh'
       When run script "$COMMON/score-merge-risk.sh" --package lodash
       The status should not equal 0
       The stderr should include 'Missing required argument'
+    End
+
+    # The remediation shape is a fact the caller knows and the score depends
+    # on, so there is no safe default to silently fall back to.
+    It 'requires the override scope'
+      use_fixture yarn-berry
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0
+      The status should not equal 0
+      The stderr should include 'Missing required argument: --override-scope'
+    End
+
+    It 'rejects an unknown override scope'
+      use_fixture yarn-berry
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope global
+      The status should not equal 0
+      The stderr should include 'must be none, scoped, bare-tightened, or bare-added'
     End
   End
 End

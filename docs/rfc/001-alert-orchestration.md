@@ -156,7 +156,7 @@ A subagent that cannot complete safely (validation fails, scripts break in ways 
 
 ### Merge-risk rubric
 
-Every PR the fix subagent opens carries a **merge risk** rating (Low / Medium / High) so a reviewer can calibrate scrutiny before reading a line of diff. The rating is computed, not vibes: five factors, each scored 0 to 2, summed to a 0-10 score with a factor breakdown table in the PR body.
+Every PR the fix subagent opens carries a **merge risk** rating (Low / Medium / High) so a reviewer can calibrate scrutiny before reading a line of diff. The rating is computed, not vibes: ~~five factors, each scored 0 to 2, summed to a 0-10 score~~ **six factors as of Phase 2** ([#20](https://github.com/SurveyMonkey/skills/issues/20)), each scored 0 to 2, summed to a 0-12 score, with a factor breakdown table in the PR body.
 
 | # | Factor | 0 | 1 | 2 |
 |---|---|---|---|---|
@@ -165,15 +165,16 @@ Every PR the fix subagent opens carries a **merge risk** rating (Low / Medium / 
 | F3 | **Usage surface** (for direct deps: modules importing the package; for transitives: modules importing its direct parent) | No source imports (build/tooling only) | 1-5 importing modules | More than 5 importing modules, or imports in entry points |
 | F4 | **Test signal** | Repo tests pass and test files exercise the importing modules | Tests pass but none clearly exercise the affected modules | No test script, or tests could not run |
 | F5 | **Verification completeness** (from the subagent's own run) | All repo scripts ran clean | Scripts ran; pre-existing failures noted | One or more scripts skipped or partially run |
+| F6 | **Override blast radius** (which remediation shape the subagent applied) | Direct update, or an override scoped to the parents that carried the alerts | A pre-existing unscoped override tightened | A new unscoped override introduced |
 
-Bands: **Low** 0-3, **Medium** 4-6, **High** 7-10, with one escalation rule: a major version delta (F1 = 2) never rates Low, regardless of total. A major bump of an untested, widely imported runtime dependency lands where it should (High); a patch bump of a dev-only transitive with passing tests lands at Low. These bands and thresholds ship as-is as the starting baseline; feedback from engineers reviewing scored PRs drives adjustments, recorded in the calibration ADR (see Decisions & Follow-ups).
+Bands: **Low** 0-3, **Medium** 4-6, **High** 7 and above, with two escalation rules: neither a major version delta (F1 = 2) nor a newly introduced unscoped override (F6 = 2) ever rates Low, regardless of total. A major bump of an untested, widely imported runtime dependency lands where it should (High); a patch bump of a dev-only transitive with passing tests lands at Low. These bands and thresholds ship as-is as the starting baseline; feedback from engineers reviewing scored PRs drives adjustments, recorded in the calibration ADR (see Decisions & Follow-ups). The thresholds are absolute risk points rather than proportions of the maximum, which is why adding F6 did not move them: F6 is 0 for every direct update and every scoped override, so no fix that scored a band before the sixth factor scores a different one after it.
 
-Division of labor follows the same principle as everything else here. `score-merge-risk.sh` computes F1 (version compare of lockfile versions before and after, via the adapter's `compare_versions`), F2 (dependency graph classification from the `why` output and the manifest), and F3 (import-site grep across source files using the adapter's per-language import patterns and name mapping, excluding tests and build output). F4 and F5 are facts the subagent already has from its verification phase and passes in as inputs; the script applies the scoring and emits the JSON breakdown. If the repo has coverage tooling configured, the subagent may refine F4 with actual coverage of the importing modules, noting in the PR body which signal was used.
+Division of labor follows the same principle as everything else here. `score-merge-risk.sh` computes F1 (version compare of lockfile versions before and after, via the adapter's `compare_versions`), F2 (dependency graph classification from the `why` output and the manifest), and F3 (import-site grep across source files using the adapter's per-language import patterns and name mapping, excluding tests and build output). F4, F5, and F6 are facts the subagent already has (the first two from its verification phase, F6 from the fix it applied, passed as `--override-scope none|scoped|bare-tightened|bare-added`); the script applies the scoring and emits the JSON breakdown. If the repo has coverage tooling configured, the subagent may refine F4 with actual coverage of the importing modules, noting in the PR body which signal was used.
 
 PR body addition:
 
 ```markdown
-## Merge risk: Medium (5/10)
+## Merge risk: Medium (5/12)
 
 | Factor | Score | Evidence |
 |---|---|---|
@@ -182,6 +183,7 @@ PR body addition:
 | Usage surface | 1 | Imported in 3 modules |
 | Test signal | 1 | Tests pass; affected modules not directly exercised |
 | Verification | 0 | lint, test, build all clean |
+| Override blast radius | 0 | scoped override: only the dependency paths that carried the alerts are pinned |
 ```
 
 The audit-pins subagent reuses the same rubric for its removal PRs, scoring the delta between pinned and naturally resolved versions.
@@ -291,6 +293,7 @@ Settled during RFC review and incorporated above:
 - **Where auto-merge is armed on a PR, promoting is merging**, so armed PRs get per-PR confirmation instead of the batch offer (field data: arsenalamerica/app#233 merged itself on promotion; recorded in ADR 002's consequences).
 - Fix subagent worktrees live at ~~`.claude/worktrees/fix-dependabot-<package>`~~ **`.claude/worktrees/fix-dependabot-<package>-<major_line>x`** (amended by [#19](https://github.com/SurveyMonkey/skills/issues/19); a package with two vulnerable major lines gets one worktree per line, so the path has to carry the line) inside the target repository, kept out of `git status` via a local `.git/info/exclude` line ([ADR 003](../adr/003-worktree-isolation-and-concurrency-cap.md)). Temp directories outside the repo were tried first and reversed on field data from the first live dispatch: out-of-workspace permission prompts whose suggested rules key to ephemeral `mktemp` paths can never persist across runs, and that friction class is what aborted the run.
 - **A group is one package major line, not one package** ([#19](https://github.com/SurveyMonkey/skills/issues/19)). `discover-alerts.sh` keys groups on the package name plus the major of `first_patched_version` and carries that as `major_line`; grouping by package alone collapsed every patched version into one `highest_fixed_version` that described only the newest line, leaving the older lines vulnerable under a group reported as fixed. Each group gets its own branch and worktree (`-<major_line>x` suffix, applied even to single-line packages so a package that grows a second line later does not rename the branch it already had) and its own PR. The adapter's `validate` gains `--line`, which scopes the constraint check to that line, and `--vulnerable`, which takes the group's advisory ranges so completeness is checked against the alerts rather than inferred from the constraint; `--line` without `--vulnerable` is refused, as is a `--vulnerable` range that does not parse, because both would report a partial fix as clean. Copies below the line that no in-group patch can reach come back as `requires_major_bump[]`: reported in the PR body and the agent result, never attempted, since widening the range past the major bound would break the parent that pinned them.
+- **The rubric gained a sixth factor, F6 override blast radius, during Phase 2** ([#20](https://github.com/SurveyMonkey/skills/issues/20)). A bare, unscoped override pins the package for every consumer in the tree, including copies that were never vulnerable, and scored identically to a parent-scoped entry; adding one is now `bare-override` in the subagent's result, scores 2, and never rates Low. The five-factor 0-10 total became 0-12 with the band thresholds unmoved, because they are absolute risk points and F6 is 0 for every direct update and scoped override.
 
 To be spawned as this RFC executes:
 
