@@ -18,17 +18,34 @@
 # whose `.git` is also a file.
 #
 # So the check resolves the enclosing repository top by walking up to the
-# first `.git`, then classifies it:
+# first `.git`, then classifies it. These are the gitdir pointers git actually
+# writes, verified against real repositories rather than assumed:
 #
-#   .git directory                 -> primary checkout, refuse
-#   .git file, gitdir .../modules/ -> submodule of somebody's checkout, refuse
-#   .git file, gitdir .../worktrees/ -> linked worktree, proceed
-#   nothing found                  -> not a repository at all, refuse
+#   .git is a directory                                  primary checkout, refuse
+#   gitdir: /abs/main/.git/worktrees/wt                   linked worktree, proceed
+#   gitdir: /abs/bare.git/worktrees/wt                    linked worktree of a
+#                                                         bare clone, proceed
+#   gitdir: ../.git/modules/sub                           submodule, refuse
+#   gitdir: ../../.git/modules/pkgs/deep                  submodule, refuse
+#   gitdir: ../../main/.git/worktrees/wt/modules/sub      submodule checked out
+#                                                         inside a worktree, refuse
+#   no .git found anywhere above                          not a repository, refuse
 #
-# `git worktree add` writes a gitdir pointing into `<main>/.git/worktrees/<name>`,
-# while a submodule's points into `<parent>/.git/modules/<name>`; that is the
-# one byte-level difference between the two, and it is what separates them
-# here. The walk is plain file inspection rather than `git rev-parse` so the
+# Two things the earlier unanchored `*/modules/*` test got wrong, both real:
+#
+#   * a submodule's pointer is RELATIVE (`../.git/modules/sub`), not absolute;
+#   * a perfectly ordinary worktree of a repo that happens to live under a
+#     directory named `modules` (`/src/modules/app/.git/worktrees/fix`) was
+#     diagnosed as a submodule and refused.
+#
+# So the markers are matched with their `/` separators and the decision is made
+# on which one comes LAST, since a submodule inside a linked worktree carries
+# both and is still a submodule. The extra `.git/modules/` probe covers the
+# reverse pathology, a submodule whose path begins with `worktrees/`
+# (`../.git/modules/worktrees/foo`), where the last marker lies. Ambiguity only
+# ever resolves toward refusing.
+#
+# The walk is plain file inspection rather than `git rev-parse` so the
 # guard keeps working when git is missing or the cwd is a scratch directory,
 # and so it stays testable without building a real repository per example.
 #
@@ -76,10 +93,26 @@ case "$first_line" in
 esac
 [ -n "$gitdir" ] || refuse "$top/.git is not a readable git worktree pointer"
 
-# Order matters: a submodule checked out inside a linked worktree has both
-# markers in its gitdir, and it is still a submodule.
-case "$gitdir" in
-  */modules/*)   refuse "this is a git submodule (its gitdir is $gitdir)" ;;
-  */worktrees/*) exit 0 ;;
-  *)             refuse "$top is not a linked worktree (its gitdir is $gitdir)" ;;
+submodule() { refuse "this is a git submodule (its gitdir is $gitdir)"; }
+
+# A trailing `/` so the last path segment can be tested as a marker too, and so
+# a worktree or submodule whose own NAME is `modules` never reads as one.
+probe="$gitdir/"
+
+case "$probe" in
+  */worktrees/*)
+    # Everything after the last `/worktrees/`: a `modules/` in there is a
+    # submodule nested inside this worktree.
+    case "${probe##*/worktrees/}" in
+      */modules/*) submodule ;;
+    esac
+    # And a submodule whose path starts with `worktrees/` puts the last marker
+    # in the wrong place; its gitdir is still anchored at `.git/modules/`.
+    case "$probe" in
+      *.git/modules/*) submodule ;;
+    esac
+    exit 0
+    ;;
+  *.git/modules/*) submodule ;;
+  *)               refuse "$top is not a linked worktree (its gitdir is $gitdir)" ;;
 esac

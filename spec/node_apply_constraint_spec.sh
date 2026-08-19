@@ -37,6 +37,47 @@ Describe 'mutating verbs run only in a linked worktree'
     The stderr should include 'submodule'
   End
 
+  # The pointer git actually writes for a submodule is relative, not the
+  # absolute path the row above uses.
+  It 'apply_constraint refuses in a git submodule with a relative gitdir'
+    use_fixture yarn-berry
+    fake_linked_worktree '../.git/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # A submodule checked out inside the fix worktree carries both markers.
+  It 'apply_constraint refuses in a submodule nested in a linked worktree'
+    use_fixture yarn-berry
+    fake_linked_worktree '../../main/.git/worktrees/fix/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # A repo that lives under a directory named `modules` is an ordinary
+  # monorepo, and its worktrees are ordinary worktrees. Matching `modules`
+  # unanchored refused every one of them with a false diagnosis.
+  It 'apply_constraint proceeds in a linked worktree of a repo under modules/'
+    use_fixture yarn-berry
+    fake_linked_worktree '/src/modules/app/.git/worktrees/fix'
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
+    The status should be success
+    The output should equal '{"package":"lodash","pm":"yarn"}'
+  End
+
+  # The guard runs before verb_detect, so this needs no package manager on
+  # PATH; deleting the one guard line from verb_install would let an install
+  # regenerate the user's own lockfile, which is the live incident behind #18.
+  It 'install refuses in a primary checkout'
+    use_fixture yarn-berry
+    fake_primary_checkout
+    When run script "$ADAPTER" install
+    The status should equal 1
+    The stderr should include 'primary checkout'
+  End
+
   It 'apply_constraint proceeds in a linked worktree'
     use_fixture yarn-berry
     When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
