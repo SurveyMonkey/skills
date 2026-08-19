@@ -24,15 +24,13 @@ if [ "$#" -lt 1 ]; then
 fi
 
 # A check runs the repository's own scripts and drops a log beside them, so it
-# is as cwd-sensitive as the mutating adapter verbs and refuses a primary
-# checkout on the same test: worktrees carry a .git *file*, the user's checkout
-# a .git *directory*. Without this, a lost cwd (no Bash call inherits the
-# previous one's) runs the suite in the user's tree. Fixtures have no .git and
-# are unaffected.
-if [ -d .git ]; then
-  printf '{"error":"refusing to run a check in a primary checkout (.git is a directory here); run from the fix worktree"}\n' >&2
-  exit 1
-fi
+# is as cwd-sensitive as the mutating adapter verbs and refuses on the same
+# test: the current directory must be inside a linked worktree. Without this, a
+# lost cwd (no Bash call inherits the previous one's) runs the suite in the
+# user's tree and leaves the log there. The classification is shared with the
+# adapter rather than repeated here; see require-linked-worktree.sh.
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+"$SCRIPT_DIR/require-linked-worktree.sh" "refusing to run a check here" || exit 1
 
 LOG="$PWD/.gh-security-check.log"
 

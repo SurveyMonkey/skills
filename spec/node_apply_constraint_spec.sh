@@ -1,23 +1,56 @@
 #!/bin/sh
 # shellcheck shell=sh
 
-Describe 'mutating verbs refuse a primary checkout'
+Describe 'mutating verbs run only in a linked worktree'
   After 'cleanup_fixture'
 
-  # Worktrees carry a .git file; the user's checkout has a .git directory. A
-  # mutating verb running in the latter silently edits the user's tree
-  # (observed live), so it refuses. A .git file — a real worktree — proceeds.
-  It 'apply_constraint refuses when .git is a directory'
+  # A mutating verb outside a linked worktree edits somebody's real tree
+  # (observed live), so it refuses. use_fixture fakes a linked worktree; each
+  # example here replaces that with the shape it is about.
+  It 'apply_constraint refuses in a primary checkout'
     use_fixture yarn-berry
-    mkdir .git
+    fake_primary_checkout
     When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
     The status should equal 1
     The stderr should include 'primary checkout'
   End
 
-  It 'apply_constraint proceeds when .git is a worktree file'
+  # The old `.git` test looked only at the current directory, so any
+  # subdirectory of the user's checkout passed it.
+  It 'apply_constraint refuses in a subdirectory of a primary checkout'
     use_fixture yarn-berry
-    printf 'gitdir: /elsewhere/.git/worktrees/fix\n' > .git
+    fake_primary_checkout
+    mkdir -p packages/app
+    cp package.json yarn.lock packages/app/
+    cd packages/app || return 1
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'subdirectory of the primary checkout'
+  End
+
+  # A submodule's .git is a file too, which the old test accepted as a worktree.
+  It 'apply_constraint refuses in a git submodule'
+    use_fixture yarn-berry
+    fake_linked_worktree '/parent/.git/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  It 'apply_constraint proceeds in a linked worktree'
+    use_fixture yarn-berry
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
+    The status should be success
+    The output should equal '{"package":"lodash","pm":"yarn"}'
+  End
+
+  # A monorepo package directory inside the fix worktree is a legitimate place
+  # to apply a constraint.
+  It 'apply_constraint proceeds in a subdirectory of a linked worktree'
+    use_fixture yarn-berry
+    mkdir -p packages/app
+    cp package.json yarn.lock packages/app/
+    cd packages/app || return 1
     When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
     The status should be success
     The output should equal '{"package":"lodash","pm":"yarn"}'

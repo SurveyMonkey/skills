@@ -51,9 +51,12 @@ lockfile in a real repository ([#18](https://github.com/SurveyMonkey/skills/issu
 prescribed snippet locates itself: `git -C <path> ...`, or `cd <path> && <command>` for
 everything else.
 
-Scripts that are cwd-sensitive enforce it rather than trust it. `refuse_primary_checkout` in
-`ecosystems/node.sh` gates the mutating verbs, and `common/run-check.sh` applies the same test:
-a worktree has a `.git` file, a primary checkout a `.git` directory, and a fixture neither.
+Scripts that are cwd-sensitive enforce it rather than trust it, through one shared guard:
+`common/require-linked-worktree.sh`, invoked by `refuse_primary_checkout` in `ecosystems/node.sh`
+for the mutating verbs and by `common/run-check.sh` for every check run. It requires the cwd to
+sit inside a **linked** worktree, which a primary checkout, any subdirectory of one, a submodule
+(also a `.git` file), and a directory in no repository at all all fail. Specs fake a worktree
+with `fake_linked_worktree` (see `spec/spec_helper.sh`).
 
 ## The rule that matters most
 

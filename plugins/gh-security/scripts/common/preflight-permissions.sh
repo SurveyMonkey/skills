@@ -67,9 +67,12 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # sometimes write `git -C "/path"` (correct hygiene for arbitrary paths), and
 # permission matching is literal, so an unquoted rule would not match.
 # The `cd` rule is not decoration: no Bash call inherits the previous call's
-# cwd, so every non-git command in agents/fix-dependency.md is prescribed as
-# `cd <worktree> && <command>` (issue #18). Push needs no rule of its own for
-# the same reason — it is `git -C <worktree> push ...`, already covered above.
+# cwd, so every non-git, non-gh command in agents/fix-dependency.md is
+# prescribed as `cd <worktree> && <command>` (issue #18). Push needs no rule of
+# its own for the same reason — it is `git -C <worktree> push ...`, already
+# covered above. The gh commands (`gh label list/create`, `gh pr create`) are
+# the deliberate exception: `--repo <nwo>` makes them location-independent, so
+# they carry no cd prefix and are covered by the NWO rules below instead.
 RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C *$REPO_ROOT* status *)
 Bash(git -C *$REPO_ROOT* branch --list *)

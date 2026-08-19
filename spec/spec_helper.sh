@@ -25,6 +25,25 @@ use_fixture() {
   TEST_DIR=$(mktemp -d)
   cp -R "$FIXTURES/$1/." "$TEST_DIR/"
   cd "$TEST_DIR" || return 1
+  fake_linked_worktree
+}
+
+# Make the current directory look like the root of a linked git worktree.
+#
+# The cwd guard (common/require-linked-worktree.sh) classifies by inspecting
+# the enclosing repository's `.git`, so a worktree is faked with the pointer
+# file `git worktree add` writes. Scratch directories are otherwise outside
+# any repository, which the guard refuses, and the mutating verbs are the ones
+# most fixtures exercise.
+fake_linked_worktree() {
+  printf 'gitdir: %s\n' "${1:-/elsewhere/.git/worktrees/fix}" > .git
+}
+
+# The opposite: the user's own checkout, which every cwd-sensitive script must
+# refuse to touch.
+fake_primary_checkout() {
+  rm -f .git
+  mkdir -p .git
 }
 
 cleanup_fixture() {

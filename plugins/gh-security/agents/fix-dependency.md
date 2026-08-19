@@ -276,6 +276,15 @@ cd "$WORK/base" && <scripts_dir>/run-check.sh <the failing command>   # same com
 
 Nothing switches you back afterwards; the next phase's commands carry `$WORK/fix` themselves.
 
+**A failed base install voids the comparison.** Check the install's exit status before running the
+check: a registry blip or a secret-gated hook leaves `$WORK/base` without dependencies, the check
+then fails for that reason instead of the repository's, and a failure read off that run looks
+exactly like pre-existing breakage. The baseline is unusable, so the comparison is inconclusive:
+classify the fix-tree failure as `fail-caused` (the conservative default, because it must then be
+fixed or the fix abandoned) or return a failure result (phase `verify`) saying the baseline could
+not be established. **Never `fail-preexisting` off a base tree that did not install** — that is
+the one classification the missing baseline cannot support, and it does not block the PR.
+
 Report both results explicitly, including in the PR body.
 
 Pre-existing failures are noted and do not block. Failures this update causes must be fixed here,
