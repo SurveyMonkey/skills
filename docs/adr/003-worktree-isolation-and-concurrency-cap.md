@@ -80,3 +80,13 @@ harness grows a completion signal worth reacting to.
 
 Stale local fix branches surface as agent failures instead of silent reuse. The orchestrator's
 summary tells the user which branch to inspect or delete; that judgment stays human.
+
+## Amendment: one worktree per package major line
+
+[Issue #19](https://github.com/SurveyMonkey/skills/issues/19) split discovery's groups by package
+*major line*, so the unit of isolation is a line, not a package: worktrees are
+`.claude/worktrees/fix-dependabot-<package>-<major_line>x` and branches
+`fix/dependabot-<package>-<major_line>x`. Everything above holds unchanged; the suffix is what
+keeps two agents fixing different lines of one package from colliding, and it is applied to every
+group so a package that grows a second line later does not rename the branch of the line it
+already had.

@@ -1,24 +1,49 @@
 #!/usr/bin/env bash
-# discover-alerts.sh — Fetch and rank open Dependabot alerts by package
+# discover-alerts.sh: fetch and rank open Dependabot alerts by package major line
 # Usage: discover-alerts.sh <owner/repo>
 # Output: JSON with two arrays:
 #   actionable: groups with a fix available and no open PR (sorted by severity then EPSS)
 #   skipped:    groups excluded (no fix or PR already open), with reason
 #
 # Each group:
-#   { package, ecosystem, max_severity, max_epss_percentile, alert_count,
-#     highest_fixed_version, branch_name, alerts: [{ number, cve, ghsa,
-#     severity, summary, vulnerable_range, fixed_in, epss_percentile,
+#   { package, ecosystem, major_line, max_severity, max_epss_percentile,
+#     alert_count, highest_fixed_version, branch_name, alerts: [{ number, cve,
+#     ghsa, severity, summary, vulnerable_range, fixed_in, epss_percentile,
 #     relationship, manifest }] }
 # Skipped groups also include: { reason, open_pr_url?, error? }
+#
+# One group per package *major line*, not per package. A package resolved at
+# several majors at once (undici at 5.x, 6.x and 7.x is the case that exposed
+# this) has a different patched version per line, and the fix agent's overrides
+# are major-bounded, so a single highest_fixed_version describes only the newest
+# line and leaves the others silently vulnerable (issue #19). Each group maps to
+# one worktree, one branch, one PR.
+#
+# The line key is the leading component of `first_patched_version`, which is the
+# only line signal an alert carries: the API never says which resolved copy an
+# alert matched. Deciding whether a resolved copy is actually covered needs the
+# lockfile, and that is the adapter's `validate` verb, not this script.
 
 set -euo pipefail
 
 REPO="${1:?Usage: discover-alerts.sh <owner/repo>}"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-# Single source of truth for branch naming
+# Single source of truth for branch naming. The line suffix is what keeps two
+# groups for the same package from colliding on one branch; it is applied to
+# every group, including single-line packages, so a package that grows a second
+# line later does not rename the branch of the line it already had.
 branch_name() {
+  case "$2" in
+    none) printf 'fix/dependabot-%s-unfixed' "$1" ;;
+    *)    printf 'fix/dependabot-%s-%sx' "$1" "$2" ;;
+  esac
+}
+
+# Branch name used before per-line grouping shipped. Checked alongside the
+# current name when looking for an open PR, so an upgrade does not open a
+# duplicate PR against a repo that already has one from the old naming.
+legacy_branch_name() {
   printf 'fix/dependabot-%s' "$1"
 }
 
@@ -85,10 +110,19 @@ GROUPED=$(printf '%s' "$ALERTS" | jq '
       elif . == "low" then 3
       else 4 end;
 
-    group_by(.dependency.package.name) |
+    # Leading component of the patched version, or "none" when no patched
+    # version is published. Extraction, not comparison: ordering versions stays
+    # behind the adapter (see scripts/CLAUDE.md).
+    def line_of:
+      ((.security_vulnerability.first_patched_version.identifier // "")
+       | tostring | sub("^[v=]+"; "") | split(".")[0] // "")
+      | if . == "" then "none" else . end;
+
+    group_by([.dependency.package.name, line_of]) |
     map({
       package: .[0].dependency.package.name,
       ecosystem: .[0].dependency.package.ecosystem,
+      major_line: (.[0] | line_of),
       max_severity: (
         [.[].security_advisory.severity] |
         map({val: ., rank: (. | sev_rank)}) |
@@ -118,7 +152,10 @@ GROUPED=$(printf '%s' "$ALERTS" | jq '
         manifest: (.dependency.manifest_path // "unknown")
       }]
     }) |
-    sort_by([(.max_severity | sev_rank), -(.max_epss_percentile)])
+    # Package and line break ties so two lines of the same package always come
+    # out in a stable order.
+    sort_by([(.max_severity | sev_rank), -(.max_epss_percentile),
+             .package, .major_line])
   end
 ' 2>"$ERR_FILE") || {
   printf '{"error":"Failed to group alerts: %s"}\n' "$(cat "$ERR_FILE")" >&2
@@ -149,7 +186,8 @@ while IFS= read -r group; do
   else
     highest="none"
   fi
-  branch=$(branch_name "$pkg")
+  line=$(printf '%s' "$group" | jq -r '.major_line')
+  branch=$(branch_name "$pkg" "$line")
   enriched=$(printf '%s' "$group" | jq -c \
     --arg hv "$highest" --arg br "$branch" \
     '. + {highest_fixed_version: $hv, branch_name: $br} | del(.fixed_versions)')
@@ -160,22 +198,37 @@ while IFS= read -r group; do
     continue
   fi
 
-  # Skip if an open PR already exists for this package
-  pr_check_err=$(mktemp)
-  if pr_url=$(gh pr list --repo "$REPO" \
-    --search "head:${branch}" \
-    --state open --json url --jq '.[0].url // empty' 2>"$pr_check_err"); then
-    rm -f "$pr_check_err"
-    if [ -n "$pr_url" ]; then
-      SKIPPED+=("$(printf '%s' "$enriched" | jq -c --arg url "$pr_url" \
-        '. + {reason: "open PR exists", open_pr_url: $url}')")
-      continue
+  # Skip if an open PR already exists for this line, under either the current
+  # branch name or the pre-#19 one.
+  pr_url=""
+  pr_failed=false
+  pr_err=""
+  for candidate in "$branch" "$(legacy_branch_name "$pkg")"; do
+    pr_check_err=$(mktemp)
+    if found=$(gh pr list --repo "$REPO" \
+      --search "head:${candidate}" \
+      --state open --json url --jq '.[0].url // empty' 2>"$pr_check_err"); then
+      rm -f "$pr_check_err"
+      if [ -n "$found" ]; then
+        pr_url="$found"
+        break
+      fi
+    else
+      pr_err=$(cat "$pr_check_err")
+      rm -f "$pr_check_err"
+      pr_failed=true
+      break
     fi
-  else
-    pr_err=$(cat "$pr_check_err")
-    rm -f "$pr_check_err"
+  done
+
+  if [ "$pr_failed" = true ]; then
     SKIPPED+=("$(printf '%s' "$enriched" | jq -c --arg err "$pr_err" \
       '. + {reason: "PR check failed", error: $err}')")
+    continue
+  fi
+  if [ -n "$pr_url" ]; then
+    SKIPPED+=("$(printf '%s' "$enriched" | jq -c --arg url "$pr_url" \
+      '. + {reason: "open PR exists", open_pr_url: $url}')")
     continue
   fi
 

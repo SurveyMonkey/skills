@@ -10,7 +10,10 @@
 #   resolved_versions <pkg>                    -> {present, versions[], lockfile_entries}
 #   apply_constraint <pkg> <range> [parent...] -> {changes, observations[]}
 #   install                                    -> pass-through, exit code is the signal
-#   validate <pkg> <range>                     -> {ok, violations[]}
+#   validate [--line <major>] [--vulnerable <range>]... <pkg> <range>
+#                                              -> {ok, violations[],
+#                                                  unresolved_alerts[],
+#                                                  requires_major_bump[]}
 #   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
@@ -53,7 +56,9 @@ def semver_parse:
   (. // "") | tostring
   | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")
   | sub("^[v=]+"; "")
-  | split("+")[0]
+  # `"" | split("+")` is [], so an empty version would index to null and the
+  # next split would abort the whole program rather than compare as 0.0.0.
+  | (split("+")[0] // "")
   | (split("-")) as $parts
   | {
       core: ($parts[0] | split(".") | map(tonumber? // 0)),
@@ -138,10 +143,16 @@ def eval_token($version):
     else $c == 0 end;
 
 # Alternatives separated by || are OR'd; comparators within one are AND'd.
-# Covers every range this adapter emits (">=X <Y") plus the common forms
-# already present in real manifests.
+# Covers every range this adapter emits (">=X <Y"), the common forms already
+# present in real manifests, and GitHub advisory syntax (">= 7.0.0, < 7.29.0").
+#
+# The space after an operator has to go before tokenizing: the token separator
+# is whitespace, so "< 6.28.0" would otherwise split into a bare "<" and a bare
+# "6.28.0" and be read as "less than nothing, and exactly 6.28.0", which is both
+# wrong and, with an empty version to parse, fatal.
 def satisfies($version; $range):
   ($range // "") | tostring
+  | gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")
   | split("||")
   | map(
       [splits("[[:space:],]+")]
@@ -485,21 +496,97 @@ verb_why() {
 
 # ---------------------------------------------------------------------------
 # validate — composes resolved_versions and applies the constraint
+#
+# Usage: validate [--line <major>] [--vulnerable <range>]... <pkg> <constraint>
+#
+# Two independent questions, because passing the first is not passing the
+# second (issue #19):
+#
+#   1. Constraint. Does every resolved copy satisfy the range the fix applied?
+#      `--line` narrows this to the major line the group targets: a package
+#      resolved at 5.x, 6.x and 7.x concurrently can never satisfy one
+#      major-bounded range, and each line is a separate group with its own fix.
+#   2. Completeness. Does any resolved copy still match a `vulnerable_range`
+#      from the group's alerts? Meeting the constraint on the copy you fixed
+#      says nothing about the copies you did not, which is how a partial fix
+#      used to report success.
+#
+# A still-vulnerable copy *below* the target line is separated out as
+# `requires_major_bump`: no advisory in this group offers a fix within that
+# copy's major, so no scoped override bounded to it can help. The remediation is
+# a major bump of its parent, or dropping the parent, and that is reported
+# rather than attempted.
+#
+# `--vulnerable` takes advisory range syntax verbatim (">= 7.0.0, < 7.29.0",
+# "< 6.28.0"). Ranges are passed rather than whole alert JSON because advisory
+# summaries carry apostrophes and an agent has no safe way to quote them.
 # ---------------------------------------------------------------------------
 verb_validate() {
+  line=""
+  vuln_ranges=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --line)
+        line="${2:?--line requires a major}"
+        shift 2
+        ;;
+      --vulnerable)
+        vuln_ranges="$vuln_ranges${2:?--vulnerable requires a range}
+"
+        shift 2
+        ;;
+      --) shift; break ;;
+      -*) die "validate: unknown option '$1'" ;;
+      *)  break ;;
+    esac
+  done
+
   pkg="${1:?validate requires a package name}"
   range="${2:?validate requires a range}"
+
+  case "$line" in
+    ''|*[!0-9]*)
+      [ -z "$line" ] || die "validate: --line must be a major number, got '$line'"
+      ;;
+  esac
+
+  vuln_json=$(printf '%s' "$vuln_ranges" \
+    | jq -Rs 'split("\n") | map(select(length > 0)) | unique')
 
   resolved=$(verb_resolved_versions "$pkg")
   if [ "$(printf '%s' "$resolved" | jq -r '.present')" != "true" ]; then
     die "validate: '$pkg' resolves to no versions in the lockfile. Nothing to validate."
   fi
 
-  result=$(printf '%s' "$resolved" | jq --arg range "$range" "$SEMVER_JQ"'
+  result=$(printf '%s' "$resolved" \
+    | jq --arg range "$range" --arg line "$line" --argjson vulnerable "$vuln_json" \
+      "$SEMVER_JQ"'
+    def major_of: semver_parse | (.core[0] // 0);
+
     . as $r
-    | ([ $r.versions[] | select(satisfies(.version; $range) | not) ]) as $bad
-    | {ok: (($bad | length) == 0), package: $r.package, range: $range,
-       checked: $r.count, violations: $bad,
+    | (if $line == "" then null else ($line | tonumber) end) as $lineno
+    | ([ $r.versions[]
+         | select($lineno == null or ((.version | major_of) == $lineno)) ]) as $inline
+    | ([ $inline[] | select(satisfies(.version; $range) | not) ]) as $bad
+    | ([ $r.versions[]
+         | . as $v
+         | ($vulnerable | map(select(satisfies($v.version; .)))) as $hits
+         | select(($hits | length) > 0)
+         | {version: $v.version, path: $v.path, vulnerable_ranges: $hits,
+            below_line: ($lineno != null and (($v.version | major_of) < $lineno))} ]) as $still
+    | ([ $still[] | select(.below_line     ) | del(.below_line) ]) as $bump
+    | ([ $still[] | select(.below_line|not) | del(.below_line) ]) as $unresolved
+    | {ok: (($bad | length) == 0
+            and ($unresolved | length) == 0
+            and ($lineno == null or ($inline | length) > 0)),
+       package: $r.package, range: $range,
+       line: (if $line == "" then null else $line end),
+       line_present: ($lineno == null or ($inline | length) > 0),
+       checked: ($inline | length),
+       resolved_count: $r.count,
+       violations: $bad,
+       unresolved_alerts: $unresolved,
+       requires_major_bump: $bump,
        resolved_versions: ([$r.versions[].version] | unique)}')
 
   printf '%s\n' "$result"
