@@ -102,9 +102,12 @@ a JSON object before any field of it is read.
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
 plus the root manifest's own declaration, which is read from those three and `devDependencies` too:
 the repository is a dependent like any other, and a dev-only direct dependency still declares a
-range a fix can leave behind. Parent discovery covers the same three blocks, because a lockfile
-entry records each of them under its own key and a parent that declares the package only optionally
-or as a peer still resolves it. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
+range a fix can leave behind. Parent discovery covers the same three blocks in npm lockfile v3, whose
+entries record each of them under their own key; a parent that declares the package only optionally
+or as a peer still resolves it. The pnpm and Yarn Berry lockfile parsers still discover parents
+through `dependencies` blocks alone, so an optional-only or peer-only parent is missed there; a
+range it declares reaches F7 only if the agent reads it by hand. Widening those parsers is open
+work, not a documented guarantee. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
 (read, but declaring the package in no block, which version skew produces legitimately),
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse, kept inside `parents_unreadable` so every consumer of that list stays

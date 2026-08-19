@@ -9,7 +9,7 @@
 #                       [--before <version>]
 #                       [--f4-evidence <text>] [--f5-evidence <text>]
 #
-# Output: {score, max, band, escalated, escalation_reason, delta,
+# Output: {package, score, max, band, escalated, escalation_reason, delta,
 #          majors_crossed, declared_ranges, override_scope, factors: [...],
 #          markdown}
 #
@@ -23,7 +23,7 @@
 # (issue #21). What changes a band is a fix that scores on the new factors or
 # trips the new escalation, which is the point of adding them: the sweep case
 # bork#350 goes from Medium 6 to High 7 on exactly that route. A fix that
-# scores 0 on both new factors, as every direct update with a scoped override
+# scores 0 on both new factors, as every direct update or scoped override
 # crossing at most one major line and no pin does, keeps the band it had. The
 # "no pin" half is not decoration: a single-major bump past a dependent's
 # `~1.2.3` scores 1 on F7 and can move Medium to High on that alone.
@@ -214,6 +214,17 @@ require_count() {
   esac
 }
 
+# Same promise for booleans. `[ "$satisfied" = "false" ]` puts every value
+# that is not the exact string in the risk-lowering branch, so a `"no"` or a
+# null reads as "satisfied, not pinned" and the range contributes nothing.
+require_bool() {
+  case "$2" in
+    true|false) ;;
+    *)
+      contract_error "adapter $ADAPTER: $1 must be true or false, got '$2'. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); any other value lands in the risk-lowering branch and the range stops counting." ;;
+  esac
+}
+
 if [ "$DECLARED_RANGES_STATED" = true ]; then
   # Duplicates are expected: several parents commonly declare the same range,
   # and repeating it in the evidence tells a reviewer nothing.
@@ -239,7 +250,9 @@ if [ "$DECLARED_RANGES_STATED" = true ]; then
     ahead=$(read_field majors_ahead "$facts")
     [ "$ahead" = "__null__" ] || require_count "range_facts majors_ahead for '$declared'" "$ahead"
     satisfied=$(read_field satisfied "$facts")
+    require_bool "range_facts satisfied for '$declared'" "$satisfied"
     pinned=$(read_field pinned "$facts")
+    require_bool "range_facts pinned for '$declared'" "$pinned"
     if [ "$satisfied" = "false" ]; then
       # Only a range the landed version *escapes* contributes its distance. A
       # satisfied range is a dependent declaring support for the line the fix
@@ -274,10 +287,19 @@ if [ -z "$BEFORE" ]; then
 else
   cmp=$("$ADAPTER" compare_versions "$BEFORE" "$AFTER")
   require_object "$cmp" "compare_versions '$BEFORE' '$AFTER'"
-  if [ "$(read_field delta "$cmp")" = "__absent__" ]; then
-    contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' emitted no 'delta' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); read as a default it would score every unanswered bump as a patch."
-  fi
+  case "$(read_field delta "$cmp")" in
+    __absent__|__null__)
+      contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' emitted no usable 'delta'. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); read as a default it would score every unanswered bump as a patch." ;;
+  esac
   DELTA=$(printf '%s' "$cmp" | jq -r '.delta')
+  # The `case` below maps anything unrecognized to F1=0, so an adapter
+  # answering "breaking" or "MAJOR" would score as a patch. Only the contract
+  # enum passes; prerelease and none are the legitimate zeros.
+  case "$DELTA" in
+    major|minor|patch|prerelease|none) ;;
+    *)
+      contract_error "adapter $ADAPTER: compare_versions '$BEFORE' '$AFTER' answered delta '$DELTA', which is not in the contract enum major|minor|patch|prerelease|none (docs/adr/001-ecosystem-adapter-contract.md); an unrecognized delta would score as a patch." ;;
+  esac
   # An adapter that does not report the distance cannot be scored against it.
   # Read straight, jq hands back the string "null", `[ "null" -ge 2 ]` errors
   # only on stderr inside an `if`, `set -e` does not see it, and the script

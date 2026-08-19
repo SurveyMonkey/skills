@@ -559,6 +559,53 @@ STUB
       The status should not equal 0
       The stderr should include 'delta'
     End
+
+    # A null delta passed the absence check, arrived as the string "null", and
+    # fell through the F1 case to 0: a three-major jump banded Low with
+    # evidence still reading "2 majors".
+    It 'refuses a compare_versions result with a null delta'
+      use_fixture yarn-berry
+      stub_adapter '{"result":1,"delta":null,"major_distance":2}' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'delta'
+    End
+
+    # Any token outside the enum takes the same fall-through route to 0.
+    It 'refuses a delta outside the contract enum'
+      use_fixture yarn-berry
+      stub_adapter '{"result":1,"delta":"breaking","major_distance":2}' '{}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range none
+      The status should not equal 0
+      The stderr should include 'major|minor|patch|prerelease|none'
+    End
+
+    # `[ "$satisfied" = "false" ]` puts every non-conforming value in the
+    # risk-lowering branch: a "no" scored as satisfied and the range stopped
+    # counting.
+    It 'refuses a satisfied that is not a boolean'
+      use_fixture yarn-berry
+      stub_adapter '{}' '{"parseable":true,"satisfied":"no","pinned":false,"floor_major":9,"majors_ahead":2}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range '^9'
+      The status should not equal 0
+      The stderr should include 'true or false'
+    End
+
+    It 'refuses a pinned that is not a boolean'
+      use_fixture yarn-berry
+      stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":null,"floor_major":9,"majors_ahead":2}'
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
+        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --declared-range '^9'
+      The status should not equal 0
+      The stderr should include 'true or false'
+    End
   End
 
   # Nobody has evidence the tree still works, and the fix dragged a runtime
