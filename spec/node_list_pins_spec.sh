@@ -84,6 +84,41 @@ Describe 'node.sh list_pins'
     End
   End
 
+  # The version after the last `@` is optional, and its absence is not a reason
+  # to read the package name as a range. Reported as `{kind:"range", range:
+  # "esbuild-wasm"}`, the audit would test — and could report as removable —
+  # an entry that decides which package ships.
+  Describe 'an alias with no version'
+    Parameters
+      unscoped '"uuid"'         '{"kind":"alias","alias_package":"short-uuid","alias_range":null,"range":null}'
+      scoped   '"@vercel/ncc"'  '{"kind":"alias","alias_package":"@vercel/nft","alias_range":null,"range":null}'
+    End
+
+    It "is still an alias when the target is $1"
+      use_fixture yarn-pins
+      When call pins "[.pins[] | select(.key == $2) | {kind, alias_package, alias_range, range}] | first"
+      The status should be success
+      The output should equal "$3"
+    End
+  End
+
+  # A value the adapter's range parser rejects is reported as unreadable rather
+  # than guessed at. The hyphen range is a legitimate npm range this evaluator
+  # does not implement, and it lands here honestly instead of being scored.
+  Describe 'values the range parser cannot read'
+    Parameters
+      'a dist-tag'      '"minimist"' '"latest"'
+      'a hyphen range'  '"debug"'    '"1.2.7 - 1.3.0"'
+    End
+
+    It "reports $1 as unparseable, keeping the raw value"
+      use_fixture yarn-pins
+      When call pins "[.pins[] | select(.key == $2) | {kind, range, value}] | first"
+      The status should be success
+      The output should equal "{\"kind\":\"unparseable\",\"range\":null,\"value\":$3}"
+    End
+  End
+
   It 'names the target package of an aliased pnpm override'
     use_fixture pnpm-pins
     When call pins '[.pins[] | select(.key == "esbuild") | {kind, alias_package}]'
@@ -144,11 +179,14 @@ Describe 'node.sh list_pins'
 
   # A manifest with no override block is a legitimate empty answer, not a
   # parser failure: this verb reads structured JSON, so "found nothing" here
-  # cannot mean what it means for the lockfile parsers.
+  # cannot mean what it means for the lockfile parsers. Each package manager
+  # reads a different key, so each needs its own absent-block case.
   Describe 'manifests with no pins'
     Parameters
-      'no override block' no-overrides '{"block_present":false,"count":0,"pins":[]}'
-      'empty manifest'    empty-yarn   '{"block_present":false,"count":0,"pins":[]}'
+      'a yarn manifest with no resolutions'  no-overrides      '{"block_present":false,"count":0,"pins":[]}'
+      'an empty yarn manifest'               empty-yarn        '{"block_present":false,"count":0,"pins":[]}'
+      'an npm manifest with no overrides'    empty-npm         '{"block_present":false,"count":0,"pins":[]}'
+      'a pnpm manifest with no pnpm block'   pnpm-no-overrides '{"block_present":false,"count":0,"pins":[]}'
     End
 
     It "reports $1 as empty rather than failing"
@@ -157,6 +195,58 @@ Describe 'node.sh list_pins'
       The status should be success
       The output should equal "$3"
     End
+  End
+
+  # An override block that exists but holds no entries is a third state, and
+  # `block_present` is what separates it from a manifest that never had one.
+  Describe 'an override block that is present and empty'
+    put() { jq "$1 = $2" package.json > pkg.tmp && mv pkg.tmp package.json; }
+
+    Parameters
+      npm  npm-v3    '.overrides'      '{}'
+      pnpm pnpm-v9   '.pnpm.overrides' '{}'
+      yarn yarn-berry '.resolutions'   '{}'
+    End
+
+    It "reports an empty $1 block as present with no pins"
+      use_fixture "$2"
+      put "$3" "$4"
+      When call pins '{block_present, count, bare_count}'
+      The status should be success
+      The output should equal '{"block_present":true,"count":0,"bare_count":0}'
+    End
+  End
+
+  # The failure this guards: coercing a non-object block to {} emitted
+  # `count: 0`, byte-identical to a manifest that genuinely pins nothing — and
+  # the audit stops on `count: 0`. A corrupted manifest would audit clean,
+  # which is the v0.1.0 "found nothing means all clear" class exactly.
+  Describe 'an override block that is not an object'
+    put() { jq "$1 = $2" package.json > pkg.tmp && mv pkg.tmp package.json; }
+
+    Parameters
+      'a string'  npm-v3     '.overrides'      '"oops"'
+      'an array'  pnpm-v9    '.pnpm.overrides' '["oops"]'
+      'a number'  yarn-berry '.resolutions'    '42'
+    End
+
+    It "fails rather than reporting no pins when the block is $1"
+      use_fixture "$2"
+      put "$3" "$4"
+      When run script "$ADAPTER" list_pins
+      The status should equal 1
+      The stderr should include 'not an object of override entries'
+    End
+  End
+
+  # `.pnpm.overrides` raises when `.pnpm` is a string, which would abort the
+  # whole jq program rather than reach the check above.
+  It 'fails when the container holding the block is not an object'
+    use_fixture pnpm-v9
+    jq '.pnpm = "oops"' package.json > pkg.tmp && mv pkg.tmp package.json
+    When run script "$ADAPTER" list_pins
+    The status should equal 1
+    The stderr should include 'cannot be read'
   End
 
   It 'names the block it read'

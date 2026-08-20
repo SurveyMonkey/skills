@@ -94,11 +94,18 @@ cd "$WORK/audit" && $ADAPTER list_pins
 ```
 
 Each pin carries `key` (the literal manifest key), `path`, `package`, `parents`, `scope`
-(`bare` or `scoped`), `value`, and `kind`.
+(`bare` or `scoped`), `value`, and `kind`. It also carries `selector`, `range`, `alias_package`
+and `alias_range` (see [ADR 001](../../../docs/adr/001-ecosystem-adapter-contract.md)); none of
+the phases below needs them, beyond quoting `range` and the alias fields in your report.
 
 `count` of 0 is a complete answer: this repository pins nothing, so report that and stop after
 cleanup. Unlike a lockfile parse, an empty override block is read from structured JSON and cannot
 mean "the parser failed".
+
+**A non-zero exit is not an empty result.** The adapter fails rather than reporting zero pins when
+the override block is present but is not an object of entries — a corrupted or hand-mangled
+manifest. Return a failure result (phase `list`) quoting its error; never report a manifest the
+adapter refused to read as a repository that pins nothing.
 
 **`kind` decides whether a pin is yours to test at all.** Only `range` entries are version pins:
 
@@ -121,7 +128,7 @@ turns "the version resolves safely now" into a finding a reviewer can act on.
 ```bash
 git -C "$WORK/audit" log --max-count=5 --date=short --format='%h %ad %s' -S '<key>' -- package.json
 gh pr list --repo <nwo> --search '<key>' --state merged --limit 5 --json number,url,title
-gh api "repos/<nwo>/dependabot/alerts?package=<package>&state=fixed&per_page=100" \
+gh api repos/<nwo>/dependabot/alerts -f state=fixed -f package=<package> -f per_page=100 \
   --jq '[.[] | {number, ghsa: .security_advisory.ghsa_id, range: .security_vulnerability.vulnerable_version_range}]'
 ```
 
@@ -193,7 +200,7 @@ that makes the whole pin `still-required` or `inconclusive`; there is no partial
 
 Present a table in your transcript, then the result block:
 
-> | Pin | Scope | Pinned | Without the pin | Advisories | Finding |
+> | Pin | Scope | Value | Without the pin | Advisories | Finding |
 > |---|---|---|---|---|---|
 > | `express>sha.js` | scoped | `>=2.4.11 <3` | 2.4.11 | 4 published, none match | removable |
 
