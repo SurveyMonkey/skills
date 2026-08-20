@@ -229,6 +229,102 @@ Describe 'node.sh resolved_versions'
   End
 End
 
+# The whole-tree view the pin audit diffs across a removal, so a pin whose
+# removal moves some OTHER package cannot come back a silent `removable`
+# (issue #42).
+Describe 'node.sh resolution_map'
+  After 'cleanup_fixture'
+
+  Describe 'every lockfile format yields the same shape'
+    Parameters
+      npm-v3     npm   6
+      pnpm-v9    pnpm  5
+      yarn-berry yarn  5
+    End
+
+    It "maps $1 to $3 packages"
+      use_fixture "$1"
+      When call adapter_jq '{pm, package_count, populated: (.lockfile_entries > 0)}' resolution_map
+      The status should be success
+      The output should equal "{\"pm\":\"$2\",\"package_count\":$3,\"populated\":true}"
+    End
+  End
+
+  # The map is only useful for a diff if it agrees with the verb the verdict is
+  # computed from. A disagreement is a parser bug, not a tie to break.
+  Describe 'the map agrees with resolved_versions'
+    # Printing both sides rather than a bare boolean, so a failure shows which
+    # parser drifted instead of only that one did.
+    versions_agree() {
+      _map=$("$ADAPTER" resolution_map | jq -c --arg p "$1" '.resolutions[$p] // []')
+      _one=$("$ADAPTER" resolved_versions "$1" | jq -c '[.versions[].version] | unique')
+      if [ "$_map" = "$_one" ]; then printf 'agree %s\n' "$_map"
+      else printf 'map=%s resolved_versions=%s\n' "$_map" "$_one"; fi
+    }
+
+    Parameters
+      npm-v3     lodash        '["3.10.1","4.17.21"]' # two copies, one nested
+      npm-v3     '@babel/core' '["7.24.0"]'           # scoped name
+      pnpm-v9    react-dom     '["18.2.0"]'           # peer-dependency suffix
+      pnpm-v9    'sha.js'      '["2.4.11"]'           # a dot is not a wildcard here
+      yarn-berry undici        '["5.28.4","6.19.8"]'  # two majors side by side
+    End
+
+    It "reports the same versions for $2 in $1"
+      use_fixture "$1"
+      When call versions_agree "$2"
+      The status should be success
+      The output should equal "agree $3"
+    End
+  End
+
+  It 'keeps two copies of one package as one entry with two versions'
+    use_fixture npm-v3
+    When call adapter_jq '.resolutions.lodash' resolution_map
+    The status should be success
+    The output should equal '["3.10.1","4.17.21"]'
+  End
+
+  It 'excludes the yarn workspace entry, which resolves to no registry version'
+    use_fixture yarn-berry
+    When call adapter_jq '.resolutions | has("demo-app")' resolution_map
+    The status should be success
+    The output should equal 'false'
+  End
+
+  It 'excludes the npm root entry'
+    use_fixture npm-v3
+    When call adapter_jq '.resolutions | has("demo-npm")' resolution_map
+    The status should be success
+    The output should equal 'false'
+  End
+
+  It 'does not mistake the pnpm overrides or snapshots blocks for packages'
+    # `overrides:` names lodash and express above `packages:`; `snapshots:`
+    # repeats every key below it.
+    use_fixture pnpm-v9
+    When call adapter_jq '.resolutions.lodash' resolution_map
+    The status should be success
+    The output should equal '["4.17.21"]'
+  End
+
+  Describe 'the empty-parse guard'
+    # A whole-tree diff against an empty map reports every package unchanged,
+    # which is the wrong-safe answer this plugin exists to avoid.
+    Parameters
+      empty-yarn
+      empty-npm
+    End
+
+    It "treats a zero-entry $1 lockfile as an error, never an empty tree"
+      use_fixture "$1"
+      When run script "$ADAPTER" resolution_map
+      The status should equal 1
+      The stderr should include 'Parsed 0 entries'
+    End
+  End
+End
+
 Describe 'node.sh why'
   After 'cleanup_fixture'
 

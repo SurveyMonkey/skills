@@ -141,6 +141,24 @@ When the adapter itself fails on a range, its stderr is kept in `adapter_errors[
 discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
 broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
 
+## A removal is judged against the whole tree, not one package
+
+An override is not scoped in its effects the way its key is scoped in its syntax. Lifting one
+changes dedup and hoisting and can let a peer conflict resolve differently, so removing a pin on A
+can move B. `resolved_versions A` cannot see that, and the `removable` verdict it produces is
+correct about A and silent about the tree it was tested in
+([#42](https://github.com/SurveyMonkey/skills/issues/42)).
+
+`resolution_map` is the whole-lockfile answer, and the audit diffs it across every removal.
+Anything else that judges a tree change reads it the same way. Two rules travel with it:
+
+- **Zero entries is an error here too, and for a sharper reason.** A diff against an empty map
+  reports every package unchanged — "found nothing" meaning "all clear" once more, this time
+  wearing the shape of a clean diff.
+- **A verdict says what it covers.** When the map is unavailable the audit still runs, but its
+  findings say the claim is about the named package only. A narrower finding is a smaller result;
+  a finding that outruns what was checked is a wrong one.
+
 ## The rule that matters most
 
 **Zero resolved versions is an error, never a pass.** `resolved_versions` returning an empty list

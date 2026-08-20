@@ -72,6 +72,22 @@ Splitting them serves two callers: the merge-risk baseline needs to enumerate ve
 any constraint exists to check against, and `validate` needs the same enumeration plus a
 predicate. One parser, two consumers.
 
+**`resolution_map` answers the whole-tree question `resolved_versions` cannot.** It returns
+`{pm, lockfile_entries, package_count, resolutions}`, where `resolutions` maps every package in the
+lockfile to its unique, lexically sorted version list. The pin audit needs it because an override
+reaches past the package it names: lifting one changes dedup and hoisting and can let a peer
+conflict resolve differently, so a removal can move a package the pin never mentioned. Diffing one
+package before and after a removal is blind to that, and the resulting `removable` verdict is right
+about its own package and silent about the tree
+([#42](https://github.com/SurveyMonkey/skills/issues/42)). A separate verb rather than a widened
+`resolved_versions`: that one has callers (`validate`, the merge-risk baseline) whose behavior must
+not shift, and its per-path detail is not what a diff wants. The empty-parse rule above applies
+unchanged, and for a sharper reason — a diff against an empty map reports every package unchanged,
+which is the wrong-safe answer by yet another route. Versions are sorted for comparability, not
+ranked; callers that need semver order still ask `compare_versions`. Entries that resolve to
+something other than a registry version (aliases, workspace links, `patch:`, git targets) are
+excluded, because "what version of X is in the tree" has no answer for them.
+
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR
 commits, and parsing it works before any install has run, which the pre-fix baseline requires.

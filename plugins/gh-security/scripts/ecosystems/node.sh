@@ -8,6 +8,8 @@
 #   detect                                     -> toolchain metadata
 #   why <pkg>                                  -> {relationship, parents[], raw}
 #   resolved_versions <pkg>                    -> {present, versions[], lockfile_entries}
+#   resolution_map                             -> {pm, lockfile_entries, package_count,
+#                                                  resolutions{}}
 #   apply_constraint <pkg> <range> [parent...] -> {changes, observations[]}
 #   install                                    -> pass-through, exit code is the signal
 #   validate [--line <major>] [--vulnerable <range>]... <pkg> <range>
@@ -468,6 +470,110 @@ verb_resolved_versions() {
         'unique_by(.version + .path)
          | {pm: $pm, package: $pkg, present: (length > 0), count: length,
             versions: ., lockfile_entries: $entries}'
+}
+
+# ---------------------------------------------------------------------------
+# resolution_map — every package in the lockfile, not one named package
+#
+# The pin audit's reason for existing: removing an override can change dedup,
+# hoisting, or how a peer conflict resolves, so a removal can move a package
+# the pin never named. `resolved_versions <pkg>` cannot see that, and a
+# `removable` verdict computed from it alone is right about its own package and
+# silent about the tree ([#42](https://github.com/SurveyMonkey/skills/issues/42)).
+# Diffing this map before and after a removal names what else moved.
+#
+# Deliberately a separate verb, not a widening of `resolved_versions`: that one
+# has callers (`validate`, the merge-risk baseline) whose behavior must not
+# shift, and its per-path detail is not what a whole-tree diff wants.
+#
+# `versions` are unique and lexically sorted, which makes two maps comparable
+# with a plain jq `==`. They are NOT semver-ordered; rank with
+# `compare_versions` if order matters. Aliases, workspace links, patch
+# protocols and git targets are excluded — every parser keeps only resolutions
+# whose version starts with a digit, because "what version of X is in the tree"
+# has no answer for an entry that does not resolve to a registry version.
+# ---------------------------------------------------------------------------
+npm_resolution_pairs() {
+  jq '
+    if (.packages | type) != "object" then
+      error("package-lock.json has no .packages object (lockfileVersion 1 is unsupported)")
+    else
+      [ .packages | to_entries[]
+        | select(.key | contains("node_modules/"))
+        | select(.value.version != null)
+        | {package: (.key | split("node_modules/") | last),
+           version: (.value.version | tostring)}
+        | select(.version | test("^[0-9]")) ]
+    end' package-lock.json
+}
+
+pnpm_resolution_pairs() {
+  awk '
+    /^packages:/ { inpkgs = 1; next }
+    /^[a-zA-Z]/  { inpkgs = 0 }
+    inpkgs && /^  [^ ]/ {
+      line = $0
+      sub(/^  /, "", line)
+      p = index(line, "(")
+      if (p > 0) line = substr(line, 1, p - 1)
+      sub(/:$/, "", line)
+      gsub(/\x27/, "", line)
+      # Split on the LAST "@": a scoped name carries one of its own.
+      at = 0
+      for (i = length(line); i > 1; i--) {
+        if (substr(line, i, 1) == "@") { at = i; break }
+      }
+      if (at == 0) next
+      name = substr(line, 1, at - 1)
+      ver  = substr(line, at + 1)
+      if (ver ~ /^[0-9]/) printf "%s\t%s\n", name, ver
+    }
+  ' pnpm-lock.yaml \
+    | jq -Rs 'split("\n") | map(select(length > 0) | split("\t")
+                                | {package: .[0], version: .[1]})'
+}
+
+yarn_resolution_pairs() {
+  awk '
+    {
+      i = index($0, "resolution: \"")
+      if (i == 0) next
+      rest = substr($0, i + 13)
+      j = index(rest, "\"")
+      if (j == 0) next
+      res = substr(rest, 1, j - 1)
+      k = index(res, "@npm:")
+      if (k == 0) next
+      name = substr(res, 1, k - 1)
+      ver  = substr(res, k + 5)
+      if (ver ~ /^[0-9]/) printf "%s\t%s\n", name, ver
+    }
+  ' yarn.lock \
+    | jq -Rs 'split("\n") | map(select(length > 0) | split("\t")
+                                | {package: .[0], version: .[1]})'
+}
+
+verb_resolution_map() {
+  pm=$(pm_of)
+  case "$pm" in
+    npm)  pairs=$(npm_resolution_pairs);  entries=$(npm_entry_count)  ;;
+    pnpm) pairs=$(pnpm_resolution_pairs); entries=$(pnpm_entry_count) ;;
+    yarn) pairs=$(yarn_resolution_pairs); entries=$(yarn_entry_count) ;;
+    *)    die "resolution_map: unsupported pm '$pm'" ;;
+  esac
+
+  # Same rule as resolved_versions: zero parsed entries is a broken parser,
+  # never a clean tree. A whole-tree diff against an empty map would report
+  # every package as unchanged, which is the wrong-safe answer.
+  if [ "$entries" -eq 0 ]; then
+    die "Parsed 0 entries from the lockfile for pm '$pm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result."
+  fi
+
+  printf '%s' "$pairs" \
+    | jq --arg pm "$pm" --argjson entries "$entries" \
+        '(reduce .[] as $p ({}; .[$p.package] += [$p.version]) | map_values(unique)) as $res
+         | {pm: $pm, lockfile_entries: $entries,
+            package_count: ($res | length), resolutions: $res}'
 }
 
 # ---------------------------------------------------------------------------
@@ -1319,6 +1425,7 @@ case "$VERB" in
   detect)                verb_detect ;;
   why)                   verb_why "$@" ;;
   resolved_versions)     verb_resolved_versions "$@" ;;
+  resolution_map)        verb_resolution_map ;;
   apply_constraint)      verb_apply_constraint "$@" ;;
   install)               verb_install ;;
   validate)              verb_validate "$@" ;;

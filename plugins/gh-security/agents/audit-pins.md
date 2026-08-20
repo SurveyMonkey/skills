@@ -162,16 +162,26 @@ either direction. A batch result is not evidence about any individual pin, and t
 shortcut that makes it one.
 
 First, **record the with-all-pins baseline**: install the manifest as it stands, once, then read
-the resolutions of each distinct package you are about to test.
+both the whole-tree resolution map and the resolutions of each distinct package you are about to
+test.
 
 ```bash
 cd "$WORK/audit" && $ADAPTER install
+cd "$WORK/audit" && $ADAPTER resolution_map                # once, the whole lockfile
 cd "$WORK/audit" && $ADAPTER resolved_versions <package>   # one call per distinct package
 ```
 
-Keep each `versions[]`. The tree is restored between every pin, so a package's baseline is read
-once and stays valid for every pin on it — this costs one install for the whole audit, not one per
-pin.
+Keep the map's `resolutions` object and each `versions[]`. The tree is restored between every pin,
+so both baselines are read once and stay valid for every pin — this costs one install for the whole
+audit, not one per pin.
+
+**If the baseline install fails, stop.** Return a failure result (phase `install`) quoting the
+error, and clean up. Do not fall back to testing pins against a tree you could not build: the
+baseline is what every later delta is measured against, and a package manager that rewrote part of
+the lockfile before failing poisons every pin's result at once, silently and in the same direction.
+One failure reported honestly beats a whole audit of plausible-looking verdicts. The same goes for
+a baseline `resolution_map` or `resolved_versions` that errors — both refuse to report a lockfile
+they could not parse, and that refusal is the answer.
 
 Then, for each `range` pin, in priority order — **bare pins first** (they constrain every consumer
 in the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
@@ -180,18 +190,41 @@ in the tree, so they are both the most costly and the most likely to be over-bro
    is the last entry, and nothing else.
 2. `cd "$WORK/audit" && $ADAPTER install`
 3. `cd "$WORK/audit" && $ADAPTER resolved_versions <package>`
-4. **Diff against the baseline.** The versions attributable to *this* pin are the ones present
-   after removal and absent from the baseline. `resolved_versions` reports every resolution of that
-   package name anywhere in the tree, not the ones the removed key was holding, so with two scoped
-   pins on one package the raw list carries the sibling's resolutions and unrelated copies
-   elsewhere in the tree. Judging those against the advisory database is how a genuinely safe
-   scoped pin reports `still-required` citing a version that has nothing to do with it. Keep both
-   lists and the delta; phase 5 judges the delta.
-5. Restore the tree before the next pin:
+4. `cd "$WORK/audit" && $ADAPTER resolution_map`
+5. **Diff the tested package against the baseline.** The versions attributable to *this* pin are
+   the ones present after removal and absent from the baseline. `resolved_versions` reports every
+   resolution of that package name anywhere in the tree, not the ones the removed key was holding,
+   so with two scoped pins on one package the raw list carries the sibling's resolutions and
+   unrelated copies elsewhere in the tree. Judging those against the advisory database is how a
+   genuinely safe scoped pin reports `still-required` citing a version that has nothing to do with
+   it. Keep both lists and the delta; phase 5 judges the delta.
+6. **Diff the whole map against the baseline map.** For every *other* package whose version set
+   changed, record `{package, baseline, without_pin, newly_admitted}`, where `newly_admitted` is
+   what the removal added. This is the collateral list, and it is usually empty.
+7. Restore the tree before the next pin:
    `git -C "$WORK/audit" checkout -- package.json <lockfile>`
 
+**Step 6 is not bookkeeping; it is the reason a `removable` verdict can be trusted.** An override
+reaches past its own target: lifting it changes dedup and hoisting, and lets a peer conflict
+resolve differently. If that moves some previously-safe package into a vulnerable version, a diff
+of the tested package alone cannot see it, and the pin reports `removable` while the tree it was
+tested in is no longer safe. This is the audit's only removal recommendation, so a wrong "safe"
+here is the most expensive mistake it can make.
+
+`resolution_map` and `resolved_versions` must agree about the tested package. If they do not, one
+of the two parsers is wrong; report the pin `inconclusive`, quote both answers, and do not pick a
+winner.
+
+**If `resolution_map` is unavailable** — exit 2 from an adapter that does not implement it, or an
+error on this lockfile — you have no whole-tree view, and you may not fabricate one. Fall back to
+the honest narrow claim: keep testing pins, set `collateral_changes` to `null`, and say in the
+report, per verdict and once in the summary, that the verdict covers the named package only and no
+other package's resolution was re-checked. A scoped claim is a smaller finding; a claim that
+outruns what was checked is a wrong one.
+
 An install that fails is a result: record the pin as `inconclusive` with the install error. Never
-report a pin as removable off a failed install, and restore the tree before continuing.
+report a pin as removable off a failed install, and restore the tree before continuing. A per-pin
+install failure stops that pin, not the run — unlike the baseline, whose failure stops everything.
 
 If `present` is false after removal, the package left the tree entirely — the pin was the only
 thing holding it in. That is `removable`, with the detail saying the package is no longer resolved
@@ -229,6 +262,25 @@ judgment to the reader.
 A pin is `removable` only when **every** version in the delta comes back `safe`. One version short
 of that makes the whole pin `still-required` or `inconclusive`; there is no partial removal.
 
+**Then judge the collateral list the same way.** For each entry phase 4 step 6 recorded, run
+`check-advisories.sh` against every version in its `newly_admitted`, using that entry's own package
+name — not the tested pin's. The list is usually empty, so this usually costs nothing; when it is
+not empty, it is the whole point. Collapse the results into `collateral_verdict`:
+
+| Collateral | `collateral_verdict` | Effect on the pin |
+|---|---|---|
+| nothing else moved | `none` | none; the verdict stands as computed |
+| every newly-admitted version `safe` | `safe` | none, but the report must still name what moved |
+| any `vulnerable` | `vulnerable` | the pin is `still-required` |
+| any `unknown` or `no-advisories`, none vulnerable | `inconclusive` | the pin is `inconclusive` |
+| `resolution_map` unavailable | `not-checked` | the verdict is scoped to the named package |
+
+A `vulnerable` collateral makes the pin `still-required` even when its own package came back
+clean, and `detail` must say why in those terms: the pin is not required for the package it names,
+it is required because removing it admits a vulnerable version of something else. Naming the
+package it is really holding is the finding; a bare `still-required` here would send a reader
+looking in the wrong place.
+
 **An empty delta is its own finding, not a missing one.** Nothing new resolved, so there is no
 version to judge and removing the entry changes nothing observable *in this manifest as it stands*
 — which is what a sibling pin on the same package holding the tree looks like. Report it
@@ -242,14 +294,21 @@ flat list of keys. Within each section, a table:
 
 > ### `minimatch` — 5 pins
 >
-> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
-> |---|---|---|---|---|---|
-> | `eslint>minimatch` | scoped | `>=3.1.5 <4` | nothing new resolved | not judged | removable-individually |
+> | Pin | Scope | Value | Attributable to removal | Elsewhere in the tree | Advisories | Finding |
+> |---|---|---|---|---|---|---|
+> | `eslint>minimatch` | scoped | `>=3.1.5 <4` | nothing new resolved | nothing else moved | not judged | removable-individually |
 
 For each removable pin say what a human would need to do (delete the entry, reinstall, and that the
 resolved version is unchanged or moves to X), and for each `still-required` say which advisory
 range still admits the version that would resolve. For `not-a-version-pin`, say what the entry
 actually is.
+
+**Every verdict states what it covers.** The "Elsewhere in the tree" column is not optional and
+never blank: it reads `nothing else moved`, or it names each other package whose resolution changed
+with its verdict, or it reads `not checked` when `resolution_map` was unavailable. A `removable`
+with an empty column and a `removable` with an unchecked one are different claims, and a reader who
+cannot tell them apart is being told the stronger one. Say once, in the summary, which of the two
+this run produced.
 
 **One pin at a time proves each pin removable on its own; it proves nothing about a set.** When two
 or more pins on the **same package** come back removable, their status is `removable-individually`,
@@ -313,6 +372,15 @@ End your final message with exactly one fenced JSON block:
       "resolved_without_pin": ["2.4.11", "2.4.9"],
       "attributable_versions": ["2.4.9"],
       "sibling_pins": [],
+      "collateral_changes": [
+        {
+          "package": "readable-stream",
+          "baseline": ["3.6.2"],
+          "without_pin": ["3.6.2", "2.3.8"],
+          "newly_admitted": ["2.3.8"]
+        }
+      ],
+      "collateral_verdict": "safe",
       "advisory_verdict": "safe",
       "advisory_count": 4,
       "matched_ranges": [],
@@ -321,7 +389,7 @@ End your final message with exactly one fenced JSON block:
         "pr_url": "https://github.com/<nwo>/pull/412",
         "fixed_alerts": [93, 148]
       },
-      "detail": "removing the entry newly admits sha.js 2.4.9 (2.4.11 is held elsewhere either way); no published advisory range admits 2.4.9"
+      "detail": "removing the entry newly admits sha.js 2.4.9 (2.4.11 is held elsewhere either way); no published advisory range admits 2.4.9. It also newly admits readable-stream 2.3.8 elsewhere in the tree, which no advisory range admits either"
     }
   ],
   "failure": null
@@ -339,8 +407,15 @@ End your final message with exactly one fenced JSON block:
   version `resolved_versions` reported after removal, verbatim; `attributable_versions` is the
   delta — what phase 5 judged. All three are `[]` when the package left the tree and `null` when
   the pin was not tested.
+- `collateral_changes` is phase 4 step 6's whole-lockfile diff: one entry per **other** package
+  whose resolved version set changed, `[]` when nothing else moved, and `null` when the pin was not
+  tested or `resolution_map` was unavailable. `collateral_verdict` is `none`, `safe`, `vulnerable`,
+  `inconclusive`, or `not-checked`, and `null` for an untested pin. `null` and `[]` are not
+  interchangeable: one says nothing else moved, the other says nobody looked.
 - `advisory_verdict`, `advisory_count` and `matched_ranges` come from `check-advisories.sh`
-  verbatim, and are `null`/`[]` for a pin that was not tested or whose delta was empty.
+  verbatim **for the tested package**, and are `null`/`[]` for a pin that was not tested or whose
+  delta was empty. A collateral package's advisory result lives in `collateral_verdict`, never
+  folded into these.
 - `detail` carries the judgment: the install error for `inconclusive`, the reason for
   `not-tested`, what the entry really is for `not-a-version-pin`.
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, and
