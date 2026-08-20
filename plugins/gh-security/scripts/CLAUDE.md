@@ -22,7 +22,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion, advisory lookup |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -68,10 +68,12 @@ vulnerable").
 
 ## Prescribed shapes and the preflight catalog move together
 
-`preflight-permissions.sh` pre-approves exactly the command shapes the agent definition
-prescribes. Changing a prescribed shape in `agents/fix-dependency.md` without updating the
-catalog in the same commit reintroduces a permission prompt for spec'd behavior — caught live
-once already (the `rev-parse` → `branch --list` guard change). Keep them in lockstep.
+`preflight-permissions.sh` pre-approves exactly the command shapes the agent definitions
+prescribe. Changing a prescribed shape in `agents/fix-dependency.md` or `agents/audit-pins.md`
+without updating the catalog in the same commit reintroduces a permission prompt for spec'd
+behavior — caught live once already (the `rev-parse` → `branch --list` guard change). Keep them in
+lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
+its definition prescribes them.
 
 ## No Bash snippet may depend on the previous call
 
@@ -91,6 +93,21 @@ the whole set today; a verb that starts writing joins it, and the guard is its f
 requires the cwd to sit inside a **linked** worktree, which a primary checkout, any subdirectory
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
+
+## Removability is judged against the advisory database, never repo alert history
+
+`check-advisories.sh` unions the vulnerable ranges of **every published advisory** for a package
+and, given `--adapter` and `--version`, returns a verdict for one candidate version. The pin audit
+has no other source for "is this version safe", and the reason is structural: a pin keeps
+vulnerable versions out of the lockfile, so every advisory published after the pin produced no
+alert on that repository. Asking the repo's own alert history is asking "was anything reported
+while we were protected", whose answer is no by construction.
+
+Its four verdicts exist because three different things get mistaken for safety. `safe` means
+advisories exist, every range was evaluated, and none admits the version. `unknown` means a range
+could not be read — never folded into `safe`, since an unreadable range is exactly where an
+unnoticed match hides. `no-advisories` means the query succeeded and returned nothing, which a
+non-security pin, a misspelled package name, and the wrong ecosystem all produce identically.
 
 ## The rule that matters most
 
