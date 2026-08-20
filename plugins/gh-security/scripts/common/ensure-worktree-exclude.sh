@@ -26,19 +26,21 @@ set -euo pipefail
 
 LINE='.claude/worktrees/'
 
+# Every failure leaves the same {"error": "..."} on stderr, so a caller parses
+# one shape whatever went wrong. jq does the escaping: a repo path may carry a
+# quote, and a raw printf would emit invalid JSON exactly when something is
+# already wrong (issue #42).
+die() {
+  printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
+  exit 1
+}
+
 REPO_ROOT="${1:-}"
-if [ -z "$REPO_ROOT" ]; then
-  printf '{"error":"Usage: ensure-worktree-exclude.sh <repo_root>"}\n' >&2
-  exit 1
-fi
-if [ ! -d "$REPO_ROOT" ]; then
-  printf '{"error":"repo_root does not exist: %s"}\n' "$REPO_ROOT" >&2
-  exit 1
-fi
+[ -n "$REPO_ROOT" ] || die "Usage: ensure-worktree-exclude.sh <repo_root>"
+[ -d "$REPO_ROOT" ] || die "repo_root does not exist: $REPO_ROOT"
 
 if ! common_dir=$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null); then
-  printf '{"error":"not a git repository: %s"}\n' "$REPO_ROOT" >&2
-  exit 1
+  die "not a git repository: $REPO_ROOT"
 fi
 case "$common_dir" in
   /*) ;;
@@ -61,23 +63,37 @@ if has_line; then
   exit 0
 fi
 
-mkdir -p "$INFO_DIR"
+# Guarded like every other failure path: a read-only `.git` (chmod 555) makes
+# this the first write to fail, and under bare `set -e` it aborted with a raw
+# `mkdir:` line instead of the JSON contract every other exit here honors.
+mkdir -p "$INFO_DIR" 2>/dev/null || die "cannot create $INFO_DIR"
 LOCK="$INFO_DIR/.exclude.gh-security.lock"
 
 # The rename below is atomic, but read-then-rewrite as a whole is not: two
 # callers can both read a file without the line and the second's rename then
 # publishes a copy carrying it twice. `mkdir` is the portable atomic test-and-
 # set, so the whole sequence runs under it.
+#
+# The temp file is dropped here too: a `cp` or `mv` that fails leaves one
+# behind inside `.git/info/`, where git would otherwise carry it forever.
+release() {
+  if [ -n "${tmp:-}" ]; then rm -f "$tmp"; fi
+  rmdir "$LOCK" 2>/dev/null || true
+}
+
 acquired=0
 attempt=0
 while [ "$attempt" -lt 50 ]; do
   if mkdir "$LOCK" 2>/dev/null; then
     acquired=1
-    trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+    trap release EXIT
     break
   fi
-  # A lock left behind by a killed process would otherwise block every later
-  # run forever. Nothing here holds it for anywhere near a minute.
+  # A lock left behind by a killed process is never reclaimed on its own, so
+  # every later run would wait out all 50 attempts and fail until someone
+  # removed it by hand. The bound below already rules out "forever"; this rules
+  # out "broken until a human notices". Nothing here holds it for anywhere near
+  # a minute.
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
     rmdir "$LOCK" 2>/dev/null || true
   fi
@@ -86,8 +102,7 @@ while [ "$attempt" -lt 50 ]; do
 done
 
 if [ "$acquired" -eq 0 ]; then
-  printf '{"error":"could not acquire %s"}\n' "$LOCK" >&2
-  exit 1
+  die "could not acquire $LOCK"
 fi
 
 # Another holder may have written it while we waited.
@@ -96,18 +111,22 @@ if has_line; then
   exit 0
 fi
 
-tmp=$(mktemp "$INFO_DIR/.exclude.XXXXXX")
+# Each write is guarded for the same reason `mkdir -p` above is: `.git` can be
+# read-only, or out of space, and a raw shell diagnostic is not this script's
+# contract.
+tmp=$(mktemp "$INFO_DIR/.exclude.XXXXXX" 2>/dev/null) \
+  || die "cannot create a temporary file in $INFO_DIR"
 if [ -f "$EXCLUDE" ]; then
   # -p keeps the mode git created the file with; mktemp's own is 0600.
-  cp -p "$EXCLUDE" "$tmp"
+  cp -p "$EXCLUDE" "$tmp" 2>/dev/null || die "cannot read $EXCLUDE"
   # A file whose last line has no newline would otherwise absorb ours.
   if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l)" -eq 0 ]; then
     printf '\n' >> "$tmp"
   fi
 else
-  chmod 644 "$tmp"
+  chmod 644 "$tmp" 2>/dev/null || die "cannot set the mode of $tmp"
 fi
-printf '%s\n' "$LINE" >> "$tmp"
-mv "$tmp" "$EXCLUDE"
+printf '%s\n' "$LINE" >> "$tmp" || die "cannot write $tmp"
+mv "$tmp" "$EXCLUDE" 2>/dev/null || die "cannot publish $EXCLUDE"
 
 emit added
