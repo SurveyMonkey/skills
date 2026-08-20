@@ -144,11 +144,16 @@ would otherwise make:
   (`"$lodash"` → `reference`). Reading any of those as a range has the audit reasoning about the
   version of a pin that was never about a version, and reporting the wrong package. `range` is
   never inferred: it is what the adapter's own range parser accepts, the same one behind
-  `range_facts`.
+  `range_facts`. The version in an `npm:` value is optional, so `npm:esbuild-wasm` and
+  `npm:@babel/core` are aliases with a null `alias_range`, not ranges whose text happens to be a
+  package name.
 
 An empty override block is `count: 0` and exit 0, which does **not** contradict the empty-result
 rule above: this verb reads structured JSON, where absence is a fact, rather than a lockfile,
-where zero parsed entries means the parser failed.
+where zero parsed entries means the parser failed. A block that is **present but not an object**
+is the third state and exits 1: coercing it to `{}` produced a `count: 0` byte-identical to the
+legitimately empty case, and the audit stops on `count: 0`, so a corrupted manifest audited clean
+— "found nothing" meaning "all clear" by another route.
 
 **Dependencies are `bash`, `jq`, and `gh`.** No `node`, no `npx`. Node has no built-in semver, so
 using it would mean `npx semver` and a cold-cache network fetch in the middle of a security fix.

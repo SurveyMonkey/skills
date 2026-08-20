@@ -1151,10 +1151,25 @@ def value_facts:
     elif ($v | startswith("$")) then
       {kind: "reference", range: null, alias_package: null, alias_range: null}
     elif ($v | startswith("npm:")) then
+      # An `npm:` value names a package, optionally with a version after the
+      # last `@`. The version is optional and its absence is not a reason to
+      # read what remains as a range: `npm:esbuild-wasm` and
+      # `npm:@babel/core` are both redirects to a different package, and
+      # reporting either as `{kind: "range", range: "<package name>"}` is the
+      # exact misreading this classification exists to prevent — the audit
+      # would then test, and could report as removable, an entry that decides
+      # which package ships.
+      #
+      # `npm:4.17.21` (the protocol carrying only a version, same package) is
+      # reported as an alias too, because a package name and a bare version are
+      # not distinguishable here: npm allows purely numeric names. That
+      # direction is the safe one — the audit reports such an entry as
+      # `not-a-version-pin` and leaves it alone, rather than testing the wrong
+      # thing.
       ($v[4:]) as $rest
       | ($rest | rindex("@")) as $i
       | if $i == null or $i == 0 then
-          {kind: "range", range: $rest, alias_package: null, alias_range: null}
+          {kind: "alias", range: null, alias_package: $rest, alias_range: null}
         else
           {kind: "alias", range: null,
            alias_package: ($rest[0:$i]), alias_range: ($rest[$i+1:])}
@@ -1184,6 +1199,17 @@ def pin($key; $path; $parents; $target; $value):
       alias_range: $f.alias_range
     };
 
+# The override block itself, or null when the manifest has none.
+#
+# `try/catch` is not defensive decoration: `.pnpm.overrides` raises when
+# `.pnpm` is a string rather than an object, which aborts the whole program.
+# The sentinel makes that manifest reachable by the type check below instead,
+# where it is reported rather than crashing.
+def override_block($loc):
+  if   $loc == "pnpm.overrides" then (try (.pnpm.overrides // null) catch "__invalid__")
+  elif $loc == "resolutions"    then (try (.resolutions    // null) catch "__invalid__")
+  else                               (try (.overrides      // null) catch "__invalid__") end;
+
 # npm nests, so the entries are the leaves of the override block and their key
 # path is the parent chain.
 def npm_walk($obj; $path):
@@ -1197,10 +1223,29 @@ JQLIB
 verb_list_pins() {
   loc=$(verb_detect | jq -r '.override_location')
   pm=$(pm_of)
+
+  # Three states, not two. An override block that is present but is not an
+  # object (a string, an array, a number) is a broken manifest, and coercing it
+  # to `{}` emitted `count: 0` — byte-identical to a manifest that genuinely
+  # pins nothing, which the audit reads as "this repository pins nothing, stop".
+  # A corrupted manifest auditing clean is the v0.1.0 failure class exactly
+  # (scripts/CLAUDE.md), so it fails loudly here instead.
+  block_type=$(jq -r --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
+    override_block($loc)
+    | if . == "__invalid__" then "unreadable" else type end' package.json) \
+    || die "list_pins: cannot read package.json"
+  case "$block_type" in
+    object|null) ;;
+    unreadable)
+      die "list_pins: the container holding '$loc' in package.json is not an object, so the override block cannot be read. Refusing to report a manifest this script cannot read as a repository with no pins."
+      ;;
+    *)
+      die "list_pins: '$loc' in package.json is a $block_type, not an object of override entries. Refusing to report a manifest this script cannot read as a repository with no pins."
+      ;;
+  esac
+
   jq --arg pm "$pm" --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
-    (if   $loc == "pnpm.overrides" then (.pnpm.overrides // null)
-     elif $loc == "resolutions"    then (.resolutions // null)
-     else (.overrides // null) end) as $block
+    override_block($loc) as $block
     | (if ($block | type) == "object" then $block else {} end) as $b
     | (if $loc == "overrides" then
          [ npm_walk($b; [])[]

@@ -12,6 +12,10 @@
     "express/sha.js": "^2.4.11",
     "webpack/@types/node": "^20.0.0",
     "lodash@^3/minimist": "^1.2.6",
-    "left-pad": "patch:left-pad@1.3.0#./.yarn/patches/left-pad.patch"
+    "left-pad": "patch:left-pad@1.3.0#./.yarn/patches/left-pad.patch",
+    "uuid": "npm:short-uuid",
+    "@vercel/ncc": "npm:@vercel/nft",
+    "minimist": "latest",
+    "debug": "1.2.7 - 1.3.0"
   }
 }
