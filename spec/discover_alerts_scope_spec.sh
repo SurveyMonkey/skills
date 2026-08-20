@@ -6,9 +6,10 @@
 # Org scope prefers the aggregate `/orgs/{org}/dependabot/alerts` endpoint and
 # falls back to per-repo enumeration on a 403 (no org-level security
 # visibility). User scope has no aggregate endpoint at all and always fans out
-# per repo. Both fan-out paths filter on push access, and a repo the
-# authenticated user cannot push to is reported by name in `skipped_repos`
-# rather than dropped silently.
+# per repo. *Every* cross-repo path filters on push access — the aggregate one
+# included, since org alert visibility and per-repo push access are separate
+# grants — and a repo the authenticated user cannot push to is reported by name
+# in `skipped_repos` rather than dropped silently.
 
 Describe 'discover-alerts.sh --scope'
   setup_mock() {
@@ -17,6 +18,13 @@ Describe 'discover-alerts.sh --scope'
     mkdir -p "$MOCK_DIR"
     : > "$MOCK_DIR/log"
     export MOCK_DIR
+    # The aggregate path consults the org repo listing purely to read push
+    # permission, so every aggregate example needs one. This default grants
+    # push on the two repos `write_org_agg` names; examples that exercise
+    # filtering overwrite it.
+    write_repo_listing "$MOCK_DIR/org-repos.json" \
+      'octo/app:true:false:false' \
+      'octo/other:true:false:false'
   }
 
   Before 'setup_mock'
@@ -65,6 +73,41 @@ Describe 'discover-alerts.sh --scope'
     ]]' > "$MOCK_DIR/org-alerts.json"
   }
 
+  # One aggregate alert per named repo, all for the same package, so a single
+  # example can span several repos with different push permissions.
+  write_org_agg_repos() {
+    items="[]"
+    for r in "$@"; do
+      item=$(jq -n --arg r "$r" '{
+        number: 1, repository: {full_name: $r},
+        dependency: {package: {ecosystem: "npm", name: "lodash"}, manifest_path: "package.json", relationship: "direct"},
+        security_advisory: {ghsa_id: "GHSA-lodash-1", cve_id: "CVE-2000-0002", severity: "medium", summary: "s", epss: {percentile: 0.3}},
+        security_vulnerability: {vulnerable_version_range: "< 4.17.21", first_patched_version: {identifier: "4.17.21"}}
+      }')
+      items=$(printf '%s' "$items" | jq --argjson i "$item" '. + [$i]')
+    done
+    printf '[%s]' "$items" | jq -c '.' > "$MOCK_DIR/org-alerts.json"
+  }
+
+  # Two repos, one alert each, neither with a patched version — so every group
+  # lands in `skipped` rather than `actionable`.
+  write_org_agg_no_fix() {
+    jq -n '[[
+      {
+        number: 1, repository: {full_name: "octo/app"},
+        dependency: {package: {ecosystem: "npm", name: "left-pad"}, manifest_path: "package.json", relationship: "direct"},
+        security_advisory: {ghsa_id: "GHSA-left-pad-1", cve_id: "CVE-2000-0003", severity: "low", summary: "s", epss: {percentile: 0.1}},
+        security_vulnerability: {vulnerable_version_range: "< 2.0.0", first_patched_version: null}
+      },
+      {
+        number: 2, repository: {full_name: "octo/other"},
+        dependency: {package: {ecosystem: "npm", name: "request"}, manifest_path: "package.json", relationship: "transitive"},
+        security_advisory: {ghsa_id: "GHSA-request-1", cve_id: "CVE-2000-0004", severity: "high", summary: "s", epss: {percentile: 0.4}},
+        security_vulnerability: {vulnerable_version_range: "< 3.0.0", first_patched_version: null}
+      }
+    ]]' > "$MOCK_DIR/org-alerts.json"
+  }
+
   # Repo listing response for an org- or user-repos call, in the same
   # page-array shape. Each remaining argument is "<full_name>:<push>:<fork>:<archived>".
   write_repo_listing() {
@@ -91,6 +134,16 @@ Describe 'discover-alerts.sh --scope'
     jq -n --arg fn "$full_name" '[[{full_name: $fn, fork: false, archived: false}]]' > "$out"
   }
 
+  # Same again, but with an explicit `"push": null`. Distinct from both a
+  # boolean answer and an absent `permissions` object: the key is present, so a
+  # `has("push")` test reads it as a definite denial when it is missing data.
+  write_repo_listing_null_push() {
+    out="$1"
+    full_name="$2"
+    jq -n --arg fn "$full_name" \
+      '[[{full_name: $fn, permissions: {push: null}, fork: false, archived: false}]]' > "$out"
+  }
+
   # A genuine two-page `--paginate --slurp` shape: the outer array holds one
   # array per page, unlike every other fixture here which uses a single page.
   # Proves `flatten` in the fan-out's repo-listing pipeline actually combines
@@ -111,11 +164,18 @@ Describe 'discover-alerts.sh --scope'
   }
 
   # A repo whose alert endpoint answers 200 with a JSON object rather than an
-  # array (e.g. Dependabot disabled for that repo) — not a `gh api` failure,
-  # so it must be classified by content, not treated as a fetch error.
-  write_repo_disabled() {
+  # array: an *unexpected shape*, not an observed GitHub response.
+  #
+  # A live user-scope run over 28 repos hit seven repos with Dependabot
+  # disabled and every one answered HTTP 403 with a non-zero `gh` exit, which
+  # is the `alert fetch failed` path covered separately below. Nothing returned
+  # 200-with-object. So this fixture exercises `classify_alerts_json`'s
+  # defensive status-3 branch — a 200 body that is valid JSON but not an array
+  # must be reported, never counted as zero alerts — and deliberately claims
+  # nothing about what a Dependabot-disabled repo really returns (issue #40).
+  write_repo_unexpected_body() {
     key=$(printf '%s' "$1" | tr / _)
-    jq -n --arg msg "$2" '{message: $msg}' > "$MOCK_DIR/repo-disabled-$key"
+    jq -n --arg msg "$2" '{message: $msg}' > "$MOCK_DIR/repo-unexpected-$key"
   }
 
   Mock gh
@@ -123,6 +183,10 @@ Describe 'discover-alerts.sh --scope'
       api)
         case "$2" in
           user)
+            if [ -f "$MOCK_DIR/user-lookup-fail" ]; then
+              printf 'gh: Bad credentials (HTTP 401)\n' >&2
+              exit 1
+            fi
             printf 'octocat\n'
             ;;
           orgs/*/dependabot/alerts*)
@@ -151,8 +215,8 @@ Describe 'discover-alerts.sh --scope'
               printf 'gh: could not fetch alerts\n' >&2
               exit 1
             fi
-            if [ -f "$MOCK_DIR/repo-disabled-$key" ]; then
-              cat "$MOCK_DIR/repo-disabled-$key"
+            if [ -f "$MOCK_DIR/repo-unexpected-$key" ]; then
+              cat "$MOCK_DIR/repo-unexpected-$key"
               exit 0
             fi
             cat "$MOCK_DIR/repo-$key.json"
@@ -186,6 +250,12 @@ Describe 'discover-alerts.sh --scope'
       The stderr should include 'Usage'
     End
 
+    It 'requires a target for repo scope'
+      When run script "$COMMON/discover-alerts.sh" --scope repo
+      The status should not equal 0
+      The stderr should include 'Usage'
+    End
+
     It 'defaults to repo scope when none is given'
       write_repo_alerts 'octo/app' lodash direct medium 4.17.21
       When call common_jq discover-alerts.sh '[.actionable[].repo]' octo/app
@@ -209,11 +279,50 @@ Describe 'discover-alerts.sh --scope'
       The output should equal '[{"repo":"octo/app","package":"lodash"},{"repo":"octo/other","package":"undici"}]'
     End
 
-    It 'reports no skipped repos on a clean aggregate call'
+    It 'reports no skipped repos when every repo in the aggregate is pushable'
       write_org_agg
       When call common_jq discover-alerts.sh '.skipped_repos' --scope org octo
       The status should be success
       The output should equal '[]'
+    End
+
+    # The aggregate response carries no permission data, so this path used to
+    # group straight out of the payload with `skipped_repos` hardcoded to `[]`.
+    # Org alert visibility (security manager) and per-repo push access are
+    # separate grants, so a caller could be handed a repo whose fix agent only
+    # discovers the problem at `git push` (issue #38). The listing is fetched
+    # purely to answer the push question, and all three states are honored:
+    # pushable, denied, and no usable permission data.
+    It 'filters the aggregate response on push access too, not only the fallback'
+      write_org_agg_repos 'octo/app' 'octo/readonly' 'octo/absent'
+      write_repo_listing "$MOCK_DIR/org-repos.json" \
+        'octo/app:true:false:false' \
+        'octo/readonly:false:false:false'
+
+      When call common_jq discover-alerts.sh '{groups: [.actionable[].repo], skipped: (.skipped_repos | sort_by(.repo))}' --scope org octo
+      The status should be success
+      The output should equal '{"groups":["octo/app"],"skipped":[{"repo":"octo/absent","reason":"permission data missing from API response"},{"repo":"octo/readonly","reason":"no push access"}]}'
+    End
+
+    It 'hard-fails when the permission listing the aggregate path needs cannot be fetched'
+      write_org_agg
+      rm -f "$MOCK_DIR/org-repos.json"
+      When run script "$COMMON/discover-alerts.sh" --scope org octo
+      The status should not equal 0
+      The stderr should include 'Failed to list repos'
+    End
+
+    # `combine_results` merges `skipped: [.[].skipped[]]` across repos, and
+    # every other scope fixture leaves that array empty, so nothing proved a
+    # skipped group from one repo and one from another keep distinct `repo`
+    # tags after combination — issue #19's regression class, covered for
+    # `actionable` and not for `skipped` (issue #40).
+    It 'keeps skipped groups from two repos distinctly tagged after combination'
+      write_org_agg_no_fix
+
+      When call common_jq discover-alerts.sh '[.skipped[] | {repo, package, reason}] | sort_by(.repo)' --scope org octo
+      The status should be success
+      The output should equal '[{"repo":"octo/app","package":"left-pad","reason":"no fix available"},{"repo":"octo/other","package":"request","reason":"no fix available"}]'
     End
 
     It 'ranks the combined groups by severity then EPSS across repos'
@@ -277,6 +386,16 @@ Describe 'discover-alerts.sh --scope'
       The output should equal '{"groups":[{"repo":"octo/app","package":"lodash"}],"skipped":[{"repo":"octo/readonly","reason":"no push access"}]}'
     End
 
+    # The listing is the fan-out's whole candidate set, so a failure to fetch
+    # it must abort rather than come back as an empty, clean-looking result.
+    It 'hard-fails when the repo listing itself cannot be fetched'
+      : > "$MOCK_DIR/org-403"
+      rm -f "$MOCK_DIR/org-repos.json"
+      When run script "$COMMON/discover-alerts.sh" --scope org octo
+      The status should not equal 0
+      The stderr should include 'Failed to list repos'
+    End
+
     It 'excludes forks and archived repos from the fan-out without reporting them'
       : > "$MOCK_DIR/org-403"
       write_repo_listing "$MOCK_DIR/org-repos.json" \
@@ -326,17 +445,36 @@ Describe 'discover-alerts.sh --scope'
       The output should equal '["octo/app","octo/other"]'
     End
 
-    It 'reports the API message when a repo alert endpoint answers 200 with a non-array body'
+    # Defensive handling of a shape the API is not observed to return: a 200
+    # whose body is valid JSON but not an array. The real Dependabot-disabled
+    # response is the 403 covered by 'records a repo whose alert fetch fails'
+    # in the user-scope block. What this proves is only that a non-array 200
+    # is reported with the body's own message instead of being counted as zero
+    # alerts.
+    It 'reports the body message when a repo alert endpoint answers 200 with an unexpected non-array body'
       write_repo_listing "$MOCK_DIR/org-repos.json" \
         'octo/app:true:false:false' \
-        'octo/disabled:true:false:false'
+        'octo/odd:true:false:false'
       write_repo_alerts 'octo/app' lodash direct medium 4.17.21
-      write_repo_disabled 'octo/disabled' 'Dependabot alerts are disabled for this repository.'
+      write_repo_unexpected_body 'octo/odd' 'Something unexpected.'
       : > "$MOCK_DIR/org-403"
 
-      When call common_jq discover-alerts.sh '[.skipped_repos[] | select(.repo == "octo/disabled")]' --scope org octo
+      When call common_jq discover-alerts.sh '[.skipped_repos[] | select(.repo == "octo/odd")]' --scope org octo
       The status should be success
-      The output should equal '[{"repo":"octo/disabled","reason":"invalid alert response","error":"Dependabot alerts are disabled for this repository."}]'
+      The output should equal '[{"repo":"octo/odd","reason":"invalid alert response","error":"Something unexpected."}]'
+    End
+
+    # `permissions.push: null` is missing data, not a denial. Testing for the
+    # key's presence rather than the value's type classified it as a genuine
+    # "no push access", the exact inversion of the fix made for the omitted
+    # `permissions` object above (issue #40).
+    It 'treats an explicit null push permission as missing data, not a denial'
+      : > "$MOCK_DIR/org-403"
+      write_repo_listing_null_push "$MOCK_DIR/org-repos.json" 'octo/nullperm'
+
+      When call common_jq discover-alerts.sh '.skipped_repos' --scope org octo
+      The status should be success
+      The output should equal '[{"repo":"octo/nullperm","reason":"permission data missing from API response"}]'
     End
   End
 
@@ -392,6 +530,36 @@ Describe 'discover-alerts.sh --scope'
       The stderr should include 'SAML/SSO enforcement'
     End
 
+    # An IP allow list blocks the credential, not this endpoint, so every
+    # per-repo call in the fallback is refused for the same reason. Falling
+    # back would bury one clear cause under a pile of generic
+    # `alert fetch failed` entries, so it hard-fails and names the cause.
+    It 'hard-fails on an IP allow list block instead of falling back'
+      # Double-quoted with escaped backticks: GitHub really does wrap the org
+      # name in backticks here, and single quotes would read as an unexpanded
+      # command substitution (SC2016).
+      printf "gh: Although you appear to have the correct authorization credentials, the \`octo\` organization has an IP allow list enabled, and 203.0.113.5 is not permitted to access this resource. (HTTP 403)\n" \
+        > "$MOCK_DIR/org-agg-error"
+      When run script "$COMMON/discover-alerts.sh" --scope org octo
+      The status should not equal 0
+      The stderr should include 'IP allow list'
+    End
+
+    # Substring matching on gh's formatted stderr classified any 403 whose text
+    # merely *contained* `sso` as an SSO block — an org named `tessso-corp` is
+    # enough — and hard-failed a case that should fall back (issue #39). The
+    # match is word-boundary anchored against the API's own message instead.
+    It 'falls back on a permission-shaped 403 whose org name merely contains sso'
+      printf 'gh: Resource not accessible by personal access token for the tessso-corp organization. (HTTP 403)\n' \
+        > "$MOCK_DIR/org-agg-error"
+      write_repo_listing "$MOCK_DIR/org-repos.json" 'tessso-corp/app:true:false:false'
+      write_repo_alerts 'tessso-corp/app' lodash direct medium 4.17.21
+
+      When call common_jq discover-alerts.sh '[.actionable[].repo]' --scope org tessso-corp
+      The status should be success
+      The output should equal '["tessso-corp/app"]'
+    End
+
     # The ordinary permission-shaped 403 (no rate-limit or SAML/SSO wording)
     # must still fall back — this is the pre-existing, still-covered case,
     # named here to make the contrast with the two hard-fail cases explicit.
@@ -425,6 +593,16 @@ Describe 'discover-alerts.sh --scope'
       When call common_jq discover-alerts.sh '[.actionable[].repo]' --scope user octocat
       The status should be success
       The output should equal '["octocat/mine"]'
+    End
+
+    # Resolving an explicit login is the one place user scope calls
+    # `gh api user`; a failure there must be reported, not silently treated as
+    # a mismatch or a match.
+    It 'reports a failure to resolve the authenticated user'
+      : > "$MOCK_DIR/user-lookup-fail"
+      When run script "$COMMON/discover-alerts.sh" --scope user octocat
+      The status should not equal 0
+      The stderr should include 'Failed to resolve the authenticated user'
     End
 
     It 'refuses an explicit login that does not match the authenticated user'

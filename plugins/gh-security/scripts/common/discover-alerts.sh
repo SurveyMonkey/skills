@@ -15,11 +15,14 @@
 #         (the authenticated user's own repos, forks and archived excluded)
 #         and fans out per repo inside this script.
 #
-# At org (fallback) and user scope, each candidate repo's push permission is
-# checked. A repo the authenticated user cannot push to is never dispatched;
-# it is recorded in the top-level `skipped_repos` array by name so the caller
-# can report it, never silently drop it. `skipped_repos` is always present,
-# empty at repo scope and on a clean org aggregate call.
+# At org and user scope — including the org aggregate path, not only the
+# fallback — each candidate repo's push permission is checked. A repo the
+# authenticated user cannot push to is never dispatched; it is recorded in the
+# top-level `skipped_repos` array by name so the caller can report it, never
+# silently drop it (RFC 001, "it must never be silent"). Org alert visibility
+# (security manager) and per-repo push access are separate grants, so a repo
+# the aggregate endpoint reports on is not necessarily one this user can push
+# to. `skipped_repos` is always present, and empty only at repo scope.
 #
 # EMU orgs are out of scope (RFC 001 Non-Goals): this script does not detect
 # or special-case them.
@@ -138,9 +141,30 @@ highest_version() {
       continue
     fi
     if [ -n "$adapter" ]; then
-      if [ "$("$adapter" compare_versions "$candidate" "$best" | jq -r '.result')" = "1" ]; then
-        best="$candidate"
-      fi
+      # The comparison is checked rather than tested inline. Inside
+      # `if [ "$(...)" = "1" ]` a non-zero adapter exit is invisible to
+      # `set -e`, and an `{"error":...}` reply reduces through `.result` to the
+      # string `null`, which reads as "not higher": a failed comparison would
+      # silently pick the wrong highest_fixed_version (issue #39). Absent and
+      # untyped are both errors here, per the adapter contract in
+      # scripts/CLAUDE.md.
+      cmp_json=$("$adapter" compare_versions "$candidate" "$best" 2>"$ERR_FILE") || {
+        printf '{"error":"compare_versions failed for %s (%s vs %s): %s"}\n' \
+          "$eco" "$candidate" "$best" "$(cat "$ERR_FILE")" >&2
+        exit 1
+      }
+      cmp=$(printf '%s' "$cmp_json" | jq -r '
+        if type == "object" and has("result") and (.result | type) == "number"
+        then (.result | tostring) else "invalid" end' 2>/dev/null || printf 'invalid')
+      case "$cmp" in
+        1)     best="$candidate" ;;
+        0|-1)  ;;
+        *)
+          printf '{"error":"compare_versions returned no usable result for %s (%s vs %s): %s"}\n' \
+            "$eco" "$candidate" "$best" "$cmp_json" >&2
+          exit 1
+          ;;
+      esac
     else
       # No adapter for this ecosystem. The group is going to be skipped anyway;
       # this only decides whether *some* fix exists to report.
@@ -150,6 +174,34 @@ highest_version() {
     fi
   done
   printf '%s\n' "$best"
+}
+
+# The API's own message out of a failed `gh api` invocation. gh formats an
+# error as `gh: <message> (HTTP <code>)`, where `<message>` is the response
+# body's `.message` when the body is JSON; anything it cannot parse is relayed
+# unchanged, so the fallback is the text itself. Classification reads this
+# rather than gh's whole formatted line, so neither the `gh:` prefix nor the
+# status code can match a content pattern.
+api_error_message() {
+  printf '%s\n' "$1" | sed -e 's/^gh: //' -e 's/ (HTTP [0-9][0-9]*)[[:space:]]*$//'
+}
+
+# The HTTP status gh reported, or empty when it reported none.
+http_status_of() {
+  printf '%s\n' "$1" | sed -n 's/.*(HTTP \([0-9][0-9]*\)).*/\1/p' | tail -1
+}
+
+# Word-boundary match of an ERE alternation (lowercase) against a message.
+#
+# Free substring matching misfires in both directions: an ordinary
+# permission-shaped 403 naming an org like `tessso-corp` contains `sso` and was
+# hard-failing as an SSO block instead of falling back (issue #39). The
+# boundaries are spelled with POSIX classes rather than `\b`, which BSD ERE
+# does not support.
+err_mentions() {
+  printf '%s\n' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | grep -Eq "(^|[^a-z0-9])($2)([^a-z0-9]|\$)"
 }
 
 # Classify a JSON payload against the "array of alerts" contract without
@@ -405,6 +457,81 @@ combine_results() {
   '
 }
 
+# Fetch and validate a `gh api` repo listing (org repos or the authenticated
+# user's repos), reducing every row to the three fields the callers need.
+#
+# `push_status` distinguishes a genuine denial ("false") from a row that
+# carries no usable `push` boolean ("unknown"): `// false` alone collapses both
+# to the same reason, misattributing an absent-data case as a denial (the same
+# absent-vs-false trap documented in scripts/CLAUDE.md for
+# score-merge-risk.sh). An explicit `"push": null` is absent data too, so the
+# test is on the value's *type*, not on the key being present (issue #40).
+repo_listing_rows() {
+  api_path="$1"
+
+  list=$(gh api "$api_path" --paginate --slurp 2>"$ERR_FILE") || {
+    printf '{"error":"Failed to list repos via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
+    exit 1
+  }
+  printf '%s' "$list" | jq empty 2>/dev/null || {
+    printf '{"error":"Invalid JSON response listing repos via %s"}\n' "$api_path" >&2
+    exit 1
+  }
+  printf '%s' "$list" | jq -e 'type == "array"' >/dev/null 2>&1 || {
+    msg=$(printf '%s' "$list" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
+    printf '{"error":"Unexpected repo listing response via %s: %s"}\n' "$api_path" "$msg" >&2
+    exit 1
+  }
+
+  printf '%s' "$list" | jq -c '
+    flatten
+    | map({
+        full_name,
+        fork: (.fork // false),
+        archived: (.archived // false),
+        push_status: (
+          if ((.permissions | type) == "object")
+             and ((.permissions.push | type) == "boolean")
+          then (if .permissions.push then "true" else "false" end)
+          else "unknown"
+          end
+        )
+      })
+  ' 2>"$ERR_FILE" || {
+    printf '{"error":"Failed to process repo listing via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
+    exit 1
+  }
+}
+
+# One `skipped_repos` entry for a repo excluded on push grounds. Shared so the
+# aggregate path and the fan-out cannot drift on the reason strings a caller
+# reports.
+push_skip_entry() {
+  case "$2" in
+    false)
+      jq -n --arg repo "$1" --arg reason "no push access" \
+        '{repo: $repo, reason: $reason}'
+      ;;
+    *)
+      jq -n --arg repo "$1" \
+        --arg reason "permission data missing from API response" \
+        '{repo: $repo, reason: $reason}'
+      ;;
+  esac
+}
+
+# Assemble a cross-repo result: per-repo {actionable, skipped} blobs on stdin,
+# one per line, `skipped_repos` JSON as $1.
+emit_combined() {
+  blobs=$(cat)
+  if [ -n "$blobs" ]; then
+    combined=$(printf '%s\n' "$blobs" | combine_results)
+  else
+    combined='{"actionable":[],"skipped":[]}'
+  fi
+  printf '%s' "$combined" | jq --argjson sr "$1" '. + {skipped_repos: $sr}'
+}
+
 # Fetch, validate, group, and combine alerts across every repo listed by a
 # `gh api` listing endpoint (org repos or the authenticated user's repos).
 # Forks and archived repos are dropped silently (never dispatch targets);
@@ -413,41 +540,8 @@ combine_results() {
 fan_out() {
   api_path="$1"
 
-  LIST=$(gh api "$api_path" --paginate --slurp 2>"$ERR_FILE") || {
-    printf '{"error":"Failed to list repos via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
-    exit 1
-  }
-  printf '%s' "$LIST" | jq empty 2>/dev/null || {
-    printf '{"error":"Invalid JSON response listing repos via %s"}\n' "$api_path" >&2
-    exit 1
-  }
-  printf '%s' "$LIST" | jq -e 'type == "array"' >/dev/null 2>&1 || {
-    msg=$(printf '%s' "$LIST" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
-    printf '{"error":"Unexpected repo listing response via %s: %s"}\n' "$api_path" "$msg" >&2
-    exit 1
-  }
-
-  # `push_status` distinguishes a genuine denial ("false") from a listing row
-  # that carries no `permissions` object at all ("unknown"): `// false` alone
-  # collapses both to the same reason, misattributing an absent-data case as a
-  # denial (the same absent-vs-false trap documented in scripts/CLAUDE.md for
-  # score-merge-risk.sh).
-  CANDIDATES=$(printf '%s' "$LIST" | jq -c '
-    flatten
-    | map(select((.fork // false) == false and (.archived // false) == false))
-    | map({
-        full_name,
-        push_status: (
-          if (has("permissions") and (.permissions != null) and (.permissions | has("push")))
-          then (if .permissions.push then "true" else "false" end)
-          else "unknown"
-          end
-        )
-      })
-  ' 2>"$ERR_FILE") || {
-    printf '{"error":"Failed to process repo listing via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
-    exit 1
-  }
+  CANDIDATES=$(repo_listing_rows "$api_path" \
+    | jq -c 'map(select(.fork == false and .archived == false))')
 
   results=()
   skipped_repos=()
@@ -458,21 +552,10 @@ fan_out() {
     full_name=$(printf '%s' "$row" | jq -r '.full_name')
     push_status=$(printf '%s' "$row" | jq -r '.push_status')
 
-    case "$push_status" in
-      true)
-        ;;
-      false)
-        skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "no push access" \
-          '{repo: $repo, reason: $reason}')")
-        continue
-        ;;
-      *)
-        skipped_repos+=("$(jq -n --arg repo "$full_name" \
-          --arg reason "permission data missing from API response" \
-          '{repo: $repo, reason: $reason}')")
-        continue
-        ;;
-    esac
+    if [ "$push_status" != "true" ]; then
+      skipped_repos+=("$(push_skip_entry "$full_name" "$push_status")")
+      continue
+    fi
 
     repo_alerts_err=$(mktemp)
     if ! repo_alerts=$(gh api "repos/$full_name/dependabot/alerts?state=open&per_page=100" \
@@ -499,17 +582,16 @@ fan_out() {
     fi
   done <<< "$rows"
 
-  combined='{"actionable":[],"skipped":[]}'
-  if [ ${#results[@]} -gt 0 ]; then
-    combined=$(printf '%s\n' "${results[@]}" | combine_results)
-  fi
-
   skipped_repos_json="[]"
   if [ ${#skipped_repos[@]} -gt 0 ]; then
     skipped_repos_json=$(printf '%s\n' "${skipped_repos[@]}" | jq -s '.')
   fi
 
-  printf '%s' "$combined" | jq --argjson sr "$skipped_repos_json" '. + {skipped_repos: $sr}'
+  if [ ${#results[@]} -eq 0 ]; then
+    emit_combined "$skipped_repos_json" < /dev/null
+  else
+    printf '%s\n' "${results[@]}" | emit_combined "$skipped_repos_json"
+  fi
 }
 
 case "$SCOPE" in
@@ -530,52 +612,93 @@ case "$SCOPE" in
       validate_alerts_json "$TARGET" "$AGG"
       FLAT=$(printf '%s' "$AGG" | jq -c 'flatten')
 
+      # Push filtering applies here too, not only on the fallback path. Org
+      # alert visibility and per-repo push access are separate grants, so a
+      # security manager sees alerts for repos they cannot push to, and
+      # dispatching one of those fails only at the fix agent's `git push` —
+      # after a clone, a worktree, an install and a verification run.
+      #
+      # The cost is one extra API call: the aggregate response carries no
+      # permission data, so the org repo listing is fetched purely to compute
+      # `push_status`. Correctness over call count; the listing is paginated
+      # at 100/page and reused for every repo in the response.
       repos=$(printf '%s' "$FLAT" | jq -r '[.[].repository.full_name] | unique | .[]')
+
+      PERMS='{}'
+      if [ -n "$repos" ]; then
+        PERMS=$(repo_listing_rows "orgs/$TARGET/repos?per_page=100" \
+          | jq -c 'map({key: .full_name, value: .push_status}) | from_entries')
+      fi
+
       results=()
+      skipped_repos=()
       while IFS= read -r r; do
         [ -n "$r" ] || continue
+        # A repo the aggregate reports on but the listing does not name has no
+        # permission data at all, which is the "unknown" case, not a denial.
+        # Forks and archived repos are not filtered here the way the fan-out
+        # filters them at enumeration time: there the listing *is* the
+        # candidate set, whereas here the alert payload is, and dropping a
+        # repo GitHub reported alerts for would be the silent behavior the RFC
+        # forbids.
+        push_status=$(printf '%s' "$PERMS" | jq -r --arg r "$r" '.[$r] // "unknown"')
+        if [ "$push_status" != "true" ]; then
+          skipped_repos+=("$(push_skip_entry "$r" "$push_status")")
+          continue
+        fi
         repo_alerts=$(printf '%s' "$FLAT" | jq -c --arg r "$r" \
           '[.[] | select(.repository.full_name == $r)]')
         res=$(group_repo_alerts "$r" "$repo_alerts") || exit 1
         results+=("$res")
       done <<< "$repos"
 
+      skipped_repos_json="[]"
+      if [ ${#skipped_repos[@]} -gt 0 ]; then
+        skipped_repos_json=$(printf '%s\n' "${skipped_repos[@]}" | jq -s '.')
+      fi
+
       if [ ${#results[@]} -eq 0 ]; then
-        printf '{"actionable":[],"skipped":[],"skipped_repos":[]}\n'
+        emit_combined "$skipped_repos_json" < /dev/null
       else
-        printf '%s\n' "${results[@]}" | combine_results | jq '. + {skipped_repos: []}'
+        printf '%s\n' "${results[@]}" | emit_combined "$skipped_repos_json"
       fi
     else
       agg_err=$(cat "$ERR_FILE")
-      # A bare `403` substring is not proof of "no org-level security
-      # visibility": a rate limit and a SAML/SSO enforcement block both surface
-      # as 403s too, and silently reinterpreting either as the permission case
-      # fans out to per-repo calls that mostly also fail, or succeed against a
-      # partial repo set, and come back looking like a clean, wrong answer.
-      # Both are checked, and hard-fail, before the permission-shaped fallback.
-      agg_err_lower=$(printf '%s' "$agg_err" | tr '[:upper:]' '[:lower:]')
-      case "$agg_err_lower" in
-        *"rate limit"*|*abuse*)
-          printf '{"error":"Org alert aggregate call for %s was rate-limited: %s"}\n' \
-            "$TARGET" "$agg_err" >&2
-          exit 1
-          ;;
-        *saml*|*sso*|*"single sign-on"*)
-          printf '{"error":"Org alert aggregate call for %s blocked by SAML/SSO enforcement: %s"}\n' \
-            "$TARGET" "$agg_err" >&2
-          exit 1
-          ;;
-        *"403"*)
-          # No org-level security visibility (security manager or admin
-          # required). Fall back to per-repo enumeration of repos the
-          # authenticated user can access, applying push-access filtering.
-          fan_out "orgs/$TARGET/repos?per_page=100"
-          ;;
-        *)
-          printf '{"error":"Failed to fetch org alerts for %s: %s"}\n' "$TARGET" "$agg_err" >&2
-          exit 1
-          ;;
-      esac
+      # A bare `403` is not proof of "no org-level security visibility": a rate
+      # limit, a SAML/SSO enforcement block and an IP allow list all surface as
+      # 403s too, and silently reinterpreting any of them as the permission
+      # case fans out to per-repo calls that mostly also fail, or succeed
+      # against a partial repo set, and come back looking like a clean, wrong
+      # answer. All three are checked, and hard-fail, before the
+      # permission-shaped fallback.
+      agg_msg=$(api_error_message "$agg_err")
+      if err_mentions "$agg_msg" 'rate limit|abuse'; then
+        printf '{"error":"Org alert aggregate call for %s was rate-limited: %s"}\n' \
+          "$TARGET" "$agg_err" >&2
+        exit 1
+      elif err_mentions "$agg_msg" 'saml|sso|single sign-on|single sign on'; then
+        printf '{"error":"Org alert aggregate call for %s blocked by SAML/SSO enforcement: %s"}\n' \
+          "$TARGET" "$agg_err" >&2
+        exit 1
+      elif err_mentions "$agg_msg" 'ip allow list|ip allowlist'; then
+        # An IP allow list blocks the credential, not this endpoint: every
+        # per-repo call in the fallback is refused for the same reason, so
+        # falling back would bury one clear cause under a pile of generic
+        # `alert fetch failed` entries. Hard-fail and name it, which is also
+        # the only outcome the user can act on (allow the address, or run
+        # from a permitted network).
+        printf '{"error":"Org alert aggregate call for %s blocked by an IP allow list: %s"}\n' \
+          "$TARGET" "$agg_err" >&2
+        exit 1
+      elif [ "$(http_status_of "$agg_err")" = "403" ]; then
+        # No org-level security visibility (security manager or admin
+        # required). Fall back to per-repo enumeration of repos the
+        # authenticated user can access, applying push-access filtering.
+        fan_out "orgs/$TARGET/repos?per_page=100"
+      else
+        printf '{"error":"Failed to fetch org alerts for %s: %s"}\n' "$TARGET" "$agg_err" >&2
+        exit 1
+      fi
     fi
     ;;
 

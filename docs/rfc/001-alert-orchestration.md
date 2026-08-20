@@ -131,6 +131,8 @@ All three live behind `discover-alerts.sh --scope`, so the orchestrator prompt n
 
 At org and user scope, the script also records whether the authenticated user can push to each repo. Repos without push access are not dispatched, and the orchestrator's summary lists each skipped repo by name so the user knows exactly what was left untouched. This should be rare in practice, but it must never be silent.
 
+This holds on the org aggregate path too, not only where the script already enumerates repos: org-wide alert visibility (security manager) and per-repo push access are separate grants, so the combination is ordinary rather than exotic, and a repo dispatched without push access fails only at the fix agent's `git push`, after a clone, a worktree, an install and a verification run. The aggregate alert response carries no permission data, so that path pays one extra `GET /orgs/{org}/repos` purely to read it. Correctness over call count.
+
 ### Ecosystem adapters
 
 Every alert is ecosystem-tagged at the source: `dependency.package.ecosystem` plus `manifest_path`. GitHub's advisory ecosystem enum is `rubygems`, `npm`, `pip`, `maven`, `nuget`, `composer`, `go`, `rust`, `erlang`, `actions`, `pub`, `swift`, and `other` (verified against the REST OpenAPI description). Two are in scope: `npm` routes to the node adapter, `pip` to the Python adapter. `select-adapter.sh` keys on the alert's ecosystem and manifest path, not on scanning the repo root, so polyglot repos route each alert to the right toolchain. Alerts for the other eleven ecosystems are skipped with reason "ecosystem not supported yet" and surfaced in the orchestrator summary alongside repos without push access; never an error, and a new adapter is built when the team asks for one.

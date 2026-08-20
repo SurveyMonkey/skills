@@ -202,6 +202,45 @@ Describe 'discover-alerts.sh'
     The output should equal '{"a":0,"s":0}'
   End
 
+  # `highest_fixed_version` is picked by asking the ecosystem adapter, and the
+  # call used to sit inside `if [ "$(...)" = "1" ]`: a non-zero adapter exit was
+  # invisible to `set -e`, and an `{"error":...}` reply reduced through
+  # `.result` to `null`, read as "not higher". Either way discovery came back
+  # exit 0 with a silently wrong version (issue #39).
+  #
+  # The shipped node.sh has no input that makes compare_versions fail, so the
+  # two scripts are copied beside a stub adapter and the copy is run; discovery
+  # resolves the adapter relative to its own directory.
+  Describe 'adapter version comparison failures'
+    stub_adapter() {
+      mkdir -p "$MOCK_DIR/scripts/common" "$MOCK_DIR/scripts/ecosystems"
+      cp "$COMMON/discover-alerts.sh" "$COMMON/select-adapter.sh" "$MOCK_DIR/scripts/common/"
+      printf '#!/usr/bin/env sh\n%s\n' "$1" > "$MOCK_DIR/scripts/ecosystems/node.sh"
+      chmod +x "$MOCK_DIR/scripts/ecosystems/node.sh"
+    }
+
+    It 'fails when the adapter exits non-zero on a comparison'
+      stub_adapter 'printf "{\"error\":\"adapter exploded\"}\n" >&2; exit 1'
+      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      The status should not equal 0
+      The stderr should include 'compare_versions failed'
+    End
+
+    It 'fails when the adapter answers 0 with an error object instead of a result'
+      stub_adapter 'printf "{\"error\":\"adapter refused\"}\n"; exit 0'
+      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      The status should not equal 0
+      The stderr should include 'no usable result'
+    End
+
+    It 'fails when the adapter answers 0 with empty stdout'
+      stub_adapter 'exit 0'
+      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      The status should not equal 0
+      The stderr should include 'no usable result'
+    End
+  End
+
   It 'fails loudly when the API response is not an array'
     printf '{"message":"Not Found"}' > "$MOCK_DIR/alerts.json"
     When run script "$COMMON/discover-alerts.sh" "$REPO"
