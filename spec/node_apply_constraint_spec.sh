@@ -1,23 +1,109 @@
 #!/bin/sh
 # shellcheck shell=sh
 
-Describe 'mutating verbs refuse a primary checkout'
+Describe 'mutating verbs run only in a linked worktree'
   After 'cleanup_fixture'
 
-  # Worktrees carry a .git file; the user's checkout has a .git directory. A
-  # mutating verb running in the latter silently edits the user's tree
-  # (observed live), so it refuses. A .git file — a real worktree — proceeds.
-  It 'apply_constraint refuses when .git is a directory'
+  # A mutating verb outside a linked worktree edits somebody's real tree
+  # (observed live), so it refuses. use_fixture fakes a linked worktree; each
+  # example here replaces that with the shape it is about.
+  It 'apply_constraint refuses in a primary checkout'
     use_fixture yarn-berry
-    mkdir .git
+    fake_primary_checkout
     When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
     The status should equal 1
     The stderr should include 'primary checkout'
   End
 
-  It 'apply_constraint proceeds when .git is a worktree file'
+  # The old `.git` test looked only at the current directory, so any
+  # subdirectory of the user's checkout passed it.
+  It 'apply_constraint refuses in a subdirectory of a primary checkout'
     use_fixture yarn-berry
-    printf 'gitdir: /elsewhere/.git/worktrees/fix\n' > .git
+    fake_primary_checkout
+    mkdir -p packages/app
+    cp package.json yarn.lock packages/app/
+    cd packages/app || return 1
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'subdirectory of the primary checkout'
+  End
+
+  # A submodule's .git is a file too, which the old test accepted as a worktree.
+  It 'apply_constraint refuses in a git submodule'
+    use_fixture yarn-berry
+    fake_linked_worktree '/parent/.git/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # The pointer git actually writes for a submodule is relative, not the
+  # absolute path the row above uses.
+  It 'apply_constraint refuses in a git submodule with a relative gitdir'
+    use_fixture yarn-berry
+    fake_linked_worktree '../.git/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # A submodule checked out inside the fix worktree carries both markers.
+  It 'apply_constraint refuses in a submodule nested in a linked worktree'
+    use_fixture yarn-berry
+    fake_linked_worktree '../../main/.git/worktrees/fix/modules/vendor'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # A submodule whose own path begins with worktrees/ writes a gitdir like
+  # .git/modules/worktrees/foo, where the last marker is `worktrees` and the
+  # last-marker rule alone would misread it as a linked worktree. Only the
+  # `.git/modules/` probe inside the worktrees arm catches it.
+  It 'apply_constraint refuses in a submodule whose path begins with worktrees/'
+    use_fixture yarn-berry
+    fake_linked_worktree '../../.git/modules/worktrees/foo'
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'submodule'
+  End
+
+  # A repo that lives under a directory named `modules` is an ordinary
+  # monorepo, and its worktrees are ordinary worktrees. Matching `modules`
+  # unanchored refused every one of them with a false diagnosis.
+  It 'apply_constraint proceeds in a linked worktree of a repo under modules/'
+    use_fixture yarn-berry
+    fake_linked_worktree '/src/modules/app/.git/worktrees/fix'
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
+    The status should be success
+    The output should equal '{"package":"lodash","pm":"yarn"}'
+  End
+
+  # The guard runs before verb_detect, so this needs no package manager on
+  # PATH; deleting the one guard line from verb_install would let an install
+  # regenerate the user's own lockfile, which is the live incident behind #18.
+  It 'install refuses in a primary checkout'
+    use_fixture yarn-berry
+    fake_primary_checkout
+    When run script "$ADAPTER" install
+    The status should equal 1
+    The stderr should include 'primary checkout'
+  End
+
+  It 'apply_constraint proceeds in a linked worktree'
+    use_fixture yarn-berry
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
+    The status should be success
+    The output should equal '{"package":"lodash","pm":"yarn"}'
+  End
+
+  # A monorepo package directory inside the fix worktree is a legitimate place
+  # to apply a constraint.
+  It 'apply_constraint proceeds in a subdirectory of a linked worktree'
+    use_fixture yarn-berry
+    mkdir -p packages/app
+    cp package.json yarn.lock packages/app/
+    cd packages/app || return 1
     When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
     The status should be success
     The output should equal '{"package":"lodash","pm":"yarn"}'

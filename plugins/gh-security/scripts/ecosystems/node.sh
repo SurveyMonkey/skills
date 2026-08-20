@@ -33,6 +33,8 @@ if [ -z "$VERB" ]; then
 fi
 shift || true
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
 die() {
   printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
   exit "${2:-1}"
@@ -645,15 +647,14 @@ verb_apply_constraint() {
 # ---------------------------------------------------------------------------
 # install / verification_commands / compare_versions / list_pins
 # ---------------------------------------------------------------------------
-# Mutating verbs refuse to run in a primary checkout. Fix agents work in git
-# worktrees, which carry a .git *file*; the user's checkout has a .git
-# *directory*, and a mutating verb running there (a cwd mistake before
-# worktree setup) silently edits the user's tree — observed live in Phase 2
-# testing. Spec fixtures have no .git at all and are unaffected.
+# Mutating verbs run only inside a linked git worktree. A mutating verb that
+# runs anywhere else (a cwd mistake before worktree setup) silently edits the
+# user's tree, observed live in Phase 2 testing. The classification lives in
+# common/require-linked-worktree.sh, which run-check.sh also invokes, so the
+# two guards cannot drift; it already emits the adapter's JSON error shape on
+# stderr, so this only has to relay the exit status.
 refuse_primary_checkout() {
-  if [ -d .git ]; then
-    die "refusing to run '$VERB' in a primary checkout (.git is a directory here); create the fix worktree and run from there"
-  fi
+  "$SCRIPT_DIR/../common/require-linked-worktree.sh" "refusing to run '$VERB' here" || exit 1
 }
 
 verb_install() {

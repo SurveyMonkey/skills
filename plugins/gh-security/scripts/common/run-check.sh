@@ -23,6 +23,15 @@ if [ "$#" -lt 1 ]; then
   exit 1
 fi
 
+# A check runs the repository's own scripts and drops a log beside them, so it
+# is as cwd-sensitive as the mutating adapter verbs and refuses on the same
+# test: the current directory must be inside a linked worktree. Without this, a
+# lost cwd (no Bash call inherits the previous one's) runs the suite in the
+# user's tree and leaves the log there. The classification is shared with the
+# adapter rather than repeated here; see require-linked-worktree.sh.
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+"$SCRIPT_DIR/require-linked-worktree.sh" "refusing to run a check here" || exit 1
+
 LOG="$PWD/.gh-security-check.log"
 
 "$@" > "$LOG" 2>&1

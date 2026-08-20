@@ -42,6 +42,22 @@ prescribes. Changing a prescribed shape in `agents/fix-dependency.md` without up
 catalog in the same commit reintroduces a permission prompt for spec'd behavior — caught live
 once already (the `rev-parse` → `branch --list` guard change). Keep them in lockstep.
 
+## No Bash snippet may depend on the previous call
+
+The Bash tool resets cwd between invocations and shell variables do not survive it. A snippet in
+an agent definition that relies on an earlier `cd` or an earlier assignment runs in the user's
+checkout instead of the worktree — which is how a live run bumped a package and regenerated a
+lockfile in a real repository ([#18](https://github.com/SurveyMonkey/skills/issues/18)). Every
+prescribed snippet locates itself: `git -C <path> ...`, or `cd <path> && <command>` for
+everything else.
+
+Scripts that are cwd-sensitive enforce it rather than trust it, through one shared guard:
+`common/require-linked-worktree.sh`, invoked by `refuse_primary_checkout` in `ecosystems/node.sh`
+for the mutating verbs and by `common/run-check.sh` for every check run. It requires the cwd to
+sit inside a **linked** worktree, which a primary checkout, any subdirectory of one, a submodule
+(also a `.git` file), and a directory in no repository at all all fail. Specs fake a worktree
+with `fake_linked_worktree` (see `spec/spec_helper.sh`).
+
 ## The rule that matters most
 
 **Zero resolved versions is an error, never a pass.** `resolved_versions` returning an empty list
