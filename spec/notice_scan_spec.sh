@@ -93,15 +93,24 @@ Severity: 1 low | 2 moderate"
     # bug class as the shipped v0.1.0 yarn lockfile validator
     # (plugins/gh-security/scripts/CLAUDE.md, "The rule that matters most").
     Describe 'non-zero totals'
+      # npm's own fixture is hand-authored (auditReportVersion 2, `.total`
+      # present); npm's real shape is not in dispute (issue #32 notes it as
+      # already correct). The pnpm and Yarn Berry fixtures below are not
+      # hand-authored: they are trimmed straight from real captured
+      # `pnpm audit --json` / `yarn npm audit --json` output (issue #32), so
+      # an edit that drifts the detection logic back toward an invented
+      # shape has real output to fail against, not another invention.
       npm_json='{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"info":0,"low":1,"moderate":2,"high":0,"critical":0,"total":3},"dependencies":{"prod":10,"dev":5,"total":15}}}'
-      pnpm_json='{"advisories":{},"metadata":{"vulnerabilities":{"low":0,"moderate":1,"high":0,"critical":0,"total":1}}}'
-      yarn_ndjson='{"type":"auditAdvisory","data":{"resolution":{"id":1234,"path":"lodash"},"advisory":{"module_name":"lodash","severity":"high"}}}
+      pnpm_json=$(cat "$FIXTURES/notice-scan/pnpm-audit-sample.json")
+      yarn_v1_ndjson='{"type":"auditAdvisory","data":{"resolution":{"id":1234,"path":"lodash"},"advisory":{"module_name":"lodash","severity":"high"}}}
 {"type":"auditSummary","data":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":1,"critical":0}}}'
+      yarn_berry_ndjson=$(cat "$FIXTURES/notice-scan/yarn-berry-audit-sample.ndjson")
 
       Parameters
-        "npm audit --json"                         "$npm_json"
-        "pnpm audit --json"                        "$pnpm_json"
-        "yarn audit --json NDJSON auditAdvisory"   "$yarn_ndjson"
+        "npm audit --json"                            "$npm_json"
+        "pnpm audit --json, real capture, no .total"   "$pnpm_json"
+        "yarn classic audit --json NDJSON auditAdvisory" "$yarn_v1_ndjson"
+        "yarn Berry audit --json NDJSON children.Severity" "$yarn_berry_ndjson"
       End
 
       It "nudges toward checking GitHub alerts on $1"
@@ -111,9 +120,27 @@ Severity: 1 low | 2 moderate"
       End
     End
 
-    It 'stays silent on npm audit --json with a zero total'
+    Describe 'zero-count negatives stay silent for every package manager'
       npm_json_zero='{"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":0,"critical":0,"total":0}}}'
-      When call notice_jq '.' "$npm_json_zero"
+      pnpm_json_zero='{"advisories":{},"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":0,"critical":0}}}'
+      yarn_berry_no_advisories='{"type":"info","data":"No named packages were audited"}'
+
+      Parameters
+        "npm audit --json with a zero total"                "$npm_json_zero"
+        "pnpm audit --json with all-zero severities, no .total" "$pnpm_json_zero"
+        "yarn Berry audit --json with no advisory records"  "$yarn_berry_no_advisories"
+      End
+
+      It "stays silent on $1"
+        When call notice_jq '.' "$2"
+        The status should be success
+        The output should equal ''
+      End
+    End
+
+    It 'stays silent on malformed metadata.vulnerabilities instead of crashing the hook'
+      malformed='{"metadata":{"vulnerabilities":"not an object"}}'
+      When call notice_jq '.' "$malformed"
       The status should be success
       The output should equal ''
     End

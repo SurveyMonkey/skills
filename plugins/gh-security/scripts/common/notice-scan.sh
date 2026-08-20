@@ -8,9 +8,10 @@
 #     on <branch> ...")
 #   - a Dependabot alert URL (".../security/dependabot" or ".../N")
 #   - non-zero package manager audit output: npm/pnpm/yarn "N vulnerabilities"
-#     in text form, `npm audit --json` / `pnpm audit --json`
-#     (`.metadata.vulnerabilities.total`), or classic yarn's NDJSON
-#     `"auditAdvisory"` records
+#     in text form; `npm audit --json` / `pnpm audit --json` via a positive
+#     severity count under `.metadata.vulnerabilities`; classic yarn (v1)
+#     NDJSON `"auditAdvisory"` records; or Yarn Berry's NDJSON
+#     `{"value":..., "children":{"Severity":...}}` records
 #
 # BashOutput is included because that is how a backgrounded Bash command's
 # output surfaces to Claude; a text-only "Bash" matcher never sees it.
@@ -85,17 +86,43 @@ fi
 # most"). jq is asked to parse only the JSON case, guarded with `2>/dev/null`
 # and an explicit type check so audit output that is not valid JSON (the
 # common case, npm/pnpm's default human-readable form) never trips `set -e`.
+#
+# pnpm emits the npm v6 audit shape: `.metadata.vulnerabilities` carries only
+# the severity-keyed counts (info/low/moderate/high/critical), with no
+# `.total` key at all — reading `.total` there is always null (issue #32).
+# Summing the five known severity keys instead reads correctly for both: npm
+# v7+ carries the same five keys alongside `.total`, so the sum is still
+# positive exactly when `.total` would have been. `try ... catch false` keeps
+# a value of the wrong type (a string, an array) from raising a jq runtime
+# error that would otherwise only surface as an unnoticed non-zero exit
+# hidden inside this `if` condition.
 if [ "$pm_match" = false ] && printf '%s' "$output" | jq -e '
-    type == "object"
-    and (.metadata.vulnerabilities.total? // 0) > 0
+    try (
+      type == "object"
+      and ((.metadata.vulnerabilities // {}) as $v
+        | (($v.info // 0) + ($v.low // 0) + ($v.moderate // 0)
+           + ($v.high // 0) + ($v.critical // 0)) > 0)
+    ) catch false
   ' >/dev/null 2>&1; then
   pm_match=true
 fi
 
-# Classic yarn's `audit --json` emits NDJSON (one JSON object per line, not
-# one parseable document), so it is matched as a literal marker rather than
-# parsed as a whole.
+# Classic yarn (v1) `audit --json` emits NDJSON (one JSON object per line,
+# not one parseable document) shaped `{"type":"auditAdvisory", ...}`, so it
+# is matched as a literal marker rather than parsed as a whole.
 if [ "$pm_match" = false ] && printf '%s' "$output" | grep -q '"auditAdvisory"'; then
+  pm_match=true
+fi
+
+# Yarn Berry's `audit --json` (really `yarn npm audit --json`) is a
+# different NDJSON shape entirely: one record per line keyed
+# `{"value": "<package>", "children": {"ID":..., "Severity":"...", ...}}`,
+# carrying none of the v1 markers above — the v1 detection above is silent
+# on real Berry output (issue #32). Matched the same way, as a same-line
+# literal marker rather than a parsed document, keyed on `children.Severity`
+# since that field is stable across the advisories seen in real captures
+# while the rest of the record varies in which keys are present.
+if [ "$pm_match" = false ] && printf '%s' "$output" | grep -Eq '"children":\{[^}]*"Severity":"'; then
   pm_match=true
 fi
 
