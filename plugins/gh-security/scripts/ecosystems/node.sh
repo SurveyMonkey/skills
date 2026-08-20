@@ -377,15 +377,30 @@ pm_of() { verb_detect | jq -r '.pm'; }
 # from "the parser is broken". v0.1.0 could not make that distinction: its yarn
 # regex could never match, so every yarn repo got a validation claim backed by
 # nothing.
+#
+# A package is identified by the name it actually resolves to, never by where it
+# sits: npm keys an `npm:` alias by the alias (`node_modules/lodash-alias`) and
+# records the real name in `.value.name`, and Berry wraps a patched package in a
+# `patch:` locator whose inner descriptor names the registry version. Both are
+# the same package as far as "what version of X is in the tree" is concerned,
+# and both were previously invisible to this verb
+# ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
 # ---------------------------------------------------------------------------
+
+# npm's own name for an entry, falling back to the path segment. `.value.name`
+# is present exactly when the two differ (an `npm:` alias), so this leaves every
+# ordinary entry, nested or hoisted, keyed as before.
+NPM_ENTRY_NAME='(.value.name // (.key | split("node_modules/") | last))'
+
 npm_versions() {
   jq --arg pkg "$1" '
     if (.packages | type) != "object" then
       error("package-lock.json has no .packages object (lockfileVersion 1 is unsupported)")
     else
       [ .packages | to_entries[]
-        | select(.key | endswith("node_modules/" + $pkg))
+        | select(.key | contains("node_modules/"))
         | select(.value.version != null)
+        | select('"$NPM_ENTRY_NAME"' == $pkg)
         | {version: .value.version, path: .key} ]
     end' package-lock.json
 }
@@ -424,22 +439,69 @@ pnpm_entry_count() {
 }
 
 # Berry keys the canonical resolution on a `resolution:` line, which stays
-# stable even when several descriptors share a single block.
-yarn_versions() {
-  awk -v pkg="$1" '
+# stable even when several descriptors share a single block. Every consumer
+# reads the lockfile through this one parser, emitting
+# `name<TAB>version<TAB>resolution` for each entry that resolves to a registry
+# version: `resolved_versions` filters it by name, `resolution_map` groups it.
+#
+# The name is the locator's leading `pkg@` segment rather than a `@npm:` prefix
+# match, because a `patch:` locator does not contain a literal `@npm:` — Berry
+# percent-encodes the colon of the descriptor it wraps
+# (`lodash@patch:lodash@npm%3A4.17.21#...`). Requiring the literal dropped every
+# patched package from both verbs at a real registry version, which is the
+# population `yarn patch` exists for
+# ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
+yarn_resolution_rows() {
+  awk '
+    # The name a locator resolves under: everything before its first "@", from
+    # position 2 so a scoped name keeps its own leading "@".
+    function locator_name(res,   n) {
+      for (n = 2; n <= length(res); n++)
+        if (substr(res, n, 1) == "@") return substr(res, 1, n - 1)
+      return ""
+    }
+    # The registry version a locator ultimately points at, or "" when it points
+    # at none: workspace:, portal: and exec: entries are local code whose
+    # package.json version is not a published release, and git and URL targets
+    # name no version at all. patch: is the exception — it wraps another
+    # locator, so decode the wrapped one and ask it the same question. That
+    # keeps a patched registry package in (it is that release, plus a diff) and
+    # a patched workspace or portal package out, on the same rule.
+    function registry_version(res,   d, i, n, hash) {
+      gsub(/%3[Aa]/, ":", res)
+      while (1) {
+        i = 0
+        for (n = 2; n <= length(res); n++)
+          if (substr(res, n, 1) == "@") { i = n; break }
+        if (i == 0) return ""
+        d = substr(res, i + 1)
+        if (substr(d, 1, 4) == "npm:") return substr(d, 5)
+        if (substr(d, 1, 6) != "patch:") return ""
+        res = substr(d, 7)
+        # Everything from the first "#" is the patch file and its metadata.
+        hash = index(res, "#")
+        if (hash > 0) res = substr(res, 1, hash - 1)
+      }
+    }
     {
       i = index($0, "resolution: \"")
       if (i == 0) next
       rest = substr($0, i + 13)
       j = index(rest, "\"")
       if (j == 0) next
-      res = substr(rest, 1, j - 1)
-      prefix = pkg "@npm:"
-      if (substr(res, 1, length(prefix)) == prefix)
-        printf "%s\t%s\n", substr(res, length(prefix) + 1), res
+      res  = substr(rest, 1, j - 1)
+      name = locator_name(res)
+      ver  = registry_version(res)
+      if (name != "" && ver ~ /^[0-9]/) printf "%s\t%s\t%s\n", name, ver, res
     }
-  ' yarn.lock \
-    | jq -Rs 'split("\n") | map(select(length > 0) | split("\t") | {version: .[0], path: .[1]})'
+  ' yarn.lock
+}
+
+yarn_versions() {
+  yarn_resolution_rows \
+    | jq -Rs --arg pkg "$1" \
+        'split("\n") | map(select(length > 0) | split("\t"))
+         | map(select(.[0] == $pkg) | {version: .[1], path: .[2]})'
 }
 
 yarn_entry_count() {
@@ -488,10 +550,26 @@ verb_resolved_versions() {
 #
 # `versions` are unique and lexically sorted, which makes two maps comparable
 # with a plain jq `==`. They are NOT semver-ordered; rank with
-# `compare_versions` if order matters. Aliases, workspace links, patch
-# protocols and git targets are excluded — every parser keeps only resolutions
-# whose version starts with a digit, because "what version of X is in the tree"
-# has no answer for an entry that does not resolve to a registry version.
+# `compare_versions` if order matters.
+#
+# An entry is keyed by the package it resolves to, and only entries that resolve
+# to a registry version are kept, on exactly the rule `resolved_versions` uses —
+# the two verbs must agree about any package, because the audit reads a
+# disagreement as a parser bug and refuses the pin. So:
+#
+# - Workspace links, portal and exec targets, git targets and URL targets are
+#   excluded: "what version of X is in the tree" has no registry answer for
+#   local or generated code.
+# - A **patched** package is included at the version it patches. `yarn patch`
+#   applies a diff to a real published release, and it is used above all for
+#   one-off security fixes, so dropping those entries blinded the audit to the
+#   very packages it exists to watch
+#   ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
+# - An npm `npm:` **alias** is included under the package it aliases, not the
+#   key it is installed as. The resolved code genuinely is that package, and the
+#   audit feeds this name straight into an advisory query, where the alias key
+#   returns `no-advisories` — indistinguishable from a package with a clean
+#   record.
 # ---------------------------------------------------------------------------
 npm_resolution_pairs() {
   jq '
@@ -501,7 +579,7 @@ npm_resolution_pairs() {
       [ .packages | to_entries[]
         | select(.key | contains("node_modules/"))
         | select(.value.version != null)
-        | {package: (.key | split("node_modules/") | last),
+        | {package: '"$NPM_ENTRY_NAME"',
            version: (.value.version | tostring)}
         | select(.version | test("^[0-9]")) ]
     end' package-lock.json
@@ -534,21 +612,7 @@ pnpm_resolution_pairs() {
 }
 
 yarn_resolution_pairs() {
-  awk '
-    {
-      i = index($0, "resolution: \"")
-      if (i == 0) next
-      rest = substr($0, i + 13)
-      j = index(rest, "\"")
-      if (j == 0) next
-      res = substr(rest, 1, j - 1)
-      k = index(res, "@npm:")
-      if (k == 0) next
-      name = substr(res, 1, k - 1)
-      ver  = substr(res, k + 5)
-      if (ver ~ /^[0-9]/) printf "%s\t%s\n", name, ver
-    }
-  ' yarn.lock \
+  yarn_resolution_rows \
     | jq -Rs 'split("\n") | map(select(length > 0) | split("\t")
                                 | {package: .[0], version: .[1]})'
 }

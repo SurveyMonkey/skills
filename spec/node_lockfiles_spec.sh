@@ -227,6 +227,58 @@ Describe 'node.sh resolved_versions'
     The status should not equal 0
     The stderr should include 'requires a package name'
   End
+
+  # A package is found by the name it resolves to, never by where it sits. Both
+  # cases below were invisible to this verb at a real registry version, which
+  # reads as "the package left the tree" — the audit's cue for `removable`
+  # (issue #44).
+  Describe 'a package is identified by what it resolves to'
+    It 'finds a yarn patched package at the version it patches'
+      # `patch:` percent-encodes the colon of the locator it wraps, so a
+      # literal `@npm:` match never sees it.
+      use_fixture yarn-patch
+      When call adapter_jq '{present, versions: [.versions[].version]}' resolved_versions lodash
+      The status should be success
+      The output should equal '{"present":true,"versions":["4.17.21"]}'
+    End
+
+    It 'finds a yarn builtin patch, whose locator carries a "#" before its metadata'
+      use_fixture yarn-patch
+      When call adapter_jq '[.versions[].version]' resolved_versions typescript
+      The status should be success
+      The output should equal '["5.4.5"]'
+    End
+
+    It 'finds an npm alias under the package it aliases'
+      use_fixture npm-alias
+      When call adapter_jq '[.versions[] | select(.path | endswith("lodash-alias"))]' resolved_versions lodash
+      The status should be success
+      The output should equal '[{"version":"4.18.1","path":"node_modules/lodash-alias"}]'
+    End
+
+    It 'does not report an npm alias under its own key'
+      use_fixture npm-alias
+      When call adapter_jq '.present' resolved_versions lodash-alias
+      The status should be success
+      The output should equal 'false'
+    End
+
+    # Local code is not a registry version, so neither verb claims one for it.
+    Describe 'entries that resolve to no registry version'
+      Parameters
+        local-tool  # portal: a linked local directory
+        gen-thing   # exec:   a package generated at install time
+        demo-patch  # workspace: the root itself
+      End
+
+      It "reports no registry version for the $1 entry"
+        use_fixture yarn-patch
+        When call adapter_jq '{present, count}' resolved_versions "$1"
+        The status should be success
+        The output should equal '{"present":false,"count":0}'
+      End
+    End
+  End
 End
 
 # The whole-tree view the pin audit diffs across a removal, so a pin whose
@@ -255,6 +307,12 @@ Describe 'node.sh resolution_map'
   Describe 'the map agrees with resolved_versions'
     # Printing both sides rather than a bare boolean, so a failure shows which
     # parser drifted instead of only that one did.
+    #
+    # `[.versions[].version] | unique` is the normalization the audit's
+    # cross-check prescribes (agents/audit-pins.md, phase 4): the two
+    # verbs answer different questions, so one version at two paths is a longer
+    # list on one side and one entry on the other, and comparing the raw shapes
+    # would report a healthy pin `inconclusive` (issue #44).
     versions_agree() {
       _map=$("$ADAPTER" resolution_map | jq -c --arg p "$1" '.resolutions[$p] // []')
       _one=$("$ADAPTER" resolved_versions "$1" | jq -c '[.versions[].version] | unique')
@@ -268,6 +326,8 @@ Describe 'node.sh resolution_map'
       pnpm-v9    react-dom     '["18.2.0"]'           # peer-dependency suffix
       pnpm-v9    'sha.js'      '["2.4.11"]'           # a dot is not a wildcard here
       yarn-berry undici        '["5.28.4","6.19.8"]'  # two majors side by side
+      yarn-patch lodash        '["4.17.21"]'          # a patched package
+      npm-alias  lodash        '["4.17.21","4.18.1"]' # an alias, plus one version at two paths
     End
 
     It "reports the same versions for $2 in $1"
@@ -306,6 +366,57 @@ Describe 'node.sh resolution_map'
     When call adapter_jq '.resolutions.lodash' resolution_map
     The status should be success
     The output should equal '["4.17.21"]'
+  End
+
+  # `yarn patch` is used above all for one-off security fixes, so a patched
+  # package missing from the map is missing from the baseline *and* the
+  # post-removal snapshot: the collateral diff then reports `none` for a package
+  # that moved (issue #44). `lockfile_entries` counts it either way, so the
+  # empty-parse guard below never fires on it.
+  It 'keeps a yarn patched package at the registry version it patches'
+    use_fixture yarn-patch
+    When call adapter_jq '{lockfile_entries, resolutions}' resolution_map
+    The status should be success
+    The output should equal '{"lockfile_entries":6,"resolutions":{"express":["4.21.2"],"lodash":["4.17.21"],"typescript":["5.4.5"]}}'
+  End
+
+  # portal: and exec: do NOT share the patch defect: excluding them is correct,
+  # and stays correct now that patch: is unwrapped rather than string-matched.
+  Describe 'entries that resolve to no registry version stay out'
+    Parameters
+      local-tool  # portal:, whose local package.json version would pass the digit filter
+      gen-thing   # exec:, generated at install time
+      demo-patch  # workspace:, the root itself
+    End
+
+    It "excludes the $1 entry"
+      use_fixture yarn-patch
+      When call adapter_jq ".resolutions | has(\"$1\")" resolution_map
+      The status should be success
+      The output should equal 'false'
+    End
+  End
+
+  # npm keys an `npm:` alias by the alias and records the real name in `.name`.
+  # Under the alias key the audit's collateral lookup queries a package the
+  # registry does not have, which answers `no-advisories` — a lost signal that
+  # never forces `still-required` the way `vulnerable` does (issue #44).
+  It 'keys an npm alias under the package it aliases'
+    use_fixture npm-alias
+    When call adapter_jq '{lodash: .resolutions.lodash, aliased: (.resolutions | has("lodash-alias"))}' resolution_map
+    The status should be success
+    The output should equal '{"lodash":["4.17.21","4.18.1"],"aliased":false}'
+  End
+
+  # The shape difference the audit's cross-check has to normalize away: the same
+  # version at two paths is two entries from `resolved_versions` and one from
+  # the map. Compared unnormalized that reads as a disagreement, which reports a
+  # healthy pin `inconclusive`; the agreement itself is asserted above.
+  It 'holds one entry for a version resolved at two paths'
+    use_fixture npm-alias
+    When call adapter_jq '[.versions[] | select(.version == "4.17.21") | .path] | length' resolved_versions lodash
+    The status should be success
+    The output should equal '2'
   End
 
   Describe 'the empty-parse guard'

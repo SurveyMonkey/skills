@@ -158,6 +158,14 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
 - **A verdict says what it covers.** When the map is unavailable the audit still runs, but its
   findings say the claim is about the named package only. A narrower finding is a smaller result;
   a finding that outruns what was checked is a wrong one.
+- **A package is identified by what it resolves to, never by where it sits**, and identically in
+  `resolution_map` and `resolved_versions` — the audit reads a disagreement between them as a
+  parser bug. Berry's `patch:` locator percent-encodes the descriptor it wraps, and npm keys an
+  `npm:` alias by the alias with the real name in `.name`; matching a literal `@npm:` or reading
+  the `node_modules/` path lost the first entirely and mislabeled the second
+  ([#44](https://github.com/SurveyMonkey/skills/issues/44)). Neither tripped the zero-entry guard,
+  because the entry count is nonzero and the map merely looks healthy — which is the whole reason
+  to state the identity rule rather than leave it to each parser.
 
 ## The rule that matters most
 

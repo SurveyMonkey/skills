@@ -84,9 +84,21 @@ about its own package and silent about the tree
 not shift, and its per-path detail is not what a diff wants. The empty-parse rule above applies
 unchanged, and for a sharper reason — a diff against an empty map reports every package unchanged,
 which is the wrong-safe answer by yet another route. Versions are sorted for comparability, not
-ranked; callers that need semver order still ask `compare_versions`. Entries that resolve to
-something other than a registry version (aliases, workspace links, `patch:`, git targets) are
-excluded, because "what version of X is in the tree" has no answer for them.
+ranked; callers that need semver order still ask `compare_versions`.
+
+**A package is keyed by what it resolves to, not by where it sits — in both verbs.** Workspace
+links, `portal:` and `exec:` targets, git targets and URL targets are excluded, because "what
+version of X is in the tree" has no registry answer for local or generated code. A `patch:` entry
+is *not* in that set: it wraps a published release, so it is included at the version it patches,
+and an npm `npm:` alias is included under the package it aliases rather than the key it installs
+as. Both were previously dropped or mislabeled — a patched package vanished from the map at a real
+registry version, and an alias was reported under a name no registry has
+([#44](https://github.com/SurveyMonkey/skills/issues/44)).
+
+The two verbs must agree about any package, since the pin audit treats a disagreement as a parser
+bug and refuses the pin. Their **shapes** differ by design, though — `resolved_versions` reports
+one `{version, path}` per resolution, the map reports each package's versions once — so a caller
+comparing them normalizes first: `[.versions[].version] | unique` against the map's list.
 
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR
