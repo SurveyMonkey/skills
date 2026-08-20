@@ -118,11 +118,24 @@ fi
 # different NDJSON shape entirely: one record per line keyed
 # `{"value": "<package>", "children": {"ID":..., "Severity":"...", ...}}`,
 # carrying none of the v1 markers above — the v1 detection above is silent
-# on real Berry output (issue #32). Matched the same way, as a same-line
-# literal marker rather than a parsed document, keyed on `children.Severity`
-# since that field is stable across the advisories seen in real captures
-# while the rest of the record varies in which keys are present.
-if [ "$pm_match" = false ] && printf '%s' "$output" | grep -Eq '"children":\{[^}]*"Severity":"'; then
+# on real Berry output (issue #32).
+#
+# Matched by parsing each line as its own JSON document (`fromjson`) rather
+# than pattern-matching the raw text: a text regex for `"children":{...` can
+# never rule out a literal `{` occurring in an *earlier* field of the same
+# record (`Issue`, `URL`) without also being able to match a `}` there, which
+# is the same unmatchable-pattern bug class this file exists to avoid
+# (issue #41; plugins/gh-security/scripts/CLAUDE.md, "The rule that matters
+# most"). `-R` reads NDJSON one line at a time; the outer `try ... catch
+# empty` absorbs a line that is not valid JSON (`fromjson` fails) or whose
+# `children` is present but not an object (`.children.Severity` errors on a
+# string/array/number), so either degrades to "no signal on this line"
+# instead of aborting the scan. `// empty` treats a record with no `Severity`
+# key (`children.Severity` is `null`) the same way, rather than emitting the
+# literal string "null" as a match.
+if [ "$pm_match" = false ] && printf '%s' "$output" | jq -R '
+    try (fromjson | .children.Severity // empty) catch empty
+  ' 2>/dev/null | grep -q .; then
   pm_match=true
 fi
 

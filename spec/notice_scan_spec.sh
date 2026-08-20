@@ -144,6 +144,48 @@ Severity: 1 low | 2 moderate"
       The status should be success
       The output should equal ''
     End
+
+    # issue #41: the old detector matched `"children":\{[^}]*"Severity":"` as
+    # raw text. Because `[^}]*` excludes `}` by construction, it could never
+    # match a record whose text before `Severity` contains a literal brace —
+    # the same unmatchable-pattern bug class the file exists to avoid. Fixed
+    # by parsing each NDJSON line as its own JSON document instead.
+    Describe 'Yarn Berry records containing a literal brace (issue #41)'
+      # Real record from the captured sample (issue #41's own repro): the
+      # `Issue` text quotes a `{}` group, which sits before `Severity` in the
+      # record and defeated the old `[^}]*` regex.
+      brace_in_issue='{"value":"brace-expansion","children":{"ID":1123898,"Issue":"brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups","URL":"https://github.com/advisories/GHSA-3jxr-9vmj-r5cp","Severity":"high","Vulnerable Versions":">=3.0.0 <5.0.7","Tree Versions":["5.0.5"],"Dependents":["minimatch@npm:10.2.5"]}}'
+      # A brace in URL is not something real GHSA advisory URLs contain, but
+      # the old regex was equally blind to one there; hand-authored to prove
+      # the fix is not accidentally scoped to the Issue field alone.
+      brace_in_url='{"value":"foo","children":{"ID":1,"Issue":"foo has a flaw","URL":"https://example.com/{legacy}/advisory","Severity":"high"}}'
+
+      Parameters
+        "a brace in the Issue text" "$brace_in_issue"
+        "a brace in the URL"        "$brace_in_url"
+      End
+
+      It "now fires on a Yarn Berry record with $1"
+        When call notice_jq '{matched: (.hookSpecificOutput.additionalContext != null)}' "$2"
+        The status should be success
+        The output should equal '{"matched":true}'
+      End
+    End
+
+    It 'stays silent on a Yarn Berry record whose children is not an object'
+      not_an_object='{"value":"foo","children":"not-an-object"}'
+      When call notice_jq '.' "$not_an_object"
+      The status should be success
+      The output should equal ''
+    End
+
+    It 'fires on a Yarn Berry capture with a non-JSON line mixed in among valid records'
+      mixed="not json at all
+{\"value\":\"ajv\",\"children\":{\"ID\":1,\"Issue\":\"x\",\"URL\":\"y\",\"Severity\":\"moderate\"}}"
+      When call notice_jq '{matched: (.hookSpecificOutput.additionalContext != null)}' "$mixed"
+      The status should be success
+      The output should equal '{"matched":true}'
+    End
   End
 
   Describe 'non-matching output stays silent'
