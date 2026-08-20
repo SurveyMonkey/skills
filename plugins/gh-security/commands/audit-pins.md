@@ -35,16 +35,26 @@ if nothing is missing, continue silently; otherwise ask once, **enumerating ever
 the question text itself**, and on consent run `apply` with the same arguments. Never block the
 audit on permissions housekeeping.
 
-## 3. Resolve the adapter
+## 3. Check there is something to audit, then resolve the adapter
+
+Two separate questions, in this order.
+
+**Is there a manifest?** Use Glob or `test -f <repo_root>/package.json`. `npm` is the only
+ecosystem with an adapter today, so a repository with no node manifest has nothing this command
+can audit: report exactly that and stop, without dispatching an agent that would only fail on its
+first adapter call.
+
+**Which adapter?**
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --ecosystem npm
 ```
 
-`npm` is the only ecosystem with an adapter today, so a repository with no node manifest has
-nothing this command can audit: report that and stop rather than dispatching. Python arrives with
-its adapter ([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the
-choice will be made once more than one exists.
+This resolves `adapter_path` and nothing else. It is a pure routing table — ecosystem in, adapter
+path out — and never looks at the filesystem, so it answers `supported: true` for `npm` in an
+empty directory. It cannot stand in for the check above. Python arrives with its adapter
+([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the choice will be
+made once more than one exists.
 
 ## 4. Dispatch the audit
 

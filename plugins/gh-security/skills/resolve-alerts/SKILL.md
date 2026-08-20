@@ -328,7 +328,7 @@ from it: it fixed nothing and opened nothing, and mixing its rows into the PR ta
 reading a finding as a change. Name the repo it audited, which at org or user scope is one repo in
 the batch rather than all of them. One table:
 
-> | Pin | Scope | Value | Without the pin | Finding |
+> | Pin | Scope | Value | Without the pin | Advisories | Finding |
 
 Then say plainly which pins are `removable` (and that removing them is the user's call, since this
 phase opens no PR), which are `still-required` and against which advisory range, and which came

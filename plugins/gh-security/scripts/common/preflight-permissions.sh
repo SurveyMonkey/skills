@@ -75,7 +75,15 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # deliberate exception: `--repo <nwo>` makes them location-independent, so they
 # carry no cd prefix and are covered by the NWO rules below instead. `git log`
 # is the pin audit's provenance lookup (`log -S <key>`), read-only like
-# `status` and `rev-parse`.
+# `status` and `rev-parse`. The alerts rule carries no wildcard between
+# `gh api` and the path, deliberately: one there would match
+# `gh api -X PATCH repos/<nwo>/dependabot/alerts/42 -f state=dismissed` and
+# pre-approve *mutating* an alert in a plugin whose audit is report-only. That
+# is also why agents/audit-pins.md prescribes the filters as `-f state=fixed`
+# rather than a `?state=fixed&...` query string: gh appends `-f` values to the
+# query on a GET, and a URL with no `?` or `&` in it needs no shell quoting, so
+# the rule can start at the path itself. Rule and prescribed shape are one
+# unit.
 RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C *$REPO_ROOT* status *)
 Bash(git -C *$REPO_ROOT* branch --list *)
@@ -92,7 +100,7 @@ if [ -n "$NWO" ]; then
 Bash(gh label * --repo $NWO *)
 Bash(gh pr create --repo $NWO *)
 Bash(gh pr list --repo $NWO *)
-Bash(gh api *repos/$NWO/dependabot/alerts*)"
+Bash(gh api repos/$NWO/dependabot/alerts*)"
 fi
 
 rules_json=$(printf '%s\n' "$RULES" | jq -R . | jq -s .)

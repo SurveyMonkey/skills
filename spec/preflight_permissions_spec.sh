@@ -51,7 +51,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '[.missing[] | select(test("log |pr list|dependabot/alerts"))]' check "$REPO" octo/app
     The status should be success
-    The output should equal "[\"Bash(git -C *$REPO* log *)\",\"Bash(gh pr list --repo octo/app *)\",\"Bash(gh api *repos/octo/app/dependabot/alerts*)\"]"
+    The output should equal "[\"Bash(git -C *$REPO* log *)\",\"Bash(gh pr list --repo octo/app *)\",\"Bash(gh api repos/octo/app/dependabot/alerts*)\"]"
   End
 
   # Push is `git -C <worktree> push ...` like every other git call, so the
