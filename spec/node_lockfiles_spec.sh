@@ -538,6 +538,82 @@ Describe 'node.sh resolution_map'
       The status should be success
       The output should equal '{"lockfile_entries":3,"package_count":0,"resolutions":{}}'
     End
+
+    # npm writes a workspace as `"node_modules/<ws>": {"resolved":"packages/<ws>",
+    # "link":true}`: the key carries `node_modules/`, so it counted in the
+    # denominator, and there is no `version`, so it could never count in the
+    # numerator. Six workspaces beside four dependencies read as `Read 4 of 10`
+    # and hard-failed an ordinary monorepo with "the parser is broken", which
+    # stops the audit and fails the fix flow's baseline outright (issue #48).
+    It 'does not count npm workspace links against the parse guard'
+      use_fixture npm-workspaces
+      When call adapter_jq '{entries_read, entries_expected, package_count, packages: (.resolutions | keys)}' resolution_map
+      The status should be success
+      The output should equal '{"entries_read":4,"entries_expected":4,"package_count":4,"packages":["express","lodash","sha.js","undici"]}'
+    End
+
+    # pnpm had no "read it and deliberately excluded it" answer at all, so a
+    # `link:`, a `file:` and a git dependency counted as parse failures: two
+    # registry entries out of five read as `Read 2 of 5` and died. The other
+    # direction was wrong too — local dependencies padded the recognized share
+    # of a genuinely broken lockfile (issue #48).
+    It 'classifies pnpm link:, file: and git entries as recognized, not unread'
+      use_fixture pnpm-local
+      When call adapter_jq '{entries_read, entries_expected, unreadable_entries, package_count}' resolution_map
+      The status should be success
+      The output should equal '{"entries_read":5,"entries_expected":5,"unreadable_entries":0,"package_count":2}'
+    End
+
+    # The guard fires only below half, so ONE unreadable locator sails through
+    # it and its package is dropped from the map with nothing saying so. Absent
+    # from the baseline snapshot and from the post-removal one alike, it shows
+    # no change in the audit's step-6 diff, which then reports
+    # `collateral_changes: []` — documented as the STRONGER claim than `null`.
+    # An unaudited package becomes an affirmatively clean one and the pin stays
+    # `removable`, so the map has to state its own coverage (issue #48).
+    It 'reports how many locators it could not read, rather than dropping them silently'
+      use_fixture yarn-partial-read
+      When call adapter_jq '{entries_read, entries_expected, unreadable_entries, dropped: (.resolutions | has("victim"))}' resolution_map
+      The status should be success
+      The output should equal '{"entries_read":4,"entries_expected":5,"unreadable_entries":1,"dropped":false}'
+    End
+
+    # A fully-read lockfile says so in the same field, so the audit's rule is a
+    # test on one number rather than an inference from an absence.
+    It 'reports zero unreadable entries for a lockfile it read completely'
+      use_fixture yarn-berry
+      When call adapter_jq '.unreadable_entries' resolution_map
+      The status should be success
+      The output should equal '0'
+    End
+  End
+
+  # A real package whose name equals another entry's install key. Both answer to
+  # the name, one as what it resolves to and one as the key it is installed
+  # under, so `resolved_versions` merges two different packages into one answer.
+  # The direction is fail-safe — it over-reports toward `inconclusive` and
+  # `still-required`, never toward `removable` — and disambiguating would mean
+  # guessing which sense a caller's name was in, which the caller cannot say
+  # either. So it is a documented limit (ADR 001) rather than a fix, and this is
+  # the shape it applies to (issue #48).
+  Describe 'a real package whose name is another entry install key'
+    both_views() {
+      _map=$("$ADAPTER" resolution_map | jq -c '.resolutions.lodash // []')
+      _one=$("$ADAPTER" resolved_versions lodash | jq -c '[.versions[].version] | unique')
+      printf 'map=%s resolved_versions=%s\n' "$_map" "$_one"
+    }
+
+    Parameters
+      npm-dual-name
+      yarn-dual-name
+    End
+
+    It "merges the two packages under one name in $1"
+      use_fixture "$1"
+      When call both_views
+      The status should be success
+      The output should equal 'map=["4.17.21"] resolved_versions=["1.13.6","4.17.21"]'
+    End
   End
 End
 
@@ -589,6 +665,18 @@ Describe 'node.sh why'
     When call adapter_jq '[.parents[]] | sort' why lodash
     The status should be success
     The output should equal '["express","test-exclude"]'
+  End
+
+  # Berry's side of the same rule. `yarn_parents` matched the declared key
+  # alone, so a parent reaching the package through an `npm:` alias reported no
+  # parent at all — and with the root here never mentioning lodash,
+  # `apply_constraint` had nothing to scope to and nothing to retarget: Yarn
+  # Berry had no path from the alias identity shift to a fix (issue #47).
+  It 'names a Yarn Berry parent that declares the package through an npm: alias'
+    use_fixture yarn-berry-alias-parent
+    When call adapter_jq '{relationship, parents}' why lodash
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["express"]}'
   End
 
   It 'excludes the yarn workspace entry from parents'

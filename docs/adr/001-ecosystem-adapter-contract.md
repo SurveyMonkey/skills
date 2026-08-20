@@ -73,8 +73,9 @@ any constraint exists to check against, and `validate` needs the same enumeratio
 predicate. One parser, two consumers.
 
 **`resolution_map` answers the whole-tree question `resolved_versions` cannot.** It returns
-`{pm, lockfile_entries, package_count, resolutions}`, where `resolutions` maps every package in the
-lockfile to its unique, lexically sorted version list. The pin audit needs it because an override
+`{pm, lockfile_entries, entries_read, entries_expected, unreadable_entries, package_count,
+resolutions}`, where `resolutions` maps every package in the lockfile to its unique, lexically
+sorted version list. The pin audit needs it because an override
 reaches past the package it names: lifting one changes dedup and hoisting and can let a peer
 conflict resolve differently, so a removal can move a package the pin never mentioned. Diffing one
 package before and after a removal is blind to that, and the resulting `removable` verdict is right
@@ -117,13 +118,38 @@ single canonical name, because its consumer is an advisory query that an alias k
 `resolved_versions` reports one, and `agents/audit-pins.md` reports that pin `inconclusive` naming
 the alias rather than reading it as a parser bug.
 
+**That exception carries a limit, and the limit is documented rather than fixed.** Answering under
+both names means a real package whose name equals another entry's install key — a repository
+installing `underscore` under the key `lodash` while a dependency pulls the real `lodash` — has its
+versions merged into one `resolved_versions` answer, in npm and Berry alike. Disambiguating by path
+or locator would require the caller to say which sense of the name it meant, and the caller cannot:
+an override key `lodash` is exactly as ambiguous as the lockfile is. The merge is fail-safe in
+direction — it over-reports toward `inconclusive` and `still-required`, never toward `removable` —
+so it is stated here and acted on in the audit rather than guessed at. It presents as **two
+non-empty lists that disagree**, distinct from the alias-key case's `[]` against non-empty, and
+`agents/audit-pins.md` names both shapes so neither is read as a parser bug
+([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
 **The parse guard counts what the parser could read, not what it kept.** A repository whose
 dependencies are all workspaces and portals resolves to no registry version at all, so an empty map
 is a real answer there; a lockfile the parser understood none of produces the same empty map, and a
 diff against it reports every package unchanged. Adapters therefore distinguish "read it and
 excluded it" from "could not read it", and refuse a lockfile whose recognized share has collapsed —
 which also catches the partial parse a zero-check cannot see
-([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+([#46](https://github.com/SurveyMonkey/skills/issues/46)). Every ecosystem's parser owes all three
+answers: an npm workspace link (`link: true`, no `version`) and a pnpm `link:`, `file:` or git
+entry are read and deliberately excluded, exactly as Berry's `workspace:` and `portal:` locators
+are, and counting either as unread hard-failed ordinary monorepos with a "the parser is broken"
+diagnosis ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
+**A guard that only refuses is not enough: the map states its own coverage.** The guard is a ratio,
+so a *single* unreadable locator passes it and its package silently leaves the map — absent from a
+baseline snapshot and from a post-removal one alike, which a whole-tree diff reads as "unchanged".
+`resolution_map` therefore carries `entries_read`, `entries_expected` and `unreadable_entries`, and
+`agents/audit-pins.md` requires `collateral_changes: null` with `collateral_verdict: not-checked`
+whenever the last is non-zero. Without it an unaudited package became an affirmatively clean one,
+because `[]` is documented as the stronger claim than `null`
+([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR
@@ -156,6 +182,22 @@ exits 0 with empty stdout answers nothing, and jq reading empty input emits noth
 failing, so every `has()` check downstream is skipped instead of tripped. A reply is asserted to be
 a JSON object before any field of it is read.
 
+**`apply_constraint` reads every declaration it needs out of the lockfile, and reports what it
+wrote.** It runs *before* `install`, in a fresh worktree where `node_modules` is gitignored and
+absent — and Yarn PnP never has one at all, while pnpm links only direct dependencies into one — so
+the key a parent declares an aliased dependency under comes from the lockfile
+(`.packages["node_modules/<parent>"].dependencies` for npm, the `dependencies:` block under each
+`resolution:` entry for Berry), never from a parent's installed manifest. A parent whose declaration
+the adapter cannot locate is named in `alias_lookup.parents_unresolved`, never skipped: the whole
+failure of the manifest-based lookup was that it skipped silently and wrote the plain package name,
+which does not govern the aliased copy. The result also carries `written[]`, one
+`{parent, path, value}` per entry the call actually created, produced by the same pass that writes
+them — the report used to state `package` and `range` whatever it had written, so a PR body quoting
+it described an edit that was not made ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+pnpm is the one gap and it is reported rather than guessed at: its `snapshots:` blocks record what
+a dependency resolved to, not the key and specifier it was declared with, so `alias_lookup.source`
+is `unsupported` there and every parent is listed unresolved.
+
 **`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
 plus the root manifest's own declaration, which is read from those three and `devDependencies` too:
@@ -169,7 +211,11 @@ work, not a documented guarantee. Alongside the ranges: `parents_read[]`, `paren
 (read, but declaring the package in no block, which version skew produces legitimately),
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse, kept inside `parents_unreadable` so every consumer of that list stays
-correct while the corrupt case remains distinguishable from the merely uninstalled one. The verb
+correct while the corrupt case remains distinguishable from the merely uninstalled one. A range is
+read from an `npm:` alias declaration as well as from a plain one, because parent discovery counts
+an aliasing parent as a parent: looking the package up under its own name alone filed that parent
+under `parents_without_range`, which reads as "declared nothing" for a parent that in fact declares
+a live range ([#48](https://github.com/SurveyMonkey/skills/issues/48)). The verb
 belongs behind the contract because finding a parent's manifest is an ecosystem question
 (`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and because the
 shell loop it replaced in the agent definition could not be pre-approved by the preflight catalog,

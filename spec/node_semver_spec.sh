@@ -197,6 +197,33 @@ Describe 'node.sh declared_ranges'
     The output should equal '{"ranges":["^4.17.21"],"parents_read":[],"parents_unreadable":["express","test-exclude"],"parents_malformed":["express"]}'
   End
 
+  # `npm_parents` and `yarn_parents` count a parent that declares the package
+  # through an `npm:` alias, but this verb looked the package up under its own
+  # name only — so that parent came back in `parents_without_range`, labelled as
+  # declaring nothing, with node.sh's own comment rationalizing the label as
+  # version skew. It in fact declares `npm:lodash@^4.18.0`, a live range that
+  # keeps readmitting vulnerable versions and never reaches the PR body
+  # (issue #48). The fixture is the installed state this verb reads, which is
+  # why it is a separate one from `npm-alias`: that fixture models the
+  # pre-install state `apply_constraint` runs in and has no node_modules at all.
+  It 'reads the range out of a parent alias declaration'
+    use_fixture npm-alias-installed
+    When call adapter_jq '{ranges, parents_read, parents_without_range, parents_unreadable}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"ranges":["^4.17.21","^4.18.0"],"parents_read":["alias-parent"],"parents_without_range":[],"parents_unreadable":["dupe-parent"]}'
+  End
+
+  # The root is a dependent like any other, and this one declares lodash only
+  # through `aliased: "npm:lodash@4.17.21"`. Reported as no root range at all,
+  # it took the fix's most reliable input away on precisely the repositories
+  # where the copy is hardest to find (issues #47, #48).
+  It 'reads the root range out of an alias declaration too'
+    use_fixture yarn-alias
+    When call adapter_jq '{ranges, root_range}' declared_ranges lodash
+    The status should be success
+    The output should equal '{"ranges":["4.17.21"],"root_range":"4.17.21"}'
+  End
+
   # Yarn PnP installs no node_modules at all: every parent is unreadable and
   # the root manifest is all there is. Partial, and visibly so.
   It 'still reports the root range when no parent manifest is installed'

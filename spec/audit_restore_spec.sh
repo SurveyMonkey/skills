@@ -50,21 +50,30 @@ Describe 'the prescribed pin-audit restore'
             -e 's|<lockfile>|yarn.lock|'
   }
 
+  # stderr is NOT discarded: a git that fails for some reason other than the one
+  # under test would otherwise be invisible, and the exit status alone cannot
+  # tell the two apart. It flows to the example's own stderr, which each caller
+  # asserts is empty.
   run_lines() {
     _st=0
     while IFS= read -r _cmd; do
       [ -n "$_cmd" ] || continue
-      eval "$_cmd" >/dev/null 2>&1 || _st=$?
+      eval "$_cmd" >/dev/null || _st=$?
     done <<EOF
 $1
 EOF
     printf '%s\n' "$_st"
   }
 
+  # The line count is asserted, not just the two lines. Without it a third
+  # matching line added to the definition would still pass this example, and
+  # would silently change what the two examples below execute — they run
+  # whatever `prescribed` returns.
   It 'prescribes exactly one restore and one verification'
     audit_repo
     When call prescribed
     The status should be success
+    The lines of output should equal 2
     The line 1 should equal "git -C $REPO checkout HEAD -- package.json yarn.lock"
     The line 2 should equal "git -C $REPO diff --quiet HEAD -- package.json yarn.lock"
   End
@@ -81,6 +90,7 @@ EOF
     }
     When call exit_and_manifest
     The status should be success
+    The stderr should equal ''
     The output should equal 'exit=0 manifest={"name":"demo","overrides":{"lodash":"^4.17.21"}}'
   End
 
@@ -93,6 +103,7 @@ EOF
     verify_only() { run_lines "$(prescribed | tail -1)"; }
     When call verify_only
     The status should be success
+    The stderr should equal ''
     The output should equal '1'
   End
 End

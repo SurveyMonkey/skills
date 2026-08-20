@@ -223,6 +223,19 @@ in the tree, so they are both the most costly and the most likely to be over-bro
 6. **Diff the whole map against the baseline map.** For every *other* package whose version set
    changed, record `{package, baseline, without_pin, newly_admitted}`, where `newly_admitted` is
    what the removal added. This is the collateral list, and it is usually empty.
+
+   **First read `unreadable_entries` on the map, in the baseline and after every removal.** It
+   counts the lockfile entries the parser could not read at all. The parse guard refuses only when
+   the recognized share collapses below half, so one unreadable locator passes it — and that
+   entry's package is then missing from *both* snapshots, so the diff sees no change for it and
+   `[]` claims nothing else moved. `[]` is the stronger claim, so an unaudited package would be
+   reported as an affirmatively clean one and the pin would stay `removable`
+   ([#48](https://github.com/SurveyMonkey/skills/issues/48)). **When `unreadable_entries` is
+   non-zero on either map, set `collateral_changes` to `null` and `collateral_verdict` to
+   `not-checked`** for every pin measured against it, and say in the report — per verdict and once
+   in the summary — how many entries could not be read. This is the same fallback as an
+   unavailable `resolution_map` below, for the same reason: a partial view is not a whole-tree
+   view, and a verdict that outruns what was checked is a wrong one.
 7. **Restore the tree, then verify the restore, before the next pin:**
 
    ```bash
@@ -284,13 +297,29 @@ If the normalized answers still differ, one of the two parsers is wrong; report 
 `inconclusive`, quote both answers, and do not pick a winner.
 
 **One difference is not a parser bug: a pin keyed on an `npm:` alias.** `"lodash-alias":
-"npm:lodash@4.18.2"` pins a copy of `lodash` under a name no registry has, so the map holds it under
-`lodash` — the name an advisory query needs — while `resolved_versions` answers under both. The map
-therefore has no entry for the pin's own key, and the normalized comparison reads `[]` against a
-non-empty list. Report the pin `inconclusive`, saying it is keyed on an alias of the package named in
-its value and that the two views cannot be compared under one name. That is the honest small answer;
-`removable` here would be a deletion recommendation reached by the same route
-([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+">=4.18.0"` is a version pin on a copy of `lodash` installed under a name no registry has, so the
+map holds that copy under `lodash` — the name an advisory query needs — while `resolved_versions`
+answers under both. The map therefore has no entry for the pin's own key, and the normalized
+comparison reads `[]` against a non-empty list. Report the pin `inconclusive`, saying it is keyed on
+an alias of the package named in its value and that the two views cannot be compared under one name.
+That is the honest small answer; `removable` here would be a deletion recommendation reached by the
+same route ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+
+That worked example is a **`range`** pin keyed on an alias name, deliberately. `"lodash-alias":
+"npm:lodash@4.18.2"` never reaches this comparison at all: `kind` is `alias`, so phase 2 files it
+`not-a-version-pin` and it is never tested
+([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
+**A second difference is a documented limit, not a parser bug either, and it looks different: two
+non-empty lists that disagree.** A real package can share its name with another entry's install
+key — a repository that installs `underscore` under the key `lodash` while some dependency pulls the
+real `lodash`. `resolved_versions` answers under both senses of the name and so merges the two
+packages into one answer, while the map keeps each under what it resolves to. `[]` against non-empty
+is the alias-key case above; **non-empty against non-empty, where the map's list is a subset, is
+this one**. Report the pin `inconclusive` either way, and for this shape say that the name is
+carried by two different packages in this tree, naming both. Do not report it as a parser bug: the
+adapter cannot tell which sense a name was meant in, and neither can the pin's key
+([#48](https://github.com/SurveyMonkey/skills/issues/48); ADR 001's alias exception).
 
 **If `resolution_map` is unavailable** — exit 2 from an adapter that does not implement it, or an
 error on this lockfile — you have no whole-tree view, and you may not fabricate one. Fall back to
@@ -352,7 +381,7 @@ not empty, it is the whole point. Collapse the results into `collateral_verdict`
 | every newly-admitted version `safe` | `safe` | none, but the report must still name what moved |
 | any `vulnerable` | `vulnerable` | the pin is `still-required` |
 | any `unknown` or `no-advisories`, none vulnerable | `inconclusive` | the pin is `inconclusive` |
-| `resolution_map` unavailable | `not-checked` | the verdict is scoped to the named package |
+| `resolution_map` unavailable, **or its `unreadable_entries` non-zero** | `not-checked` | the verdict is scoped to the named package |
 
 A `vulnerable` collateral makes the pin `still-required` even when its own package came back
 clean, and `detail` must say why in those terms: the pin is not required for the package it names,
@@ -488,9 +517,11 @@ End your final message with exactly one fenced JSON block:
   the pin was not tested.
 - `collateral_changes` is phase 4 step 6's whole-lockfile diff: one entry per **other** package
   whose resolved version set changed, `[]` when nothing else moved, and `null` when the pin was not
-  tested or `resolution_map` was unavailable. `collateral_verdict` is `none`, `safe`, `vulnerable`,
-  `inconclusive`, or `not-checked`, and `null` for an untested pin. `null` and `[]` are not
-  interchangeable: one says nothing else moved, the other says nobody looked.
+  tested, `resolution_map` was unavailable, or the map's `unreadable_entries` was non-zero.
+  `collateral_verdict` is `none`, `safe`, `vulnerable`, `inconclusive`, or `not-checked`, and
+  `null` for an untested pin. `null` and `[]` are not interchangeable: one says nothing else moved,
+  the other says nobody looked. A partially-read map produces the second, never the first
+  ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 - `advisory_verdict`, `advisory_count` and `matched_ranges` come from `check-advisories.sh`
   verbatim **for the tested package**, and are `null`/`[]` for a pin that was not tested or whose
   delta was empty. A collateral package's advisory result lives in `collateral_verdict`, never

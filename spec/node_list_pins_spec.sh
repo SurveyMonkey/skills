@@ -271,18 +271,27 @@ Describe 'node.sh list_pins'
   # not fire, because the map has no entry under the alias key either, so both
   # sides normalize to [] and agree. Every guard passes and a pin on a real
   # package is recommended for deletion (issue #46).
+  #
+  # The pin carrying that shape is a **range** keyed on an alias name
+  # (`"lodash-alias": ">=4.18.0"`), not `"lodash-alias": "npm:lodash@4.18.2"`.
+  # The latter classifies `kind: alias`, which phase 2 files as
+  # `not-a-version-pin` and never tests, so it can never reach the phase-6
+  # exception it was used to illustrate; audit-pins.md pointed at that
+  # unreachable specimen and no fixture carried the reachable one (issue #48).
   Describe 'an override keyed on an alias name'
     pin_then_resolve() {
-      _pin=$("$ADAPTER" list_pins | jq -r '[.pins[].package] | index("lodash-alias")')
+      _kind=$("$ADAPTER" list_pins \
+        | jq -c '[.pins[] | select(.package == "lodash-alias") | {kind, scope, range}]')
       _res=$("$ADAPTER" resolved_versions lodash-alias | jq -c '{present, versions: [.versions[].version]}')
-      printf 'pin_index=%s resolved=%s\n' "$_pin" "$_res"
+      _map=$("$ADAPTER" resolution_map | jq -c '.resolutions["lodash-alias"] // []')
+      printf 'pin=%s resolved=%s map=%s\n' "$_kind" "$_res" "$_map"
     }
 
-    It 'is reported by list_pins and resolves in the tree under that name'
+    It 'is a testable range pin, resolves under that name, and has no map entry'
       use_fixture npm-alias
       When call pin_then_resolve
       The status should be success
-      The output should equal 'pin_index=1 resolved={"present":true,"versions":["4.18.1"]}'
+      The output should equal 'pin=[{"kind":"range","scope":"bare","range":">=4.18.0"}] resolved={"present":true,"versions":["4.18.1"]} map=[]'
     End
   End
 End

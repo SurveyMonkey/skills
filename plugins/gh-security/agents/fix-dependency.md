@@ -212,7 +212,17 @@ cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>
 ```
 
 The adapter picks the right syntax per package manager, merges into existing entries rather than
-replacing them, and preserves the manifest's formatting. Its `observations` array lists
+replacing them, and preserves the manifest's formatting.
+
+**Quote `written[]`, not your own arguments, when the PR body says what changed.** It carries one
+`{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
+parent reached through an `npm:` alias is written under the alias key with the protocol in the value
+(`{"express/lodash-alias": "npm:lodash@>=4.18.2 <5"}`), not under the package name you passed.
+**Also read `alias_lookup.parents_unresolved`**: those are parents whose declaration the adapter
+could not locate, so an aliased copy under one of them was not moved. Say so in the PR body rather
+than reporting the fix as complete; validate will fail on it if it matters.
+
+Its `observations` array lists
 **unscoped global overrides** already in the manifest. Do not act on them; carry them verbatim
 into your result JSON, where the orchestrator aggregates them across the batch. Keep this first
 array: it is the only record of what the manifest looked like before you touched it, and it is

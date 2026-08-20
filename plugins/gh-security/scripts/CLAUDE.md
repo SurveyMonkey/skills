@@ -163,7 +163,17 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
   to no registry version and a *partial* parse passes a zero-check.
 - **A verdict says what it covers.** When the map is unavailable the audit still runs, but its
   findings say the claim is about the named package only. A narrower finding is a smaller result;
-  a finding that outruns what was checked is a wrong one.
+  a finding that outruns what was checked is a wrong one. The guard is a *ratio*, so a single
+  unreadable locator passes it and drops its package from both snapshots — no change in the diff,
+  and `[]` is the stronger claim. `resolution_map` therefore reports `unreadable_entries`, and
+  `agents/audit-pins.md` maps any non-zero value onto `collateral_changes: null` +
+  `collateral_verdict: not-checked` ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+- **Every parser owes three answers, not two**, and "deliberately excluded" is the one that keeps
+  getting forgotten: an npm workspace link (`link: true`, no `version`) and a pnpm `link:`, `file:`
+  or git entry belong with Berry's `workspace:` and `portal:` locators, not in the unread count.
+  Counting them as unread hard-failed ordinary monorepos with a "the parser is broken" diagnosis,
+  which stops the audit and fails the fix flow's baseline
+  ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 - **A package is identified by what it resolves to, never by where it sits**, and identically in
   `resolution_map` and `resolved_versions` — the audit reads a disagreement between them as a
   parser bug. Berry's `patch:` locator percent-encodes the descriptor it wraps, and npm keys an
@@ -176,7 +186,37 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
   is what `list_pins` hands the audit, and `present: false` there is read as "the package left the
   tree". That is the single place the two verbs differ about a name, it is documented in ADR 001,
   and `apply_constraint` writes the same key so the copy can also be moved
-  ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+  ([#46](https://github.com/SurveyMonkey/skills/issues/46)). Answering under both names has one
+  documented consequence: a real package sharing its name with another entry's install key has its
+  versions merged into one answer. The direction is fail-safe and the audit names the shape; see
+  ADR 001's alias exception.
+
+## What a parent declares comes from the lockfile, never from `node_modules/`
+
+`apply_constraint` runs **before** `install`, in a fresh worktree where `node_modules` is
+gitignored and absent; Yarn PnP never has one, and pnpm links only direct dependencies into one.
+Reading `node_modules/<parent>/package.json` for a parent's alias key therefore found nothing every
+time, skipped silently, and wrote the plain package name — which does not govern the aliased copy,
+so the escalation ladder re-ran the same lookup and the flow dead-ended
+([#48](https://github.com/SurveyMonkey/skills/issues/48)). The declarations come from
+`.packages["node_modules/<parent>"].dependencies` (npm) and the `dependencies:` block under each
+`resolution:` entry (Berry), through one reader that `why`, `apply_constraint` and `declared_ranges`
+all share — which is also what gave Berry a working alias path at all
+([#47](https://github.com/SurveyMonkey/skills/issues/47)).
+
+Two rules travel with it, both of which the old lookup broke:
+
+- **A parent whose declaration cannot be read is named**, in `alias_lookup.parents_unresolved`.
+  pnpm has no readable declaration at all — its snapshots record what a dependency resolved to, not
+  the key it was declared under — so it reports `source: "unsupported"` rather than guessing.
+- **The result states the key and value actually written**, in `written[]`, produced by the same jq
+  pass that writes them. Two copies of that logic is how the report came to say `package`/`range`
+  while an alias key had been written, putting an edit in the PR body that was never made.
+
+`spec/fixtures/npm-alias` has **no committed `node_modules`** for this reason, and
+`spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`
+reads. A fixture carrying a directory that does not exist where the verb runs is not a specimen of
+reality, and it is why the suite stayed green through this.
 
 ## The rule that matters most
 

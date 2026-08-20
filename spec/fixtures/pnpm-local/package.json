@@ -1,0 +1,11 @@
+{
+  "name": "demo-pnpm-local",
+  "packageManager": "pnpm@10.2.1",
+  "dependencies": {
+    "express": "^4.18.2",
+    "local-lib": "file:./vendor/local-lib",
+    "linked-tool": "link:../linked-tool",
+    "git-dep": "github:example/git-dep#abcdef0"
+  },
+  "scripts": { "test": "vitest run" }
+}

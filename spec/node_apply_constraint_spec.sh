@@ -159,12 +159,73 @@ Describe 'node.sh apply_constraint'
   # declared as `lodash-alias`, and a bare range under the alias key names a
   # package no registry has. Both halves are needed, so both are asserted
   # (issue #46).
+  #
+  # **Neither fixture below has a `node_modules` directory**, and that is the
+  # point. This verb runs before `install`, in a fresh worktree where
+  # node_modules is gitignored and absent; Yarn PnP never has one at all. The
+  # alias key used to be looked up in `node_modules/<parent>/package.json`, so
+  # every parent was silently skipped and the plain package name was written,
+  # which moves nothing — while `spec/fixtures/npm-alias` committed a
+  # node_modules tree encoding a state that never exists here, which is why the
+  # suite stayed green through it (issue #48).
   Describe 'a dependency reached through an npm: alias'
+    # The chain, end to end: the key `apply_constraint` writes, and the copy
+    # `validate` says is still vulnerable. A pass means the override that was
+    # written names the same copy the completeness check flags — which is what
+    # "the aliased copy is governed" means before an install has run.
+    alias_chain() {
+      _wrote=$("$ADAPTER" apply_constraint lodash '>=4.18.2 <5' "$@" \
+        | jq -c '[.written[] | select(.value | startswith("npm:")) | .path]')
+      _left=$("$ADAPTER" validate --line 4 --vulnerable '>= 4.18.0, < 4.18.2' \
+        lodash '>=4.18.2 <5' | jq -c '[.unresolved_alerts[].path]')
+      printf 'wrote=%s still_vulnerable=%s\n' "$_wrote" "$_left"
+    }
+
     It 'writes the alias key, with the protocol, under the parent that declared it'
       use_fixture npm-alias
       "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' alias-parent dupe-parent >/dev/null
       When call manifest '{aliased: .overrides["alias-parent"], plain: .overrides["dupe-parent"]}'
       The output should equal '{"aliased":{"lodash-alias":"npm:lodash@>=4.18.2 <5"},"plain":{"lodash":">=4.18.2 <5"}}'
+    End
+
+    It 'governs the aliased copy validate flags, with no node_modules to read'
+      use_fixture npm-alias
+      When call alias_chain alias-parent dupe-parent
+      The status should be success
+      The path node_modules should not be exist
+      The output should equal 'wrote=[["overrides","alias-parent","lodash-alias"]] still_vulnerable=["node_modules/lodash-alias"]'
+    End
+
+    # Yarn Berry, which had no working path at all until `yarn_parents` learned
+    # to read alias declarations: `why` returned no parent, so this call would
+    # have received none and only the root-alias branch could fire — and the
+    # root here never mentions lodash (issue #47).
+    It 'does the same for a Yarn Berry parent that declares through npm:'
+      use_fixture yarn-berry-alias-parent
+      When call alias_chain express
+      The status should be success
+      The path node_modules should not be exist
+      The output should equal 'wrote=[["resolutions","express/lodash-alias"]] still_vulnerable=["lodash-alias@npm:lodash@4.18.1"]'
+    End
+
+    # The result used to report `package` and `range` whatever it had written,
+    # so a PR body quoting it described an edit that was not made (issue #48).
+    It 'reports the key and value it actually wrote'
+      use_fixture npm-alias
+      When call adapter_jq '.written' apply_constraint lodash '>=4.18.2 <5' alias-parent
+      The status should be success
+      The output should equal '[{"parent":"alias-parent","path":["overrides","alias-parent","lodash-alias"],"value":"npm:lodash@>=4.18.2 <5"}]'
+    End
+
+    # Silently skipping a parent whose declaration cannot be read is the whole
+    # failure mode above. pnpm's snapshots record what a dependency resolved to
+    # rather than the key it was declared under, so this adapter has no source
+    # for a pnpm alias declaration and says so rather than guessing.
+    It 'names every parent whose declaration it could not read'
+      use_fixture pnpm-v9
+      When call adapter_jq '.alias_lookup' apply_constraint lodash '>=4.17.25 <5' express koa
+      The status should be success
+      The output should equal '{"source":"unsupported","parents_unresolved":["express","koa"]}'
     End
 
     # The root is a dependent like any other, and it declares both copies here.
