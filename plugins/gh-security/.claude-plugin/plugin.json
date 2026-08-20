@@ -1,7 +1,7 @@
 {
   "name": "gh-security",
-  "version": "0.4.0",
-  "description": "Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow.",
+  "version": "0.5.0",
+  "description": "Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, a check-aware mark-ready flow, and a report-only pin audit that finds overrides no longer needed.",
   "author": {
     "name": "Brian Espinosa",
     "email": "b@bje.co"
@@ -13,6 +13,7 @@
     "security",
     "dependabot",
     "cve",
-    "overrides"
+    "overrides",
+    "pin-audit"
   ]
 }
