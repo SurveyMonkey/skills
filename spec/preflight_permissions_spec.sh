@@ -54,6 +54,19 @@ Describe 'preflight-permissions.sh'
     The output should equal "[\"Bash(git -C *$REPO* log *)\",\"Bash(gh pr list --repo octo/app *)\",\"Bash(gh api repos/octo/app/dependabot/alerts*)\"]"
   End
 
+  # The pin audit's restore and its verifier both run as
+  # `git -C "$WORK/audit" ... HEAD -- package.json <lockfile>`, and $WORK sits
+  # under .claude/worktrees, so the worktree rule already covers them and
+  # neither needs one of its own. Asserted rather than assumed, because those
+  # shapes changed (issue #46) and prescribed shapes and this catalog move
+  # together.
+  It 'covers the pin audit restore under the worktree rule alone'
+    make_repo
+    When call common_jq preflight-permissions.sh '{worktree: ([.missing[] | select(test("worktrees/"))] | length), dedicated: ([.missing[] | select(test("checkout|diff "))] | length)}' check "$REPO"
+    The status should be success
+    The output should equal '{"worktree":3,"dedicated":0}'
+  End
+
   # Push is `git -C <worktree> push ...` like every other git call, so the
   # worktree rule covers it and a bare-push rule would be dead weight.
   It 'carries no bare git push rule'

@@ -226,14 +226,27 @@ in the tree, so they are both the most costly and the most likely to be over-bro
 7. **Restore the tree, then verify the restore, before the next pin:**
 
    ```bash
-   git -C "$WORK/audit" checkout -- package.json <lockfile>
-   git -C "$WORK/audit" diff --quiet -- package.json <lockfile>
+   git -C "$WORK/audit" checkout HEAD -- package.json <lockfile>
+   git -C "$WORK/audit" diff --quiet HEAD -- package.json <lockfile>
    ```
 
-   The second command exits 0 only when both files match HEAD again. **A non-zero exit stops the
-   run**: return a failure result (phase `restore`) saying which pin was being tested and quoting
+   The second command exits 0 only when both files match HEAD again. **`HEAD` is load-bearing in
+   both, and for the same reason.** Without it `checkout` restores from the *index* and `diff`
+   compares against the *index*, so the restore and the check that is supposed to catch a failed
+   restore share one movable reference: anything that lands in the index — a stray `git add`, a
+   tool that stages — is restored and then confirmed as correct
+   ([#46](https://github.com/SurveyMonkey/skills/issues/46)). **A non-zero exit stops the run**:
+   return a failure result (phase `restore`) saying which pin was being tested and quoting
    `git -C "$WORK/audit" status --porcelain -- package.json <lockfile>`, then clean up. Do not
    retry, and do not continue to the next pin.
+
+   **What this verifies is exactly `package.json` and the lockfile.** In a zero-install Yarn Berry
+   repository every install also rewrites the committed `.yarn/cache/*.zip` entries, which are
+   tracked, outside this pathspec, and restored by nothing here. That is deliberate rather than
+   overlooked: cache archives are content-addressed artifacts of the lockfile, so they cannot make
+   the next pin resolve differently, and the whole worktree is a scratch checkout that phase 7
+   removes — none of it reaches the user's own tree. So say the two files match HEAD, which is what
+   was checked; do not report the worktree as clean.
 
 **Step 6 is not bookkeeping; it is the reason a `removable` verdict can be trusted.** An override
 reaches past its own target: lifting it changes dedup and hoisting, and lets a peer conflict
