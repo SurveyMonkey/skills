@@ -152,6 +152,28 @@ highest_version() {
   printf '%s\n' "$best"
 }
 
+# Classify a JSON payload against the "array of alerts" contract without
+# exiting, so a caller that must hard-stop (a top-level scope) and a caller
+# that must record a per-repo skip and continue (the fan-out) can share one
+# classification instead of the fan-out re-deriving a weaker check that
+# discards the API's own `.message`.
+#
+# Exit status: 0 clean array (nothing printed), 2 not valid JSON at all
+# (nothing printed; there is no `.message` to read from non-JSON), 3 valid
+# JSON but not an array (the API's own `.message`, when present, printed on
+# stdout).
+classify_alerts_json() {
+  json="$1"
+  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
+    return 2
+  fi
+  if ! printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null
+    return 3
+  fi
+  return 0
+}
+
 # Fail loudly on anything that is not a JSON array of alerts: an empty array is
 # a legitimate "no alerts" answer, but a JSON error object or non-JSON body
 # must never be silently treated as zero alerts.
@@ -159,15 +181,14 @@ validate_alerts_json() {
   label="$1"
   json="$2"
 
-  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
+  msg=$(classify_alerts_json "$json") && return 0
+  status=$?
+  if [ "$status" -eq 2 ]; then
     printf '{"error":"Invalid JSON response for %s"}\n' "$label" >&2
-    exit 1
-  fi
-  if ! printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    msg=$(printf '%s' "$json" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
+  else
     printf '{"error":"Unexpected API response for %s: %s"}\n' "$label" "$msg" >&2
-    exit 1
   fi
+  exit 1
 }
 
 # Group one repo's flat alert array into the actionable/skipped contract,
@@ -400,12 +421,33 @@ fan_out() {
     printf '{"error":"Invalid JSON response listing repos via %s"}\n' "$api_path" >&2
     exit 1
   }
+  printf '%s' "$LIST" | jq -e 'type == "array"' >/dev/null 2>&1 || {
+    msg=$(printf '%s' "$LIST" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
+    printf '{"error":"Unexpected repo listing response via %s: %s"}\n' "$api_path" "$msg" >&2
+    exit 1
+  }
 
+  # `push_status` distinguishes a genuine denial ("false") from a listing row
+  # that carries no `permissions` object at all ("unknown"): `// false` alone
+  # collapses both to the same reason, misattributing an absent-data case as a
+  # denial (the same absent-vs-false trap documented in scripts/CLAUDE.md for
+  # score-merge-risk.sh).
   CANDIDATES=$(printf '%s' "$LIST" | jq -c '
     flatten
     | map(select((.fork // false) == false and (.archived // false) == false))
-    | map({full_name, push: ((.permissions.push) // false)})
-  ')
+    | map({
+        full_name,
+        push_status: (
+          if (has("permissions") and (.permissions != null) and (.permissions | has("push")))
+          then (if .permissions.push then "true" else "false" end)
+          else "unknown"
+          end
+        )
+      })
+  ' 2>"$ERR_FILE") || {
+    printf '{"error":"Failed to process repo listing via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
+    exit 1
+  }
 
   results=()
   skipped_repos=()
@@ -414,13 +456,23 @@ fan_out() {
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     full_name=$(printf '%s' "$row" | jq -r '.full_name')
-    push=$(printf '%s' "$row" | jq -r '.push')
+    push_status=$(printf '%s' "$row" | jq -r '.push_status')
 
-    if [ "$push" != "true" ]; then
-      skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "no push access" \
-        '{repo: $repo, reason: $reason}')")
-      continue
-    fi
+    case "$push_status" in
+      true)
+        ;;
+      false)
+        skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "no push access" \
+          '{repo: $repo, reason: $reason}')")
+        continue
+        ;;
+      *)
+        skipped_repos+=("$(jq -n --arg repo "$full_name" \
+          --arg reason "permission data missing from API response" \
+          '{repo: $repo, reason: $reason}')")
+        continue
+        ;;
+    esac
 
     repo_alerts_err=$(mktemp)
     if ! repo_alerts=$(gh api "repos/$full_name/dependabot/alerts?state=open&per_page=100" \
@@ -432,15 +484,19 @@ fan_out() {
     fi
     rm -f "$repo_alerts_err"
 
-    if ! printf '%s' "$repo_alerts" | jq empty 2>/dev/null || \
-       ! printf '%s' "$repo_alerts" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    if problem_msg=$(classify_alerts_json "$repo_alerts"); then
+      res=$(group_repo_alerts "$full_name" "$repo_alerts") || exit 1
+      results+=("$res")
+    else
+      classify_status=$?
+      if [ "$classify_status" -eq 2 ]; then
+        detail="invalid JSON in alert response"
+      else
+        detail="$problem_msg"
+      fi
       skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "invalid alert response" \
-        '{repo: $repo, reason: $reason}')")
-      continue
+        --arg err "$detail" '{repo: $repo, reason: $reason, error: $err}')")
     fi
-
-    res=$(group_repo_alerts "$full_name" "$repo_alerts") || exit 1
-    results+=("$res")
   done <<< "$rows"
 
   combined='{"actionable":[],"skipped":[]}'
@@ -491,7 +547,24 @@ case "$SCOPE" in
       fi
     else
       agg_err=$(cat "$ERR_FILE")
-      case "$agg_err" in
+      # A bare `403` substring is not proof of "no org-level security
+      # visibility": a rate limit and a SAML/SSO enforcement block both surface
+      # as 403s too, and silently reinterpreting either as the permission case
+      # fans out to per-repo calls that mostly also fail, or succeed against a
+      # partial repo set, and come back looking like a clean, wrong answer.
+      # Both are checked, and hard-fail, before the permission-shaped fallback.
+      agg_err_lower=$(printf '%s' "$agg_err" | tr '[:upper:]' '[:lower:]')
+      case "$agg_err_lower" in
+        *"rate limit"*|*abuse*)
+          printf '{"error":"Org alert aggregate call for %s was rate-limited: %s"}\n' \
+            "$TARGET" "$agg_err" >&2
+          exit 1
+          ;;
+        *saml*|*sso*|*"single sign-on"*)
+          printf '{"error":"Org alert aggregate call for %s blocked by SAML/SSO enforcement: %s"}\n' \
+            "$TARGET" "$agg_err" >&2
+          exit 1
+          ;;
         *"403"*)
           # No org-level security visibility (security manager or admin
           # required). Fall back to per-repo enumeration of repos the

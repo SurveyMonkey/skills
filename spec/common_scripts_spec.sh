@@ -171,6 +171,21 @@ Describe 'select-adapter.sh'
       The status should not equal 0
       The stderr should be present
     End
+
+    # discover-alerts.sh --scope org|user emits a top-level `skipped_repos`
+    # array alongside actionable/skipped (issue #6). The batch-mode pipeline
+    # rebuilds the output object, so a key it does not know about must still
+    # survive the round trip rather than being silently dropped.
+    discovery_with_skipped_repos() {
+      printf '%s' '{"actionable":[{"package":"lodash","ecosystem":"npm"}],"skipped":[],"skipped_repos":[{"repo":"octo/readonly","reason":"no push access"}]}'
+    }
+    annotate_with_skipped_repos() { discovery_with_skipped_repos | "$COMMON/select-adapter.sh" --from-discovery | jq -c "$1"; }
+
+    It 'passes skipped_repos through unchanged'
+      When call annotate_with_skipped_repos '.skipped_repos'
+      The status should be success
+      The output should equal '[{"repo":"octo/readonly","reason":"no push access"}]'
+    End
   End
 End
 

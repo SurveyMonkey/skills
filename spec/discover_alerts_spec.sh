@@ -91,6 +91,14 @@ Describe 'discover-alerts.sh'
     The output should equal '[41,60,93,145,148,151,152]'
   End
 
+  # Every group now carries its own `repo`, the field cross-repo scopes key on
+  # (issue #6). Repo scope pins it to the target passed on the command line.
+  It 'tags every group with the repo scope target'
+    When call discover '[(.actionable[], .skipped[]) | .repo] | unique'
+    The status should be success
+    The output should equal '["octo/app"]'
+  End
+
   It 'suffixes the line even when a package has only one'
     When call discover '[.actionable[] | select(.package == "lodash") | .branch_name]'
     The status should be success
