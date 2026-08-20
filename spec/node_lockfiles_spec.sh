@@ -108,11 +108,14 @@ End
 Describe 'node.sh verb dispatch'
   After 'cleanup_fixture'
 
-  It 'reserves list_pins with exit 2 until issue #7'
+  # Reserved and exiting 2 through Phases 1-3; implemented in Phase 4, whose
+  # pin audit is its only consumer (issue #7). Behavior is covered in
+  # spec/node_list_pins_spec.sh; this only asserts the verb is wired up.
+  It 'dispatches list_pins'
     use_fixture pnpm-v9
-    When run script "$ADAPTER" list_pins
-    The status should equal 2
-    The stderr should include 'not implemented'
+    When call adapter_jq '{pm, count}' list_pins
+    The status should be success
+    The output should equal '{"pm":"pnpm","count":3}'
   End
 
   It 'rejects an unknown verb'

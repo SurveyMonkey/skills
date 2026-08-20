@@ -124,10 +124,31 @@ discarded every per-parent error, and missed optional dependencies. A parent who
 installed is reported, never guessed at: Yarn PnP has no `node_modules`, and pnpm links only direct
 dependencies into one.
 
-**`list_pins` is reserved but unimplemented.** It is part of the contract and returns exit code 2
-until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is its only
-consumer. Declaring the verb now keeps the contract complete; implementing it now would land code
-with no caller and no way to verify it.
+**~~`list_pins` is reserved but unimplemented.~~** ~~It is part of the contract and returns exit
+code 2 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is
+its only consumer.~~ **Implemented in Phase 4** alongside that consumer. It returns
+`{pm, override_location, block_present, count, bare_count, pins[]}`, one entry per constraint the
+manifest declares, each carrying `key`, `path`, `package`, `selector`, `parents`, `scope`
+(`bare` or `scoped`), `value`, `kind`, `range`, and the alias fields.
+
+Two parts of that shape are contract, not convenience, because each is a wrong reading the audit
+would otherwise make:
+
+- **Keys are parsed, not split.** Every scoping syntax collides with something: pnpm's `>` with
+  version selectors (`handlebars@4`), yarn's `/` with scoped package names (`@babel/core` is one
+  name; `@vercel/fun/undici` is a parent and a dependency), npm's nesting with its `"."` key,
+  which names the parent itself and so is a bare pin wearing a nested shape.
+- **`kind` says what the value is**, and only `range` is a version pin. A resolution may redirect
+  to a **different package** (`"@next/env": "npm:@varlock/nextjs-integration@1.1.6"` → `alias`),
+  point at a patch or a local path (`protocol`), or defer to a declared dependency
+  (`"$lodash"` → `reference`). Reading any of those as a range has the audit reasoning about the
+  version of a pin that was never about a version, and reporting the wrong package. `range` is
+  never inferred: it is what the adapter's own range parser accepts, the same one behind
+  `range_facts`.
+
+An empty override block is `count: 0` and exit 0, which does **not** contradict the empty-result
+rule above: this verb reads structured JSON, where absence is a fact, rather than a lockfile,
+where zero parsed entries means the parser failed.
 
 **Dependencies are `bash`, `jq`, and `gh`.** No `node`, no `npx`. Node has no built-in semver, so
 using it would mean `npx semver` and a cold-cache network fetch in the middle of a security fix.

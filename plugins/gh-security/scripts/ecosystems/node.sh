@@ -27,7 +27,8 @@
 #                                                  parents_unreadable[],
 #                                                  parents_malformed[]}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
-#   list_pins                                  -> reserved, exits 2 (see issue #7)
+#   list_pins                                  -> {pm, override_location, block_present,
+#                                                  count, bare_count, pins[]}
 #
 # Exit codes: 0 ok | 1 error | 2 not implemented | 3 unsupported toolchain
 #
@@ -1095,6 +1096,140 @@ EOF
     }'
 }
 
+# ---------------------------------------------------------------------------
+# list_pins — every override/resolution entry, parsed
+#
+# The pin audit's first step (RFC 001 Phase 4). Read-only: it parses the
+# manifest and states what is declared there, and every judgment about whether
+# an entry is still needed belongs to the audit agent, which tests removal in a
+# scratch worktree against `check-advisories.sh`.
+#
+# Three key syntaxes, one shape out. Each is ambiguous in its own way and each
+# ambiguity has been the source of a wrong reading:
+#
+#   * pnpm scopes with `>` (`jsdom>form-data`) and allows a version selector on
+#     either side (`handlebars@4`). A scoped package name starts with an `@`
+#     that is not a selector, so the selector is split off the *last* `@`.
+#   * yarn scopes with `/`, which is also the separator inside a scoped package
+#     name: `@babel/core` is a bare entry, `@vercel/fun/undici` is a scoped one.
+#     The first segment is one path component, or two when the key starts `@`.
+#   * npm nests objects (`{parent: {dep: range}}`) to arbitrary depth, and a
+#     `"."` key inside one names the parent itself rather than a dependency.
+#
+# Values are classified rather than assumed to be ranges. A resolution may
+# redirect to a different package entirely (`"@next/env":
+# "npm:@varlock/nextjs-integration@1.1.6"`), point at a patch or a local path,
+# or reference another declared dependency (`"$lodash"`). Reading any of those
+# as a version range is how an audit would reason about the "range" of a pin
+# that was never about a version at all.
+# ---------------------------------------------------------------------------
+PINS_JQ=$(cat <<'JQLIB'
+def strip_selector:
+  . as $k
+  | ($k | rindex("@")) as $i
+  | if $i == null or $i == 0 then {name: $k, selector: null}
+    else {name: ($k[0:$i]), selector: ($k[$i+1:])} end;
+
+def pnpm_key:
+  . as $k
+  | ($k | rindex(">")) as $i
+  | if $i == null then {parents: [], target: $k}
+    else {parents: ($k[0:$i] | split(">")), target: ($k[$i+1:])} end;
+
+def yarn_key:
+  . as $k
+  | ($k | split("/")) as $seg
+  | (if ($k | startswith("@")) then 2 else 1 end) as $head
+  | if ($seg | length) <= $head then {parents: [], target: $k}
+    else {parents: [($seg[0:$head] | join("/"))],
+          target: ($seg[$head:] | join("/"))} end;
+
+def value_facts:
+  . as $v
+  | if ($v | type) != "string" then
+      {kind: "unparseable", range: null, alias_package: null, alias_range: null}
+    elif ($v | startswith("$")) then
+      {kind: "reference", range: null, alias_package: null, alias_range: null}
+    elif ($v | startswith("npm:")) then
+      ($v[4:]) as $rest
+      | ($rest | rindex("@")) as $i
+      | if $i == null or $i == 0 then
+          {kind: "range", range: $rest, alias_package: null, alias_range: null}
+        else
+          {kind: "alias", range: null,
+           alias_package: ($rest[0:$i]), alias_range: ($rest[$i+1:])}
+        end
+    elif ($v | test("^[a-zA-Z][a-zA-Z0-9+.-]*:")) then
+      {kind: "protocol", range: null, alias_package: null, alias_range: null}
+    elif ($v | range_parseable) then
+      {kind: "range", range: $v, alias_package: null, alias_range: null}
+    else
+      {kind: "unparseable", range: null, alias_package: null, alias_range: null}
+    end;
+
+def pin($key; $path; $parents; $target; $value):
+  ($target | strip_selector) as $t
+  | ($value | value_facts) as $f
+  | {
+      key: $key,
+      path: $path,
+      package: $t.name,
+      selector: $t.selector,
+      parents: $parents,
+      scope: (if ($parents | length) == 0 then "bare" else "scoped" end),
+      value: $value,
+      kind: $f.kind,
+      range: $f.range,
+      alias_package: $f.alias_package,
+      alias_range: $f.alias_range
+    };
+
+# npm nests, so the entries are the leaves of the override block and their key
+# path is the parent chain.
+def npm_walk($obj; $path):
+  [ $obj | to_entries[]
+    | .key as $k | .value as $v
+    | if ($v | type) == "object" then npm_walk($v; $path + [$k])[]
+      else {path: ($path + [$k]), value: $v} end ];
+JQLIB
+)
+
+verb_list_pins() {
+  loc=$(verb_detect | jq -r '.override_location')
+  pm=$(pm_of)
+  jq --arg pm "$pm" --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
+    (if   $loc == "pnpm.overrides" then (.pnpm.overrides // null)
+     elif $loc == "resolutions"    then (.resolutions // null)
+     else (.overrides // null) end) as $block
+    | (if ($block | type) == "object" then $block else {} end) as $b
+    | (if $loc == "overrides" then
+         [ npm_walk($b; [])[]
+           | .path as $p | .value as $v
+           | (if ($p | last) == "." and ($p | length) > 1
+              then {parents: $p[0:-2], target: $p[-2]}
+              else {parents: $p[0:-1], target: ($p | last)} end) as $s
+           | pin($p[0]; $p; $s.parents; $s.target; $v) ]
+       elif $loc == "pnpm.overrides" then
+         [ $b | to_entries[]
+           | .key as $k | .value as $v
+           | ($k | pnpm_key) as $s
+           | pin($k; ($s.parents + [$s.target]); $s.parents; $s.target; $v) ]
+       else
+         [ $b | to_entries[]
+           | .key as $k | .value as $v
+           | ($k | yarn_key) as $s
+           | pin($k; ($s.parents + [$s.target]); $s.parents; $s.target; $v) ]
+       end) as $pins
+    | {
+        pm: $pm,
+        override_location: $loc,
+        block_present: ($block != null),
+        count: ($pins | length),
+        bare_count: ([$pins[] | select(.scope == "bare")] | length),
+        pins: $pins
+      }' package.json
+}
+
 # Some repo scripts invoke the bare package-manager name internally, which
 # fails when the toolchain is corepack-managed or vendored and no binary sits
 # on PATH. This writes a one-line shim that delegates to the resolved runner,
@@ -1147,9 +1282,6 @@ case "$VERB" in
   range_facts)           verb_range_facts "$@" ;;
   declared_ranges)       verb_declared_ranges "$@" ;;
   shim)                  verb_shim "$@" ;;
-  list_pins)
-    printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2
-    exit 2
-    ;;
+  list_pins)             verb_list_pins ;;
   *) die "Unknown verb '$VERB'" ;;
 esac
