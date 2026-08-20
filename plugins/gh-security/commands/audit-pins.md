@@ -59,7 +59,18 @@ empty directory. It cannot stand in for the check above. Python arrives with its
 ([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the choice will be
 made once more than one exists.
 
-## 4. Dispatch the audit
+## 4. Keep the audit worktree out of `git status`
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
+```
+
+Local-only, never committed, idempotent. The agent does not do this for itself: `.git/info/exclude`
+is repo-global state, and an agent may share a `repo_root` with a concurrent sibling
+([#35](https://github.com/SurveyMonkey/skills/issues/35)). A failure here is not fatal — report it
+and dispatch anyway.
+
+## 5. Dispatch the audit
 
 One Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
 `default_branch`, `adapter_path` (from step 3), and `scripts_dir`
@@ -68,16 +79,21 @@ end with its JSON result block.
 
 The audit runs an install per pin it tests, so it is not instant. Say so before dispatching.
 
-## 5. Report
+## 6. Report
 
 Parse the agent's fenced JSON result. **An unparseable or missing result block is a failure
-report** — say so; never guess fields. Present its findings as a table:
+report** — say so; never guess fields. Present its findings **grouped by package, one table per
+package**, as the agent reported them — never a flat list of pin keys:
 
-> | Pin | Scope | Value | Without the pin | Advisories | Finding |
+> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
 
 Then, in order:
 
 - **Removable** pins: what to delete, and the version that resolves instead.
+- **Removable individually** pins (`removable-individually`): the package carries more than one,
+  and each was tested with the others still in place. Say that, and say that removing more than
+  one requires a fresh audit of what remains. Never collapse this status into `removable`; the
+  word would then read as a property of the set, which is exactly what was not tested.
 - **Still required** pins: the advisory range that still admits the version that would resolve.
 - **Inconclusive** and **not tested** pins: why, so the user knows what was not established. A pin
   reported as `no-advisories` is not a pin proven safe.

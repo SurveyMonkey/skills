@@ -22,7 +22,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion, advisory lookup |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion, advisory lookup, worktree ignore setup |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -74,6 +74,34 @@ without updating the catalog in the same commit reintroduces a permission prompt
 behavior — caught live once already (the `rev-parse` → `branch --list` guard change). Keep them in
 lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
 its definition prescribes them.
+
+## Every `gh` and `git` command runs under `direnv exec <repo_root>`
+
+`direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever
+account the shell defaults to. Both agent definitions and both entry points prescribe
+`direnv exec <repo_root> gh ...` and `direnv exec <repo_root> git -C <path> ...` for that reason;
+`check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+
+The failure modes are misleading rather than obvious, which is why this is a rule and not a tip:
+bare `gh` reports "please run gh auth login" on a correctly configured machine, bare `git fetch`
+reports **`repository not found`** (reads as a renamed or deleted repo, not an auth context), and
+bare `git commit` fails on a missing author identity. Following an agent definition literally
+without the wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
+
+## Repo-global git state belongs to the orchestrator, never to an agent
+
+Agents share a `repo_root` by design — the spare-slot pin audit rides in the same wave as a fix
+agent — and worktree *paths* not colliding is not the same as repository state not colliding
+([#35](https://github.com/SurveyMonkey/skills/issues/35)).
+
+- `.git/info/exclude` is written once per repo by `common/ensure-worktree-exclude.sh`, called by
+  the orchestrator before it dispatches any wave. Agents never write it. Two agents dispatched in
+  one message start milliseconds apart, so a read-then-append from each can duplicate the line or
+  tear the file.
+- **Never `git worktree prune` from an agent.** It walks *every* worktree entry in the repository,
+  so a call timed against a sibling mid `worktree add`/`remove` can delete a live registration —
+  and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
+  removes the caller's own entry; that is the whole cleanup an agent is entitled to.
 
 ## No Bash snippet may depend on the previous call
 

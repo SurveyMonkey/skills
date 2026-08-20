@@ -49,9 +49,19 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   via Bash.** Bash is for the scripts, the package manager, git, and gh; the only JSON tool in it
   is `jq`.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git switch`,
-  stash, or edit checked-out files under `repo_root` itself. Exactly two writes into the user's
-  repository are sanctioned: the `.claude/worktrees/` directory your work lives in, and one line
-  in `.git/info/exclude` keeping it out of `git status`.
+  stash, or edit checked-out files under `repo_root` itself. Exactly one write into the user's
+  repository is sanctioned: the `.claude/worktrees/` directory your work lives in.
+- **Repo-global git state is not yours.** You may add and remove your own worktree, and nothing
+  else. Never write `.git/info/exclude` (your dispatcher already did, once, before the wave) and
+  never run `git worktree prune`, `git gc`, or any other repository-wide command: a fix agent is
+  very likely running in this same `repo_root` right now, and those commands reach its state. See
+  `scripts/CLAUDE.md`, "Repo-global git state belongs to the orchestrator".
+- **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
+  `direnv exec <repo_root> gh api ...`, `direnv exec <repo_root> git -C <path> ...`, and the
+  `check-advisories.sh` call, which makes its own `gh` call. Without it the account is wrong and
+  the failures are misleading rather than obvious; the rule and its failure modes are in
+  `scripts/CLAUDE.md`, "Every `gh` and `git` command runs under `direnv exec`". The snippets below
+  omit the prefix for readability; add it to every one.
 - **Every Bash call starts fresh; nothing carries over from the last one.** cwd resets and shell
   variables do not survive, so **every command locates itself**: git uses `git -C <literal path>`,
   `gh` calls carry `--repo <nwo>` and take no prefix, and every other command carries its own
@@ -71,12 +81,9 @@ Your workspace is `<repo_root>/.claude/worktrees/audit-pins` — written `$WORK`
 but **substitute the literal path in every command**. A stable in-repo path means the permission
 rules a user accepts for it persist across runs.
 
-1. **Exclude line**: Read `<repo_root>/.git/info/exclude`; if no line reads exactly
-   `.claude/worktrees/`, append it with Edit (Write the file if it does not exist).
-2. **Crashed-run guard**: if `$WORK` already exists, a previous run crashed before cleanup. Stop
-   and return a failure (phase `worktree`) naming the directory, so the user can inspect and
-   remove it (`git -C <repo_root> worktree remove --force <path>`). Never reuse or silently
-   delete it.
+**Crashed-run guard**: if `$WORK` already exists, a previous run crashed before cleanup. Stop and
+return a failure (phase `worktree`) naming the directory, so the user can inspect and remove it
+(`git -C <repo_root> worktree remove --force <path>`). Never reuse or silently delete it.
 
 ```bash
 git -C <repo_root> fetch origin <default_branch>
@@ -128,9 +135,16 @@ turns "the version resolves safely now" into a finding a reviewer can act on.
 ```bash
 git -C "$WORK/audit" log --max-count=5 --date=short --format='%h %ad %s' -S '<key>' -- package.json
 gh pr list --repo <nwo> --search '<key>' --state merged --limit 5 --json number,url,title
-gh api repos/<nwo>/dependabot/alerts -f state=fixed -f package=<package> -f per_page=100 \
+gh api repos/<nwo>/dependabot/alerts -X GET -f state=fixed -f package=<package> -f per_page=100 \
   --jq '[.[] | {number, ghsa: .security_advisory.ghsa_id, range: .security_vulnerability.vulnerable_version_range}]'
 ```
+
+**`-X GET` is mandatory, and it goes immediately after the path.** `gh api` switches to POST
+whenever any `-f` is present and no method is given, and this endpoint accepts GET only, so without
+it every call 404s — quietly, since the error string reads like "no fixed alerts for this package"
+and provenance silently degrades to empty for every pin. After the path, because the permission
+rule is `Bash(gh api repos/$NWO/dependabot/alerts*)` and deliberately admits no flag slot in front
+of it.
 
 Record the introducing commit, any PR that looks like the one that added it, and the fixed alerts
 for that package. Any of the three may come back empty; that is information, not a failure.
@@ -147,14 +161,33 @@ pin you removed alongside this one may be the reason this package now resolves w
 either direction. A batch result is not evidence about any individual pin, and there is no
 shortcut that makes it one.
 
-For each `range` pin, in priority order — **bare pins first** (they constrain every consumer in
-the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
+First, **record the with-all-pins baseline**: install the manifest as it stands, once, then read
+the resolutions of each distinct package you are about to test.
+
+```bash
+cd "$WORK/audit" && $ADAPTER install
+cd "$WORK/audit" && $ADAPTER resolved_versions <package>   # one call per distinct package
+```
+
+Keep each `versions[]`. The tree is restored between every pin, so a package's baseline is read
+once and stays valid for every pin on it — this costs one install for the whole audit, not one per
+pin.
+
+Then, for each `range` pin, in priority order — **bare pins first** (they constrain every consumer
+in the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
 
 1. Remove exactly that entry from `package.json` with Edit. Remove the whole override block if it
    is the last entry, and nothing else.
 2. `cd "$WORK/audit" && $ADAPTER install`
 3. `cd "$WORK/audit" && $ADAPTER resolved_versions <package>`
-4. Restore the tree before the next pin:
+4. **Diff against the baseline.** The versions attributable to *this* pin are the ones present
+   after removal and absent from the baseline. `resolved_versions` reports every resolution of that
+   package name anywhere in the tree, not the ones the removed key was holding, so with two scoped
+   pins on one package the raw list carries the sibling's resolutions and unrelated copies
+   elsewhere in the tree. Judging those against the advisory database is how a genuinely safe
+   scoped pin reports `still-required` citing a version that has nothing to do with it. Keep both
+   lists and the delta; phase 5 judges the delta.
+5. Restore the tree before the next pin:
    `git -C "$WORK/audit" checkout -- package.json <lockfile>`
 
 An install that fails is a result: record the pin as `inconclusive` with the install error. Never
@@ -171,8 +204,8 @@ untested one is not.
 
 ## Phase 5: Judge each naturally resolved version against the advisory database
 
-For each pin you installed without, take **every** version `resolved_versions` reported (a package
-can resolve at more than one) and ask:
+For each pin you installed without, take **every version in phase 4's delta** — the versions that
+appeared only once the pin was gone (a removal can admit more than one) — and ask:
 
 ```bash
 <scripts_dir>/check-advisories.sh --adapter $ADAPTER --version <resolved version> <package>
@@ -193,21 +226,47 @@ security advisory (a broken release, a peer conflict), and a wrong package name 
 produces the same empty answer. Say which one you think it is from the provenance, and leave the
 judgment to the reader.
 
-A pin is `removable` only when **every** resolved version comes back `safe`. One version short of
-that makes the whole pin `still-required` or `inconclusive`; there is no partial removal.
+A pin is `removable` only when **every** version in the delta comes back `safe`. One version short
+of that makes the whole pin `still-required` or `inconclusive`; there is no partial removal.
+
+**An empty delta is its own finding, not a missing one.** Nothing new resolved, so there is no
+version to judge and removing the entry changes nothing observable *in this manifest as it stands*
+— which is what a sibling pin on the same package holding the tree looks like. Report it
+`removable` with a detail that says exactly that, in those terms, rather than implying the package
+was independently checked and found safe. Phase 6 is where that becomes visible to the reader.
 
 ## Phase 6: Report
 
-Present a table in your transcript, then the result block:
+**Group the findings by package, always** — one section per package, its pins beneath it — never a
+flat list of keys. Within each section, a table:
 
-> | Pin | Scope | Value | Without the pin | Advisories | Finding |
+> ### `minimatch` — 5 pins
+>
+> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
 > |---|---|---|---|---|---|
-> | `express>sha.js` | scoped | `>=2.4.11 <3` | 2.4.11 | 4 published, none match | removable |
+> | `eslint>minimatch` | scoped | `>=3.1.5 <4` | nothing new resolved | not judged | removable-individually |
 
-For each `removable` pin say what a human would need to do (delete the entry, reinstall, and that
-the resolved version is unchanged or moves to X), and for each `still-required` say which advisory
+For each removable pin say what a human would need to do (delete the entry, reinstall, and that the
+resolved version is unchanged or moves to X), and for each `still-required` say which advisory
 range still admits the version that would resolve. For `not-a-version-pin`, say what the entry
 actually is.
+
+**One pin at a time proves each pin removable on its own; it proves nothing about a set.** When two
+or more pins on the **same package** come back removable, their status is `removable-individually`,
+not `removable`, and the section must say in prose:
+
+> Each of these was tested with the other four still in place. That is what makes them removable
+> individually; it is not evidence that they are removable together. Removing more than one
+> requires a fresh audit of what remains.
+
+That is mandatory, not advisory. A real run reported four `minimatch` pins with byte-identical
+results — same resolved versions, same `safe` verdict — purely because the siblings held those
+versions during each test, while the fifth was the one holding the line. A reader who deletes all
+four has not performed four tested operations; they have performed one untested one. Name the
+sibling pins each removable verdict leaned on, in `sibling_pins` and in the prose.
+
+A single removable pin on a package keeps the plain `removable` status: there is no set to
+misread.
 
 Recommend nothing beyond removal of the entries you tested. In particular do not propose version
 bumps, do not propose converting bare pins to scoped ones, and do not open a PR.
@@ -218,12 +277,16 @@ Before returning — on success **and** on every failure path:
 
 ```bash
 git -C <repo_root> worktree remove --force "$WORK/audit"
-git -C <repo_root> worktree prune
 rm -rf "$WORK"
 ```
 
-`--force` because the install dirties the tree. If cleanup itself fails, say so in the result: an
-orphaned worktree under `.claude/worktrees/` is recoverable at a stable path, but only if the
+`--force` because the install dirties the tree. `worktree remove` already drops your
+administrative entry, and it names your path: that is the entire cleanup you are entitled to.
+**Never add `git worktree prune`.** It is repository-wide, and a fix agent very likely shares this
+`repo_root` with you right now; a prune timed against its `worktree add` or `remove` can delete a
+live sibling's registration, and the breakage then surfaces in the victim with no cause it can
+observe. If cleanup itself fails, say so in the result and leave it: an orphaned worktree under
+`.claude/worktrees/` is recoverable at a stable path once no wave is in flight, but only if the
 report says it happened.
 
 ## Result
@@ -246,7 +309,10 @@ End your final message with exactly one fenced JSON block:
       "value": ">=2.4.11 <3",
       "kind": "range",
       "status": "removable",
-      "resolved_without_pin": ["2.4.11"],
+      "resolved_with_pin": ["2.4.11"],
+      "resolved_without_pin": ["2.4.11", "2.4.9"],
+      "attributable_versions": ["2.4.9"],
+      "sibling_pins": [],
       "advisory_verdict": "safe",
       "advisory_count": 4,
       "matched_ranges": [],
@@ -255,19 +321,26 @@ End your final message with exactly one fenced JSON block:
         "pr_url": "https://github.com/<nwo>/pull/412",
         "fixed_alerts": [93, 148]
       },
-      "detail": "sha.js resolves to 2.4.11 with the entry removed; no published advisory range admits it"
+      "detail": "removing the entry newly admits sha.js 2.4.9 (2.4.11 is held elsewhere either way); no published advisory range admits 2.4.9"
     }
   ],
   "failure": null
 }
 ```
 
-- `status` per finding is `removable`, `still-required`, `inconclusive`, `not-a-version-pin`, or
-  `not-tested`. Every pin `list_pins` returned appears exactly once, whichever status it earned.
-- `resolved_without_pin` is every version `resolved_versions` reported after removal, verbatim;
-  `[]` when the package left the tree, `null` when the pin was not tested.
+- `status` per finding is `removable`, `removable-individually`, `still-required`, `inconclusive`,
+  `not-a-version-pin`, or `not-tested`. Every pin `list_pins` returned appears exactly once,
+  whichever status it earned.
+- `removable-individually` is required — not optional — for **every** removable pin on a package
+  that has more than one removable pin, and `sibling_pins` then lists the other pins on that
+  package that were in place during the test. `removable` is reserved for a package with exactly
+  one removable pin, where there is no set to misread.
+- `resolved_with_pin` is phase 4's baseline for the package; `resolved_without_pin` is every
+  version `resolved_versions` reported after removal, verbatim; `attributable_versions` is the
+  delta — what phase 5 judged. All three are `[]` when the package left the tree and `null` when
+  the pin was not tested.
 - `advisory_verdict`, `advisory_count` and `matched_ranges` come from `check-advisories.sh`
-  verbatim, and are `null`/`[]` for a pin that was not tested.
+  verbatim, and are `null`/`[]` for a pin that was not tested or whose delta was empty.
 - `detail` carries the judgment: the install error for `inconclusive`, the reason for
   `not-tested`, what the entry really is for `not-a-version-pin`.
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, and

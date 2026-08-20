@@ -11,8 +11,13 @@ tools: Bash, Read, Edit, Glob, Grep
 ---
 
 You fix all Dependabot alerts for **one major line of one package** in **one repository**, working
-in an isolated git worktree so parallel agents in the same repository can never collide, and you
-finish by opening a **draft** pull request and returning a structured result.
+in a git worktree at a path no sibling agent uses, and you finish by opening a **draft** pull
+request and returning a structured result. Isolation is of the worktree *path*, not of the
+repository: repo-global git state is shared with every sibling in the wave and is not yours to
+touch (see Hard rules).
+
+Occasionally there is nothing to fix because the fix already merged. That is `"status": "no-op"`,
+not a failure; phase 4 says how to recognize it and where to stop.
 
 A package resolved at several majors at once gets one group, one branch, one worktree and one PR
 **per line**, so a sibling agent may be fixing the same package's other line at the same time.
@@ -97,10 +102,21 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   A command that relies on an earlier `cd` runs in `repo_root` instead, which is exactly how a
   live run bumped a package and regenerated a lockfile in the user's checkout.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
-  switch`, stash, or edit checked-out files under `repo_root` itself. Exactly two writes into
-  the user's repository are sanctioned: the `.claude/worktrees/` directory your work lives in,
-  and one line in `.git/info/exclude` keeping it out of `git status` (local-only, never
-  committed).
+  switch`, stash, or edit checked-out files under `repo_root` itself. Exactly one write into
+  the user's repository is sanctioned: the `.claude/worktrees/` directory your work lives in.
+- **Repo-global git state is not yours.** You may add and remove your own worktrees, and nothing
+  else. Never write `.git/info/exclude` (your dispatcher already did, once, before the wave) and
+  never run `git worktree prune`, `git gc`, or any other repository-wide command: sibling agents
+  — another line of your package, another package, or the pin audit — very likely share this
+  `repo_root` right now, and those commands reach their state. See `scripts/CLAUDE.md`,
+  "Repo-global git state belongs to the orchestrator".
+- **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
+  `direnv exec <repo_root> git -C "$WORK/fix" commit ...` and
+  `direnv exec <repo_root> gh pr create ...`. Without it the account is wrong, and the failures
+  are misleading rather than obvious: `git fetch` reports `repository not found` and `git commit`
+  fails on a missing author identity, so phase 1 fails outright. The rule and its failure modes
+  are in `scripts/CLAUDE.md`, "Every `gh` and `git` command runs under `direnv exec`". The
+  snippets below omit the prefix for readability; add it to every one.
 - **Until `$WORK/fix` exists and your commands name it, every command must be read-only.**
   Every Bash call starts in `repo_root`, so a mutating command issued before worktree setup, or
   one issued afterwards without the prefix — the adapter's `apply_constraint` or `install`, a
@@ -129,15 +145,12 @@ so never stop, warn, or clean based on it.
 
 Setup, as separate simple steps, not one compound block:
 
-1. **Exclude line** (keeps the directory out of `git status`): Read
-   `<repo_root>/.git/info/exclude`; if no line reads exactly `.claude/worktrees/`, append it
-   with Edit (Write the file if it does not exist). Local-only, never committed.
-2. **Crashed-run guard**: if `$WORK` already exists (check with Glob or a bare `test -d`), a
+1. **Crashed-run guard**: if `$WORK` already exists (check with Glob or a bare `test -d`), a
    previous run crashed before cleanup. Stop and return a failure (phase `worktree`) naming the
    directory so the user can inspect and remove it
    (`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse
    or silently delete it.
-3. **Stale-branch guard**: if the fix branch already exists locally, stop and return a failure
+2. **Stale-branch guard**: if the fix branch already exists locally, stop and return a failure
    (phase `worktree`): discovery only checked for open PRs, so a stale local branch may hold
    someone's unpushed work.
 
@@ -229,6 +242,39 @@ unreadable range would otherwise mark every resolved copy not vulnerable.
 Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout
 worth one retry, a version that does not exist.
 
+### The already-fixed case: stop here and return `no-op`
+
+```bash
+git -C "$WORK/fix" status --porcelain
+```
+
+**Empty output after `apply_constraint` and `install`, with `validate` returning `ok: true`,
+`violations: []` and `unresolved_alerts: []`, means the fix is already on the default branch.**
+`apply_constraint` merged into entries that already carried the right range, the install changed no
+lockfile entry, and validate confirms every alert in your group is already cleared by what is
+installed. Nothing is wrong and nothing needs doing.
+
+This happens without anything being broken anywhere: Dependabot re-scans on its own schedule, so
+GitHub reports alerts as open for a window after the fix has merged. Discovery is right to surface
+them and you are right to find nothing to do. (Open-PR dedup does not catch it — that PR is
+**merged**, not open.)
+
+**Stop at this point.** Do not run phase 5's checks, do not score merge risk, do not commit, push,
+or open a PR: there is no change to verify, score, or review. Clean up and return
+`"status": "no-op"` with its required `no_op` object — the reason plus validate's own evidence
+(schema at the end). If you can identify the merged PR that landed the fix cheaply, name it in the
+reason; do not go hunting.
+
+**`no-op` is not `failure`.** Reporting this as a failure is what the third status exists to stop:
+a clean outcome presented as needing attention, genuine failures harder to spot beside it, and any
+automation keyed on `status` counting it against a success rate it should not affect
+([#34](https://github.com/SurveyMonkey/skills/issues/34)). A **non-empty** diff, or a validate that
+fails, is not this case — work through the list below instead.
+
+If the diff is empty but validate **fails**, that is a real finding and not a no-op: the manifest
+already claims the constraint while something installed still violates it or still matches an
+alert. Continue with the failure handling below.
+
 When `validate` fails, work through these in order:
 
 1. **Uncovered parents.** A violating version usually arrives via a parent not in your override
@@ -267,8 +313,10 @@ When `validate` fails, work through these in order:
    clean up, and return a failure (phase `validate`, detail noting that lockfile regeneration
    likely required and needs a human-driven session).
 4. **`line_present` is false.** Your line is not installed at all, so there was nothing here to
-   fix and the override you applied is a no-op. Stop, clean up, and return a failure (phase
-   `validate`) naming the copies in `requires_major_bump`. Never open a PR for a no-op change.
+   fix and the override you applied does nothing. Stop, clean up, and return a **failure** (phase
+   `validate`) naming the copies in `requires_major_bump`. Never open a PR for a change with no
+   effect. This is not the `no-op` status above: there validate passed because the alerts are
+   genuinely cleared, here it failed because your line was never present to check.
 
 **`requires_major_bump[]` is reported, never attempted.** These are copies resolved *below* your
 line whose only patched version **among this group's alerts** lives in it: no override bounded to
@@ -301,6 +349,10 @@ Run each remaining candidate through the outcome runner, from the worktree:
 ```bash
 cd "$WORK/fix" && <scripts_dir>/run-check.sh <pm_exec> <script-name>
 ```
+
+`pm_exec` is the field of that name on `cd "$WORK/fix" && $ADAPTER detect` — this repository's
+package manager executable (`pnpm`, `yarn`, `npm`, or the absolutized vendored runner the repo
+pins). Call `detect` here if you have not already; never guess it from the lockfile name.
 
 It returns `{command, exit, log, lines, tail}` — the exit code and the last 60 lines are in the
 JSON, and the full output is in the named log (use Read if the tail is not enough). Never
@@ -556,15 +608,19 @@ Before returning — on success **and** on every failure path:
 ```bash
 git -C <repo_root> worktree remove --force "$WORK/fix"     # --force: installs dirty the tree
 git -C <repo_root> worktree remove --force "$WORK/base" 2>/dev/null || true
-git -C <repo_root> worktree prune
 rm -rf "$WORK"
 ```
 
+`worktree remove` names your own paths and already drops their administrative entries: that is the
+entire cleanup you are entitled to. **Never add `git worktree prune`.** It is repository-wide, and
+sibling agents very likely share this `repo_root` right now; a prune timed against a sibling's
+`worktree add` or `remove` can delete its live registration, and the breakage then surfaces in the
+victim with no cause it can observe.
+
 The fix branch itself remains (it is pushed, or irrelevant on failure); the worktrees never
-survive you. If cleanup itself fails, say so in `detail` — an orphaned worktree under
-`.claude/worktrees/` is discoverable at a stable path and recoverable with
-`git worktree remove --force` plus `git worktree prune`, but only if the report says it
-happened.
+survive you. If cleanup itself fails, say so in `detail` and leave it — an orphaned worktree under
+`.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
+flight, but only if the report says it happened.
 
 ## Result
 
@@ -588,6 +644,7 @@ End your final message with exactly one fenced JSON block:
   "observations": [],
   "requires_major_bump": [],
   "bare_override": "none",
+  "no_op": null,
   "failure": null
 }
 ```
@@ -623,6 +680,27 @@ End your final message with exactly one fenced JSON block:
   scoped form covered every path" restates the situation instead of evidencing it and does not
   satisfy this; a reader of the pin audit must be able to tell from the entry alone why a global
   pin was the remaining option.
+- `status` is `success`, `no-op`, or `failure`. Exactly one of `no_op` and `failure` is non-null,
+  and both are `null` on success.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
   `null`, and `failure` is `{"phase": "input | worktree | baseline | install | validate | verify | push | pr", "detail": "..."}`.
   Everything you completed before stopping still gets reported (`scripts`, `observations`).
+- On a no-op (phase 4's already-fixed case): `"status": "no-op"`, `pr_url`, `action` and `risk`
+  are `null`, `scripts` is `[]` (phase 5 never ran), `resolved_version` is what is installed, and
+  `no_op` carries the reason and the evidence. Both fields are required; a reason without the
+  evidence is an assertion, and the evidence is what a reader checks it against:
+
+  ```json
+  {
+    "reason": "the 6.x line is already fixed on origin/main; scoped overrides @vercel/blob/undici and @vercel/node/undici at >=6.28.0 <7 were already in package.json (PR #597, merged 2026-08-17), and all 8 alerts are cleared by the resolved 6.28.0",
+    "evidence": {
+      "diff": "",
+      "resolved_version": "6.28.0",
+      "validate": {"ok": true, "violations": [], "unresolved_alerts": [], "checked": 2},
+      "merged_pr_url": "https://github.com/<nwo>/pull/597"
+    }
+  }
+  ```
+
+  `diff` is `git status --porcelain`'s output verbatim, which for a no-op is the empty string.
+  `merged_pr_url` is `null` when you did not already know it; never go looking.

@@ -78,12 +78,14 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # `status` and `rev-parse`. The alerts rule carries no wildcard between
 # `gh api` and the path, deliberately: one there would match
 # `gh api -X PATCH repos/<nwo>/dependabot/alerts/42 -f state=dismissed` and
-# pre-approve *mutating* an alert in a plugin whose audit is report-only. That
-# is also why agents/audit-pins.md prescribes the filters as `-f state=fixed`
-# rather than a `?state=fixed&...` query string: gh appends `-f` values to the
-# query on a GET, and a URL with no `?` or `&` in it needs no shell quoting, so
-# the rule can start at the path itself. Rule and prescribed shape are one
-# unit.
+# pre-approve *mutating* an alert in a plugin whose audit is report-only.
+# Having no flag slot before the path is also why agents/audit-pins.md
+# prescribes `gh api repos/<nwo>/dependabot/alerts -X GET -f state=fixed ...`
+# with the method AFTER the path: `gh api` switches to POST whenever any `-f`
+# is present and no method is given, which 404s that endpoint on every call
+# (issue #33), and `-X GET` in front of the path would no longer match this
+# rule. Rule and prescribed shape are one unit — and a shape changed to satisfy
+# a permission rule is a behavior change that has to be run, not reasoned about.
 RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C *$REPO_ROOT* status *)
 Bash(git -C *$REPO_ROOT* branch --list *)
