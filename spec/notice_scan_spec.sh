@@ -26,6 +26,20 @@ Describe 'notice-scan.sh'
     return "$_st"
   }
 
+  # Same, but takes a pre-built stdin payload verbatim instead of wrapping
+  # tool_response through payload() — for cases about the envelope shape
+  # itself (missing tool_response, object-shaped stdout/stderr, non-object
+  # top-level JSON, truncated JSON).
+  notice_jq_raw() {
+    _filter=$1; _stdin=$2
+    _st=0
+    _raw=$(printf '%s' "$_stdin" | "$COMMON/notice-scan.sh") || _st=$?
+    if [ -n "$_raw" ]; then
+      printf '%s' "$_raw" | jq -c "$_filter"
+    fi
+    return "$_st"
+  }
+
   Describe 'GitHub-sourced notices'
     Parameters
       "push-time notice"        "remote: GitHub found 8 vulnerabilities on brianespinosa/app's default branch (2 critical, 3 high, 2 moderate, 1 low). To find out more, visit:"
@@ -40,7 +54,16 @@ Describe 'notice-scan.sh'
     End
   End
 
-  Describe 'package manager audit output'
+  Describe 'BashOutput events (backgrounded commands)'
+    It 'fires the GitHub nudge for a Dependabot URL surfaced via BashOutput'
+      When call notice_jq '{event: .hookSpecificOutput.hookEventName, offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+        "https://github.com/brianespinosa/app/security/dependabot/3" "BashOutput"
+      The status should be success
+      The output should equal '{"event":"PostToolUse","offers_directly":true}'
+    End
+  End
+
+  Describe 'package manager audit output (text form)'
     npm_summary="2 vulnerabilities (1 moderate, 1 high)
   run \`npm audit fix\` to fix them"
     pnpm_summary="3 vulnerabilities found
@@ -62,6 +85,40 @@ Severity: 1 low | 2 moderate"
     End
   End
 
+  # JSON-format audit output never matches a prose regex: the same
+  # unmatchable-pattern bug class as the shipped v0.1.0 yarn validator
+  # (plugins/gh-security/scripts/CLAUDE.md, "The rule that matters most").
+  Describe 'package manager audit output (JSON form)'
+    # Prose regexes can never match this shape: the same unmatchable-pattern
+    # bug class as the shipped v0.1.0 yarn lockfile validator
+    # (plugins/gh-security/scripts/CLAUDE.md, "The rule that matters most").
+    Describe 'non-zero totals'
+      npm_json='{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"info":0,"low":1,"moderate":2,"high":0,"critical":0,"total":3},"dependencies":{"prod":10,"dev":5,"total":15}}}'
+      pnpm_json='{"advisories":{},"metadata":{"vulnerabilities":{"low":0,"moderate":1,"high":0,"critical":0,"total":1}}}'
+      yarn_ndjson='{"type":"auditAdvisory","data":{"resolution":{"id":1234,"path":"lodash"},"advisory":{"module_name":"lodash","severity":"high"}}}
+{"type":"auditSummary","data":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":1,"critical":0}}}'
+
+      Parameters
+        "npm audit --json"                         "$npm_json"
+        "pnpm audit --json"                        "$pnpm_json"
+        "yarn audit --json NDJSON auditAdvisory"   "$yarn_ndjson"
+      End
+
+      It "nudges toward checking GitHub alerts on $1"
+        When call notice_jq '{matched: (.hookSpecificOutput.additionalContext != null)}' "$2"
+        The status should be success
+        The output should equal '{"matched":true}'
+      End
+    End
+
+    It 'stays silent on npm audit --json with a zero total'
+      npm_json_zero='{"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":0,"critical":0,"total":0}}}'
+      When call notice_jq '.' "$npm_json_zero"
+      The status should be success
+      The output should equal ''
+    End
+  End
+
   Describe 'non-matching output stays silent'
     ordinary_output="ok
 nothing interesting here"
@@ -75,6 +132,8 @@ nothing to commit, working tree clean"
       "zero pnpm vulnerabilities"             "0 vulnerabilities found"
       "vulnerability mentioned without count" "No known vulnerabilities found"
       "the word vulnerability with no digit"  "Checking for vulnerability disclosures policy"
+      "GitHub zero-count push notice"         "remote: GitHub found 0 vulnerabilities on main's default branch."
+      "code-scanning URL, not dependabot"     "remote:      https://github.com/brianespinosa/app/security/code-scanning/3"
     End
 
     It "emits nothing for $1"
@@ -84,13 +143,70 @@ nothing to commit, working tree clean"
     End
   End
 
-  It 'ignores non-Bash tool calls even with matching text in the payload'
+  It 'ignores non-Bash, non-BashOutput tool calls even with matching text in the payload'
     When call notice_jq '.' "GitHub found 8 vulnerabilities on main" "Read"
     The status should be success
     The output should equal ''
   End
 
-  It 'exits cleanly on malformed stdin instead of erroring the hook'
+  # A GitHub notice and PM audit text can both appear in the same output
+  # (e.g. `npm install` followed by a `git push` in one command string). The
+  # GitHub branch wins: it is grounds enough to offer the skill directly
+  # regardless of what else is present.
+  It 'prefers the GitHub branch when both signal classes are present'
+    combined="remote: GitHub found 8 vulnerabilities on main's default branch.
+2 vulnerabilities (1 moderate, 1 high)
+  run \`npm audit fix\` to fix them"
+    When call notice_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("Offer to run"))}' "$combined"
+    The status should be success
+    The output should equal '{"offers_directly":true}'
+  End
+
+  Describe 'tool_response envelope shapes'
+    It 'matches when the signal is only in the object-shaped stdout field'
+      stdin=$(jq -n '{tool_name: "Bash", tool_response: {stdout: "https://github.com/brianespinosa/app/security/dependabot/3", stderr: ""}}')
+      When call notice_jq_raw '{matched: (.hookSpecificOutput.additionalContext != null)}' "$stdin"
+      The status should be success
+      The output should equal '{"matched":true}'
+    End
+
+    It 'matches when the signal is only in the object-shaped stderr field'
+      stdin=$(jq -n '{tool_name: "Bash", tool_response: {stdout: "", stderr: "remote: GitHub found 3 vulnerabilities on main'"'"'s default branch."}}')
+      When call notice_jq_raw '{matched: (.hookSpecificOutput.additionalContext != null)}' "$stdin"
+      The status should be success
+      The output should equal '{"matched":true}'
+    End
+
+    It 'stays silent when tool_response is absent entirely'
+      stdin=$(jq -n '{tool_name: "Bash"}')
+      When call notice_jq_raw '.' "$stdin"
+      The status should be success
+      The output should equal ''
+    End
+  End
+
+  Describe 'top-level JSON that is not an object'
+    Parameters
+      "a bare number"  '42'
+      "an empty array" '[]'
+      "a bare boolean" 'true'
+      "a bare string"  '"just a string"'
+    End
+
+    It "exits cleanly on $1 instead of crashing on .tool_name indexing"
+      When call notice_jq_raw '.' "$2"
+      The status should be success
+      The output should equal ''
+    End
+  End
+
+  It 'exits cleanly on truncated JSON instead of erroring the hook'
+    When call notice_jq_raw '.' '{"tool_name": "Bash",'
+    The status should be success
+    The output should equal ''
+  End
+
+  It 'exits cleanly on empty stdin instead of erroring the hook'
     When run script "$COMMON/notice-scan.sh"
     The status should be success
     The output should equal ''
