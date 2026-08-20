@@ -178,6 +178,23 @@ At org or user scope, name every distinct repo the plan touches and say plainly 
 yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
 (phase 6) — this is part of what the approval covers, not a separate consent step.
 
+**Spare slot → the pin audit rides along.** If the approved batch has **fewer groups than `cap`**,
+one `audit-pins` agent joins the first wave and the plan says so, in the same approval:
+
+> 2 group(s), concurrency cap 4 → 1 wave, with 2 slot(s) spare. The pin audit will run in one of
+> them against `octo/app`: it reports which of that repo's existing overrides/resolutions are no
+> longer needed. Report-only, no PR.
+
+Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
+are free — its own removability tests run installs, and a second copy of it would audit the same
+repository twice. When the batch fills every slot, the audit is not dispatched here; phase 11
+offers it instead, because spending a slot on housekeeping in a full dispatch trades away a fix.
+
+**The audit is repo-scoped, at every scope of this skill.** At org or user scope the batch may span
+repos while the audit covers exactly one, so the plan **names the repo it will audit**: the repo of
+the top-ranked group, which is the one the user is most likely to be thinking about. It is not a
+cross-repo audit, and the remaining repos are offered in phase 11 like any other.
+
 Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
 from here through draft-PR creation. Nothing dispatches without it.
 
@@ -235,6 +252,19 @@ Two lines of the same package may run in the same wave, whether in the same repo
 ones: they carry different `branch_name`s and different worktree paths (worktree paths are always
 under that group's own `repo_root`), so they cannot collide.
 
+When phase 5's approved plan included the pin audit, its Task call goes in that **same first
+message**, counting against `cap` like any other agent:
+
+- `subagent_type`: `audit-pins`
+- prompt: the `{repo, repo_root, default_branch}` triple of the repo named in the plan (phase 1 at
+  repo scope, that repo's phase 6 triple at org or user scope), its `adapter_path` (any of that
+  repo's actionable groups — one repository, one toolchain), and `scripts_dir`, plus the
+  instruction to follow its agent definition and end with its JSON result block.
+
+It works in `.claude/worktrees/audit-pins` under that repo's own `repo_root`, which no fix agent
+uses, so it cannot collide with the wave it rides in. Dispatch it once per run, in the first wave
+only; later waves are fixes alone.
+
 The cap is a **wave barrier**, machine-wide across every repo in the batch: never issue more than
 `cap` Task calls in one message, and do not start the next wave until every agent in the current
 one has returned. There is no slot-freed signal, so the barrier is the honest implementation of the
@@ -284,12 +314,30 @@ the reason the agent gave, the repo, and the PR that introduced them:
 `unscoped_override` entries are pre-existing, and stay one aggregate line per repo:
 
 > Note: `octo/app` contains N unscoped global override(s): `<keys>`. These may be removable or
-> convertible to scoped pins. The pin audit will test removability
+> convertible to scoped pins. The pin audit tests removability
 > ([#7](https://github.com/SurveyMonkey/skills/issues/7)).
 
 Leads, not findings. Do not act on either. Without deduplication a five-package dispatch would
 report the same pre-existing bare overrides five times. Never fold a newly added pin into that
 count and call it pre-existing debt: this batch is the record of where it came from.
+
+### Audit findings, when the audit rode along
+
+If an `audit-pins` agent ran in phase 7, report its result **after** the fix table and separately
+from it: it fixed nothing and opened nothing, and mixing its rows into the PR table invites
+reading a finding as a change. Name the repo it audited, which at org or user scope is one repo in
+the batch rather than all of them. One table:
+
+> | Pin | Scope | Value | Without the pin | Finding |
+
+Then say plainly which pins are `removable` (and that removing them is the user's call, since this
+phase opens no PR), which are `still-required` and against which advisory range, and which came
+back `inconclusive`, `not-tested`, or `not-a-version-pin` — an audit that could not establish
+something must not read as an all-clear. A bare override this batch just added will appear in the
+audit as `still-required`; that is expected, not a contradiction.
+
+An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
+audit are independent work that happened to share a wave.
 
 ## Phase 9: Decide what may leave draft
 
@@ -344,8 +392,27 @@ deleting its branch, and re-running this skill for that package rebuilds the fix
 new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
 remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
 
-## Phase 11: Offer the next batch
+## Phase 11: Offer the next batch, then the pin audit
 
 If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
-back to phase 4 with the remaining groups. Otherwise report done, including anything left in the
-not-promoted groups, any repos still in `skipped_repos`, and what would unblock each.
+back to phase 4 with the remaining groups.
+
+Then, **unless an `audit-pins` agent already ran in phase 7**, recommend the pin audit once:
+
+> Every fix in this run added or tightened a pin. The pin audit is the other direction: it finds
+> overrides and resolutions a repository no longer needs, testing each removal in an isolated
+> worktree against every published advisory for the package. Report-only — it opens no PR. It runs
+> one install per pin it tests, so it takes a few minutes. Run it now?
+
+On acceptance, dispatch `audit-pins` with the phase 7 payload and report its findings as phase 8
+describes. The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
+the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
+same `cap` — their removability tests run installs like any fix agent. Recommend it once and take
+the answer; declining is a complete answer, and `/gh-security:audit-pins` runs it later, per repo,
+without going through alert resolution at all.
+
+Recommend it even when this run fixed nothing that touched an override: a repository accumulates
+pins from every past run and from hand edits, and the audit is about all of them.
+
+Otherwise report done, including anything left in the not-promoted groups, any repos still in
+`skipped_repos`, and what would unblock each.

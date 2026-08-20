@@ -70,15 +70,19 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # cwd, so every non-git, non-gh command in agents/fix-dependency.md is
 # prescribed as `cd <worktree> && <command>` (issue #18). Push needs no rule of
 # its own for the same reason — it is `git -C <worktree> push ...`, already
-# covered above. The gh commands (`gh label list/create`, `gh pr create`) are
-# the deliberate exception: `--repo <nwo>` makes them location-independent, so
-# they carry no cd prefix and are covered by the NWO rules below instead.
+# covered above. The gh commands (`gh label list/create`, `gh pr create`, and
+# the pin audit's read-only `gh pr list` and fixed-alert lookup) are the
+# deliberate exception: `--repo <nwo>` makes them location-independent, so they
+# carry no cd prefix and are covered by the NWO rules below instead. `git log`
+# is the pin audit's provenance lookup (`log -S <key>`), read-only like
+# `status` and `rev-parse`.
 RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C *$REPO_ROOT* status *)
 Bash(git -C *$REPO_ROOT* branch --list *)
 Bash(git -C *$REPO_ROOT* rev-parse *)
 Bash(git -C *$REPO_ROOT* fetch origin *)
 Bash(git -C *$REPO_ROOT* worktree *)
+Bash(git -C *$REPO_ROOT* log *)
 Bash(mkdir -p *$REPO_ROOT/.claude/worktrees*)
 Bash(git -C *$REPO_ROOT/.claude/worktrees/*)
 Bash(cd *$REPO_ROOT/.claude/worktrees/*)"
@@ -86,7 +90,9 @@ Bash(cd *$REPO_ROOT/.claude/worktrees/*)"
 if [ -n "$NWO" ]; then
   RULES="$RULES
 Bash(gh label * --repo $NWO *)
-Bash(gh pr create --repo $NWO *)"
+Bash(gh pr create --repo $NWO *)
+Bash(gh pr list --repo $NWO *)
+Bash(gh api *repos/$NWO/dependabot/alerts*)"
 fi
 
 rules_json=$(printf '%s\n' "$RULES" | jq -R . | jq -s .)

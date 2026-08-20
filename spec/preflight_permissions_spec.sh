@@ -17,14 +17,14 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{exists, missing_count, present}' check "$REPO"
     The status should be success
-    The output should equal '{"exists":false,"missing_count":9,"present":[]}'
+    The output should equal '{"exists":false,"missing_count":10,"present":[]}'
   End
 
   It 'adds the gh rules only when an nwo is supplied'
     make_repo
     When call common_jq preflight-permissions.sh '[.missing[] | select(startswith("Bash(gh"))] | length' check "$REPO" octo/app
     The status should be success
-    The output should equal '2'
+    The output should equal '4'
   End
 
   It 'covers every bundled script with one absolute-path rule'
@@ -41,6 +41,17 @@ Describe 'preflight-permissions.sh'
     When call common_jq preflight-permissions.sh '[.missing[] | select(startswith("Bash(cd "))]' check "$REPO"
     The status should be success
     The output should equal "[\"Bash(cd *$REPO/.claude/worktrees/*)\"]"
+  End
+
+  # The pin audit's prescribed shapes: `git log -S <key>` for provenance, and
+  # two read-only gh lookups. Prescribed shapes and this catalog move together
+  # (scripts/CLAUDE.md), so an agent step added without its rule is a
+  # permission prompt for spec'd behavior.
+  It 'covers the pin audit provenance lookups'
+    make_repo
+    When call common_jq preflight-permissions.sh '[.missing[] | select(test("log |pr list|dependabot/alerts"))]' check "$REPO" octo/app
+    The status should be success
+    The output should equal "[\"Bash(git -C *$REPO* log *)\",\"Bash(gh pr list --repo octo/app *)\",\"Bash(gh api *repos/octo/app/dependabot/alerts*)\"]"
   End
 
   # Push is `git -C <worktree> push ...` like every other git call, so the
@@ -64,7 +75,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{added: (.added | length), dirs: (.additional_directories_added | length)}' apply "$REPO"
     The status should be success
-    The output should equal '{"added":9,"dirs":1}'
+    The output should equal '{"added":10,"dirs":1}'
     The path "$REPO/.claude/settings.local.json" should be exist
   End
 
@@ -84,7 +95,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call jq -c '{model, first: .permissions.allow[0], second: .permissions.allow[1], deny: .permissions.deny, total: (.permissions.allow | length)}' "$REPO/.claude/settings.local.json"
     The status should be success
-    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":11}'
+    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":12}'
   End
 
   It 'counts pre-existing catalog rules as present, not missing'
@@ -92,7 +103,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call common_jq preflight-permissions.sh '{missing_count, present: (.present | length)}' check "$REPO"
     The status should be success
-    The output should equal '{"missing_count":0,"present":9}'
+    The output should equal '{"missing_count":0,"present":10}'
   End
 
   It 'refuses to touch a settings file that is not valid JSON'
