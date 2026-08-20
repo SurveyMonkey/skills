@@ -6,7 +6,14 @@
 #
 # Output:
 #   {package, ecosystem, advisory_count, withdrawn_excluded, vulnerable_ranges[],
-#    advisories[], version, verdict, matched_ranges[], unevaluated_ranges[]}
+#    advisories[], version, verdict, matched_ranges[], unevaluated_ranges[],
+#    adapter_errors[]}
+#
+# `--ecosystem` defaults to `npm`, which is the only ecosystem with an adapter
+# today. It is not a fallback: a caller routing a non-npm package must pass its
+# ecosystem explicitly, because the advisories endpoint matches package names
+# per registry and the same name exists in several. Phase 6's Python adapter
+# passes `--ecosystem pip`; anything that does not pass one is asserting npm.
 #
 # The pin audit's source of truth for whether a pinned package is still
 # dangerous (RFC 001 Phase 4). It unions the vulnerable ranges of **every
@@ -87,6 +94,16 @@ trap 'rm -f "$ERR_FILE"' EXIT
 
 # `affects` matches the package name; the ecosystem narrows it, since the same
 # name exists in more than one registry. --slurp yields one array per page.
+#
+# Load-bearing assumption, shared with discover-alerts.sh: `--paginate --slurp`
+# either emits the whole collection or exits non-zero, never a truncated
+# collection with status 0. Slurping requires gh to hold every page before it
+# can emit the enclosing array, so a mid-pagination failure has nothing partial
+# to print — but this is inferred from the flag's semantics rather than from a
+# documented guarantee, and it is the assumption that makes a short answer here
+# impossible. If it ever fails, a page dropped silently would shrink the union
+# of vulnerable ranges, and a pin holding back exactly what the missing page
+# describes would read as removable.
 RAW=$(gh api \
   "advisories?affects=$PACKAGE&ecosystem=$ECOSYSTEM&per_page=100" \
   --paginate --slurp 2>"$ERR_FILE") || {
@@ -140,14 +157,26 @@ FILTERED=$(printf '%s' "$RAW" | jq \
 
 MATCHED=""
 UNEVALUATED=""
+ADAPTER_ERRORS=$(mktemp)
+trap 'rm -f "$ERR_FILE" "$ADAPTER_ERRORS"' EXIT
 if [ -n "$VERSION" ]; then
   while IFS= read -r range; do
     [ -n "$range" ] || continue
-    facts=$("$ADAPTER" range_facts "$range" "$VERSION" 2>/dev/null) || facts=""
+    adapter_status=0
+    facts=$("$ADAPTER" range_facts "$range" "$VERSION" 2>"$ERR_FILE") || adapter_status=$?
     # An adapter that answers nothing has answered nothing. jq on empty input
     # emits nothing rather than failing, so an unchecked reply would skip both
     # branches below and leave the range silently uncounted (ADR 001).
     if [ -z "$facts" ] || ! printf '%s' "$facts" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      # Keep what the adapter said. Swallowing its stderr turned a systemically
+      # broken adapter — a missing dependency, a syntax error, a path that is
+      # not this ecosystem's — into an audit where every pin came back
+      # inconclusive and nothing pointed at the cause. The verdict is
+      # unchanged: an unevaluated range is never folded into "safe".
+      jq -n --arg range "$range" --argjson status "$adapter_status" \
+        --arg error "$(tr '\n' ' ' < "$ERR_FILE" | cut -c1-300)" \
+        '{range: $range, status: $status,
+          error: ($error | sub("[[:space:]]+$"; ""))}' >> "$ADAPTER_ERRORS"
       UNEVALUATED="$UNEVALUATED$range
 "
       continue
@@ -170,7 +199,8 @@ fi
 printf '%s' "$FILTERED" | jq \
   --arg pkg "$PACKAGE" --arg eco "$ECOSYSTEM" --arg version "$VERSION" \
   --argjson matched "$(printf '%s' "$MATCHED" | jq -Rs 'split("\n") | map(select(length > 0)) | unique')" \
-  --argjson unevaluated "$(printf '%s' "$UNEVALUATED" | jq -Rs 'split("\n") | map(select(length > 0)) | unique')" '
+  --argjson unevaluated "$(printf '%s' "$UNEVALUATED" | jq -Rs 'split("\n") | map(select(length > 0)) | unique')" \
+  --argjson adapter_errors "$(jq -s '.' "$ADAPTER_ERRORS")" '
   {
     package: $pkg,
     ecosystem: $eco,
@@ -181,6 +211,7 @@ printf '%s' "$FILTERED" | jq \
     version: (if $version == "" then null else $version end),
     matched_ranges: $matched,
     unevaluated_ranges: $unevaluated,
+    adapter_errors: $adapter_errors,
     verdict: (
       if   (.advisories | length) == 0        then "no-advisories"
       elif $version == ""                     then null

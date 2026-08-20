@@ -109,6 +109,10 @@ could not be read — never folded into `safe`, since an unreadable range is exa
 unnoticed match hides. `no-advisories` means the query succeeded and returned nothing, which a
 non-security pin, a misspelled package name, and the wrong ecosystem all produce identically.
 
+When the adapter itself fails on a range, its stderr is kept in `adapter_errors[]` rather than
+discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
+broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
+
 ## The rule that matters most
 
 **Zero resolved versions is an error, never a pass.** `resolved_versions` returning an empty list

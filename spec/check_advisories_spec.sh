@@ -157,6 +157,51 @@ JSON
     End
   End
 
+  # A systemically broken adapter — a missing dependency, a bad path, the wrong
+  # ecosystem's script — degrades every range to unevaluated. Swallowing its
+  # stderr made that an audit where every pin came back inconclusive with
+  # nothing pointing at the cause.
+  Describe 'an adapter that fails'
+    broken_adapter() {
+      BROKEN="$SHELLSPEC_WORKDIR/broken-adapter.sh"
+      printf '#!/bin/sh\nprintf "jq: command not found\\n" >&2\nexit 127\n' > "$BROKEN"
+      chmod +x "$BROKEN"
+    }
+
+    It 'surfaces the adapter error text instead of only an inconclusive verdict'
+      broken_adapter
+      When call advisories '{verdict, adapter_errors: [.adapter_errors[] | {status, error}] | unique}' --adapter "$BROKEN" --version 4.17.21 lodash
+      The status should be success
+      The output should equal '{"verdict":"unknown","adapter_errors":[{"status":127,"error":"jq: command not found"}]}'
+    End
+
+    # The verdict itself must not soften: an unevaluated range is never folded
+    # into "safe", however it came to be unevaluated.
+    It 'still refuses to call the version safe'
+      broken_adapter
+      When call advisories '{unevaluated: (.unevaluated_ranges | length), matched: .matched_ranges}' --adapter "$BROKEN" --version 4.17.21 lodash
+      The status should be success
+      The output should equal '{"unevaluated":3,"matched":[]}'
+    End
+  End
+
+  It 'carries no adapter errors on a clean run'
+    When call advisories '.adapter_errors' --adapter "$ADAPTER" --version 4.17.21 lodash
+    The status should be success
+    The output should equal '[]'
+  End
+
+  # `--paginate --slurp` emits one array per page, so the union has to flatten
+  # before it groups. A second page dropped silently would shrink the union and
+  # make a pin holding back exactly that advisory look removable.
+  It 'unions across pages'
+    jq '[[.[0][0]], [.[0][1], .[0][2]]]' "$MOCK_DIR/advisories.json" > "$MOCK_DIR/paged.json"
+    mv "$MOCK_DIR/paged.json" "$MOCK_DIR/advisories.json"
+    When call advisories '{n: .advisory_count, ranges: .vulnerable_ranges}' lodash
+    The status should be success
+    The output should equal '{"n":3,"ranges":["< 4.17.12","< 4.17.21",">= 3.0.0, < 4.17.19"]}'
+  End
+
   # An empty result is a real answer here (the API succeeded), but it is not
   # "safe": a pin may exist for a non-security reason, and a misspelled name
   # produces exactly this.
