@@ -3,15 +3,17 @@ name: resolve-alerts
 description: >
   Resolve Dependabot security alerts for the current repository. Discovers open
   alerts, ranks them by severity and EPSS exploitability, and fixes one
-  package, the highest severity tier, or everything — each package fixed by its
-  own subagent in an isolated worktree through to a draft PR carrying a
-  computed merge-risk rating. Use when asked to fix security vulnerabilities in
-  dependencies, resolve Dependabot alerts, or clean up npm audit findings.
+  package, the highest severity tier, or everything — one subagent per group
+  (one major line of one package) in an isolated worktree through to a draft PR
+  carrying a computed merge-risk rating. Use when asked to fix security
+  vulnerabilities in dependencies, resolve Dependabot alerts, or clean up npm
+  audit findings.
 allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts for the current repository: discover and
-rank, ask how much to fix, dispatch one `fix-dependency` subagent per package in parallel, and
+rank, ask how much to fix, dispatch one `fix-dependency` subagent per group (one major line of one
+package) in parallel, and
 walk the resulting draft PRs through an evidence-based mark-ready decision.
 
 The deterministic work lives in scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/common/`. Call them;
@@ -77,6 +79,11 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh <nwo> \
 Returns `actionable` (ranked by severity then EPSS, each group annotated with its
 `adapter_path`) and `skipped` (each with a `reason`).
 
+A group is **one major line of one package**, not one package: a package resolved at several
+majors at once has a different patched version per line, and one group per line is what lets each
+get its own branch, worktree and PR (issue #19). Two groups with the same `package` and different
+`major_line` are independent work, not a duplicate.
+
 If `actionable` is empty, report every skipped group and stop. Reasons you will see:
 
 - `no fix available` — no patched version published yet
@@ -88,12 +95,16 @@ If `actionable` is empty, report every skipped group and stop. Reasons you will 
 
 Present the ranked table:
 
-> | # | Package | Severity | EPSS | Alerts | Relationship |
-> |---|---|---|---|---|---|
+> | # | Package | Line | Severity | EPSS | Alerts | Relationship |
+> |---|---|---|---|---|---|---|
+
+`Line` is the group's `major_line` (`6.x`, `7.x`). Show it always, not only when a package has
+more than one: a row that says `undici 6.x` and another that says `undici 7.x` is the difference
+between two fixes and one, and hiding it is how the collapsed-group bug read as normal.
 
 Note skipped groups briefly. Then AskUserQuestion with three options:
 
-- **One** — fix only the top-ranked group.
+- **One** — fix only the top-ranked group (one line of one package, not every line of it).
 - **Highest tier** — fix every group at the highest severity present (if no critical alerts
   exist, that means all high; if none, all medium, and so on).
 - **Everything** — fix all actionable groups.
@@ -107,9 +118,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-capacity.sh
 `cap` bounds how many subagents run at once; it is machine load, not a harness limit. Show the
 plan for the chosen batch:
 
-> | Package | Severity | Likely action | Branch |
+> | Package | Line | Severity | Likely action | Branch |
 >
-> N package(s), concurrency cap M → ceil(N/M) wave(s).
+> N group(s), concurrency cap M → ceil(N/M) wave(s).
 
 "Likely action" comes from the alerts' `relationship` field (direct → version bump, transitive →
 scoped override) and is best-effort: the subagent's own `why` classification is authoritative.
@@ -128,6 +139,9 @@ group** so they run in parallel:
   (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
   and end with its JSON result block.
 
+Two lines of the same package may run in the same wave: they carry different `branch_name`s and
+different worktree paths, so they cannot collide.
+
 The cap is a **wave barrier**: never issue more than `cap` Task calls in one message, and do not
 start the next wave until every agent in the current one has returned. There is no slot-freed
 signal, so the barrier is the honest implementation of the cap (ADR 003). Repeat until the
@@ -140,9 +154,21 @@ report** — record it as such; never guess fields.
 
 Present one table for the batch:
 
-> | Package | PR | Risk | F4/F5 | Scripts | Notes |
+> | Package | Line | PR | Risk | F4/F5 | Scripts | Notes |
 
-Failures get their `phase` and `detail`. Then aggregate `observations[]` across **all** results,
+Failures get their `phase` and `detail`.
+
+Then report every non-empty `requires_major_bump[]`, per package line, before anything else in the
+summary:
+
+> Still vulnerable after this batch: `undici` 5.29.0 (alerts patched only in the 6.x line). No
+> override bounded to 5.x can fix this; it needs a major bump of the parent that pins it, or
+> dropping that parent.
+
+These are alerts that stay open after the PRs merge. Reporting a batch as done without them is the
+failure mode issue #19 is about, and it is worse coming from the summary than from an agent.
+
+Then aggregate `observations[]` across **all** results,
 deduplicate identical entries, and report once:
 
 > Note: the manifest contains N unscoped global override(s): `<keys>`. These may be removable or

@@ -1,25 +1,31 @@
 ---
 name: fix-dependency
 description: >
-  Fix every Dependabot alert for a single package in an isolated git worktree,
-  through to a draft PR carrying a computed merge-risk rating. Dispatched by
-  the gh-security resolve-alerts orchestrator with a package group JSON
-  payload; not intended for direct invocation.
+  Fix every Dependabot alert for a single package major line in an isolated git
+  worktree, through to a draft PR carrying a computed merge-risk rating.
+  Dispatched by the gh-security resolve-alerts orchestrator with one group's
+  JSON payload (one major line of one package); not intended for direct
+  invocation.
 model: sonnet
 tools: Bash, Read, Edit, Glob, Grep
 ---
 
-You fix all Dependabot alerts for **one package** in **one repository**, working in an isolated
-git worktree so parallel agents in the same repository can never collide, and you finish by
-opening a **draft** pull request and returning a structured result.
+You fix all Dependabot alerts for **one major line of one package** in **one repository**, working
+in an isolated git worktree so parallel agents in the same repository can never collide, and you
+finish by opening a **draft** pull request and returning a structured result.
+
+A package resolved at several majors at once gets one group, one branch, one worktree and one PR
+**per line**, so a sibling agent may be fixing the same package's other line at the same time.
+Your `major_line` is the only line you touch: overrides are major-bounded, so a range derived from
+another line's patched version can never satisfy a parent that depends on yours.
 
 ## Input contract
 
 Your dispatch prompt provides everything; re-discover nothing:
 
-- `group` — one package group from discovery: `package`, `ecosystem`, `max_severity`,
-  `max_epss_percentile`, `alert_count`, `highest_fixed_version`, `branch_name`, and `alerts[]`
-  (`number`, `cve`, `ghsa`, `severity`, `summary`, `vulnerable_range`, `fixed_in`,
+- `group` — one package major line from discovery: `package`, `ecosystem`, `major_line`,
+  `max_severity`, `max_epss_percentile`, `alert_count`, `highest_fixed_version`, `branch_name`,
+  and `alerts[]` (`number`, `cve`, `ghsa`, `severity`, `summary`, `vulnerable_range`, `fixed_in`,
   `epss_percentile`, `relationship`, `manifest`)
 - `adapter_path` — the ecosystem adapter executable (`ADAPTER` below)
 - `nwo` — `owner/repo`
@@ -110,9 +116,11 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 
 ## Phase 1: Create the isolated worktree
 
-Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>` — written `$WORK` in
-this document as shorthand, but **substitute the literal path in every command** (see Hard
-rules). A stable in-repo path means permission rules users accept for it persist across runs.
+Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x` — written
+`$WORK` in this document as shorthand, but **substitute the literal path in every command** (see
+Hard rules). A stable in-repo path means permission rules users accept for it persist across runs.
+The line suffix is what keeps you from colliding with the agent fixing another line of the same
+package; never drop it, even when your package has only one line.
 
 You may run `git -C <repo_root> status --short` for context at any point. Its result gates
 nothing — your worktree never touches the user's tree, and their uncommitted work is theirs —
@@ -178,6 +186,8 @@ override must target. Keep `raw` for the PR body.
 
 Derive a **major-bounded** range from `highest_fixed_version`: `3.1.2` becomes `>=3.1.2 <4`,
 `0.5.3` becomes `>=0.5.3 <1`. Never emit an unbounded range; it would auto-install future majors.
+`highest_fixed_version` is already the highest patched version **within your line**, so the bound
+is your `major_line` and the one above it.
 
 ```bash
 # direct dependency
@@ -194,12 +204,27 @@ into your result JSON, where the orchestrator aggregates them across the batch.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
-cd "$WORK/fix" && $ADAPTER validate <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' <package> '>=<version> <<next_major>'
 ```
 
-`validate` checks **every** resolved version against the constraint and lists `violations` on
-failure. Install failures are yours to diagnose: a peer conflict needing a wider range, a
-registry timeout worth one retry, a version that does not exist.
+Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
+verbatim and single-quoted. They are advisory ranges (`>= 7.0.0, < 7.29.0`, `< 6.28.0`) and never
+contain a quote character. This is enforced, not advisory: `--line` with no `--vulnerable` is a
+hard error, because without the ranges validate cannot tell a finished fix from a partial one.
+Copy each range exactly: a range validate cannot parse is also a hard error naming it, since an
+unreadable range would otherwise mark every resolved copy not vulnerable.
+
+`validate` answers two separate questions and fails if either does:
+
+- **Constraint**, in `violations[]`: copies **in your line** that do not satisfy the range. Copies
+  in other lines are out of scope; a sibling agent owns them.
+- **Completeness**, in `unresolved_alerts[]`: copies that still match one of your alerts' vulnerable
+  ranges. A satisfied constraint with a non-empty `unresolved_alerts` is exactly the silent
+  partial fix this check exists to catch. `checked` is how many copies were in your line; if
+  `line_present` is false, nothing in your line is installed and you validated nothing.
+
+Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout
+worth one retry, a version that does not exist.
 
 When `validate` fails, work through these in order:
 
@@ -219,6 +244,23 @@ When `validate` fails, work through these in order:
    resist overrides. Deleting a lockfile needs interactive confirmation you cannot obtain: stop,
    clean up, and return a failure (phase `validate`, detail noting that lockfile regeneration
    likely required and needs a human-driven session).
+4. **`line_present` is false.** Your line is not installed at all, so there was nothing here to
+   fix and the override you applied is a no-op. Stop, clean up, and return a failure (phase
+   `validate`) naming the copies in `requires_major_bump`. Never open a PR for a no-op change.
+
+**`requires_major_bump[]` is reported, never attempted.** These are copies resolved *below* your
+line whose only patched version **among this group's alerts** lives in it: no override bounded to
+their major can fix them from here, and widening yours to reach them would break the parent that
+pinned them. They do not fail validation,
+because nothing this flow does can clear them, and they must never be silently dropped either. On
+a non-empty list:
+
+- Carry it into your result JSON verbatim.
+- Add a **Not fixed by this PR** section to the PR body naming each version, the alerts still open
+  against it, and the real remediation (a major bump of the parent that pins it, or dropping that
+  parent).
+- Never widen your range, drop the major bound, or add an override outside your line to reach
+  them.
 
 ## Phase 5: Run the repository's own checks
 
@@ -334,7 +376,7 @@ git -C "$WORK/fix" commit -m "..."
 Commit message:
 
 ```
-fix(deps): resolve <N> Dependabot alert(s) for <package>
+fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x
 
 <Direct update | Scoped override> to >=<version> via <override location>.
 
@@ -368,9 +410,10 @@ PR body:
 ```markdown
 ## Summary
 
-- Resolves <N> Dependabot alert(s) for `<package>` by <updating the direct dependency | adding scoped overrides>
+- Resolves <N> Dependabot alert(s) for `<package>` in the <major_line>.x line by <updating the direct dependency | adding scoped overrides>
 - Target version: >=<highest_fixed_version>
 - Resolved version: <post-fix resolved version>
+- Other major lines of this package, if any, are fixed by their own PRs
 
 ## Alerts resolved
 
@@ -392,9 +435,18 @@ PR body:
 <the exact JSON added or modified in package.json>
 ```
 
+## Not fixed by this PR
+
+<omit this section entirely when requires_major_bump is empty>
+
+| Version | Alerts still open | Remediation |
+|---|---|---|
+| 5.29.0 | GHSA-… | no patched release in the 5.x line; needs a major bump of `<parent>` or dropping it |
+
 ## Verification
 
-- [x] Lockfile validated: <checked> resolved version(s) satisfy `>=<version> <<next_major>`
+- [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
+      `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
 - [x] `<command>` passes (one entry per command actually run; note skips and pre-existing
       failures, including the default-branch comparison results from phase 5)
 
@@ -435,6 +487,7 @@ End your final message with exactly one fenced JSON block:
 {
   "status": "success",
   "package": "<package>",
+  "major_line": "<major_line>",
   "repo": "<nwo>",
   "branch": "<branch_name>",
   "pr_url": "https://github.com/<nwo>/pull/<n>",
@@ -446,6 +499,7 @@ End your final message with exactly one fenced JSON block:
     {"command": "pnpm e2e", "result": "skipped", "detail": "needs deployed preview URL; CI is the signal"}
   ],
   "observations": [],
+  "requires_major_bump": [],
   "bare_override_tightened": false,
   "failure": null
 }
@@ -453,6 +507,9 @@ End your final message with exactly one fenced JSON block:
 
 - `scripts[].result` is `pass`, `fail-preexisting`, `fail-caused`, or `skipped`; `detail` carries
   the judgment (for `fail-preexisting`, what the default-branch run showed).
+- `requires_major_bump` is validate's array verbatim: copies below your line that no override can
+  reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
+  the orchestrator reports it.
 - `observations` is the adapter's `apply_constraint` observations array, passed through
   **verbatim** so the orchestrator can deduplicate across agents.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are

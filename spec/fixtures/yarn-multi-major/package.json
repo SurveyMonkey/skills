@@ -1,0 +1,12 @@
+{
+  "name": "demo-multi",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "legacy-client": "^2.0.0",
+    "mid-client": "^3.1.0",
+    "undici": "^7.27.1"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

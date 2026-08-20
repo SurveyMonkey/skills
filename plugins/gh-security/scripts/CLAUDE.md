@@ -35,6 +35,22 @@ Everything ecosystem-specific stays behind the verbs, **including version compar
 Python adapter implements PEP 440; node implements semver. Do not lift `compare_versions` into
 `common/`.
 
+## One group per package major line, and validate decides completeness
+
+`discover-alerts.sh` groups by package **and** the major of `first_patched_version`. Grouping by
+package alone collapsed every patched version into one `highest_fixed_version`, which described
+only the newest line while the older ones stayed vulnerable under a group reported as fixed
+([#19](https://github.com/SurveyMonkey/skills/issues/19)). Anything that regroups or renames must
+keep one branch, one worktree and one PR per line.
+
+Discovery cannot tell which resolved copy an alert matched: the API does not say, and discovery
+has no lockfile. **Only the adapter's `validate` can answer whether the alerts were actually
+cleared**, and it must be given the group's `vulnerable_range`s (`--vulnerable`) to do it. A
+constraint check alone passes a partial fix, so the guarantee is enforced rather than requested:
+`--line` without `--vulnerable` is an error, and so is a `--vulnerable` range that does not parse
+(range satisfaction answers false for a token it cannot read, which on this side means "nothing is
+vulnerable").
+
 ## Prescribed shapes and the preflight catalog move together
 
 `preflight-permissions.sh` pre-approves exactly the command shapes the agent definition
