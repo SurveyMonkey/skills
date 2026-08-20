@@ -16,10 +16,13 @@ repository, directly: this entry point does not discover or fix alerts.
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
 ```
 
-The audit is **repo-scoped**. If `scope` is `org` or `user`, say that auditing across an org or
-user arrives with cross-repo scope
-([#6](https://github.com/SurveyMonkey/skills/issues/6)) and stop; do not fan out by hand. If
-`git_remote` disagrees with `nwo`, trust `git_remote` and say so. If `default_branch` is null,
+The audit is **repo-scoped**, and stays so even though alert resolution now reaches org and user
+scope: one `audit-pins` agent tests one repository's pins. If `scope` is `org` or `user`, say that
+this command audits a single repository and ask which one, or ask the user to run it from that
+repo's checkout; then continue from that repo. Never fan out across every repo in the org by hand
+— each pin tested costs an install, and a silent org-wide sweep is not what the user asked for.
+
+If `git_remote` disagrees with `nwo`, trust `git_remote` and say so. If `default_branch` is null,
 report that and stop — the audit worktree is created from it.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`.

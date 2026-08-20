@@ -181,9 +181,9 @@ yet checked out locally will be cloned under the workspace's `@owner` convention
 **Spare slot → the pin audit rides along.** If the approved batch has **fewer groups than `cap`**,
 one `audit-pins` agent joins the first wave and the plan says so, in the same approval:
 
-> 2 group(s), concurrency cap 4 → 1 wave, with 2 slot(s) spare. The pin audit will run in one of
-> them against `octo/app`: it reports which of that repo's existing overrides/resolutions are no
-> longer needed. Report-only, no PR.
+> 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
+> one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
+> are no longer needed. Report-only, no PR.
 
 Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
 are free — its own removability tests run installs, and a second copy of it would audit the same
