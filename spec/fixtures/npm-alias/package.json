@@ -3,8 +3,12 @@
   "dependencies": {
     "lodash": "^4.17.21",
     "lodash-alias": "npm:lodash@^4.18.0",
-    "dupe-parent": "^1.0.0"
+    "dupe-parent": "^1.0.0",
+    "alias-parent": "^1.0.0"
   },
-  "overrides": { "lodash": "^4.17.21" },
+  "overrides": {
+    "lodash": "^4.17.21",
+    "lodash-alias": "npm:lodash@4.18.2"
+  },
   "scripts": { "test": "jest" }
 }

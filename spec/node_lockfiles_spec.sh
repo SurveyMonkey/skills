@@ -256,11 +256,57 @@ Describe 'node.sh resolved_versions'
       The output should equal '[{"version":"4.18.1","path":"node_modules/lodash-alias"}]'
     End
 
-    It 'does not report an npm alias under its own key'
+    # ...and under the key it is installed as, which is the name an override
+    # entry for an aliased dependency carries (`"lodash-alias":
+    # "npm:lodash@4.18.2"`), so it is the name `list_pins` hands the audit.
+    # Answering `present: false` there is read as "the package left the tree
+    # entirely", which agents/audit-pins.md turns into `removable`: a deletion
+    # recommendation for a pin on a package nothing examined (issue #46).
+    It 'answers under the npm alias key as well'
       use_fixture npm-alias
-      When call adapter_jq '.present' resolved_versions lodash-alias
+      When call adapter_jq '{present, versions: [.versions[].version]}' resolved_versions lodash-alias
       The status should be success
-      The output should equal 'false'
+      The output should equal '{"present":true,"versions":["4.18.1"]}'
+    End
+
+    # `yarn patch` on a package that already carries the builtin compat patch.
+    # Berry escapes the wrapped locator once per nesting level, so the decode
+    # has to run per unwrap: run once up front it leaves %253A intact, the
+    # inner descriptor matches neither protocol, and the row is dropped —
+    # `present: false` for a package sitting in the tree at a real registry
+    # version (issue #46).
+    It 'finds a yarn patch applied on top of another patch'
+      use_fixture yarn-patch-nested
+      When call adapter_jq '{present, versions: [.versions[].version]}' resolved_versions typescript
+      The status should be success
+      The output should equal '{"present":true,"versions":["5.1.6"]}'
+    End
+
+    # Berry writes `__archiveUrl` binding parameters for anything fetched from
+    # a non-default registry. Left on the version they make it sort below the
+    # clean release, which is how a vulnerable copy reads safe; see the
+    # completeness example in node_validate_spec.sh.
+    It 'drops the binding parameters an npm: locator carries after "::"'
+      use_fixture yarn-binding-params
+      When call adapter_jq '[.versions[].version]' resolved_versions privreg
+      The status should be success
+      The output should equal '["2.5.0"]'
+    End
+
+    Describe 'a yarn npm: alias'
+      Parameters
+        lodash        '["4.17.21"]' # the package it aliases
+        aliased       '["4.17.21"]' # the key it is installed and pinned under
+        '@scope/real' '["2.3.4"]'   # scoped, aliased
+        scoped-alias  '["2.3.4"]'
+      End
+
+      It "resolves $1"
+        use_fixture yarn-alias
+        When call adapter_jq '[.versions[].version]' resolved_versions "$1"
+        The status should be success
+        The output should equal "$2"
+      End
     End
 
     # Local code is not a registry version, so neither verb claims one for it.
@@ -328,6 +374,9 @@ Describe 'node.sh resolution_map'
       yarn-berry undici        '["5.28.4","6.19.8"]'  # two majors side by side
       yarn-patch lodash        '["4.17.21"]'          # a patched package
       npm-alias  lodash        '["4.17.21","4.18.1"]' # an alias, plus one version at two paths
+      yarn-patch-nested typescript '["5.1.6"]'        # a patch of a patch
+      yarn-binding-params privreg  '["2.5.0"]'        # an npm: locator with :: parameters
+      yarn-alias lodash        '["4.17.21"]'          # a yarn npm: alias
     End
 
     It "reports the same versions for $2 in $1"
@@ -419,25 +468,94 @@ Describe 'node.sh resolution_map'
     The output should equal '2'
   End
 
-  Describe 'the empty-parse guard'
+  It 'keeps a yarn patch of a patch at the version its innermost locator names'
+    use_fixture yarn-patch-nested
+    When call adapter_jq '{lockfile_entries, resolutions}' resolution_map
+    The status should be success
+    The output should equal '{"lockfile_entries":3,"resolutions":{"keep":["1.0.0"],"typescript":["5.1.6"]}}'
+  End
+
+  # Berry aliases, keyed like npm's: under the package the code actually is,
+  # because the audit feeds this name into an advisory query and the alias key
+  # answers `no-advisories` there — a lost signal that never forces
+  # `still-required` the way `vulnerable` does.
+  It 'keys a yarn npm: alias under the package it aliases'
+    use_fixture yarn-alias
+    When call adapter_jq '{resolutions: (.resolutions | to_entries | sort_by(.key) | from_entries), keyed_by_alias: (.resolutions | has("aliased") or has("scoped-alias"))}' resolution_map
+    The status should be success
+    The output should equal '{"resolutions":{"@scope/real":["2.3.4"],"lodash":["4.17.21"]},"keyed_by_alias":false}'
+  End
+
+  # The one place the two verbs answer differently about the same name, and it
+  # is the identity rule rather than a parser drifting: the map holds a package
+  # once, under the name a registry knows, while `resolved_versions` also
+  # answers under the key an override entry names. agents/audit-pins.md says
+  # what the audit does with it — report the pin `inconclusive` naming the
+  # alias, never `removable`.
+  It 'holds an alias only under the aliased package, though both names resolve'
+    use_fixture npm-alias
+    When call adapter_jq '{map: (.resolutions | has("lodash-alias")), aliased: .resolutions.lodash}' resolution_map
+    The status should be success
+    The output should equal '{"map":false,"aliased":["4.17.21","4.18.1"]}'
+  End
+
+  Describe 'the parse guard'
     # A whole-tree diff against an empty map reports every package unchanged,
     # which is the wrong-safe answer this plugin exists to avoid.
-    Parameters
-      empty-yarn
-      empty-npm
+    Describe 'a lockfile with no entries at all'
+      Parameters
+        empty-yarn
+        empty-npm
+      End
+
+      It "treats a zero-entry $1 lockfile as an error, never an empty tree"
+        use_fixture "$1"
+        When run script "$ADAPTER" resolution_map
+        The status should equal 1
+        The stderr should include 'Parsed 0 entries'
+      End
     End
 
-    It "treats a zero-entry $1 lockfile as an error, never an empty tree"
-      use_fixture "$1"
+    # The guard the `entries == 0` check could not make: `grep -c 'resolution:
+    # "'` counts lines the rows never had to survive, so a lockfile the parser
+    # understood none of reported `{"lockfile_entries":3,"package_count":0}`
+    # and exit 0. Two empty maps compare equal, so the audit's collateral check
+    # degraded into a no-op that *strengthens* a removal (issue #46).
+    It 'refuses a lockfile whose locators it mostly could not read'
+      use_fixture yarn-unknown-protocol
       When run script "$ADAPTER" resolution_map
       The status should equal 1
-      The stderr should include 'Parsed 0 entries'
+      The stderr should include 'Read 1 of 4 lockfile entries'
+    End
+
+    # ...and does not mistake a repository that genuinely resolves to no
+    # registry version for that failure. Every locator here is read and
+    # deliberately excluded, which is why the guard counts what it could read
+    # rather than what it kept.
+    It 'accepts an all-local lockfile, whose package_count is legitimately zero'
+      use_fixture yarn-all-local
+      When call adapter_jq '{lockfile_entries, package_count, resolutions}' resolution_map
+      The status should be success
+      The output should equal '{"lockfile_entries":3,"package_count":0,"resolutions":{}}'
     End
   End
 End
 
 Describe 'node.sh why'
   After 'cleanup_fixture'
+
+  # A parent that declares the package through an `npm:` alias declares it
+  # under another name, and matching the declared key alone reported no parent
+  # at all. `fix-dependency`'s failure ladder starts by scoping to a parent, so
+  # a package with no parents and a copy no bare entry can move dead-ends the
+  # flow on exactly the repositories where the copy is hardest to find
+  # (issue #46).
+  It 'names a parent that declares the package through an npm: alias'
+    use_fixture npm-alias
+    When call adapter_jq '.parents' why lodash
+    The status should be success
+    The output should equal '["alias-parent","dupe-parent"]'
+  End
 
   It 'classifies a direct runtime dependency'
     use_fixture yarn-berry

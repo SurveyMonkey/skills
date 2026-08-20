@@ -154,7 +154,13 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
 
 - **Zero entries is an error here too, and for a sharper reason.** A diff against an empty map
   reports every package unchanged — "found nothing" meaning "all clear" once more, this time
-  wearing the shape of a clean diff.
+  wearing the shape of a clean diff. **Guard on what the parser read, never on what a `grep`
+  counted.** The yarn count was a `grep -c 'resolution: "'` while the rows had to survive two more
+  filters, so a lockfile parsed to nothing reported `lockfile_entries: 3, package_count: 0` and
+  exit 0 ([#46](https://github.com/SurveyMonkey/skills/issues/46)). A parser therefore separates
+  "read it and excluded it" from "could not read it" and refuses when the recognized share
+  collapses — a ratio and not a zero-check, because an all-local repository legitimately resolves
+  to no registry version and a *partial* parse passes a zero-check.
 - **A verdict says what it covers.** When the map is unavailable the audit still runs, but its
   findings say the claim is about the named package only. A narrower finding is a smaller result;
   a finding that outruns what was checked is a wrong one.
@@ -165,7 +171,12 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
   the `node_modules/` path lost the first entirely and mislabeled the second
   ([#44](https://github.com/SurveyMonkey/skills/issues/44)). Neither tripped the zero-entry guard,
   because the entry count is nonzero and the map merely looks healthy — which is the whole reason
-  to state the identity rule rather than leave it to each parser.
+  to state the identity rule rather than leave it to each parser. The **install key** answers too,
+  in `resolved_versions` only: it is what an override entry for an aliased dependency names, so it
+  is what `list_pins` hands the audit, and `present: false` there is read as "the package left the
+  tree". That is the single place the two verbs differ about a name, it is documented in ADR 001,
+  and `apply_constraint` writes the same key so the copy can also be moved
+  ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
 
 ## The rule that matters most
 

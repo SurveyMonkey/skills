@@ -132,6 +132,45 @@ Describe 'node.sh validate --vulnerable (completeness)'
     The output should equal '{"ok":true,"bump":["5.29.0"],"unresolved":[]}'
   End
 
+  # A locator whose version carried Berry's `::` binding parameters still
+  # ranked as its core version, so a wide range admitted it while the narrow
+  # `>= 2.5.0, < 2.5.3` shape advisories publish rejected it: the completeness
+  # check found nothing, and `safe` is what agents/audit-pins.md maps to
+  # `removable`. `__archiveUrl` is written for every non-default registry, so
+  # this is the ordinary shape in the repositories this plugin targets
+  # (issue #46).
+  It 'flags a copy whose locator carries binding parameters'
+    use_fixture yarn-binding-params
+    When call adapter_jq '{ok, unresolved: [.unresolved_alerts[].version], ranges: [.unresolved_alerts[].vulnerable_ranges[]]}' \
+      validate --line 2 --vulnerable '>= 2.5.0, < 2.5.3' privreg '>=2.5.3 <3'
+    The status should not equal 0
+    The output should equal '{"ok":false,"unresolved":["2.5.0"],"ranges":[">= 2.5.0, < 2.5.3"]}'
+  End
+
+  # A patch of a patch resolved to nothing, so validate died on "resolves to no
+  # versions in the lockfile" — for a package sitting in the tree at a real
+  # registry version, whose `present: false` the audit reads as `removable`.
+  It 'validates a package reached through nested patch locators'
+    use_fixture yarn-patch-nested
+    When call adapter_jq '{ok, checked, resolved_versions}' \
+      validate --line 5 --vulnerable '< 5.1.6' typescript '>=5.1.6 <6'
+    The status should be success
+    The output should equal '{"ok":true,"checked":1,"resolved_versions":["5.1.6"]}'
+  End
+
+  # A copy installed under an `npm:` alias key is a copy of the aliased package,
+  # and the completeness check has to see it: no `--vulnerable` range would ever
+  # match a name no registry has. This is the deliberate shift the identity rule
+  # carries into validate — `apply_constraint` writes the alias key, so the
+  # stricter answer is actionable rather than a dead end (issue #46).
+  It 'counts a copy installed under an npm: alias key'
+    use_fixture npm-alias
+    When call adapter_jq '{ok, unresolved: [.unresolved_alerts[] | {version, path}]}' \
+      validate --line 4 --vulnerable '>= 4.18.0, < 4.18.2' lodash '>=4.18.2 <5'
+    The status should not equal 0
+    The output should equal '{"ok":false,"unresolved":[{"version":"4.18.1","path":"node_modules/lodash-alias"}]}'
+  End
+
   # Advisory syntax puts a space after the operator, which the range tokenizer
   # used to split into a bare "<" and a bare version: read as "less than
   # nothing AND exactly 6.28.0", and fatal on the empty version.

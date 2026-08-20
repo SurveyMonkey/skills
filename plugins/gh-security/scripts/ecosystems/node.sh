@@ -387,11 +387,20 @@ pm_of() { verb_detect | jq -r '.pm'; }
 # ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
 # ---------------------------------------------------------------------------
 
-# npm's own name for an entry, falling back to the path segment. `.value.name`
-# is present exactly when the two differ (an `npm:` alias), so this leaves every
-# ordinary entry, nested or hoisted, keyed as before.
-NPM_ENTRY_NAME='(.value.name // (.key | split("node_modules/") | last))'
+# The key an entry is installed under, and npm's own name for it. `.value.name`
+# is present exactly when the two differ (an `npm:` alias), so for every
+# ordinary entry, nested or hoisted, the two are the same string.
+NPM_ENTRY_KEY='(.key | split("node_modules/") | last)'
+NPM_ENTRY_NAME='(.value.name // '"$NPM_ENTRY_KEY"')'
 
+# Either name answers, because both are real names for the same copy and each
+# is the one some caller holds. `resolution_map` keys the alias under the
+# package it aliases, which is what an advisory query needs; but a `resolutions`
+# or `overrides` entry for an aliased dependency is keyed by the **alias**
+# (`"lodash-alias": "npm:lodash@4.18.2"`), so that is the name `list_pins` hands
+# the audit. Answering `present: false` for it, while `declared_ranges` returns
+# its range, is read as "the package left the tree" and recommends deleting the
+# pin ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
 npm_versions() {
   jq --arg pkg "$1" '
     if (.packages | type) != "object" then
@@ -400,13 +409,24 @@ npm_versions() {
       [ .packages | to_entries[]
         | select(.key | contains("node_modules/"))
         | select(.value.version != null)
-        | select('"$NPM_ENTRY_NAME"' == $pkg)
+        | select('"$NPM_ENTRY_NAME"' == $pkg or '"$NPM_ENTRY_KEY"' == $pkg)
         | {version: .value.version, path: .key} ]
     end' package-lock.json
 }
 
 npm_entry_count() {
   jq '[.packages // {} | keys[] | select(. != "")] | length' package-lock.json
+}
+
+# `<installed>\t<versioned>` for the parse guard: the entries that name an
+# installed package, and the subset carrying a version. Workspace links are
+# recorded without one, so the denominator is the installed set rather than
+# every key — a monorepo with more workspaces than dependencies is not a parse
+# failure.
+npm_parse_counts() {
+  jq -r '[ .packages // {} | to_entries[] | select(.key | contains("node_modules/")) ]
+         | "\(length)\t\([.[] | select(.value.version != null)] | length)"' \
+    package-lock.json
 }
 
 pnpm_versions() {
@@ -438,6 +458,10 @@ pnpm_entry_count() {
        END { print n + 0 }' pnpm-lock.yaml
 }
 
+pnpm_parsed_count() {
+  pnpm_resolution_pairs | jq 'length'
+}
+
 # Berry keys the canonical resolution on a `resolution:` line, which stays
 # stable even when several descriptors share a single block. Every consumer
 # reads the lockfile through this one parser, emitting
@@ -451,8 +475,14 @@ pnpm_entry_count() {
 # patched package from both verbs at a real registry version, which is the
 # population `yarn patch` exists for
 # ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
-yarn_resolution_rows() {
-  awk '
+#
+# One awk program, two modes. `rows` emits the registry resolutions;
+# `count` emits `<total>\t<recognized>` for the parse guard, which needs to
+# know how many locators this parser could read at all — not how many it kept.
+# A single copy behind a variable, because two copies of a locator parser is
+# how the two counts drift apart, and the guard is only worth anything while
+# they measure the same lockfile the same way.
+YARN_LOCATOR_AWK=$(cat <<'AWKLIB'
     # The name a locator resolves under: everything before its first "@", from
     # position 2 so a scoped name keeps its own leading "@".
     function locator_name(res,   n) {
@@ -460,27 +490,90 @@ yarn_resolution_rows() {
         if (substr(res, n, 1) == "@") return substr(res, 1, n - 1)
       return ""
     }
-    # The registry version a locator ultimately points at, or "" when it points
-    # at none: workspace:, portal: and exec: entries are local code whose
-    # package.json version is not a published release, and git and URL targets
-    # name no version at all. patch: is the exception — it wraps another
-    # locator, so decode the wrapped one and ask it the same question. That
-    # keeps a patched registry package in (it is that release, plus a diff) and
-    # a patched workspace or portal package out, on the same rule.
-    function registry_version(res,   d, i, n, hash) {
-      gsub(/%3[Aa]/, ":", res)
+
+    # One level of percent-decoding.
+    #
+    # Berry escapes the locator a `patch:` wraps, and escapes it again per
+    # nesting level: a patch of an already-patched package carries %253A where
+    # a single patch carries %3A. So this runs once per unwrap rather than once
+    # per line, and %25 is decoded LAST — decoding it first would collapse two
+    # levels in one pass and split the inner locator a level too early, which
+    # is how a patch-of-patch used to fall out of both verbs entirely at a real
+    # registry version.
+    function pct_decode(s) {
+      gsub(/%3[Aa]/, ":", s)
+      gsub(/%23/, "#", s)
+      gsub(/%40/, "@", s)
+      gsub(/%25/, "%", s)
+      return s
+    }
+
+    # Read one locator. Three answers, not two:
+    #
+    #   1  it resolves to a registry version (RV_NAME, RV_VER, RV_KEY set)
+    #   2  it deliberately resolves to none — workspace:, portal:, exec:,
+    #      link:, file:, git and URL targets are local or generated code, whose
+    #      package.json version is not a published release
+    #   0  this parser could not read it
+    #
+    # The third answer exists for the parse guard. "Read it and excluded it"
+    # and "could not read it" produce the same empty map, and one of them is a
+    # broken parser reporting a clean tree.
+    #
+    # patch: is unwrapped rather than excluded: it wraps a published release,
+    # so the wrapped locator is asked the same question, once per nesting
+    # level. An `npm:` descriptor that is not a version is an alias naming
+    # another package, and the row is keyed under the package it aliases, on
+    # the same rule the npm adapter path uses.
+    function locator_row(res,   d, i, n, hash, ver, sep, at, p, proto) {
+      RV_KEY = locator_name(res)
+      RV_NAME = RV_KEY
+      RV_VER = ""
+      if (RV_KEY == "") return 0
       while (1) {
+        res = pct_decode(res)
         i = 0
         for (n = 2; n <= length(res); n++)
           if (substr(res, n, 1) == "@") { i = n; break }
-        if (i == 0) return ""
+        if (i == 0) return 0
         d = substr(res, i + 1)
-        if (substr(d, 1, 4) == "npm:") return substr(d, 5)
-        if (substr(d, 1, 6) != "patch:") return ""
-        res = substr(d, 7)
-        # Everything from the first "#" is the patch file and its metadata.
-        hash = index(res, "#")
-        if (hash > 0) res = substr(res, 1, hash - 1)
+        p = index(d, ":")
+        proto = (p > 0) ? substr(d, 1, p - 1) : ""
+        if (proto == "npm") {
+          ver = substr(d, p + 1)
+          # Berry appends binding parameters after "::" — __archiveUrl for
+          # anything fetched from a non-default registry, i.e. every private or
+          # mirrored one. Left attached, the string still ranks as its core
+          # version but sorts strictly below the clean release, so it is
+          # admitted by a wide range and rejected by the narrow ">= 2.5.0,
+          # < 2.5.3" shape advisories use: a vulnerable copy reading safe.
+          sep = index(ver, "::")
+          if (sep > 0) ver = substr(ver, 1, sep - 1)
+          # A full semver match, not a leading digit. Anything else is a
+          # locator this parser misread, and a misreading belongs in the guard
+          # below rather than in a version string.
+          if (ver ~ /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$/) {
+            RV_VER = ver
+            return 1
+          }
+          at = 0
+          for (n = length(ver); n > 1; n--)
+            if (substr(ver, n, 1) == "@") { at = n; break }
+          if (at == 0) return 0
+          RV_NAME = substr(ver, 1, at - 1)
+          res = RV_NAME "@npm:" substr(ver, at + 1)
+          continue
+        }
+        if (proto == "patch") {
+          res = substr(d, p + 1)
+          # Everything from the first "#" is the patch file and its metadata.
+          hash = index(res, "#")
+          if (hash > 0) res = substr(res, 1, hash - 1)
+          continue
+        }
+        if (proto ~ /^(workspace|portal|exec|link|file|git|git[+]ssh|git[+]http|git[+]https|http|https|ssh|github|gitlab|bitbucket)$/)
+          return 2
+        return 0
       }
     }
     {
@@ -489,43 +582,103 @@ yarn_resolution_rows() {
       rest = substr($0, i + 13)
       j = index(rest, "\"")
       if (j == 0) next
-      res  = substr(rest, 1, j - 1)
-      name = locator_name(res)
-      ver  = registry_version(res)
-      if (name != "" && ver ~ /^[0-9]/) printf "%s\t%s\t%s\n", name, ver, res
+      res = substr(rest, 1, j - 1)
+      total++
+      code = locator_row(res)
+      if (code > 0) recognized++
+      if (code == 1 && mode != "count")
+        printf "%s\t%s\t%s\t%s\n", RV_NAME, RV_VER, res, RV_KEY
     }
-  ' yarn.lock
+    END { if (mode == "count") printf "%d\t%d\n", total + 0, recognized + 0 }
+AWKLIB
+)
+
+yarn_resolution_rows() {
+  awk -v mode=rows "$YARN_LOCATOR_AWK" yarn.lock
 }
 
+# `<total>\t<recognized>`: every `resolution:` line, and the subset this parser
+# could read. Replaces a `grep -c`, which counted lines the parser might have
+# dropped every one of (issue #46).
+yarn_counts() {
+  awk -v mode=count "$YARN_LOCATOR_AWK" yarn.lock
+}
+
+# Matched on either name: the package a locator resolves to, or the key it is
+# installed under. They differ only for an `npm:` alias, where the alias key is
+# what a `resolutions` entry names — so answering `present: false` for it while
+# `declared_ranges` reports a range is the disagreement that turns a pin on a
+# real package into a deletion recommendation (issue #46). `resolution_map`
+# keeps the canonical name only; see its header.
 yarn_versions() {
   yarn_resolution_rows \
     | jq -Rs --arg pkg "$1" \
         'split("\n") | map(select(length > 0) | split("\t"))
-         | map(select(.[0] == $pkg) | {version: .[1], path: .[2]})'
+         | map(select(.[0] == $pkg or .[3] == $pkg) | {version: .[1], path: .[2]})'
 }
 
-yarn_entry_count() {
-  # `grep -c` prints 0 *and* exits 1 when there are no matches, so a `|| echo 0`
-  # fallback fires on top of the 0 grep already printed and yields "0\n0".
-  count=$(grep -c 'resolution: "' yarn.lock 2>/dev/null) || true
-  printf '%s\n' "${count:-0}"
+# The parse guard, shared by both lockfile verbs.
+#
+# `entries` is what the lockfile claims to hold. `read` is what this parser
+# could actually make sense of, out of `denom` entries that it should have been
+# able to: for yarn that is every locator it recognized, registry or
+# deliberately excluded, and for npm and pnpm it is the entries carrying a
+# version.
+#
+# Two failures, both of which used to pass. Zero entries is a parser that
+# matched nothing (v0.1.0's yarn regex, scripts/CLAUDE.md). A collapsed ratio is
+# the subtler one: `resolution_map` reported `{"lockfile_entries":3,
+# "package_count":0,"resolutions":{}}` and exit 0, because the count came from a
+# `grep` the rows never had to survive. Two empty maps compare equal, so the
+# audit's collateral check degraded into a no-op that *strengthens* a removal
+# recommendation (issue #46).
+#
+# Deliberately a ratio and not a zero-check. A repository whose dependencies are
+# all workspaces and portals legitimately resolves to no registry version at
+# all, so `read == 0` is a real answer there; and a *partial* parse — one
+# encoding change dropping most rows — passes a zero-check while poisoning every
+# diff computed from it.
+guard_parse() {
+  _pm=$1
+  _entries=$2
+  _read=$3
+  _denom=$4
+  if [ "$_entries" -eq 0 ]; then
+    die "Parsed 0 entries from the lockfile for pm '$_pm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result."
+  fi
+  if [ "$_denom" -gt 0 ] && [ $((_read * 2)) -lt "$_denom" ]; then
+    die "Read $_read of $_denom lockfile entries for pm '$_pm'. The parser understands too little of this lockfile to describe the tree; refusing to report a mostly-unparsed lockfile as a clean result."
+  fi
 }
 
 verb_resolved_versions() {
   pkg="${1:?resolved_versions requires a package name}"
   pm=$(pm_of)
   case "$pm" in
-    npm)  versions=$(npm_versions "$pkg");  entries=$(npm_entry_count)  ;;
-    pnpm) versions=$(pnpm_versions "$pkg"); entries=$(pnpm_entry_count) ;;
-    yarn) versions=$(yarn_versions "$pkg"); entries=$(yarn_entry_count) ;;
+    npm)
+      versions=$(npm_versions "$pkg")
+      entries=$(npm_entry_count)
+      counts=$(npm_parse_counts)
+      denom=$(printf '%s' "$counts" | cut -f1)
+      parsed=$(printf '%s' "$counts" | cut -f2)
+      ;;
+    pnpm)
+      versions=$(pnpm_versions "$pkg")
+      entries=$(pnpm_entry_count)
+      denom=$entries
+      parsed=$(pnpm_parsed_count)
+      ;;
+    yarn)
+      versions=$(yarn_versions "$pkg")
+      counts=$(yarn_counts)
+      entries=$(printf '%s' "$counts" | cut -f1)
+      parsed=$(printf '%s' "$counts" | cut -f2)
+      denom=$entries
+      ;;
     *)    die "resolved_versions: unsupported pm '$pm'" ;;
   esac
 
-  # A lockfile that yields nothing at all means the parser failed, not that the
-  # repo has no dependencies. Never report that as a clean result.
-  if [ "$entries" -eq 0 ]; then
-    die "Parsed 0 entries from the lockfile for pm '$pm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result."
-  fi
+  guard_parse "$pm" "$entries" "$parsed" "$denom"
 
   printf '%s' "$versions" \
     | jq --arg pkg "$pkg" --arg pm "$pm" --argjson entries "$entries" \
@@ -544,9 +697,20 @@ verb_resolved_versions() {
 # silent about the tree ([#42](https://github.com/SurveyMonkey/skills/issues/42)).
 # Diffing this map before and after a removal names what else moved.
 #
-# Deliberately a separate verb, not a widening of `resolved_versions`: that one
-# has callers (`validate`, the merge-risk baseline) whose behavior must not
-# shift, and its per-path detail is not what a whole-tree diff wants.
+# Deliberately a separate verb, not a widening of `resolved_versions`: the two
+# answer different questions, and the per-path detail one caller needs is not
+# what a whole-tree diff wants.
+#
+# What does NOT travel with that separation is the identity rule. Both verbs
+# answer "what version of X is in the tree", so a change to what counts as X
+# lands in both or the audit's own cross-check reports a parser bug
+# ([#44](https://github.com/SurveyMonkey/skills/issues/44)). That does shift
+# `validate`, deliberately: a copy installed under an `npm:` alias key is a
+# copy of the aliased package, and hiding it from the completeness check is the
+# unsafe direction — a vulnerable copy no `--vulnerable` range would ever match
+# ([#46](https://github.com/SurveyMonkey/skills/issues/46)). `apply_constraint`
+# writes the alias key so that copy can also be moved, which is what makes the
+# stricter answer actionable rather than a dead end.
 #
 # `versions` are unique and lexically sorted, which makes two maps comparable
 # with a plain jq `==`. They are NOT semver-ordered; rank with
@@ -560,16 +724,25 @@ verb_resolved_versions() {
 # - Workspace links, portal and exec targets, git targets and URL targets are
 #   excluded: "what version of X is in the tree" has no registry answer for
 #   local or generated code.
-# - A **patched** package is included at the version it patches. `yarn patch`
-#   applies a diff to a real published release, and it is used above all for
-#   one-off security fixes, so dropping those entries blinded the audit to the
-#   very packages it exists to watch
-#   ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
-# - An npm `npm:` **alias** is included under the package it aliases, not the
-#   key it is installed as. The resolved code genuinely is that package, and the
-#   audit feeds this name straight into an advisory query, where the alias key
-#   returns `no-advisories` — indistinguishable from a package with a clean
-#   record.
+# - A **patched** package is included at the version its innermost locator
+#   names, unwrapped one nesting level at a time — `yarn patch` applies a diff
+#   to a real published release, and it is used above all for one-off security
+#   fixes, so dropping those entries blinded the audit to the very packages it
+#   exists to watch ([#44](https://github.com/SurveyMonkey/skills/issues/44)).
+#   A patch wrapping a workspace or portal target is still excluded, on the
+#   same rule, and a patch whose inner locator this parser cannot read is not
+#   silently dropped: it counts against the parse guard above
+#   ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+# - An `npm:` **alias** is included under the package it aliases, not the key
+#   it is installed as — in the npm lockfile, where the real name sits in
+#   `.value.name`, and in Berry, where the descriptor after `npm:` names it.
+#   The resolved code genuinely is that package, and the audit feeds this name
+#   straight into an advisory query, where the alias key returns
+#   `no-advisories` — indistinguishable from a package with a clean record.
+#   `resolved_versions` answers under **both** names for exactly the same
+#   reason in reverse: the alias key is what an override entry names, so
+#   answering `present: false` for it reads as "the package left the tree"
+#   ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
 # ---------------------------------------------------------------------------
 npm_resolution_pairs() {
   jq '
@@ -620,18 +793,33 @@ yarn_resolution_pairs() {
 verb_resolution_map() {
   pm=$(pm_of)
   case "$pm" in
-    npm)  pairs=$(npm_resolution_pairs);  entries=$(npm_entry_count)  ;;
-    pnpm) pairs=$(pnpm_resolution_pairs); entries=$(pnpm_entry_count) ;;
-    yarn) pairs=$(yarn_resolution_pairs); entries=$(yarn_entry_count) ;;
+    npm)
+      pairs=$(npm_resolution_pairs)
+      entries=$(npm_entry_count)
+      counts=$(npm_parse_counts)
+      denom=$(printf '%s' "$counts" | cut -f1)
+      parsed=$(printf '%s' "$counts" | cut -f2)
+      ;;
+    pnpm)
+      pairs=$(pnpm_resolution_pairs)
+      entries=$(pnpm_entry_count)
+      denom=$entries
+      parsed=$(printf '%s' "$pairs" | jq 'length')
+      ;;
+    yarn)
+      pairs=$(yarn_resolution_pairs)
+      counts=$(yarn_counts)
+      entries=$(printf '%s' "$counts" | cut -f1)
+      parsed=$(printf '%s' "$counts" | cut -f2)
+      denom=$entries
+      ;;
     *)    die "resolution_map: unsupported pm '$pm'" ;;
   esac
 
-  # Same rule as resolved_versions: zero parsed entries is a broken parser,
-  # never a clean tree. A whole-tree diff against an empty map would report
-  # every package as unchanged, which is the wrong-safe answer.
-  if [ "$entries" -eq 0 ]; then
-    die "Parsed 0 entries from the lockfile for pm '$pm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result."
-  fi
+  # Same rule as resolved_versions, and for a sharper reason: a whole-tree diff
+  # against an empty map reports every package as unchanged, which is the
+  # wrong-safe answer wearing the shape of a clean diff.
+  guard_parse "$pm" "$entries" "$parsed" "$denom"
 
   printf '%s' "$pairs" \
     | jq --arg pm "$pm" --argjson entries "$entries" \
@@ -656,13 +844,31 @@ verb_resolution_map() {
 #
 # `devDependencies` is deliberately not among them: npm records it only for the
 # root entry and for linked workspaces, and the root is filtered out below.
+#
+# A dependency declared through an `npm:` alias (`"lodash-alias":
+# "npm:lodash@^4.18.0"`) is a declaration of the aliased package under another
+# name, so the parent counts for both names. Matching the declared key alone
+# left `why <package>` reporting no parents for exactly the repositories where
+# the copy is hardest to find, so the fix flow could neither name a parent to
+# scope to nor move the copy with a bare entry
+# ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+NPM_ALIAS_TARGET=$(cat <<'JQLIB'
+(if (type == "string") and startswith("npm:")
+ then (.[4:] | (rindex("@")) as $i
+       | if $i == null or $i == 0 then . else .[0:$i] end)
+ else null end)
+JQLIB
+)
+
 npm_parents() {
   jq --arg pkg "$1" '
     [ .packages | to_entries[]
       | select([ (.value.dependencies // {}),
                  (.value.optionalDependencies // {}),
                  (.value.peerDependencies // {}) ]
-               | map(has($pkg)) | any)
+               | map(to_entries[]
+                     | select(.key == $pkg or (.value | '"$NPM_ALIAS_TARGET"') == $pkg))
+               | length > 0)
       | .key
       | if . == "" then "__root__" else (split("node_modules/") | last) end ]
     | unique' package-lock.json
@@ -946,6 +1152,20 @@ set_indent_args() {
   esac
 }
 
+# The key a manifest declares $1 under when it declares it through an `npm:`
+# alias, or nothing. A manifest that names the package directly has no alias
+# key, and neither has one that aliases a *different* package.
+alias_key_of() {
+  jq -r --arg pkg "$1" '
+    [ (.dependencies // {}), (.devDependencies // {}),
+      (.optionalDependencies // {}), (.peerDependencies // {}) ]
+    | map(to_entries[]
+          | select(.key != $pkg)
+          | select(.value | (type == "string")
+                   and (startswith("npm:" + $pkg + "@") or . == "npm:" + $pkg)))
+    | .[0].key // empty' "$2" 2>/dev/null || true
+}
+
 verb_apply_constraint() {
   refuse_primary_checkout
   tighten_bare=false
@@ -986,11 +1206,33 @@ verb_apply_constraint() {
            targets_this_package: (.key == $pkg or (.key | startswith($pkg + "@")))} ]
     ' package.json)
 
+  # The key a dependent declares this package under, when it declares it
+  # through an `npm:` alias. An override entry has to name the key the
+  # dependent used — `overrides.lodash` does not move a copy installed as
+  # `lodash-alias` — and its value has to carry the protocol back, because
+  # `lodash-alias` is not a package any registry has. Without this the fix flow
+  # dead-ended on every repository holding an aliased copy of an alerted
+  # package ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
+  root_alias=$(alias_key_of "$pkg" package.json)
+  parent_alias="{}"
+  while IFS= read -r parent; do
+    [ -n "$parent" ] || continue
+    manifest="node_modules/$parent/package.json"
+    [ -f "$manifest" ] || continue
+    key=$(alias_key_of "$pkg" "$manifest")
+    [ -n "$key" ] || continue
+    parent_alias=$(printf '%s' "$parent_alias" \
+      | jq --arg p "$parent" --arg k "$key" '.[$p] = $k')
+  done <<EOF
+$(printf '%s' "$parents_json" | jq -r '.[]')
+EOF
+
   set_indent_args
   tmp=$(mktemp)
 
   if ! jq "${INDENT_ARGS[@]}" \
       --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" \
+      --arg root_alias "$root_alias" --argjson parent_alias "$parent_alias" \
       --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
       # Create the override container only inside set_entry, so a direct
       # dependency update never leaves an empty "resolutions": {} (or
@@ -1004,36 +1246,68 @@ verb_apply_constraint() {
           ((.overrides //= {}) | .overrides[$key] = $val)
         end;
 
+      # An aliased dependency is written under the key the dependent declared
+      # it with, carrying the protocol in the value: `overrides.lodash` does not
+      # move a copy installed as `lodash-alias`, and a bare range under the
+      # alias key names a package no registry has.
+      def alias_value: "npm:" + $pkg + "@" + $range;
+
+      # Match how the manifest already expresses versions. A repo that pins
+      # exactly (yarn `defaultSemverRangePrefix: ""`, or Dependabot-managed
+      # pins) should not acquire a lone range entry, and a caret repo should
+      # stay caret. The major bound still holds either way: an exact pin cannot
+      # cross a major, and `^` is already major-bounded.
+      def spec($cur):
+        ($range | sub("^>=[[:space:]]*"; "") | split(" ")[0]) as $lower
+        | if   $cur == null               then $range
+          elif ($cur | test("^[0-9]"))    then $lower
+          elif ($cur | startswith("^"))   then "^" + $lower
+          elif ($cur | startswith("~"))   then "~" + $lower
+          else $range end;
+
+      # The same, for a declaration that may itself be an `npm:` alias. The
+      # protocol and the package it aliases are preserved and only the version
+      # part is retargeted; rewriting `npm:lodash@^4.18.0` as a plain range
+      # would silently redirect the dependency at a package that does not
+      # exist.
+      def retarget($existing):
+        if ($existing | type) == "string" and ($existing | startswith("npm:"))
+        then ($existing[4:]) as $rest
+             | ($rest | rindex("@")) as $i
+             | (if $i == null or $i == 0 then {name: $rest, cur: null}
+                else {name: $rest[0:$i], cur: $rest[$i+1:]} end) as $a
+             | "npm:" + $a.name + "@" + spec($a.cur)
+        else spec($existing) end;
+
       if $tighten then
           set_entry($pkg; $range)
         elif ($parents | length) == 0 then
-          # Direct dependency: match how the manifest already expresses
-          # versions. A repo that pins exactly (yarn `defaultSemverRangePrefix:
-          # ""`, or Dependabot-managed pins) should not acquire a lone range
-          # entry, and a caret repo should stay caret. The major bound still
-          # holds either way: an exact pin cannot cross a major, and `^` is
-          # already major-bounded.
-          ($range | sub("^>=[[:space:]]*"; "") | split(" ")[0]) as $lower
-          | (if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]
-             elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg]
-             else null end) as $existing
-          | (if   $existing == null              then $range
-             elif ($existing | test("^[0-9]"))   then $lower
-             elif ($existing | startswith("^"))  then "^" + $lower
-             elif ($existing | startswith("~"))  then "~" + $lower
-             else $range end) as $value
-          | if   ((.dependencies // {})    | has($pkg)) then .dependencies[$pkg]    = $value
-            elif ((.devDependencies // {}) | has($pkg)) then .devDependencies[$pkg] = $value
-            else set_entry($pkg; $range) end
+          # Direct dependency. The root declares it by name, through an alias
+          # key, or (a repo that pins a transitive package it does not depend
+          # on) neither.
+          (if   ((.dependencies    // {}) | has($pkg))
+             then .dependencies[$pkg]    = retarget(.dependencies[$pkg])
+           elif ((.devDependencies // {}) | has($pkg))
+             then .devDependencies[$pkg] = retarget(.devDependencies[$pkg])
+           elif $root_alias == "" then set_entry($pkg; $range)
+           else . end)
+          | if   $root_alias == "" then .
+            elif ((.dependencies    // {}) | has($root_alias))
+              then .dependencies[$root_alias]    = retarget(.dependencies[$root_alias])
+            elif ((.devDependencies // {}) | has($root_alias))
+              then .devDependencies[$root_alias] = retarget(.devDependencies[$root_alias])
+            else set_entry($root_alias; alias_value) end
         else
           reduce $parents[] as $parent (.;
-            if   $loc == "pnpm.overrides" then set_entry($parent + ">" + $pkg; $range)
-            elif $loc == "resolutions"    then set_entry($parent + "/" + $pkg; $range)
-            else ((.overrides //= {})
-                  | .overrides[$parent] =
-                      (((.overrides[$parent] // {})
-                        | if type == "string" then {} else . end) + {($pkg): $range}))
-            end)
+            ($parent_alias[$parent] // $pkg) as $key
+            | (if $key == $pkg then $range else alias_value end) as $value
+            | if   $loc == "pnpm.overrides" then set_entry($parent + ">" + $key; $value)
+              elif $loc == "resolutions"    then set_entry($parent + "/" + $key; $value)
+              else ((.overrides //= {})
+                    | .overrides[$parent] =
+                        (((.overrides[$parent] // {})
+                          | if type == "string" then {} else . end) + {($key): $value}))
+              end)
         end' package.json > "$tmp"; then
     rm -f "$tmp"
     die "apply_constraint: failed to rewrite package.json"

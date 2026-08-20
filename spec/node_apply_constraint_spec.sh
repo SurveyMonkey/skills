@@ -154,6 +154,40 @@ Describe 'node.sh apply_constraint'
     End
   End
 
+  # An aliased dependency, which `validate` now counts and which nothing could
+  # previously move: `overrides.lodash` does not reach a copy the parent
+  # declared as `lodash-alias`, and a bare range under the alias key names a
+  # package no registry has. Both halves are needed, so both are asserted
+  # (issue #46).
+  Describe 'a dependency reached through an npm: alias'
+    It 'writes the alias key, with the protocol, under the parent that declared it'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' alias-parent dupe-parent >/dev/null
+      When call manifest '{aliased: .overrides["alias-parent"], plain: .overrides["dupe-parent"]}'
+      The output should equal '{"aliased":{"lodash-alias":"npm:lodash@>=4.18.2 <5"},"plain":{"lodash":">=4.18.2 <5"}}'
+    End
+
+    # The root is a dependent like any other, and it declares both copies here.
+    # Retargeting keeps each declaration's own form: the alias keeps its
+    # protocol and the package it aliases, and a caret stays a caret.
+    It 'retargets a root alias declaration without dropping the protocol'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' >/dev/null
+      When call manifest '{plain: .dependencies.lodash, aliased: .dependencies["lodash-alias"]}'
+      The output should equal '{"plain":"^4.18.2","aliased":"npm:lodash@^4.18.2"}'
+    End
+
+    # `resolved_versions` answers under the alias key too, so an agent may well
+    # pass that name. It must not turn `npm:lodash@^4.18.0` into a bare range,
+    # which would redirect the dependency at a package that does not exist.
+    It 'keeps the protocol when the alias key itself is the named package'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash-alias '>=4.18.2 <5' >/dev/null
+      When call manifest '.dependencies["lodash-alias"]'
+      The output should equal '"npm:lodash@^4.18.2"'
+    End
+  End
+
   Describe 'existing entries are merged, never replaced'
     It 'preserves unrelated pnpm overrides'
       use_fixture pnpm-v9

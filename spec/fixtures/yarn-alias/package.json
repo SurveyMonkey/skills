@@ -1,0 +1,11 @@
+{
+  "name": "demo-alias",
+  "dependencies": {
+    "aliased": "npm:lodash@4.17.21",
+    "scoped-alias": "npm:@scope/real@2.3.4"
+  },
+  "resolutions": {
+    "aliased": "npm:lodash@4.17.21"
+  },
+  "scripts": { "test": "vitest run" }
+}

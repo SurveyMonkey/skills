@@ -188,6 +188,15 @@ Keep the map's `resolutions` object and each `versions[]`. The tree is restored 
 so both baselines are read once and stay valid for every pin — this costs one install for the whole
 audit, not one per pin.
 
+**A baseline `present: false` is a hard stop for that pin.** The manifest pins this package and the
+tree was just installed from that manifest, so a parser that cannot find it in that tree is making a
+claim about itself, not about the tree. Record the pin `inconclusive` quoting the baseline, and do
+not test it: every later step reads `present: false` as "the package left the tree entirely", which
+is this phase's cue for `removable`, so a parser gap here becomes a deletion recommendation for a
+pin nothing examined. This has been the shape of the last two defects found in the adapter's lockfile
+parsing ([#44](https://github.com/SurveyMonkey/skills/issues/44),
+[#46](https://github.com/SurveyMonkey/skills/issues/46)), and nothing checked the baseline for it.
+
 **If the baseline install fails, stop.** Return a failure result (phase `install`) quoting the
 error, and clean up. Do not fall back to testing pins against a tree you could not build: the
 baseline is what every later delta is measured against, and a package manager that rewrote part of
@@ -260,6 +269,15 @@ that is not one, and a healthy pin comes back `inconclusive` — so normalize fi
 
 If the normalized answers still differ, one of the two parsers is wrong; report the pin
 `inconclusive`, quote both answers, and do not pick a winner.
+
+**One difference is not a parser bug: a pin keyed on an `npm:` alias.** `"lodash-alias":
+"npm:lodash@4.18.2"` pins a copy of `lodash` under a name no registry has, so the map holds it under
+`lodash` — the name an advisory query needs — while `resolved_versions` answers under both. The map
+therefore has no entry for the pin's own key, and the normalized comparison reads `[]` against a
+non-empty list. Report the pin `inconclusive`, saying it is keyed on an alias of the package named in
+its value and that the two views cannot be compared under one name. That is the honest small answer;
+`removable` here would be a deletion recommendation reached by the same route
+([#46](https://github.com/SurveyMonkey/skills/issues/46)).
 
 **If `resolution_map` is unavailable** — exit 2 from an adapter that does not implement it, or an
 error on this lockfile — you have no whole-tree view, and you may not fabricate one. Fall back to

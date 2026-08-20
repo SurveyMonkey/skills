@@ -1,0 +1,8 @@
+{
+  "name": "demo-nested",
+  "dependencies": {
+    "keep": "1.0.0",
+    "typescript": "patch:typescript@patch%3Atypescript%40npm%253A5.1.6%23optional!builtin<compat/typescript>::version=5.1.6&hash=5da071#~/.yarn/patches/typescript-npm-5.1.6-local.patch"
+  },
+  "scripts": { "test": "vitest run" }
+}

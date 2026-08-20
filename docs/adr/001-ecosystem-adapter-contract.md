@@ -80,25 +80,50 @@ conflict resolve differently, so a removal can move a package the pin never ment
 package before and after a removal is blind to that, and the resulting `removable` verdict is right
 about its own package and silent about the tree
 ([#42](https://github.com/SurveyMonkey/skills/issues/42)). A separate verb rather than a widened
-`resolved_versions`: that one has callers (`validate`, the merge-risk baseline) whose behavior must
-not shift, and its per-path detail is not what a diff wants. The empty-parse rule above applies
-unchanged, and for a sharper reason — a diff against an empty map reports every package unchanged,
-which is the wrong-safe answer by yet another route. Versions are sorted for comparability, not
-ranked; callers that need semver order still ask `compare_versions`.
+`resolved_versions`: the two answer different questions, and the per-path detail one caller needs is
+not what a diff wants. What does **not** travel with that separation is the identity rule below: both
+verbs answer "what version of X is in the tree", so a change to what counts as X lands in both, even
+when it shifts `validate` ([#46](https://github.com/SurveyMonkey/skills/issues/46)). The empty-parse
+rule above applies unchanged, and for a sharper reason — a diff against an empty map reports every
+package unchanged, which is the wrong-safe answer by yet another route. Versions are sorted for
+comparability, not ranked; callers that need semver order still ask `compare_versions`.
 
 **A package is keyed by what it resolves to, not by where it sits — in both verbs.** Workspace
 links, `portal:` and `exec:` targets, git targets and URL targets are excluded, because "what
 version of X is in the tree" has no registry answer for local or generated code. A `patch:` entry
-is *not* in that set: it wraps a published release, so it is included at the version it patches,
-and an npm `npm:` alias is included under the package it aliases rather than the key it installs
-as. Both were previously dropped or mislabeled — a patched package vanished from the map at a real
-registry version, and an alias was reported under a name no registry has
-([#44](https://github.com/SurveyMonkey/skills/issues/44)).
+is *not* in that set: it wraps a published release, so it is included at the version its innermost
+locator names, unwrapped one nesting level at a time — a patch of an already-patched package escapes
+its inner locator twice, and a single decode left it looking like neither protocol. A patch wrapping
+a workspace or portal target stays excluded on the same rule, and a locator whose version cannot be
+read is **not** quietly dropped: it counts against the parse guard. An `npm:` alias is included under
+the package it aliases rather than the key it installs as, in npm and Berry alike. Each of these was
+previously dropped or mislabeled — a patched package vanished from the map at a real registry
+version, an alias was reported under a name no registry has, and a version carrying Berry's `::`
+binding parameters ranked below the clean release it named
+([#44](https://github.com/SurveyMonkey/skills/issues/44),
+[#46](https://github.com/SurveyMonkey/skills/issues/46)).
 
 The two verbs must agree about any package, since the pin audit treats a disagreement as a parser
 bug and refuses the pin. Their **shapes** differ by design, though — `resolved_versions` reports
 one `{version, path}` per resolution, the map reports each package's versions once — so a caller
 comparing them normalizes first: `[.versions[].version] | unique` against the map's list.
+
+**One documented exception, and only one: an alias key.** `resolved_versions` answers under the key a
+package is installed as *as well as* under the package it resolves to, because the install key is
+what an override entry names and what `list_pins` therefore hands the audit; answering `present:
+false` there reads as "the package left the tree" and recommends deleting the pin. The map keeps the
+single canonical name, because its consumer is an advisory query that an alias key answers
+`no-advisories`. So for an alias key alone, the map legitimately holds no entry while
+`resolved_versions` reports one, and `agents/audit-pins.md` reports that pin `inconclusive` naming
+the alias rather than reading it as a parser bug.
+
+**The parse guard counts what the parser could read, not what it kept.** A repository whose
+dependencies are all workspaces and portals resolves to no registry version at all, so an empty map
+is a real answer there; a lockfile the parser understood none of produces the same empty map, and a
+diff against it reports every package unchanged. Adapters therefore distinguish "read it and
+excluded it" from "could not read it", and refuse a lockfile whose recognized share has collapsed —
+which also catches the partial parse a zero-check cannot see
+([#46](https://github.com/SurveyMonkey/skills/issues/46)).
 
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR

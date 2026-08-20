@@ -1,0 +1,9 @@
+{
+  "name": "demo-unknown",
+  "dependencies": {
+    "express": "quantum:4.21.2",
+    "lodash": "quantum:4.17.21",
+    "undici": "quantum:6.19.8"
+  },
+  "scripts": { "test": "vitest run" }
+}

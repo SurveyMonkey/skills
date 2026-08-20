@@ -262,4 +262,27 @@ Describe 'node.sh list_pins'
     The status should equal 3
     The stderr should include 'Yarn Classic'
   End
+
+  # The whole chain the audit walks, in one example, because each half looked
+  # healthy on its own: `list_pins` hands the audit the key an override for an
+  # aliased dependency actually carries, and `resolved_versions` used to answer
+  # `present: false` for exactly that name. agents/audit-pins.md turns that into
+  # "the package left the tree entirely → removable", and the cross-check does
+  # not fire, because the map has no entry under the alias key either, so both
+  # sides normalize to [] and agree. Every guard passes and a pin on a real
+  # package is recommended for deletion (issue #46).
+  Describe 'an override keyed on an alias name'
+    pin_then_resolve() {
+      _pin=$("$ADAPTER" list_pins | jq -r '[.pins[].package] | index("lodash-alias")')
+      _res=$("$ADAPTER" resolved_versions lodash-alias | jq -c '{present, versions: [.versions[].version]}')
+      printf 'pin_index=%s resolved=%s\n' "$_pin" "$_res"
+    }
+
+    It 'is reported by list_pins and resolves in the tree under that name'
+      use_fixture npm-alias
+      When call pin_then_resolve
+      The status should be success
+      The output should equal 'pin_index=1 resolved={"present":true,"versions":["4.18.1"]}'
+    End
+  End
 End
