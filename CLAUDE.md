@@ -45,6 +45,31 @@ Bash scripts are covered by [shellspec](https://shellspec.info): `brew install s
 - **Use `Parameters` blocks for table-driven cases** (version ordering, ecosystem routing, band
   thresholds) rather than repeating near-identical examples.
 
+### Every regression lands a fixture, in the same commit as its fix
+
+**A fix without a fixture is not a fix.** Any defect found by running the code — against a real
+repository, a crafted input, or a review reproduction — must land a fixture carrying that exact
+shape alongside the change that fixes it. This is not optional cleanup; it is the deliverable.
+
+Without it the suite stays green while each round trades one defect for another. That has happened
+repeatedly: the notice hook's text-only match missed `--json` output, its replacement regex could
+not match a brace in an advisory title, and its replacement's fix for yarn `patch:` locators
+inverted `present` for npm alias keys. Every one passed a full suite at the time.
+
+**Assert the verdict, not just the parse.** These defects are dangerous because a plausible-looking
+parse becomes a `removable` recommendation or a silent skip. A spec that stops at a script's JSON
+passes while the hazard survives, so assert through the consuming rule — `validate`, a
+`skipped_repos` reason, the `present: false` → `removable` path — and the test fails for the reason
+the bug mattered.
+
+**A shape found in the wild is the specimen.** When a real sample exists, trim the fixture from it;
+never hand-author an approximation. Invented pnpm and yarn audit fixtures encoded formats those
+tools never emit, which is exactly why the suite could not see the bug.
+
+**A parser gaining a format branch needs a real specimen of that branch.** Aliases, patch
+protocols, workspace and portal targets, binding parameters and nesting each need their own entry,
+not a comment claiming they are excluded.
+
 Lint with [ShellCheck](https://www.shellcheck.net) (`brew install shellcheck`):
 
 ```bash
