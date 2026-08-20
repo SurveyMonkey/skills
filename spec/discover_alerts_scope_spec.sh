@@ -304,6 +304,22 @@ Describe 'discover-alerts.sh --scope'
       The output should equal '{"groups":["octo/app"],"skipped":[{"repo":"octo/absent","reason":"permission data missing from API response"},{"repo":"octo/readonly","reason":"no push access"}]}'
     End
 
+    # A fork with its own open alerts reaches the aggregate response the same
+    # as any repo with alerts; the fan-out's enumeration-time fork exclusion
+    # has no equivalent here unless the aggregate path adds one, so a fork
+    # used to ride into `actionable` on this path while the fan-out skipped
+    # the same repo visibly (issue #43). Both paths must agree, visibly.
+    It 'skips a fork with a reason on the aggregate path too'
+      write_org_agg_repos 'octo/app' 'octo/a-fork'
+      write_repo_listing "$MOCK_DIR/org-repos.json" \
+        'octo/app:true:false:false' \
+        'octo/a-fork:true:true:false'
+
+      When call common_jq discover-alerts.sh '{groups: [.actionable[].repo], skipped: .skipped_repos}' --scope org octo
+      The status should be success
+      The output should equal '{"groups":["octo/app"],"skipped":[{"repo":"octo/a-fork","reason":"fork repository"}]}'
+    End
+
     It 'hard-fails when the permission listing the aggregate path needs cannot be fetched'
       write_org_agg
       rm -f "$MOCK_DIR/org-repos.json"
@@ -396,7 +412,11 @@ Describe 'discover-alerts.sh --scope'
       The stderr should include 'Failed to list repos'
     End
 
-    It 'excludes forks and archived repos from the fan-out without reporting them'
+    # Forks and archived repos are never dispatch targets, but dropping them
+    # must be visible: the RFC forbids silent drops, and a fork or archived
+    # repo left out of `skipped_repos` is indistinguishable from one nobody
+    # ever looked at (issue #43).
+    It 'reports forks and archived repos in skipped_repos on the fan-out, never dispatching them'
       : > "$MOCK_DIR/org-403"
       write_repo_listing "$MOCK_DIR/org-repos.json" \
         'octo/app:true:false:false' \
@@ -404,9 +424,9 @@ Describe 'discover-alerts.sh --scope'
         'octo/archived:true:false:true'
       write_repo_alerts 'octo/app' lodash direct medium 4.17.21
 
-      When call common_jq discover-alerts.sh '{groups: [.actionable[].repo], skipped: .skipped_repos}' --scope org octo
+      When call common_jq discover-alerts.sh '{groups: [.actionable[].repo], skipped: (.skipped_repos | sort_by(.repo))}' --scope org octo
       The status should be success
-      The output should equal '{"groups":["octo/app"],"skipped":[]}'
+      The output should equal '{"groups":["octo/app"],"skipped":[{"repo":"octo/a-fork","reason":"fork repository"},{"repo":"octo/archived","reason":"archived repository"}]}'
     End
 
     # `(.permissions.push) // false` alone collapses "no permissions object at
@@ -530,6 +550,19 @@ Describe 'discover-alerts.sh --scope'
       The stderr should include 'SAML/SSO enforcement'
     End
 
+    # GitHub's real abuse-block wording, distinct from a rate limit: "You have
+    # triggered an abuse detection mechanism...". The bare keyword "abuse" was
+    # the riskiest of the original set (issue #43) since it is a plausible
+    # org-name segment; the classifier now requires the multi-word phrase
+    # "abuse detection" that this message actually contains.
+    It 'hard-fails on an abuse detection block instead of falling back'
+      printf 'gh: You have triggered an abuse detection mechanism. Please wait a few minutes before you try again. (HTTP 403)\n' \
+        > "$MOCK_DIR/org-agg-error"
+      When run script "$COMMON/discover-alerts.sh" --scope org octo
+      The status should not equal 0
+      The stderr should include 'rate-limited'
+    End
+
     # An IP allow list blocks the credential, not this endpoint, so every
     # per-repo call in the fallback is refused for the same reason. Falling
     # back would bury one clear cause under a pile of generic
@@ -558,6 +591,23 @@ Describe 'discover-alerts.sh --scope'
       When call common_jq discover-alerts.sh '[.actionable[].repo]' --scope org tessso-corp
       The status should be success
       The output should equal '["tessso-corp/app"]'
+    End
+
+    # The word-boundary fix for #39 anchored on `[^a-z0-9]`, but a hyphen is
+    # itself such a boundary, so a bare keyword as its own hyphen-delimited
+    # org-name segment still matched (issue #43): `sso-analytics` hard-failed
+    # as an SSO block. Requiring the multi-word phrase "sso enforcement" (the
+    # real GitHub wording) instead of bare "sso" fixes it without weakening
+    # the genuine SAML/SSO case above.
+    It 'falls back on a permission-shaped 403 whose org name is its own hyphen-delimited sso segment'
+      printf 'gh: Resource not accessible by personal access token for the sso-analytics organization. (HTTP 403)\n' \
+        > "$MOCK_DIR/org-agg-error"
+      write_repo_listing "$MOCK_DIR/org-repos.json" 'sso-analytics/app:true:false:false'
+      write_repo_alerts 'sso-analytics/app' lodash direct medium 4.17.21
+
+      When call common_jq discover-alerts.sh '[.actionable[].repo]' --scope org sso-analytics
+      The status should be success
+      The output should equal '["sso-analytics/app"]'
     End
 
     # The ordinary permission-shaped 403 (no rate-limit or SAML/SSO wording)

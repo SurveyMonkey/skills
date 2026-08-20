@@ -12,17 +12,20 @@
 #         (no org-level security visibility), falls back to enumerating
 #         GET /orgs/{org}/repos and fanning out per repo inside this script.
 #   user  No aggregate endpoint exists. Enumerates GET /user/repos?type=owner
-#         (the authenticated user's own repos, forks and archived excluded)
-#         and fans out per repo inside this script.
+#         (the authenticated user's own repos) and fans out per repo inside
+#         this script.
 #
 # At org and user scope — including the org aggregate path, not only the
-# fallback — each candidate repo's push permission is checked. A repo the
-# authenticated user cannot push to is never dispatched; it is recorded in the
-# top-level `skipped_repos` array by name so the caller can report it, never
-# silently drop it (RFC 001, "it must never be silent"). Org alert visibility
-# (security manager) and per-repo push access are separate grants, so a repo
-# the aggregate endpoint reports on is not necessarily one this user can push
-# to. `skipped_repos` is always present, and empty only at repo scope.
+# fallback — each candidate repo's push permission is checked, and forks are
+# excluded (archived repos too, on the fallback path; the aggregate response
+# cannot name one, see the org-scope 403 handling below). None of these are
+# ever dispatched; each is recorded in the top-level `skipped_repos` array by
+# name and reason so the caller can report it, never silently dropped (RFC
+# 001, "it must never be silent"; issue #43 for fork/archived). Org alert
+# visibility (security manager) and per-repo push access are separate grants,
+# so a repo the aggregate endpoint reports on is not necessarily one this user
+# can push to. `skipped_repos` is always present, and empty only at repo
+# scope.
 #
 # EMU orgs are out of scope (RFC 001 Non-Goals): this script does not detect
 # or special-case them.
@@ -33,7 +36,8 @@
 #   skipped:      groups excluded (no fix, PR already open, or unsupported
 #                 ecosystem), with reason
 #   skipped_repos: repos excluded from a cross-repo scope for lack of push
-#                 access, or because their alerts could not be fetched
+#                 access, for being a fork or archived, or because their
+#                 alerts could not be fetched
 #
 # Each group:
 #   { repo, package, ecosystem, major_line, max_severity, max_epss_percentile,
@@ -520,6 +524,13 @@ push_skip_entry() {
   esac
 }
 
+# One `skipped_repos` entry for a repo excluded on a repo-attribute ground
+# (fork, archived). Same shape as `push_skip_entry`, shared so the aggregate
+# path and the fan-out cannot drift on the reason strings either (issue #43).
+attribute_skip_entry() {
+  jq -n --arg repo "$1" --arg reason "$2" '{repo: $repo, reason: $reason}'
+}
+
 # Assemble a cross-repo result: per-repo {actionable, skipped} blobs on stdin,
 # one per line, `skipped_repos` JSON as $1.
 emit_combined() {
@@ -534,14 +545,15 @@ emit_combined() {
 
 # Fetch, validate, group, and combine alerts across every repo listed by a
 # `gh api` listing endpoint (org repos or the authenticated user's repos).
-# Forks and archived repos are dropped silently (never dispatch targets);
-# repos without push access are recorded in `skipped_repos`, never dropped
-# silently, per the RFC's push-access filtering requirement.
+# Forks and archived repos are never dispatch targets, and repos without push
+# access are never dispatch targets either; all three are recorded in
+# `skipped_repos` with an explicit reason, never dropped silently, per the
+# RFC's "must never be silent" requirement (issue #43 for fork/archived,
+# issue #38 for push access).
 fan_out() {
   api_path="$1"
 
-  CANDIDATES=$(repo_listing_rows "$api_path" \
-    | jq -c 'map(select(.fork == false and .archived == false))')
+  CANDIDATES=$(repo_listing_rows "$api_path")
 
   results=()
   skipped_repos=()
@@ -550,7 +562,18 @@ fan_out() {
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     full_name=$(printf '%s' "$row" | jq -r '.full_name')
+    is_fork=$(printf '%s' "$row" | jq -r '.fork')
+    is_archived=$(printf '%s' "$row" | jq -r '.archived')
     push_status=$(printf '%s' "$row" | jq -r '.push_status')
+
+    if [ "$is_fork" = "true" ]; then
+      skipped_repos+=("$(attribute_skip_entry "$full_name" "fork repository")")
+      continue
+    fi
+    if [ "$is_archived" = "true" ]; then
+      skipped_repos+=("$(attribute_skip_entry "$full_name" "archived repository")")
+      continue
+    fi
 
     if [ "$push_status" != "true" ]; then
       skipped_repos+=("$(push_skip_entry "$full_name" "$push_status")")
@@ -625,22 +648,38 @@ case "$SCOPE" in
       repos=$(printf '%s' "$FLAT" | jq -r '[.[].repository.full_name] | unique | .[]')
 
       PERMS='{}'
+      FORKS='{}'
       if [ -n "$repos" ]; then
-        PERMS=$(repo_listing_rows "orgs/$TARGET/repos?per_page=100" \
-          | jq -c 'map({key: .full_name, value: .push_status}) | from_entries')
+        LISTING=$(repo_listing_rows "orgs/$TARGET/repos?per_page=100")
+        PERMS=$(printf '%s' "$LISTING" | jq -c 'map({key: .full_name, value: .push_status}) | from_entries')
+        FORKS=$(printf '%s' "$LISTING" | jq -c 'map({key: .full_name, value: .fork}) | from_entries')
       fi
 
       results=()
       skipped_repos=()
       while IFS= read -r r; do
         [ -n "$r" ] || continue
+        # A fork with its own open alerts still reaches this loop: the
+        # aggregate's candidate set is "repos with alerts", not the org
+        # listing, so the fan-out's enumeration-time fork exclusion does not
+        # apply here on its own. Skip it the same way, visibly, so the same
+        # repo gets the same treatment regardless of which path discovered it
+        # (issue #43) rather than silently riding into `actionable`.
+        is_fork=$(printf '%s' "$FORKS" | jq -r --arg r "$r" '.[$r] // false')
+        if [ "$is_fork" = "true" ]; then
+          skipped_repos+=("$(attribute_skip_entry "$r" "fork repository")")
+          continue
+        fi
+        # No equivalent archived check belongs here: GitHub refuses Dependabot
+        # alerts for archived repositories outright, verified live against
+        # arsenalamerica/source (the org's only archived repo) —
+        # `gh api repos/arsenalamerica/source/dependabot/alerts?state=open`
+        # returns HTTP 403 "Dependabot alerts are not available for archived
+        # repositories" — so the aggregate response can never name one
+        # (issue #43).
+        #
         # A repo the aggregate reports on but the listing does not name has no
         # permission data at all, which is the "unknown" case, not a denial.
-        # Forks and archived repos are not filtered here the way the fan-out
-        # filters them at enumeration time: there the listing *is* the
-        # candidate set, whereas here the alert payload is, and dropping a
-        # repo GitHub reported alerts for would be the silent behavior the RFC
-        # forbids.
         push_status=$(printf '%s' "$PERMS" | jq -r --arg r "$r" '.[$r] // "unknown"')
         if [ "$push_status" != "true" ]; then
           skipped_repos+=("$(push_skip_entry "$r" "$push_status")")
@@ -672,11 +711,32 @@ case "$SCOPE" in
       # answer. All three are checked, and hard-fail, before the
       # permission-shaped fallback.
       agg_msg=$(api_error_message "$agg_err")
-      if err_mentions "$agg_msg" 'rate limit|abuse'; then
+      # Bare `sso`, `saml` and `abuse` all collide with a hyphen-delimited org
+      # name segment (`sso-analytics`, `abuse-tools`), since a hyphen is a
+      # non-alphanumeric word boundary just like the space `err_mentions`
+      # anchors on (issue #43). The fix is to require a multi-word phrase that
+      # GitHub's own message text actually uses, which cannot appear as a bare
+      # org-name segment. Each phrase below is checked against GitHub's real
+      # 403 wording, not guessed:
+      #   - "rate limit" — "API rate limit exceeded ..." (primary) and "You
+      #     have exceeded a secondary rate limit ..." (secondary) both use it;
+      #     already multi-word, unchanged from before this fix.
+      #   - "abuse detection" — "You have triggered an abuse detection
+      #     mechanism ..." is GitHub's actual abuse-block wording; the
+      #     previous bare "abuse" is the riskiest bare keyword the issue
+      #     flagged, since "abuse" is a plausible org-name segment.
+      #   - "saml enforcement" / "sso enforcement" — "Resource protected by
+      #     organization SAML enforcement ..." / "... SSO enforcement ..." are
+      #     GitHub's actual messages; the previous bare "saml"/"sso" are
+      #     dropped. "single sign-on" / "single sign on" are kept as
+      #     already-safe multi-word phrases for the same block.
+      #   - "ip allow list" was already multi-word and unchanged: GitHub's
+      #     message reads "... has an IP allow list enabled ...".
+      if err_mentions "$agg_msg" 'rate limit|abuse detection'; then
         printf '{"error":"Org alert aggregate call for %s was rate-limited: %s"}\n' \
           "$TARGET" "$agg_err" >&2
         exit 1
-      elif err_mentions "$agg_msg" 'saml|sso|single sign-on|single sign on'; then
+      elif err_mentions "$agg_msg" 'saml enforcement|sso enforcement|single sign-on|single sign on'; then
         printf '{"error":"Org alert aggregate call for %s blocked by SAML/SSO enforcement: %s"}\n' \
           "$TARGET" "$agg_err" >&2
         exit 1

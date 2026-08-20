@@ -98,11 +98,13 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target>
 `target` is `nwo` at repo scope, `owner` at org scope, and omitted (or the authenticated login) at
 user scope. Returns `actionable` (ranked by severity then EPSS, each group annotated with its
 `adapter_path` and, at every scope, its own `repo`) and `skipped` (each with a `reason`), plus
-`skipped_repos` — repos excluded at org or user scope, on both the aggregate and fan-out paths,
-because the user cannot push to them (`no push access`), because the API did not say whether they
-can (`permission data missing from API response`), or because their alerts could not be read
-(`alert fetch failed`, `invalid alert response`). `skipped_repos` is always present and empty at
-repo scope.
+`skipped_repos` — repos excluded at org or user scope, because the user cannot push to them
+(`no push access`), because the API did not say whether they can (`permission data missing from
+API response`), because the repo is a fork (`fork repository`, on both the aggregate and fan-out
+paths) or archived (`archived repository`, fan-out path only — the aggregate response can never
+name an archived repo, since GitHub refuses Dependabot alerts for archived repositories outright),
+or because their alerts could not be read (`alert fetch failed`, `invalid alert response`).
+`skipped_repos` is always present and empty at repo scope.
 
 A group is **one major line of one package in one repo**, not one package: a package resolved at
 several majors at once has a different patched version per line, and one group per line is what
@@ -121,6 +123,9 @@ will see:
 `skipped_repos` reasons:
 
 - `no push access` — the authenticated user cannot push to the repo; never dispatched
+- `permission data missing from API response` — the API did not say whether the user can push
+- `fork repository` — never a dispatch target, on both the aggregate and fan-out paths
+- `archived repository` — never a dispatch target; fan-out path only
 - `alert fetch failed` / `invalid alert response` — the per-repo alert call itself failed
   (`error` field where present)
 
