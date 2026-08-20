@@ -156,7 +156,10 @@ Present one table for the batch:
 
 > | Package | Line | PR | Risk | F4/F5 | Scripts | Notes |
 
-Failures get their `phase` and `detail`.
+Failures get their `phase` and `detail`. A result whose `action` is `bare-override` says so in
+Notes (`bare override added` or `bare override tightened`, from `bare_override`): it is the one
+action whose blast radius reaches past the alerts being fixed, and the table is where a user
+comparing PRs will see it.
 
 Then report every non-empty `requires_major_bump[]`, per package line, before anything else in the
 summary:
@@ -168,15 +171,26 @@ summary:
 These are alerts that stay open after the PRs merge. Reporting a batch as done without them is the
 failure mode issue #19 is about, and it is worse coming from the summary than from an agent.
 
-Then aggregate `observations[]` across **all** results,
-deduplicate identical entries, and report once:
+Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
+them by `type`, because the two are not the same news.
+
+`unscoped_override_added` entries are global pins **this batch just created** (the agent's
+`bare_override` is `added` and its `action` is `bare-override`). Report them individually, with
+the reason the agent gave and the PR that introduced them:
+
+> This batch added 1 unscoped global override: `sharp` `>=0.35.0 <1` in <PR>, because <reason>.
+> It pins `sharp` for every consumer in that repository, including copies that were never
+> vulnerable.
+
+`unscoped_override` entries are pre-existing, and stay one aggregate line:
 
 > Note: the manifest contains N unscoped global override(s): `<keys>`. These may be removable or
 > convertible to scoped pins. The pin audit will test removability
 > ([#7](https://github.com/SurveyMonkey/skills/issues/7)).
 
-A lead, not a finding. Do not act on them. Without deduplication a five-package dispatch would
-report the same bare overrides five times.
+Leads, not findings. Do not act on either. Without deduplication a five-package dispatch would
+report the same pre-existing bare overrides five times. Never fold a newly added pin into that
+count and call it pre-existing debt: this batch is the record of where it came from.
 
 ## Phase 8: Decide what may leave draft
 
