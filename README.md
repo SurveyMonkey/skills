@@ -27,6 +27,13 @@ published advisory for the package rather than against the repo's own alert hist
 pin itself blinds. It also runs automatically in a spare slot when a fix batch is smaller than the
 concurrency cap, and is offered after a batch that filled it. Report-only: it opens no PR.
 
+A PostToolUse hook on `Bash` (and `BashOutput`, for backgrounded commands) also watches for a
+GitHub push-time vulnerability notice, a Dependabot alert URL, or non-zero `npm`/`pnpm`/`yarn
+audit` output, and nudges Claude to offer the `resolve-alerts` skill when one appears. It is a
+local grep with no network calls and never runs `gh` itself: a package-manager-only match nudges
+toward checking GitHub security alerts rather than assuming a fix is needed, since GitHub stays
+the sole data source the fix pipeline acts on.
+
 Supports pnpm, npm, and Yarn Berry. Other ecosystems and package managers are reported rather
 than attempted; see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to request one.
 
@@ -56,6 +63,8 @@ plugins/
     scripts/
       common/       # ecosystem-agnostic: scope, discovery, routing, risk scoring, PR state
       ecosystems/   # one adapter per advisory ecosystem
+    hooks/
+      hooks.json    # PostToolUse hook registration (Bash -> notice-scan.sh)
 ```
 
 Deterministic work belongs in `scripts/` with a JSON contract; skills, agents, and commands carry
