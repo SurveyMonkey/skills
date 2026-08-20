@@ -161,7 +161,20 @@ pin you removed alongside this one may be the reason this package now resolves w
 either direction. A batch result is not evidence about any individual pin, and there is no
 shortcut that makes it one.
 
-First, **record the with-all-pins baseline**: install the manifest as it stands, once, then read
+First, **resolve `<lockfile>`.** It is the one placeholder below that `list_pins` does not already
+carry, and every restore in this phase names it:
+
+```bash
+cd "$WORK/audit" && $ADAPTER detect
+```
+
+Take `lockfile` from that output — `pnpm-lock.yaml`, `yarn.lock` or `package-lock.json` — and
+**substitute the literal filename for `<lockfile>` in every command below**, exactly as you do for
+`$WORK`. Ask the adapter rather than inferring the name from `pm` yourself: the mapping is the
+adapter's to own, and a restore aimed at a file that is not there fails in the one way step 7
+cannot afford (see below).
+
+Then **record the with-all-pins baseline**: install the manifest as it stands, once, then read
 both the whole-tree resolution map and the resolutions of each distinct package you are about to
 test.
 
@@ -201,8 +214,17 @@ in the tree, so they are both the most costly and the most likely to be over-bro
 6. **Diff the whole map against the baseline map.** For every *other* package whose version set
    changed, record `{package, baseline, without_pin, newly_admitted}`, where `newly_admitted` is
    what the removal added. This is the collateral list, and it is usually empty.
-7. Restore the tree before the next pin:
-   `git -C "$WORK/audit" checkout -- package.json <lockfile>`
+7. **Restore the tree, then verify the restore, before the next pin:**
+
+   ```bash
+   git -C "$WORK/audit" checkout -- package.json <lockfile>
+   git -C "$WORK/audit" diff --quiet -- package.json <lockfile>
+   ```
+
+   The second command exits 0 only when both files match HEAD again. **A non-zero exit stops the
+   run**: return a failure result (phase `restore`) saying which pin was being tested and quoting
+   `git -C "$WORK/audit" status --porcelain -- package.json <lockfile>`, then clean up. Do not
+   retry, and do not continue to the next pin.
 
 **Step 6 is not bookkeeping; it is the reason a `removable` verdict can be trusted.** An override
 reaches past its own target: lifting it changes dedup and hoisting, and lets a peer conflict
@@ -211,9 +233,33 @@ of the tested package alone cannot see it, and the pin reports `removable` while
 tested in is no longer safe. This is the audit's only removal recommendation, so a wrong "safe"
 here is the most expensive mistake it can make.
 
-`resolution_map` and `resolved_versions` must agree about the tested package. If they do not, one
-of the two parsers is wrong; report the pin `inconclusive`, quote both answers, and do not pick a
-winner.
+**Step 7's verification is not ceremony either: it is what keeps "one pin per install" true.** A
+restore that fails or only half completes — a lockfile name that is not this repository's, a
+permission denial, a checkout that touched `package.json` and not the lockfile — leaves the
+previous pin's removal in the tree while the next pin is edited out of it. Nothing downstream
+notices: a doubly-modified manifest is still valid, so the next install succeeds, and
+`resolved_versions` and `resolution_map` both parse a lockfile they have no way to know is wrong.
+Every existing failure path in this phase keys off an install failing or a parser erroring, and
+none of them fires. What you would then report is a batch result presented as a per-pin one, which
+this phase's opening rule says is evidence about no pin at all — arrived at by tooling failure
+instead of by choice, and with nothing in the output saying so. That is why the check runs after
+every single pin and why failing it ends the run rather than the pin.
+
+`resolution_map` and `resolved_versions` must agree about the tested package — **compared after
+normalizing both to the same shape**, which is a sorted, deduplicated list of bare version strings:
+
+```bash
+cd "$WORK/audit" && $ADAPTER resolution_map | jq -c '.resolutions["<package>"] // []'
+cd "$WORK/audit" && $ADAPTER resolved_versions <package> | jq -c '[.versions[].version] | unique'
+```
+
+The two verbs answer different questions and their raw shapes differ by design: `resolved_versions`
+returns one `{version, path}` per resolution, so one version installed at two paths is two entries,
+while the map holds each package's versions once. Comparing the raw shapes reports a disagreement
+that is not one, and a healthy pin comes back `inconclusive` — so normalize first, always.
+
+If the normalized answers still differ, one of the two parsers is wrong; report the pin
+`inconclusive`, quote both answers, and do not pick a winner.
 
 **If `resolution_map` is unavailable** — exit 2 from an adapter that does not implement it, or an
 error on this lockfile — you have no whole-tree view, and you may not fabricate one. Fall back to
@@ -223,8 +269,10 @@ other package's resolution was re-checked. A scoped claim is a smaller finding; 
 outruns what was checked is a wrong one.
 
 An install that fails is a result: record the pin as `inconclusive` with the install error. Never
-report a pin as removable off a failed install, and restore the tree before continuing. A per-pin
-install failure stops that pin, not the run — unlike the baseline, whose failure stops everything.
+report a pin as removable off a failed install, and restore the tree before continuing — with step
+7's verification, which applies to every restore including this one. A per-pin install failure
+stops that pin, not the run — unlike the baseline, whose failure stops everything, and unlike a
+failed restore, which stops everything for the reason step 7 gives.
 
 If `present` is false after removal, the package left the tree entirely — the pin was the only
 thing holding it in. That is `removable`, with the detail saying the package is no longer resolved
@@ -419,4 +467,7 @@ End your final message with exactly one fenced JSON block:
 - `detail` carries the judgment: the install error for `inconclusive`, the reason for
   `not-tested`, what the entry really is for `not-a-version-pin`.
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, and
-  `failure` is `{"phase": "input | worktree | list | install | advisories", "detail": "..."}`.
+  `failure` is
+  `{"phase": "input | worktree | list | install | restore | advisories", "detail": "..."}`.
+  `restore` is phase 4 step 7's: the tree could not be returned to its pre-pin state, so every
+  later pin would have been tested against a manifest carrying an earlier removal.
