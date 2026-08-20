@@ -105,6 +105,10 @@ if [ "$FROM_DISCOVERY" = true ]; then
                  | . + {reason: "ecosystem not supported yet"}
         ])
       }
+    # Pass through any other top-level keys discovery emitted (e.g.
+    # `skipped_repos` at org/user scope) unchanged, rather than dropping them.
+    | . as $out
+    | ($input | del(.actionable, .skipped)) + $out
     '
   exit 0
 fi
