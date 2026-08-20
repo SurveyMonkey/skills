@@ -13,6 +13,7 @@
 #   validate <pkg> <range>                     -> {ok, violations[]}
 #   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta}
+#   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> reserved, exits 2 (see issue #7)
 #
 # Exit codes: 0 ok | 1 error | 2 not implemented | 3 unsupported toolchain
@@ -177,15 +178,28 @@ detect_raw() {
 
 # How to actually invoke the package manager.
 #
-# Yarn Berry and modern pnpm are usually corepack-managed: `packageManager` is
-# declared in package.json and no binary sits on PATH unless the user's shell
-# shims one. Falling back to corepack keeps the adapter working regardless of
-# how the caller's environment is set up.
+# Order matters. A bare binary on PATH comes first: when yarnPath is set it
+# re-execs the vendored release anyway, and it matches whatever permission
+# rules the user already has. Second, Yarn Berry repos commonly vendor the
+# exact release they pin — `yarnPath` in .yarnrc.yml names a checked-in
+# bundle that node runs directly, with no corepack indirection and no
+# cold-cache download. Corepack is the last resort, not the default: it can
+# prompt to download a package manager mid-run.
 pm_runner() {
   candidate="$1"
   if command -v "$candidate" >/dev/null 2>&1; then
     printf '%s\n' "$candidate"
-  elif command -v corepack >/dev/null 2>&1 \
+    return 0
+  fi
+  if [ "$candidate" = "yarn" ] && [ -f .yarnrc.yml ] \
+    && command -v node >/dev/null 2>&1; then
+    yarn_path=$(sed -n 's/^yarnPath:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' .yarnrc.yml | head -1)
+    if [ -n "$yarn_path" ] && [ -f "$yarn_path" ]; then
+      printf 'node %s\n' "$yarn_path"
+      return 0
+    fi
+  fi
+  if command -v corepack >/dev/null 2>&1 \
     && jq -e '.packageManager // empty' package.json >/dev/null 2>&1; then
     printf 'corepack %s\n' "$candidate"
   else
@@ -518,6 +532,7 @@ set_indent_args() {
 }
 
 verb_apply_constraint() {
+  refuse_primary_checkout
   tighten_bare=false
   if [ "${1:-}" = "--tighten-bare" ]; then
     tighten_bare=true
@@ -630,7 +645,19 @@ verb_apply_constraint() {
 # ---------------------------------------------------------------------------
 # install / verification_commands / compare_versions / list_pins
 # ---------------------------------------------------------------------------
+# Mutating verbs refuse to run in a primary checkout. Fix agents work in git
+# worktrees, which carry a .git *file*; the user's checkout has a .git
+# *directory*, and a mutating verb running there (a cwd mistake before
+# worktree setup) silently edits the user's tree — observed live in Phase 2
+# testing. Spec fixtures have no .git at all and are unaffected.
+refuse_primary_checkout() {
+  if [ -d .git ]; then
+    die "refusing to run '$VERB' in a primary checkout (.git is a directory here); create the fix worktree and run from there"
+  fi
+}
+
 verb_install() {
+  refuse_primary_checkout
   cmd=$(verb_detect | jq -r '.install_cmd')
   printf 'Running: %s\n' "$cmd" >&2
   $cmd
@@ -663,6 +690,45 @@ verb_compare_versions() {
     {a: $a, b: $b, result: semver_cmp($a; $b), delta: semver_delta($a; $b)}'
 }
 
+# Some repo scripts invoke the bare package-manager name internally, which
+# fails when the toolchain is corepack-managed or vendored and no binary sits
+# on PATH. This writes a one-line shim that delegates to the resolved runner,
+# so callers prepend the directory to PATH instead of hand-rolling
+# mkdir/printf/chmod (three separate commands, each drawing its own
+# permission review). The optional runner override is a test seam
+# (precedent: detect-capacity.sh's meminfo path).
+verb_shim() {
+  dir="${1:?shim requires a target directory}"
+  runner="${2:-}"
+  case "$(detect_raw)" in
+    pnpm)       pm="pnpm" ;;
+    yarn-berry) pm="yarn" ;;
+    npm)        pm="npm" ;;
+    *) die "shim supports pnpm, Yarn Berry, and npm; detected: $(detect_raw)" ;;
+  esac
+  if [ -z "$runner" ]; then
+    runner=$(pm_runner "$pm")
+    if [ "$runner" = "$pm" ] && command -v "$pm" >/dev/null 2>&1; then
+      jq -n --arg pm "$pm" \
+        '{created: false, pm: $pm, reason: "\($pm) is already on PATH"}'
+      return 0
+    fi
+  fi
+  # A vendored runner is emitted relative to the repository root; the shim
+  # runs from arbitrary directories, so absolutize it.
+  case "$runner" in
+    "node .yarn/"*) runner="node $PWD/${runner#node }" ;;
+  esac
+  mkdir -p "$dir" || die "cannot create shim directory: $dir"
+  shim_file="$dir/$pm"
+  printf '#!/bin/sh\nexec %s "$@"\n' "$runner" > "$shim_file" \
+    || die "cannot write shim: $shim_file"
+  chmod +x "$shim_file"
+  jq -n --arg pm "$pm" --arg shim "$shim_file" --arg dir "$dir" \
+    --arg runner "$runner" \
+    '{created: true, pm: $pm, shim: $shim, path_prefix: $dir, runner: $runner}'
+}
+
 case "$VERB" in
   detect)                verb_detect ;;
   why)                   verb_why "$@" ;;
@@ -672,6 +738,7 @@ case "$VERB" in
   validate)              verb_validate "$@" ;;
   verification_commands) verb_verification_commands ;;
   compare_versions)      verb_compare_versions "$@" ;;
+  shim)                  verb_shim "$@" ;;
   list_pins)
     printf '{"error":"list_pins is not implemented until RFC 001 Phase 4 (issue #7)."}\n' >&2
     exit 2

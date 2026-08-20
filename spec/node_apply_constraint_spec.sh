@@ -1,5 +1,28 @@
 #!/bin/sh
 # shellcheck shell=sh
+
+Describe 'mutating verbs refuse a primary checkout'
+  After 'cleanup_fixture'
+
+  # Worktrees carry a .git file; the user's checkout has a .git directory. A
+  # mutating verb running in the latter silently edits the user's tree
+  # (observed live), so it refuses. A .git file — a real worktree — proceeds.
+  It 'apply_constraint refuses when .git is a directory'
+    use_fixture yarn-berry
+    mkdir .git
+    When run script "$ADAPTER" apply_constraint lodash '>=4.17.21 <5'
+    The status should equal 1
+    The stderr should include 'primary checkout'
+  End
+
+  It 'apply_constraint proceeds when .git is a worktree file'
+    use_fixture yarn-berry
+    printf 'gitdir: /elsewhere/.git/worktrees/fix\n' > .git
+    When call adapter_jq '{package, pm}' apply_constraint lodash '>=4.17.21 <5'
+    The status should be success
+    The output should equal '{"package":"lodash","pm":"yarn"}'
+  End
+End
 # node.sh apply_constraint.
 #
 # Every example works on a scratch copy of a fixture, because this verb writes

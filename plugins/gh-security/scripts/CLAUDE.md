@@ -22,7 +22,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -34,6 +34,13 @@ non-zero with `{"error": "..."}` on failure.
 Everything ecosystem-specific stays behind the verbs, **including version comparison**. Phase 6's
 Python adapter implements PEP 440; node implements semver. Do not lift `compare_versions` into
 `common/`.
+
+## Prescribed shapes and the preflight catalog move together
+
+`preflight-permissions.sh` pre-approves exactly the command shapes the agent definition
+prescribes. Changing a prescribed shape in `agents/fix-dependency.md` without updating the
+catalog in the same commit reintroduces a permission prompt for spec'd behavior — caught live
+once already (the `rev-parse` → `branch --list` guard change). Keep them in lockstep.
 
 ## The rule that matters most
 
@@ -56,6 +63,8 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 
 ## Testing
 
-No harness yet; tracked in [#10](https://github.com/SurveyMonkey/skills/issues/10). Until it
-lands, verify against real repositories with live alerts and check both the success path and the
-"parser found nothing" path.
+Shellspec suites live in `spec/` at the repo root; conventions are in the root `CLAUDE.md`
+(Testing section). CI automation for the suite is tracked in
+[#10](https://github.com/SurveyMonkey/skills/issues/10). Fixture tests do not replace verifying
+against real repositories with live alerts; check both the success path and the "parser found
+nothing" path.

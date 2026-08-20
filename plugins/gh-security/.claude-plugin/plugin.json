@@ -1,7 +1,7 @@
 {
   "name": "gh-security",
-  "version": "0.2.1",
-  "description": "Fix Dependabot alerts one package at a time: prioritized by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and a computed merge-risk rating on every PR.",
+  "version": "0.3.0",
+  "description": "Resolve Dependabot alerts in parallel: one subagent per package in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow.",
   "author": {
     "name": "Brian Espinosa",
     "email": "b@bje.co"
