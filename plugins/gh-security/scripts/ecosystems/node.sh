@@ -420,9 +420,32 @@ npm_entry_count() {
   jq '[.packages // {} | keys[] | select(. != "")] | length' package-lock.json
 }
 
+# The entries this parser reads, and the rows it makes of them. One expression,
+# used by `npm_resolution_pairs` for the map's rows and by `npm_parse_counts`
+# for the guard's numerator, for the reason the yarn and pnpm parsers give: two
+# copies of a locator parser is how the rows and the count drift apart.
+#
+# They had already drifted. The count asked only `.value.version != null` while
+# the rows additionally required a leading digit, so a `{"version":"v1.2.3"}`
+# entry was dropped from the map and reported `unreadable_entries: 0` — the map
+# claiming full coverage of a package it does not contain, which is exactly the
+# `collateral_changes: []` hazard the field exists to prevent
+# ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+#
+# Link entries are excluded here as well as from the denominator, so the
+# numerator stays a subset of it: they are read and deliberately kept out.
+NPM_ROW_ENTRIES='( .packages // {} | to_entries[]
+                   | select(.key | contains("node_modules/"))
+                   | select(.value.link != true) )'
+
+NPM_ROW='( select(.value.version != null)
+           | {package: '"$NPM_ENTRY_NAME"',
+              version: (.value.version | tostring)}
+           | select(.version | test("^[0-9]")) )'
+
 # `<installed>\t<versioned>` for the parse guard: the entries that name an
-# installed package this parser was supposed to read, and the subset carrying a
-# version.
+# installed package this parser was supposed to read, and the subset this
+# parser turned into a row.
 #
 # A workspace is recorded as `"node_modules/<ws>": {"resolved":"packages/<ws>",
 # "link":true}`: the key contains `node_modules/`, so it counted in the
@@ -434,38 +457,57 @@ npm_entry_count() {
 # entries are excluded from the denominator now: they are read and deliberately
 # kept out, which is the same third answer the yarn and pnpm parsers give.
 npm_parse_counts() {
-  jq -r '[ .packages // {} | to_entries[]
-           | select(.key | contains("node_modules/"))
-           | select(.value.link != true) ]
-         | "\(length)\t\([.[] | select(.value.version != null)] | length)"' \
+  jq -r '[ '"$NPM_ROW_ENTRIES"' ]
+         | "\(length)\t\([.[] | '"$NPM_ROW"'] | length)"' \
     package-lock.json
 }
 
 # pnpm's locator parser, giving the same three answers the yarn one gives.
 #
 # A `packages:` key is `<name>@<version>` for a registry entry, split on the
-# LAST `@` because a scoped name carries one of its own. Where the version would
-# be, a local dependency carries a protocol instead — and pnpm had no "read it
-# and deliberately excluded it" answer at all, so two registry entries beside a
-# `link:`, a `file:` and a git dependency read as `Read 2 of 5` and hard-failed
-# a legitimate workspace ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+# FIRST `@` after position 1 — a scoped name's own `@` is position 1, and the
+# separator is the next one. Splitting on the LAST `@` instead read
+# `ssh-dep@git+ssh://git@github.com/...` as the name `ssh-dep@git+ssh://git`,
+# so the protocol test below never saw `git+ssh:` and a perfectly ordinary
+# forked dependency counted as a parse failure. One of those is enough to force
+# `collateral_changes: null` and `not-checked` for every pin in the repository,
+# and `git+ssh` forks are common ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+# The last-`@` split is kept as a fallback for a key neither test recognizes at
+# the first `@`, so nothing that used to parse stopped parsing.
+#
+# Where the version would be, a local dependency carries a protocol instead —
+# and pnpm had no "read it and deliberately excluded it" answer at all, so two
+# registry entries beside a `link:`, a `file:` and a git dependency read as
+# `Read 2 of 5` and hard-failed a legitimate workspace ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 # Both directions were wrong: workspaces killed a healthy lockfile, and local
 # dependencies padded the recognized share of a genuinely broken one.
 #
 # One awk program, two modes, for the reason the yarn parser gives below: two
 # copies of a locator parser is how the rows and the guard's counts drift apart.
 PNPM_LOCATOR_AWK=$(cat <<'AWKLIB'
-    function pnpm_row(line,   at, i, ver) {
-      at = 0
-      for (i = length(line); i > 1; i--)
-        if (substr(line, i, 1) == "@") { at = i; break }
-      if (at == 0) return 0
+    # One candidate split: name before `at`, version or protocol after it.
+    # Same three answers the yarn parser gives.
+    function pnpm_split(line, at,   ver) {
       PR_NAME = substr(line, 1, at - 1)
       ver = substr(line, at + 1)
       if (ver ~ /^[0-9]/) { PR_VER = ver; return 1 }
       if (ver ~ /^(link|file|workspace|portal|catalog|exec|git|git[+]ssh|git[+]http|git[+]https|http|https|ssh|github|gitlab|bitbucket):/)
         return 2
       return 0
+    }
+
+    function pnpm_row(line,   i, first, last, code) {
+      first = 0
+      for (i = 2; i <= length(line); i++)
+        if (substr(line, i, 1) == "@") { first = i; break }
+      if (first == 0) return 0
+      code = pnpm_split(line, first)
+      if (code > 0) return code
+      last = 0
+      for (i = length(line); i > 1; i--)
+        if (substr(line, i, 1) == "@") { last = i; break }
+      if (last == first) return 0
+      return pnpm_split(line, last)
     }
     /^packages:/ { inpkgs = 1; next }
     /^[a-zA-Z]/  { inpkgs = 0 }
@@ -791,12 +833,7 @@ npm_resolution_pairs() {
     if (.packages | type) != "object" then
       error("package-lock.json has no .packages object (lockfileVersion 1 is unsupported)")
     else
-      [ .packages | to_entries[]
-        | select(.key | contains("node_modules/"))
-        | select(.value.version != null)
-        | {package: '"$NPM_ENTRY_NAME"',
-           version: (.value.version | tostring)}
-        | select(.version | test("^[0-9]")) ]
+      [ '"$NPM_ROW_ENTRIES"' | '"$NPM_ROW"' ]
     end' package-lock.json
 }
 
@@ -925,18 +962,40 @@ npm_declaration_rows() {
     | [$parent, .key, .value] | @tsv' package-lock.json
 }
 
-# Berry's equivalent: the `dependencies:` block under each `resolution:` entry.
-# Workspace entries are the repository's own packages rather than registry
-# parents an override can be scoped to, so they are dropped here exactly as
-# npm's root entry is filtered out of `npm_parents` below.
+# Berry's equivalent: the `dependencies:`, `peerDependencies:` and
+# `optionalDependencies:` blocks under each `resolution:` entry. Workspace
+# entries are the repository's own packages rather than registry parents an
+# override can be scoped to, so they are dropped here exactly as npm's root
+# entry is filtered out of `npm_parents` below.
+#
+# All three blocks, on the rule npm's reader already followed and ADR 001
+# states: a parent that declares the package as a peer is why the copy is in
+# the tree at all, and one that declares it optionally installs it wherever the
+# platform allows. Matching `dependencies:` alone made those parents invisible
+# to `why`, so `apply_constraint` had nothing to scope to and `declared_ranges`
+# never saw their range — the same shape as
+# [#47](https://github.com/SurveyMonkey/skills/issues/47), one block over
+# ([#49](https://github.com/SurveyMonkey/skills/issues/49)). `peerDependenciesMeta:`
+# is not among them and does not match: the pattern requires the colon
+# immediately after the block name, and its own entries are nested a level
+# deeper.
 #
 # The double-quote character comes from `sprintf`, never from a literal, and
 # that is a constraint rather than a preference: bash 3.2 — the version this
 # targets — scans for the closing `)` of a command substitution while tracking
 # double quotes, so a heredoc body carrying an *unpaired* `"` (which the obvious
 # `/resolution: "/` and `index(rest, "\"")` both introduce) is cut short and the
-# remainder of the file is parsed as shell. It breaks only under bash 3.2, i.e.
-# only on the default macOS shell, which is exactly where the suite runs.
+# remainder of the file is parsed as shell.
+#
+# It breaks only under bash 3.2 — the default macOS `/bin/bash`, and the floor
+# scripts/CLAUDE.md sets — and NOT where the suite would notice on its own:
+# `.shellspec` runs the examples under `--shell sh`, and the adapter runs under
+# whatever `bash` leads PATH, which on a development machine is Homebrew's 5.x.
+# A reintroduced unpaired quote would therefore go green everywhere modern bash
+# is installed, which is the same shape of defect as a comment describing
+# protection the code does not perform. `spec/bash32_parse_spec.sh` closes it by
+# running `/bin/bash -n` over these scripts
+# ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 YARN_DECLARATION_AWK=$(cat <<'AWKLIB'
     BEGIN { q = sprintf("%c", 34) }
     /^[^[:space:]#]/ { cur = ""; indeps = 0 }
@@ -953,8 +1012,8 @@ YARN_DECLARATION_AWK=$(cat <<'AWKLIB'
       cur = (at > 1) ? substr(res, 1, at - 1) : res
       next
     }
-    /^  dependencies:/ { indeps = 1; next }
-    /^  [a-zA-Z]/      { indeps = 0 }
+    /^  (dependencies|peerDependencies|optionalDependencies):/ { indeps = 1; next }
+    /^  [a-zA-Z]/ { indeps = 0 }
     indeps && /^    / {
       dep = $0
       sub(/^    /, "", dep)

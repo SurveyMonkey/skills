@@ -123,12 +123,24 @@ both names means a real package whose name equals another entry's install key �
 installing `underscore` under the key `lodash` while a dependency pulls the real `lodash` — has its
 versions merged into one `resolved_versions` answer, in npm and Berry alike. Disambiguating by path
 or locator would require the caller to say which sense of the name it meant, and the caller cannot:
-an override key `lodash` is exactly as ambiguous as the lockfile is. The merge is fail-safe in
-direction — it over-reports toward `inconclusive` and `still-required`, never toward `removable` —
-so it is stated here and acted on in the audit rather than guessed at. It presents as **two
-non-empty lists that disagree**, distinct from the alias-key case's `[]` against non-empty, and
-`agents/audit-pins.md` names both shapes so neither is read as a parser bug
+an override key `lodash` is exactly as ambiguous as the lockfile is. On the **read** path the merge
+is fail-safe in direction — it over-reports toward `inconclusive` and `still-required`, never toward
+`removable` — so it is stated here and acted on in the audit rather than guessed at. It presents as
+**two non-empty lists that disagree**, distinct from the alias-key case's `[]` against non-empty,
+and `agents/audit-pins.md` names both shapes so neither is read as a parser bug
 ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
+**On the write path the same ambiguity is not fail-safe, and that is the direction that ships an
+edit.** `apply_constraint lodash '>=4.17.21 <5'` against that repository finds the root's colliding
+declaration `"lodash": "npm:underscore@^1.13.6"` and retargets it in place, because retargeting an
+`npm:` declaration deliberately preserves the protocol and the package it aliases and rewrites only
+the version. The result is `"npm:underscore@^4.17.21"` — a version of `underscore` that does not
+exist, so the install breaks — while the real `lodash` copy the caller meant goes unmoved. Nothing
+in the adapter can tell the two senses apart here either, so the report is what catches it:
+`written[]` states the key and value actually written, and `agents/fix-dependency.md` **rejects any
+written value whose `npm:` protocol names a package other than the one passed**, failing the run
+with the entry quoted rather than opening a PR on it
+([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
 **The parse guard counts what the parser could read, not what it kept.** A repository whose
 dependencies are all workspaces and portals resolves to no registry version at all, so an empty map
@@ -186,8 +198,9 @@ a JSON object before any field of it is read.
 wrote.** It runs *before* `install`, in a fresh worktree where `node_modules` is gitignored and
 absent — and Yarn PnP never has one at all, while pnpm links only direct dependencies into one — so
 the key a parent declares an aliased dependency under comes from the lockfile
-(`.packages["node_modules/<parent>"].dependencies` for npm, the `dependencies:` block under each
-`resolution:` entry for Berry), never from a parent's installed manifest. A parent whose declaration
+(`.packages["node_modules/<parent>"]` for npm, each `resolution:` entry for Berry, reading
+`dependencies`, `optionalDependencies` and `peerDependencies` in both), never from a parent's
+installed manifest. A parent whose declaration
 the adapter cannot locate is named in `alias_lookup.parents_unresolved`, never skipped: the whole
 failure of the manifest-based lookup was that it skipped silently and wrote the plain package name,
 which does not govern the aliased copy. The result also carries `written[]`, one
@@ -196,7 +209,12 @@ them — the report used to state `package` and `range` whatever it had written,
 it described an edit that was not made ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 pnpm is the one gap and it is reported rather than guessed at: its `snapshots:` blocks record what
 a dependency resolved to, not the key and specifier it was declared with, so `alias_lookup.source`
-is `unsupported` there and every parent is listed unresolved.
+is `unsupported` there and every parent is listed unresolved. **`source` is what the list means, so
+a caller reads both.** `unsupported` names an ecosystem limit and nothing about this repository;
+keying the "an aliased copy may not have moved" warning on a non-empty list alone raises it on every
+pnpm scoped fix, which trains the reading agent to discount the one case — `source: "lockfile"` with
+parents still unresolved — where it is a real finding
+([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
 **`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
@@ -204,10 +222,16 @@ plus the root manifest's own declaration, which is read from those three and `de
 the repository is a dependent like any other, and a dev-only direct dependency still declares a
 range a fix can leave behind. Parent discovery covers the same three blocks in npm lockfile v3, whose
 entries record each of them under their own key; a parent that declares the package only optionally
-or as a peer still resolves it. The pnpm and Yarn Berry lockfile parsers still discover parents
-through `dependencies` blocks alone, so an optional-only or peer-only parent is missed there; a
-range it declares reaches F7 only if the agent reads it by hand. Widening those parsers is open
-work, not a documented guarantee. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
+or as a peer still resolves it. The Yarn Berry parser covers the same three blocks under each
+`resolution:` entry, which it did not until
+[#49](https://github.com/SurveyMonkey/skills/issues/49): matching `dependencies:` alone left a
+peer-declared Berry parent invisible to `why` and unreachable by `apply_constraint`, contradicting
+this paragraph one block over from where
+[#47](https://github.com/SurveyMonkey/skills/issues/47) had just been fixed. **pnpm remains the
+exception**: its `snapshots:` blocks record what each dependency resolved to rather than the block
+it was declared in, so an optional-only or peer-only pnpm parent is still missed and a range it
+declares reaches F7 only if the agent reads it by hand. Widening that parser is open work, not a
+documented guarantee. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
 (read, but declaring the package in no block, which version skew produces legitimately),
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse, kept inside `parents_unreadable` so every consumer of that list stays

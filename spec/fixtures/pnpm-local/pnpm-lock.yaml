@@ -20,6 +20,9 @@ importers:
       local-lib:
         specifier: file:./vendor/local-lib
         version: file:vendor/local-lib
+      ssh-dep:
+        specifier: git+ssh://git@github.com/example/ssh-dep.git#abcdef0
+        version: git+ssh://git@github.com/example/ssh-dep.git#abcdef0
 
 packages:
 
@@ -39,6 +42,10 @@ packages:
   lodash@4.17.21:
     resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
 
+  ssh-dep@git+ssh://git@github.com/example/ssh-dep.git#abcdef0:
+    resolution: {commit: abcdef0, repo: git+ssh://git@github.com/example/ssh-dep.git, type: git}
+    version: 2.0.0
+
 snapshots:
 
   express@4.18.2:
@@ -52,3 +59,5 @@ snapshots:
   local-lib@file:vendor/local-lib: {}
 
   lodash@4.17.21: {}
+
+  ssh-dep@git+ssh://git@github.com/example/ssh-dep.git#abcdef0: {}

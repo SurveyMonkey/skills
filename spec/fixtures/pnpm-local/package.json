@@ -5,7 +5,8 @@
     "express": "^4.18.2",
     "local-lib": "file:./vendor/local-lib",
     "linked-tool": "link:../linked-tool",
-    "git-dep": "github:example/git-dep#abcdef0"
+    "git-dep": "github:example/git-dep#abcdef0",
+    "ssh-dep": "git+ssh://git@github.com/example/ssh-dep.git#abcdef0"
   },
   "scripts": { "test": "vitest run" }
 }

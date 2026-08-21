@@ -19,11 +19,24 @@ Describe 'the audit rules that read a partially-parsed map'
   # nothing else moved — the stronger of the two claims, about a package nobody
   # audited (issue #48). Both halves have to hold: the map has to say so, and
   # the definition has to turn that into `null` + `not-checked`.
-  It 'has an adapter that reports the unread count'
-    use_fixture yarn-partial-read
-    When call adapter_jq '.unreadable_entries > 0' resolution_map
-    The status should be success
-    The output should equal 'true'
+  # Every ecosystem owes the same number, because the rule below is written
+  # once and acts on all of them. npm's count was derived from a *different*
+  # predicate than its map rows — `.value.version != null` against the rows'
+  # extra leading-digit test — so a `{"version":"v1.2.3"}` entry left the map
+  # while the coverage field still said full coverage, and the hazard this
+  # whole pairing exists to close was open on npm by construction (issue #49).
+  Describe 'the count that the rule reads'
+    Parameters
+      yarn-partial-read
+      npm-partial-read
+    End
+
+    It "has an adapter that reports the unread count in $1"
+      use_fixture "$1"
+      When call adapter_jq '.unreadable_entries > 0' resolution_map
+      The status should be success
+      The output should equal 'true'
+    End
   End
 
   rule() { grep -c "$1" "$AGENT"; }

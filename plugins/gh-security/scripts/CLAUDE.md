@@ -188,8 +188,14 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
   and `apply_constraint` writes the same key so the copy can also be moved
   ([#46](https://github.com/SurveyMonkey/skills/issues/46)). Answering under both names has one
   documented consequence: a real package sharing its name with another entry's install key has its
-  versions merged into one answer. The direction is fail-safe and the audit names the shape; see
-  ADR 001's alias exception.
+  versions merged into one answer. **On the read path** the direction is fail-safe and the audit
+  names the shape. **On the write path it is not**: `apply_constraint` retargets the colliding
+  declaration in place, turning `"lodash": "npm:underscore@^1.13.6"` into
+  `"npm:underscore@^4.17.21"` — a version of `underscore` that does not exist — while the copy the
+  caller meant goes unmoved. The adapter cannot tell the two senses apart there either, so
+  `written[]` reports what it wrote and `agents/fix-dependency.md` fails the run on a written
+  `npm:` value naming a package other than the one passed
+  ([#49](https://github.com/SurveyMonkey/skills/issues/49)). See ADR 001's alias exception.
 
 ## What a parent declares comes from the lockfile, never from `node_modules/`
 
@@ -199,9 +205,11 @@ Reading `node_modules/<parent>/package.json` for a parent's alias key therefore 
 time, skipped silently, and wrote the plain package name — which does not govern the aliased copy,
 so the escalation ladder re-ran the same lookup and the flow dead-ended
 ([#48](https://github.com/SurveyMonkey/skills/issues/48)). The declarations come from
-`.packages["node_modules/<parent>"].dependencies` (npm) and the `dependencies:` block under each
-`resolution:` entry (Berry), through one reader that `why`, `apply_constraint` and `declared_ranges`
-all share — which is also what gave Berry a working alias path at all
+`.packages["node_modules/<parent>"]` (npm) and each `resolution:` entry (Berry), through one reader
+that `why`, `apply_constraint` and `declared_ranges` all share. Both read the same three blocks —
+`dependencies`, `optionalDependencies` and `peerDependencies` — because a parent that declares the
+package as a peer is why the copy is in the tree at all; Berry read only `dependencies` until
+[#49](https://github.com/SurveyMonkey/skills/issues/49), which hid exactly that parent — which is also what gave Berry a working alias path at all
 ([#47](https://github.com/SurveyMonkey/skills/issues/47)).
 
 Two rules travel with it, both of which the old lookup broke:

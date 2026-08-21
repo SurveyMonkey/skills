@@ -561,7 +561,33 @@ Describe 'node.sh resolution_map'
       use_fixture pnpm-local
       When call adapter_jq '{entries_read, entries_expected, unreadable_entries, package_count}' resolution_map
       The status should be success
-      The output should equal '{"entries_read":5,"entries_expected":5,"unreadable_entries":0,"package_count":2}'
+      The output should equal '{"entries_read":6,"entries_expected":6,"unreadable_entries":0,"package_count":2}'
+    End
+
+    # `git+ssh://git@github.com/...` carries an `@` inside the URL, so splitting
+    # the locator on the LAST one read the name as `ssh-dep@git+ssh://git` and
+    # the protocol test never fired: an ordinary forked dependency counted as a
+    # parse failure. One of those forces `collateral_changes: null` and
+    # `not-checked` for EVERY pin in the repository under the rule above, which
+    # is worse than before the coverage field existed (issue #49).
+    It 'reads a pnpm git+ssh locator whose URL carries an @'
+      use_fixture pnpm-local
+      When call adapter_jq '{unreadable_entries, kept: (.resolutions | has("ssh-dep"))}' resolution_map
+      The status should be success
+      The output should equal '{"unreadable_entries":0,"kept":false}'
+    End
+
+    # npm's side of the same coverage promise. The count asked
+    # `.value.version != null` while the rows additionally required a leading
+    # digit, so a `{"version":"v1.2.3"}` entry was dropped from the map and
+    # reported as fully read: the map claiming complete coverage of a package it
+    # does not contain (issue #49). Both halves are asserted — the entry is
+    # still dropped, and the map now says so.
+    It 'reports an npm entry it could not turn into a row, rather than claiming full coverage'
+      use_fixture npm-partial-read
+      When call adapter_jq '{entries_read, entries_expected, unreadable_entries, dropped: (.resolutions | has("victim"))}' resolution_map
+      The status should be success
+      The output should equal '{"entries_read":3,"entries_expected":4,"unreadable_entries":1,"dropped":false}'
     End
 
     # The guard fires only below half, so ONE unreadable locator sails through
@@ -677,6 +703,18 @@ Describe 'node.sh why'
     When call adapter_jq '{relationship, parents}' why lodash
     The status should be success
     The output should equal '{"relationship":"transitive","parents":["express"]}'
+  End
+
+  # The declaration reader matched `/^  dependencies:/` alone while npm's
+  # unioned dependencies + optional + peer, so a Berry parent that declares the
+  # package as a peer — the reason the copy is in the tree at all — was
+  # invisible to `why` and unreachable by `apply_constraint`, one block over
+  # from issue #47 and contrary to what ADR 001 promised (issue #49).
+  It 'names Yarn Berry parents that declare through peer and optional blocks'
+    use_fixture yarn-berry-peer-parent
+    When call adapter_jq '{relationship, parents}' why 'sha.js'
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["express","serve-static"]}'
   End
 
   It 'excludes the yarn workspace entry from parents'

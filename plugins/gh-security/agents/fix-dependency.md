@@ -218,9 +218,30 @@ replacing them, and preserves the manifest's formatting.
 `{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
 parent reached through an `npm:` alias is written under the alias key with the protocol in the value
 (`{"express/lodash-alias": "npm:lodash@>=4.18.2 <5"}`), not under the package name you passed.
-**Also read `alias_lookup.parents_unresolved`**: those are parents whose declaration the adapter
-could not locate, so an aliased copy under one of them was not moved. Say so in the PR body rather
-than reporting the fix as complete; validate will fail on it if it matters.
+
+**Reject a written `npm:` value that names a different package, and fail the run.** If any
+`written[]` entry's value starts with `npm:` and the package it names — everything between `npm:`
+and the last `@` — is not the package you passed, the adapter has retargeted a declaration that
+merely *collides* with your package's name: a repository installing `underscore` under the key
+`lodash` gets `"npm:underscore@^4.17.21"` written when you asked for `lodash`, a version of
+`underscore` that does not exist. Neither the adapter nor you can disambiguate the two senses of
+that name, so stop: quote the offending entry verbatim, do not install, and do not open a PR.
+Escalate it as a repository that needs the collision resolved by hand
+([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+
+**Read `alias_lookup`, both fields.** `parents_unresolved` lists parents whose declaration the
+adapter could not locate, and what it means depends on `source`:
+
+- **`source: "lockfile"` (npm, Yarn Berry) with a non-empty `parents_unresolved`** is the real
+  warning. Those parents' declarations should have been readable and were not, so an aliased copy
+  under one of them was not moved. Say so in the PR body rather than reporting the fix as complete;
+  validate will fail on it if it matters.
+- **`source: "unsupported"` (pnpm)** lists *every* parent, always, and means only that this
+  ecosystem has no declaration source at all: pnpm's `snapshots:` record what a dependency resolved
+  to, not the key it was declared under. Note the known limit once and proceed normally. Treating it
+  as the warning above fires on 100% of pnpm scoped fixes, which is how a reading agent learns to
+  discount the one signal that matters
+  ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
 Its `observations` array lists
 **unscoped global overrides** already in the manifest. Do not act on them; carry them verbatim

@@ -221,11 +221,73 @@ Describe 'node.sh apply_constraint'
     # failure mode above. pnpm's snapshots record what a dependency resolved to
     # rather than the key it was declared under, so this adapter has no source
     # for a pnpm alias declaration and says so rather than guessing.
-    It 'names every parent whose declaration it could not read'
+    #
+    # `source` is asserted alongside the list because it is what separates the
+    # two readings: `unsupported` lists every parent BY DESIGN, so a definition
+    # that keys the warning on a non-empty list alone raises it on 100% of pnpm
+    # scoped fixes — a permanent false positive on a third of the fleet, which
+    # trains the reading agent to discount the one place the npm/yarn signal
+    # means something (issue #49).
+    It 'names every parent whose declaration it could not read, and why'
       use_fixture pnpm-v9
       When call adapter_jq '.alias_lookup' apply_constraint lodash '>=4.17.25 <5' express koa
       The status should be success
       The output should equal '{"source":"unsupported","parents_unresolved":["express","koa"]}'
+    End
+
+    # ...and where a declaration source does exist, an empty list is the normal
+    # answer, so the warning is about the parents named rather than about the
+    # ecosystem.
+    It 'resolves every parent where a declaration source exists'
+      use_fixture npm-alias
+      When call adapter_jq '.alias_lookup' apply_constraint lodash '>=4.18.2 <5' alias-parent
+      The status should be success
+      The output should equal '{"source":"lockfile","parents_unresolved":[]}'
+    End
+
+    definition() { grep -c "$1" "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"; }
+
+    It 'has a definition that treats source unsupported as a known limit, not a warning'
+      When call definition 'source: "unsupported"` (pnpm)'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'has a definition that keeps the warning for a lockfile-backed source'
+      When call definition 'source: "lockfile"` (npm, Yarn Berry) with a non-empty'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Berry, through the peer-declared parent the reader could not see until
+    # issue #49: `why` names it, and the scoped entry lands under it.
+    It 'scopes to a Yarn Berry parent that declares the package as a peer'
+      use_fixture yarn-berry-peer-parent
+      When call adapter_jq '.written' apply_constraint 'sha.js' '>=2.4.12 <3' serve-static
+      The status should be success
+      The output should equal '[{"parent":"serve-static","path":["resolutions","serve-static/sha.js"],"value":">=2.4.12 <3"}]'
+    End
+
+    # A real package whose name is another entry's install key. The read path
+    # merges the two toward `inconclusive`, which is fail-safe; the WRITE path
+    # is not — retargeting the colliding declaration produces
+    # `npm:underscore@^4.17.21`, a version of underscore that does not exist,
+    # while the lodash copy the caller meant goes unmoved. Pre-existing and not
+    # fixable in the adapter (neither sense of the name is knowable here), so
+    # `written[]` has to surface it and the definition has to stop on it
+    # (issue #49).
+    It 'writes an npm: value naming a different package when the name collides'
+      use_fixture npm-dual-name
+      When call adapter_jq '[.written[] | select(.value | startswith("npm:")) | .value]' \
+        apply_constraint lodash '>=4.17.21 <5'
+      The status should be success
+      The output should equal '["npm:underscore@^4.17.21"]'
+    End
+
+    It 'has a definition that rejects such a value rather than opening a PR on it'
+      When call definition 'value that names a different package, and fail the run'
+      The status should be success
+      The output should equal '1'
     End
 
     # The root is a dependent like any other, and it declares both copies here.

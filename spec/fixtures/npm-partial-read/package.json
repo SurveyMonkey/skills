@@ -1,0 +1,11 @@
+{
+  "name": "demo-npm-partial",
+  "dependencies": {
+    "express": "^4.18.2",
+    "victim": "^1.2.3"
+  },
+  "overrides": {
+    "express": { "sha.js": ">=2.4.11 <3" }
+  },
+  "scripts": { "test": "jest" }
+}
