@@ -1,8 +1,13 @@
+---
+type: ADR
+description: Fix agents work in per-major-line worktrees under .claude/worktrees inside the target repo, with a per-machine concurrency cap enforced as a wave barrier.
+status: stable
+created: 2026-08-20
+owner: brianespinosa
+related_issues: [5]
+---
+
 # ADR 003: Worktree isolation and the concurrency cap
-
-## Status
-
-Accepted
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Landed in Phase 2
 ([#5](https://github.com/SurveyMonkey/skills/issues/5)).

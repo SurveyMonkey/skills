@@ -1,8 +1,10 @@
 ---
-status: accepted
+type: RFC
+description: Converts gh-security from a single-shot fix command into an orchestrated multi-agent workflow with scripted deterministic work, worktree-isolated fix subagents, and per-PR merge-risk ratings.
+status: stable
 created: 2026-07-26
 owner: brianespinosa
-related_issues: [4, 5, 6, 7, 8, 9]
+related_milestones: [1]
 related_adrs: [1, 2, 3, 4]
 ---
 
@@ -306,7 +308,7 @@ To be spawned as this RFC executes:
 - ~~ADR: model tiering for subagents (and the Haiku re-evaluation criteria).~~ Landed as [ADR 004](../adr/004-subagent-model-tiering.md) (Phase 2).
 - ~~ADR: worktree isolation strategy and concurrency cap.~~ Landed as [ADR 003](../adr/003-worktree-isolation-and-concurrency-cap.md) (Phase 2).
 - ADR: merge-risk rubric weights and bands, once calibrated against real PRs.
-- Issues: one per rollout phase, [#4](https://github.com/SurveyMonkey/skills/issues/4) through [#9](https://github.com/SurveyMonkey/skills/issues/9), linked in `related_issues` and on each phase above.
+- Issues: one per rollout phase, [#4](https://github.com/SurveyMonkey/skills/issues/4) through [#9](https://github.com/SurveyMonkey/skills/issues/9), grouped under [milestone 1](https://github.com/SurveyMonkey/skills/milestone/1) (linked in `related_milestones`) and on each phase above.
 - Skill/rule graduation: the constraint rules (major-bounded ranges, parent scoping where the ecosystem supports it) are already durable guidance; they move from command prose into the adapters' `apply_constraint` and the subagent prompt rather than a separate rule.
 
 ## Related
@@ -314,5 +316,5 @@ To be spawned as this RFC executes:
 - Current implementation: `plugins/gh-security/commands/fix-alert.md`, `plugins/gh-security/scripts/`
 - [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
 - [ADR 002: PR draft state and the approval flow](../adr/002-pr-draft-state-and-approval-flow.md)
-- RFC process rule: `.claude/rules/path-docs-rfc.md` (adopted from `sm-incubator/beta-recognition`)
+- RFC process rule: `.claude/rules/path-docs-rfc.md`
 - GitHub REST: [Dependabot alerts endpoints](https://docs.github.com/en/rest/dependabot/alerts)
