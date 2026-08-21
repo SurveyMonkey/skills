@@ -547,19 +547,31 @@ Refs: https://github.com/<nwo>/security/dependabot/<number>
 Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the draft PR. The `gh`
 calls below are location-independent because every one of them carries `--repo`, so they take no
 `cd` prefix. Collect **all** required labels from every source and apply them together, each via
-its own `--label` flag. This flow always requires `Security`. Check every CLAUDE.md in your
-context for additional required labels. No source overrides another; labels are additive.
+its own `--label` flag. This flow always requires `security` (lowercase, matching Dependabot's own
+`dependencies`/`javascript`/etc. labels, verified across `vercel/next.js`, `microsoft/vscode`,
+`nodejs/node`, and `prettier/prettier`, all lowercase). Check every CLAUDE.md in your context for
+additional required labels. No source overrides another; labels are additive.
 
 `gh pr create` fails outright if a label does not exist in the repository, so check first and
 create any that are missing rather than dropping them:
 
 ```bash
 gh label list --repo <nwo> --json name --jq '.[].name'
-gh label create Security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
+gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
 ```
 
+Label names are case-insensitive for uniqueness but case-preserving, so a repo where this flow
+already ran under the old capitalized convention holds a literal `Security` label. Verified on
+`gh` 2.98.0 against a live repo carrying that label: `gh label create security` reports it as an
+already-existing duplicate (caught by `|| true` above, so the pre-existing `Security` label is left
+untouched, never renamed), and `gh issue create --label security` (the same label-resolution path
+`gh pr create` uses) resolved it to the existing `Security` label rather than erroring, with the
+issue coming back tagged `Security` (original casing preserved). So passing lowercase `security`
+below is safe whether the repository's label is already `security` or still the older `Security`;
+no name lookup or casing fallback is needed.
+
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --draft --label Security [--label ...] \
+gh pr create --repo <nwo> --head <branch_name> --draft --label security [--label ...] \
   --title "..." --body "..."
 ```
 
