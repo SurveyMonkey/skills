@@ -364,7 +364,15 @@ group_repo_alerts() {
     versions=$(printf '%s' "$group" | jq -r '.fixed_versions[]')
     ecosystem=$(printf '%s' "$group" | jq -r '.ecosystem // "unknown"')
     if [ -n "$versions" ]; then
-      highest=$(printf '%s\n' "$versions" | highest_version "$ecosystem")
+      # The failure check is explicit, never left to `set -e`: this whole
+      # function runs inside `res=$(group_repo_alerts ...) || exit 1` at its
+      # call sites, and bash suppresses errexit throughout the left side of
+      # `||`, so a compare_versions failure inside highest_version was
+      # swallowed and discovery reported success under the bash the shebang
+      # actually invokes. The suite only saw the correct refusal because
+      # /bin/sh (POSIX mode) propagates the failure where bash does not
+      # (issue #58); CI's bash leg is what caught it.
+      highest=$(printf '%s\n' "$versions" | highest_version "$ecosystem") || exit 1
       [ -n "$highest" ] || highest="none"
     else
       highest="none"

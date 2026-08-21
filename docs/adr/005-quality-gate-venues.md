@@ -35,8 +35,9 @@ Three facts, verified while deciding rather than assumed, constrain the venues:
 2. **The bash 3.2 parse gate skips on Linux.** `spec/bash32_parse_spec.sh` can only run where
    `/bin/bash` is 3.x, which no ubuntu runner provides, and a skip is green.
 3. **Local and CI disagree by default.** `.shellspec` sets `--shell sh`, which is bash 3.2.57 on
-   macOS and dash on ubuntu; ubuntu-latest preinstalls ShellCheck 0.9.0 against 0.11.0 locally;
-   the Claude CLI self-updates.
+   macOS and dash on ubuntu, and dash cannot run the bash-shebanged scripts at all (proven by the
+   first run: `set -o pipefail` is not a dash option, issue #57); ubuntu-latest preinstalls
+   ShellCheck 0.9.0 against 0.11.0 locally; the Claude CLI self-updates.
 
 ## Decision
 
@@ -57,10 +58,11 @@ silent skip.
 **CI enforces all three**, in `.github/workflows/gates.yml`, because hooks can be uninstalled,
 skipped, or absent on a fresh clone. Jobs `lint`, `validate`, and `spec` give per-gate failure
 attribution; an aggregate `gates` job exists to become the single required status check once a
-record of real runs exists. The spec job is a **matrix of ubuntu and macOS**: ubuntu contributes
-the dash run of the suite, macOS is the only runner that can execute the bash 3.2 parse gate, and
-its leg sets `REQUIRE_BASH32=1` so that gate failing to run fails the job rather than skipping
-green (facts 2 and 3).
+record of real runs exists. The spec job is a **matrix of ubuntu and macOS**: ubuntu runs the
+suite under modern bash 5.x (`CHECK_SPEC_SHELL=bash`, because dash was never a supported target,
+per fact 3), macOS is the only runner that can execute the bash 3.2 parse gate, and its leg sets
+`REQUIRE_BASH32=1` so that gate failing to run fails the job rather than skipping green (facts 2
+and 3).
 
 **Tool versions are pinned in CI and asserted after install**, to the versions the hooks run
 locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,

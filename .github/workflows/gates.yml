@@ -98,10 +98,14 @@ jobs:
       # so there spec/bash32_parse_spec.sh must run rather than skip; a skip
       # is green, and the parse gate silently not running is exactly the
       # failure mode this flag exists to refuse. ubuntu has no /bin/bash 3.x
-      # and legitimately skips it, but contributes the dash coverage instead:
-      # .shellspec runs examples under --shell sh, which is bash 3.2 on macOS
-      # and dash on ubuntu.
+      # and legitimately skips it, contributing modern-bash (5.x) coverage
+      # instead: .shellspec says --shell sh, which is bash 3.2 on macOS but
+      # dash on ubuntu, and dash cannot run the bash-shebanged scripts at all
+      # (the first run proved it: set -o pipefail is not a dash option, issue
+      # #57), so the ubuntu leg overrides the shell rather than testing a
+      # target that never existed.
       REQUIRE_BASH32: ${{ matrix.os == 'macos-latest' && '1' || '' }}
+      CHECK_SPEC_SHELL: ${{ matrix.os == 'ubuntu-latest' && 'bash' || 'sh' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

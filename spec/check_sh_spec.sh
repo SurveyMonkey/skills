@@ -161,6 +161,25 @@ Describe 'scripts/check.sh'
       The output should include '586 examples'
     End
 
+    It 'passes CHECK_SPEC_SHELL through as --shell'
+      # The SHELLSPEC_SHELL env var is silently ignored when .shellspec sets
+      # --shell, so the override travels as a CLI flag; a shell override
+      # that silently does not apply is how CI ends up testing the wrong
+      # shell while green (issue #57).
+      cat > bin/shellspec <<'STUB'
+#!/bin/sh
+echo "argv: $*"
+cat summary.txt
+exit 0
+STUB
+      printf '5 examples, 0 failures\n' > summary.txt
+      CHECK_SPEC_SHELL=bash
+      export CHECK_SPEC_SHELL
+      When run "$CHECK" spec
+      The status should be success
+      The output should include 'argv: --shell bash'
+    End
+
     It 'reads the summary through ANSI color codes'
       # --color via .shellspec-local prefixes the summary line with escape
       # sequences; the floor must still find the count rather than refusing

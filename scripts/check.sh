@@ -107,11 +107,23 @@ cmd_spec() {
   # an unset $report would trip set -u.
   report=$(mktemp) || die 'mktemp failed'
   trap 'rm -f "$report"' EXIT
+  # CHECK_SPEC_SHELL routes to --shell on the CLI, which overrides .shellspec
+  # and refuses an unknown shell. It exists because the SHELLSPEC_SHELL env
+  # var is silently ignored when a config file sets --shell (verified), and a
+  # shell override that silently does not apply is a misconfiguration this
+  # repo refuses on principle. CI's ubuntu leg uses it: dash cannot run the
+  # bash-shebanged scripts (issue #57).
+  local args=()
   if [ -n "${SHELLSPEC_JOBS:-}" ]; then
-    shellspec --jobs "$SHELLSPEC_JOBS" 2>&1 | tee "$report"
-  else
-    shellspec 2>&1 | tee "$report"
+    args[${#args[@]}]=--jobs
+    args[${#args[@]}]=$SHELLSPEC_JOBS
   fi
+  if [ -n "${CHECK_SPEC_SHELL:-}" ]; then
+    args[${#args[@]}]=--shell
+    args[${#args[@]}]=$CHECK_SPEC_SHELL
+  fi
+  # ${args[@]+...}: bash 3.2's set -u rejects expanding an empty array.
+  shellspec ${args[@]+"${args[@]}"} 2>&1 | tee "$report"
   # shellspec exits 0 having run zero examples, and a skipped example is
   # green too, so a green exit alone would pass a suite that never ran or
   # one whose Skip-if predicates quietly inverted and skipped everything

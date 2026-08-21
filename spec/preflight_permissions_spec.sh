@@ -60,9 +60,17 @@ Describe 'preflight-permissions.sh'
   # neither needs one of its own. Asserted rather than assumed, because those
   # shapes changed (issue #46) and prescribed shapes and this catalog move
   # together.
+  #
+  # The filter is scoped to $REPO's own worktree path. A bare test on
+  # "worktrees/" also matched the catalog's plugin-scripts rule whenever the
+  # checkout being tested FROM lives inside a linked worktree, so the example
+  # passed on such machines and failed on any clean checkout, CI included
+  # (issue #57). The repo-scoped form counts the same three rules everywhere:
+  # mkdir, git -C, and cd.
   It 'covers the pin audit restore under the worktree rule alone'
     make_repo
-    When call common_jq preflight-permissions.sh '{worktree: ([.missing[] | select(test("worktrees/"))] | length), dedicated: ([.missing[] | select(test("checkout|diff "))] | length)}' check "$REPO"
+    export REPO
+    When call common_jq preflight-permissions.sh '{worktree: ([.missing[] | select(contains(env.REPO + "/.claude/worktrees"))] | length), dedicated: ([.missing[] | select(test("checkout|diff "))] | length)}' check "$REPO"
     The status should be success
     The output should equal '{"worktree":3,"dedicated":0}'
   End
