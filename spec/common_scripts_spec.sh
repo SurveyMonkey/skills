@@ -171,6 +171,39 @@ Describe 'select-adapter.sh'
       The status should not equal 0
       The stderr should be present
     End
+
+    # Valid JSON of the wrong *shape* passes the `jq empty` guard and then
+    # fails inside the annotation pipeline. Unwrapped, that left raw jq noise
+    # on stderr and jq's own exit status where the adapter contract requires a
+    # non-zero exit carrying `{"error": "..."}` (issue #39). This script
+    # consumes discover-alerts.sh's stdout directly, so a regression in the
+    # producer has to surface as a structured error, not unparseable noise.
+    malformed_shape() {
+      printf '%s' '{"actionable":"oops","skipped":[]}' \
+        | "$COMMON/select-adapter.sh" --from-discovery
+    }
+
+    It 'reports well-formed JSON of the wrong shape through the error contract'
+      When call malformed_shape
+      The status should not equal 0
+      The stdout should equal ''
+      The stderr should include '"error":"Failed to annotate discovery JSON'
+    End
+
+    # discover-alerts.sh --scope org|user emits a top-level `skipped_repos`
+    # array alongside actionable/skipped (issue #6). The batch-mode pipeline
+    # rebuilds the output object, so a key it does not know about must still
+    # survive the round trip rather than being silently dropped.
+    discovery_with_skipped_repos() {
+      printf '%s' '{"actionable":[{"package":"lodash","ecosystem":"npm"}],"skipped":[],"skipped_repos":[{"repo":"octo/readonly","reason":"no push access"}]}'
+    }
+    annotate_with_skipped_repos() { discovery_with_skipped_repos | "$COMMON/select-adapter.sh" --from-discovery | jq -c "$1"; }
+
+    It 'passes skipped_repos through unchanged'
+      When call annotate_with_skipped_repos '.skipped_repos'
+      The status should be success
+      The output should equal '[{"repo":"octo/readonly","reason":"no push access"}]'
+    End
   End
 End
 

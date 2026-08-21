@@ -14,7 +14,7 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 | Plugin | Namespace | Description |
 |---|---|---|
-| `gh-security` | `/gh-security:*` | Resolve Dependabot alerts in parallel: one subagent per package major line in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow |
+| `gh-security` | `/gh-security:*` | Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow |
 
 Two entry points: ask Claude to fix the repo's security alerts (the `resolve-alerts` skill
 triggers from natural language) or run `/gh-security:resolve-alerts` explicitly.

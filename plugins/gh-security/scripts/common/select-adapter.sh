@@ -83,7 +83,17 @@ if [ "$FROM_DISCOVERY" = true ]; then
   # Annotate in place. Groups whose ecosystem has no adapter move to `skipped`
   # with the same shape the discovery script already uses, so a caller handles
   # "no adapter" and "no fix available" through one code path.
-  printf '%s' "$input" | jq --arg dir "$ECOSYSTEMS_DIR" '
+  #
+  # Wrapped, because valid JSON of the wrong *shape* (`"actionable":"oops"`)
+  # fails inside jq, and unwrapped that leaves raw jq noise on stderr and jq's
+  # own exit status where the adapter contract requires a non-zero exit
+  # carrying `{"error": "..."}` (issue #39). This script consumes
+  # discover-alerts.sh's stdout directly, so a regression in the producer must
+  # surface here as a structured error a caller can act on.
+  ERR_FILE=$(mktemp)
+  trap 'rm -f "$ERR_FILE"' EXIT
+
+  annotated=$(printf '%s' "$input" | jq --arg dir "$ECOSYSTEMS_DIR" '
     def adapter_of:
       if . == "npm" then "node" else null end;
 
@@ -105,7 +115,15 @@ if [ "$FROM_DISCOVERY" = true ]; then
                  | . + {reason: "ecosystem not supported yet"}
         ])
       }
-    '
+    # Pass through any other top-level keys discovery emitted (e.g.
+    # `skipped_repos` at org/user scope) unchanged, rather than dropping them.
+    | . as $out
+    | ($input | del(.actionable, .skipped)) + $out
+    ' 2>"$ERR_FILE") || {
+    printf '{"error":"Failed to annotate discovery JSON: %s"}\n' "$(cat "$ERR_FILE")" >&2
+    exit 1
+  }
+  printf '%s\n' "$annotated"
   exit 0
 fi
 
