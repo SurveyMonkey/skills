@@ -1,0 +1,41 @@
+#!/bin/sh
+# Fast gates only: ShellCheck and claude plugin validate, ~2s together.
+# The shellspec suite runs in the pre-push hook and in CI, not here: a 39s+
+# per-commit hook trains people to --no-verify.
+#
+# Enable once per clone (the relative path is deliberate; it makes the hooks
+# fire from linked worktrees too):
+#
+#   git config core.hooksPath .githooks
+#
+# Bypass for one commit with git commit --no-verify. CI enforces regardless.
+
+# Scope check: a commit touching nothing the gates read skips them entirely,
+# so a docs-only commit stays instant. This is "nothing staged in scope",
+# a legitimate skip, distinct from a gate's own target discovery resolving
+# to nothing, which scripts/check.sh treats as a hard failure, never a pass.
+# Do not "simplify" one into the other.
+if ! git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E -q '\.sh$|^\.githooks/|^scripts/|^plugins/|^\.claude-plugin/|^spec/|^\.shellspec$'; then
+  exit 0
+fi
+
+warn_missing() {
+  printf '\n!! pre-commit: %s is not installed, so the %s gate did not run here.\n' "$1" "$2" >&2
+  printf '!! CI enforces it on the pull request. Install locally with:\n!!   %s\n\n' "$3" >&2
+}
+
+if command -v shellcheck >/dev/null 2>&1; then
+  ./scripts/check.sh lint </dev/null || exit 1
+else
+  warn_missing shellcheck lint 'brew install shellcheck'
+fi
+
+if command -v claude >/dev/null 2>&1; then
+  ./scripts/check.sh validate </dev/null || exit 1
+else
+  warn_missing 'claude (the Claude Code CLI)' validate \
+    'curl -fsSL https://claude.ai/install.sh | bash'
+fi
+
+exit 0

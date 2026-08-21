@@ -29,7 +29,10 @@ Describe 'the shipped scripts parse under bash 3.2'
   Skip if 'no bash 3.x at /bin/bash' no_bash32
 
   parse_all() {
-    for _f in "$SCRIPTS"/ecosystems/*.sh "$SCRIPTS"/common/*.sh; do
+    # scripts/check.sh targets 3.2 too: the pre-commit hook runs it on stock
+    # macOS.
+    for _f in "$SCRIPTS"/ecosystems/*.sh "$SCRIPTS"/common/*.sh \
+        "$SHELLSPEC_PROJECT_ROOT"/scripts/*.sh; do
       /bin/bash -n "$_f" || return 1
     done
   }
@@ -38,5 +41,19 @@ Describe 'the shipped scripts parse under bash 3.2'
     When call parse_all
     The status should be success
     The stderr should equal ''
+  End
+End
+
+# CI's macOS leg sets REQUIRE_BASH32=1: that platform is supposed to supply
+# bash 3.2, so its absence there must fail rather than skip. The Skip above is
+# green, and without this example the parse gate could quietly stop running on
+# the one runner that exists to run it while the job stays green
+# (.github/workflows/gates.yml).
+Describe 'the platform expected to supply bash 3.2'
+  Skip if 'REQUIRE_BASH32 not set' [ "${REQUIRE_BASH32:-}" != 1 ]
+
+  It 'actually has it at /bin/bash'
+    When call /bin/bash --version
+    The line 1 of output should include 'version 3.2'
   End
 End

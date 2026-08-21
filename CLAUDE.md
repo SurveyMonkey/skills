@@ -34,6 +34,15 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
+All three quality gates (suite, ShellCheck, `claude plugin validate --strict`) run through one
+entry point, `scripts/check.sh` (`lint` / `validate` / `spec` / `fast` / `all`); target lists
+live there and nowhere else, and empty discovery is a hard failure in every gate. Committed git
+hooks run the fast gates on commit and the suite on push, enabled once per clone with
+`git config core.hooksPath .githooks`; CI runs all three (`.github/workflows/gates.yml`).
+Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
+scripts, `scripts/check.sh` may assume `git`, `shellcheck`, and `shellspec`, but still targets
+bash 3.2 because the hooks run it on stock macOS.
+
 - **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
   private repo into this one, which is public: internal package names, registry URLs, and the
   shape of an internal dependency graph all leak that way.
@@ -73,12 +82,11 @@ not a comment claiming they are excluded.
 Lint with [ShellCheck](https://www.shellcheck.net) (`brew install shellcheck`):
 
 ```bash
-shellcheck plugins/gh-security/scripts/common/*.sh \
-           plugins/gh-security/scripts/ecosystems/*.sh \
-           spec/spec_helper.sh spec/*_spec.sh
+./scripts/check.sh lint
 ```
 
-Both must stay clean.
+It covers every tracked shell file, `scripts/check.sh` and the `.githooks/` included. Both suite
+and lint must stay clean.
 
 ### Suppression is a last resort
 
