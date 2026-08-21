@@ -1,8 +1,10 @@
 #!/bin/sh
 # shellcheck shell=sh
-# scripts/common/mark-ready.sh: PR inspection (status) and promotion (promote).
+# scripts/common/pr-state.sh: PR inspection (status), the repository auto-merge
+# probe (automerge), and rebasing behind PRs (rebase). No promotion verb: fix
+# PRs open ready for review (ADR 006).
 
-Describe 'mark-ready.sh'
+Describe 'pr-state.sh'
   URL12='https://github.com/octo/app/pull/12'
   URL34='https://github.com/octo/app/pull/34'
 
@@ -58,27 +60,34 @@ Describe 'mark-ready.sh'
   End
 
   # Build a `gh pr view` payload. Args: rollup-json, autoMergeRequest-json,
-  # mergeStateStatus (defaults to BLOCKED, the ordinary draft state).
+  # mergeStateStatus (defaults to BLOCKED, an ordinary open PR awaiting
+  # required checks). Fix PRs open ready, so isDraft is false.
   stub_view() {
     _num=$1
     jq -nc --arg num "$_num" --argjson roll "$2" --argjson amr "$3" \
       --arg ms "${4:-BLOCKED}" '{
-      number: ($num | tonumber), state: "OPEN", isDraft: true,
+      number: ($num | tonumber), state: "OPEN", isDraft: false,
       headRefName: "fix/dependabot-lodash", baseRefName: "main",
       mergeStateStatus: $ms, statusCheckRollup: $roll, autoMergeRequest: $amr
     }' > "$MOCK_DIR/view-$_num.json"
   }
 
   stub_update() { { printf '%s\n' "$2"; printf '%s' "$3"; } > "$MOCK_DIR/update-$1"; }
-  stub_ready()  { { printf '%s\n' "$2"; printf '%s' "$3"; } > "$MOCK_DIR/ready-$1"; }
 
   # Reads the mock's call log after the subject ran.
-  promoted_only_34() {
-    if grep -q '^ready 34$' "$MOCK_DIR/log" && ! grep -q '^ready 12$' "$MOCK_DIR/log"; then
+  rebased_only_34() {
+    if grep -q '^update-branch 34$' "$MOCK_DIR/log" \
+      && grep -q '^update-branch 12$' "$MOCK_DIR/log"; then
       echo ok
     else
       echo bad
     fi
+  }
+
+  # The promotion step is gone with ADR 006: nothing this script does may
+  # change a PR's draft state, whatever the rebase outcome.
+  never_marked_ready() {
+    if grep -q '^ready ' "$MOCK_DIR/log"; then echo bad; else echo ok; fi
   }
 
   rollup() {
@@ -110,7 +119,7 @@ Describe 'mark-ready.sh'
 
       It "derives checks=$2 from a $1 rollup"
         stub_view 12 "$(rollup "$1")" null
-        When call common_jq mark-ready.sh '.prs[0].checks' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0].checks' status "$URL12"
         The status should be success
         The output should equal "\"$2\""
       End
@@ -118,7 +127,7 @@ Describe 'mark-ready.sh'
 
     It 'counts checks and names the failing ones'
       stub_view 12 "$(rollup failure)" null
-      When call common_jq mark-ready.sh '{counts: .prs[0].check_counts, failing: .prs[0].failing_checks}' status "$URL12"
+      When call common_jq pr-state.sh '{counts: .prs[0].check_counts, failing: .prs[0].failing_checks}' status "$URL12"
       The status should be success
       The output should equal '{"counts":{"total":2,"passed":1,"failed":1,"pending":0},"failing":["lint"]}'
     End
@@ -135,7 +144,7 @@ Describe 'mark-ready.sh'
 
       It "maps $1 to behind=$2 conflict=$3"
         stub_view 12 "$(rollup success)" null "$1"
-        When call common_jq mark-ready.sh '.prs[0] | {merge_state, behind, conflict}' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0] | {merge_state, behind, conflict}' status "$URL12"
         The status should be success
         The output should equal '{"merge_state":"'"$1"'","behind":'"$2"',"conflict":'"$3"'}'
       End
@@ -148,7 +157,7 @@ Describe 'mark-ready.sh'
       It 'distinguishes armed from merely permitted'
         stub_view 12 "$(rollup success)" '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
         export MOCK_ALLOW=true
-        When call common_jq mark-ready.sh '.prs[0].auto_merge' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0].auto_merge' status "$URL12"
         The status should be success
         The output should equal '{"permitted":true,"armed":true,"enabled_by":"octocat","method":"SQUASH"}'
       End
@@ -156,7 +165,7 @@ Describe 'mark-ready.sh'
       It 'reports permitted-but-not-armed'
         stub_view 12 "$(rollup success)" null
         export MOCK_ALLOW=true
-        When call common_jq mark-ready.sh '.prs[0].auto_merge' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0].auto_merge' status "$URL12"
         The status should be success
         The output should equal '{"permitted":true,"armed":false,"enabled_by":null,"method":null}'
       End
@@ -164,7 +173,7 @@ Describe 'mark-ready.sh'
       It 'reports not permitted'
         stub_view 12 "$(rollup success)" null
         export MOCK_ALLOW=false
-        When call common_jq mark-ready.sh '.prs[0].auto_merge.permitted' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0].auto_merge.permitted' status "$URL12"
         The status should be success
         The output should equal 'false'
       End
@@ -172,7 +181,7 @@ Describe 'mark-ready.sh'
       It 'reports null when the setting is not visible to the token'
         stub_view 12 "$(rollup success)" null
         export MOCK_ALLOW=''
-        When call common_jq mark-ready.sh '.prs[0].auto_merge.permitted' status "$URL12"
+        When call common_jq pr-state.sh '.prs[0].auto_merge.permitted' status "$URL12"
         The status should be success
         The output should equal 'null'
       End
@@ -181,7 +190,7 @@ Describe 'mark-ready.sh'
         stub_view 12 "$(rollup success)" null
         stub_view 34 "$(rollup success)" null
         export MOCK_ALLOW=true
-        When call common_jq mark-ready.sh '.prs | length' status "$URL12" "$URL34"
+        When call common_jq pr-state.sh '.prs | length' status "$URL12" "$URL34"
         The status should be success
         The output should equal '2'
         The value "$(grep -c '^api ' "$MOCK_DIR/log")" should equal 1
@@ -189,7 +198,7 @@ Describe 'mark-ready.sh'
     End
 
     It 'rejects a non-PR URL with an error entry and a non-zero exit'
-      When call common_jq mark-ready.sh '.prs[0] | keys' status 'https://example.com/nope'
+      When call common_jq pr-state.sh '.prs[0] | keys' status 'https://example.com/nope'
       The status should equal 1
       The output should equal '["error","url"]'
     End
@@ -197,22 +206,72 @@ Describe 'mark-ready.sh'
     It 'reports a PR gh cannot view and still exits non-zero'
       # No view stub for 34: the mock's cat fails like a real gh error would.
       stub_view 12 "$(rollup success)" null
-      When call common_jq mark-ready.sh '[.prs[] | has("error")]' status "$URL12" "$URL34"
+      When call common_jq pr-state.sh '[.prs[] | has("error")]' status "$URL12" "$URL34"
       The status should equal 1
       The output should equal '[false,true]'
     End
   End
 
-  Describe 'promote'
-    It 'rebases then marks ready'
-      When call common_jq mark-ready.sh '.prs[0]' promote "$URL12"
+  Describe 'automerge'
+    # The repository setting is the only auto-merge fact that exists before a
+    # PR does, so it is what the pre-dispatch checkpoint (ADR 006) discloses.
+    # The first column is a label, not data: a Parameters row beginning with
+    # '' or a trailing slash reads to ShellCheck as a command invocation
+    # (SC2286/SC2287), and it is right that those look wrong at the start of
+    # a line.
+    Describe 'repository setting'
+      Parameters
+        allowed     true  true
+        disallowed  false false
+        invisible   ''    null
+      End
+
+      It "reports permitted=$3 when the API says '$2'"
+        export MOCK_ALLOW="$2"
+        When call common_jq pr-state.sh '.repos[0]' automerge octo/app
+        The status should be success
+        The output should equal '{"repo":"octo/app","permitted":'"$3"'}'
+      End
+    End
+
+    It 'memoizes the lookup per repo across repeated arguments'
+      export MOCK_ALLOW=true
+      When call common_jq pr-state.sh '[.repos[].permitted]' automerge octo/app octo/app
       The status should be success
-      The output should equal '{"url":"'"$URL12"'","status":"rebased","ready":true,"stage":null,"detail":null}'
-      The value "$(grep -c '^ready ' "$MOCK_DIR/log")" should equal 1
+      The output should equal '[true,true]'
+      The value "$(grep -c '^api ' "$MOCK_DIR/log")" should equal 1
+    End
+
+    # A PR URL here would otherwise reach `gh api repos/https://...` and come
+    # back as a repo whose setting is invisible: null reads as "cannot tell"
+    # when the truth is "you asked the wrong question".
+    Describe 'rejects anything that is not OWNER/REPO'
+      Parameters
+        pr-url       "$URL12"
+        no-slash     octo
+        two-slashes  octo/app/extra
+        empty-owner  /app
+        empty-repo   octo/
+      End
+
+      It "rejects the $1 form with an error entry and a non-zero exit"
+        When call common_jq pr-state.sh '.repos[0] | keys' automerge "$2"
+        The status should equal 1
+        The output should equal '["error","repo"]'
+      End
+    End
+  End
+
+  Describe 'rebase'
+    It 'rebases and reports, without touching draft state'
+      When call common_jq pr-state.sh '.prs[0]' rebase "$URL12"
+      The status should be success
+      The output should equal '{"url":"'"$URL12"'","status":"rebased","stage":null,"detail":null}'
+      The value "$(never_marked_ready)" should equal ok
     End
 
     # gh's phrasing for "nothing to do" varies by version; every variant is
-    # success and still proceeds to mark ready.
+    # success.
     Describe 'already up to date is success'
       Parameters
         0 'Branch is already up-to-date'
@@ -222,48 +281,35 @@ Describe 'mark-ready.sh'
 
       It "treats rc=$1 \"$2\" as already-current"
         stub_update 12 "$1" "$2"
-        When call common_jq mark-ready.sh '.prs[0] | {status, ready}' promote "$URL12"
+        When call common_jq pr-state.sh '.prs[0].status' rebase "$URL12"
         The status should be success
-        The output should equal '{"status":"already-current","ready":true}'
+        The output should equal '"already-current"'
+        The value "$(never_marked_ready)" should equal ok
       End
     End
 
-    It 'reports a conflict and never calls gh pr ready'
+    It 'reports a conflict without resolving it'
       stub_update 12 1 'GraphQL: merge conflict between base and head'
-      When call common_jq mark-ready.sh '.prs[0] | {status, ready, stage}' promote "$URL12"
+      When call common_jq pr-state.sh '.prs[0] | {status, stage}' rebase "$URL12"
       The status should equal 1
-      The output should equal '{"status":"conflict","ready":false,"stage":"rebase"}'
-      The value "$(grep -c '^ready ' "$MOCK_DIR/log" || true)" should equal 0
+      The output should equal '{"status":"conflict","stage":"rebase"}'
+      The value "$(never_marked_ready)" should equal ok
     End
 
     It 'reports an unrecognized rebase failure as an error'
       stub_update 12 1 'HTTP 500: something broke'
-      When call common_jq mark-ready.sh '.prs[0] | {status, stage, detail}' promote "$URL12"
+      When call common_jq pr-state.sh '.prs[0] | {status, stage, detail}' rebase "$URL12"
       The status should equal 1
       The output should equal '{"status":"error","stage":"rebase","detail":"HTTP 500: something broke"}'
-      The value "$(grep -c '^ready ' "$MOCK_DIR/log" || true)" should equal 0
-    End
-
-    It 'reports a failure at the ready stage'
-      stub_ready 12 1 'HTTP 403: forbidden'
-      When call common_jq mark-ready.sh '.prs[0] | {status, ready, stage}' promote "$URL12"
-      The status should equal 1
-      The output should equal '{"status":"error","ready":false,"stage":"ready"}'
-    End
-
-    It 'treats an already-ready PR as promoted'
-      stub_ready 12 1 'Pull request #12 is not a draft'
-      When call common_jq mark-ready.sh '.prs[0] | {status, ready}' promote "$URL12"
-      The status should be success
-      The output should equal '{"status":"rebased","ready":true}'
+      The value "$(never_marked_ready)" should equal ok
     End
 
     It 'keeps going after a conflict and reports every PR in order'
       stub_update 12 1 'merge conflict between base and head'
-      When call common_jq mark-ready.sh '[.prs[] | {url, status, ready}]' promote "$URL12" "$URL34"
+      When call common_jq pr-state.sh '[.prs[] | {url, status}]' rebase "$URL12" "$URL34"
       The status should equal 1
-      The output should equal '[{"url":"'"$URL12"'","status":"conflict","ready":false},{"url":"'"$URL34"'","status":"rebased","ready":true}]'
-      The value "$(promoted_only_34)" should equal ok
+      The output should equal '[{"url":"'"$URL12"'","status":"conflict"},{"url":"'"$URL34"'","status":"rebased"}]'
+      The value "$(rebased_only_34)" should equal ok
     End
   End
 End

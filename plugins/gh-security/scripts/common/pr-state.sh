@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# mark-ready.sh — inspect and promote draft fix PRs
+# pr-state.sh — inspect fix PRs, probe a repo's auto-merge setting, and
+# rebase PRs that have fallen behind
 #
 # Usage:
-#   mark-ready.sh status  <pr-url>...   # read-only: checks, auto-merge, behind
-#   mark-ready.sh promote <pr-url>...   # rebase, then mark ready
+#   pr-state.sh status    <pr-url>...   # read-only: checks, auto-merge, behind
+#   pr-state.sh automerge <nwo>...      # read-only: repo auto-merge setting
+#   pr-state.sh rebase    <pr-url>...   # rebase behind PRs; never merges
 #
-# Output: {"prs": [...]} — one entry per URL, in argument order.
+# Output: {"prs": [...]} for status and rebase, {"repos": [...]} for
+# automerge — one entry per argument, in argument order.
 #
-# The two verbs deliberately split the read-only surface from the mutating
-# one: `status` only runs `gh pr view` / `gh api`, `promote` changes PRs.
-# Policy — which PRs to promote, per-PR versus batch confirmation, the
-# F4/F5 verification gate — belongs to the caller. This script does exactly
-# what it is told on exactly the URLs it is given.
+# The verbs deliberately split the read-only surface from the mutating one:
+# `status` and `automerge` only run `gh pr view` / `gh api`, `rebase` changes
+# PRs. Policy — which PRs to rebase, what to tell the user about an armed
+# auto-merge, the F4/F5 verification reporting — belongs to the caller. This
+# script does exactly what it is told on exactly the arguments it is given.
+#
+# There is no promote verb: fix PRs open ready for review (ADR 006), so
+# draft promotion is not a step in this system's flow. What survived the
+# reversal is the rebase, because two fix PRs in one repository edit the same
+# overrides block and the second falls behind the moment the first merges.
 #
 # status entry:
 #   { url, number, repo, state, is_draft, head, base, merge_state, behind,
@@ -21,41 +29,50 @@
 #   - `checks` is passed | failed | pending | none, derived from
 #     statusCheckRollup. The rollup mixes two node shapes — CheckRuns carry
 #     status/conclusion, legacy StatusContexts carry only state — and both
-#     must be read or draft-gated repos misclassify. An empty rollup is
-#     "none", never "passed": no CI, or CI gated off drafts, is a fact to
-#     surface, not a green light (ADR 002 prescribes observing, not
-#     assuming).
+#     must be read or a repo whose CI is gated misclassifies. An empty rollup
+#     is "none", never "passed": no CI, or CI that has not spawned yet, is a
+#     fact to surface, not a green light (ADR 006 keeps ADR 002's rule of
+#     observing rather than assuming).
 #   - `merge_state` passes the raw mergeStateStatus through because UNKNOWN
 #     is a real transient right after a push; the caller must not read it as
 #     clean or behind.
-#   - `auto_merge.armed` means auto-merge is enabled on this PR: promoting
-#     it merges it once checks pass. `permitted` is the repository setting;
-#     null when the token cannot see it.
+#   - `auto_merge.armed` means auto-merge is enabled on this PR: it merges
+#     itself once checks pass, with or without anyone reading the diff.
+#     `permitted` is the repository setting; null when the token cannot see
+#     it.
 #
-# promote entry:
-#   { url, status: rebased | already-current | conflict | error, ready,
-#     stage, detail }
+# automerge entry:
+#   { repo, permitted }
 #
-#   Strictly ordered per PR: rebase first, `gh pr ready` only after a
-#   successful rebase, so reviewers are notified once, on final content.
+#   The repository setting alone, answerable before any PR exists. It is the
+#   pre-dispatch half of the auto-merge disclosure ADR 006 requires: a PR
+#   cannot be armed before it is created, so the only auto-merge fact
+#   available at the checkpoint is whether the repository permits it at all.
+#   `permitted` is null when the token cannot see the setting.
+#
+# rebase entry:
+#   { url, status: rebased | already-current | conflict | error, stage,
+#     detail }
+#
+#   Rebase only. This verb never marks a PR ready and never merges one.
 #   "Already up to date" (any phrasing) is success. Conflicts are reported,
 #   never resolved: a conflicted overrides block is judgment, which a script
 #   refuses to guess at.
 #
-# Exit: status exits 1 if any PR could not be viewed; promote exits 1 if any
-# PR ended in conflict or error. The full report is emitted either way, like
-# the adapter's validate: report and fail.
+# Exit: status and automerge exit 1 if any argument could not be read; rebase
+# exits 1 if any PR ended in conflict or error. The full report is emitted
+# either way, like the adapter's validate: report and fail.
 
 set -euo pipefail
 
 usage() {
-  printf '{"error":"Usage: mark-ready.sh status|promote <pr-url>..."}\n' >&2
+  printf '{"error":"Usage: pr-state.sh status|rebase <pr-url>... | automerge <nwo>..."}\n' >&2
   exit 1
 }
 
 VERB="${1:-}"
 case "$VERB" in
-  status|promote) shift ;;
+  status|automerge|rebase) shift ;;
   *) usage ;;
 esac
 [ "$#" -ge 1 ] || usage
@@ -187,16 +204,53 @@ run_status() {
 }
 
 # ---------------------------------------------------------------------------
-# promote
+# automerge
 # ---------------------------------------------------------------------------
 
-run_promote() {
+run_automerge() {
   entries=""
-  all_ready=true
+  failed=false
+
+  for repo in "$@"; do
+    # OWNER/REPO and nothing else: one slash, non-empty on both sides. A URL
+    # passed here would otherwise reach `gh api repos/<url>` and read as a
+    # repository whose setting is invisible, which is the wrong answer.
+    case "$repo" in
+      */*/* | /* | */)
+        valid=false ;;
+      */*)
+        valid=true ;;
+      *)
+        valid=false ;;
+    esac
+
+    if [ "$valid" = true ]; then
+      allow_auto_merge "$repo"
+      entry=$(jq -nc --arg repo "$repo" --argjson permitted "$ALLOW_VALUE" \
+        '{repo: $repo, permitted: $permitted}')
+    else
+      entry=$(jq -nc --arg repo "$repo" \
+        '{repo: $repo, error: "not an OWNER/REPO name"}')
+      failed=true
+    fi
+    entries="$entries$entry
+"
+  done
+
+  printf '%s' "$entries" | jq -s '{repos: .}'
+  [ "$failed" = false ]
+}
+
+# ---------------------------------------------------------------------------
+# rebase
+# ---------------------------------------------------------------------------
+
+run_rebase() {
+  entries=""
+  all_current=true
 
   for url in "$@"; do
     status=""
-    ready=false
     stage=""
     detail=""
 
@@ -222,30 +276,15 @@ run_promote() {
         ;;
     esac
 
-    if [ "$status" = "rebased" ] || [ "$status" = "already-current" ]; then
-      if rout=$(gh pr ready "$url" 2>&1); then
-        ready=true
-      else
-        rlower=$(printf '%s' "$rout" | tr '[:upper:]' '[:lower:]')
-        case "$rlower" in
-          *"not a draft"*)
-            # Already ready; promoting is idempotent.
-            ready=true ;;
-          *)
-            status="error"
-            stage="ready"
-            detail="$rout"
-            ;;
-        esac
-      fi
-    fi
-
-    [ "$ready" = true ] || all_ready=false
+    case "$status" in
+      rebased | already-current) ;;
+      *) all_current=false ;;
+    esac
 
     entry=$(jq -nc \
-      --arg url "$url" --arg status "$status" --argjson ready "$ready" \
+      --arg url "$url" --arg status "$status" \
       --arg stage "$stage" --arg detail "$detail" \
-      '{url: $url, status: $status, ready: $ready,
+      '{url: $url, status: $status,
         stage: (if $stage == "" then null else $stage end),
         detail: (if $detail == "" then null else $detail end)}')
     entries="$entries$entry
@@ -253,10 +292,11 @@ run_promote() {
   done
 
   printf '%s' "$entries" | jq -s '{prs: .}'
-  [ "$all_ready" = true ]
+  [ "$all_current" = true ]
 }
 
 case "$VERB" in
-  status)  run_status "$@" ;;
-  promote) run_promote "$@" ;;
+  status)    run_status "$@" ;;
+  automerge) run_automerge "$@" ;;
+  rebase)    run_rebase "$@" ;;
 esac

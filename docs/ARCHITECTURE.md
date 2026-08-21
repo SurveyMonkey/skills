@@ -50,9 +50,12 @@ pass**. Conventions and their reasoning live in
   ecosystem-specific, version comparison and range semantics included, stays behind
   `<adapter>.sh <verb>` calls that emit JSON on stdout and fail with `{"error": ...}`. Adding an
   ecosystem means adding an adapter, not touching `common/`.
-- **PR flow** ([ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix PRs open as drafts;
-  the orchestrator batch-promotes them once checks pass, confirming per PR where auto-merge is
-  armed.
+- **PR flow** ([ADR 006](adr/006-pr-ready-state-and-the-pre-dispatch-checkpoint.md), superseding
+  [ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix PRs open ready for review, so
+  reviewers and CODEOWNERS are notified at creation. The checkpoint sits ahead of `gh pr create`,
+  in the dispatch approval, which states that approving it opens the pull requests and confirms
+  per repo wherever auto-merge is permitted. Nothing in the system merges a PR or arms
+  auto-merge.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
   `.claude/worktrees/`, and waves are sized by a per-machine concurrency cap enforced as a

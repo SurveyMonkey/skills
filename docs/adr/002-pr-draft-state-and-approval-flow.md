@@ -1,13 +1,18 @@
 ---
 type: ADR
 description: Fix PRs open as drafts and the orchestrator batch-promotes them, with per-PR confirmation where auto-merge is armed.
-status: stable
+status: deprecated
 created: 2026-07-26
 owner: brianespinosa
 related_issues: [4, 5]
 ---
 
 # ADR 002: PR draft state and the approval flow
+
+**Superseded by [ADR 006](006-pr-ready-state-and-the-pre-dispatch-checkpoint.md)**, which opens fix
+PRs ready for review and moves the checkpoint ahead of `gh pr create`. The decision below is left
+as it stood, field data included: the Phase 2 addendum on armed auto-merge is what ADR 006 had to
+answer, and it is still the record of what happened.
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Supersedes the RFC's original decision that
 fix PRs open ready for review. Adopted in Phase 1

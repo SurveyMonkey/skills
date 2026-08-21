@@ -23,12 +23,12 @@ claude plugin install gh-security@SurveyMonkey/skills
 Resolves Dependabot security alerts for one repository, an entire org, or all of your own repos.
 Discovery ranks open alerts by severity and EPSS exploitability, you choose how much to fix (one
 package, the highest severity tier, or everything), and the orchestrator dispatches one subagent
-per package major line per repo, each working in an isolated git worktree through to a draft PR
-that carries a computed merge-risk rating.
+per package major line per repo, each working in an isolated git worktree through to a pull
+request, open for review, that carries a computed merge-risk rating.
 
 | Entry point | Kind | What it does |
 |---|---|---|
-| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents in parallel waves and batch-promotes the resulting draft PRs. |
+| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents in parallel waves, then reports each resulting PR's check state and risk signals. |
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
 | `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package. Report-only: changes nothing, opens no PR. |
 | `/gh-security:fix-alert` | Command (deprecated) | Shim that fixes only the single top-ranked alert group, then offers the next batch. Use `resolve-alerts` instead. |
@@ -38,7 +38,7 @@ directly:
 
 | Agent | Role |
 |---|---|
-| `fix-dependency` | Fixes every alert for one package major line in one repo, in an isolated worktree, through to a draft PR with a computed merge-risk rating. |
+| `fix-dependency` | Fixes every alert for one package major line in one repo, in an isolated worktree, through to a PR, open for review, with a computed merge-risk rating. |
 | `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution. Also rides along automatically in a spare slot when a fix batch does not fill the concurrency cap. |
 
 **Supported package managers, by advisory ecosystem:**
@@ -64,8 +64,10 @@ directly:
   rates Low.
 - **Lockfile validation that refuses to bluff.** A fix claims completion only when the lockfile
   proves the vulnerable ranges are gone, and a parser finding nothing is an error, never a pass.
-- **Draft PRs with check-aware promotion.** Fixes land as drafts; the orchestrator batch-promotes
-  them once checks pass, with per-PR confirmation where auto-merge is armed.
+- **PRs that open ready for review.** Fixes go up as ordinary pull requests, so reviewers and
+  CODEOWNERS are notified the moment one exists. The checkpoint sits before the PRs are created:
+  the dispatch approval says what it will open, and every repo that permits auto-merge is
+  confirmed on its own. Nothing here merges a PR or arms auto-merge.
 - **Report-only pin audit.** Finds overrides and resolutions that no longer protect anything,
   judged against the full advisory database (which the pin itself blinds repo alert history to),
   including collateral effects of removing each pin.

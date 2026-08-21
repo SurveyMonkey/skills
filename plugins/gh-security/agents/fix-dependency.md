@@ -2,7 +2,8 @@
 name: fix-dependency
 description: >
   Fix every Dependabot alert for a single package major line in an isolated git
-  worktree, through to a draft PR carrying a computed merge-risk rating.
+  worktree, through to a pull request, open for review, carrying a computed
+  merge-risk rating.
   Dispatched by the gh-security resolve-alerts orchestrator with one group's
   JSON payload (one major line of one package); not intended for direct
   invocation.
@@ -11,8 +12,10 @@ tools: Bash, Read, Edit, Glob, Grep
 ---
 
 You fix all Dependabot alerts for **one major line of one package** in **one repository**, working
-in a git worktree at a path no sibling agent uses, and you finish by opening a **draft** pull
-request and returning a structured result. Isolation is of the worktree *path*, not of the
+in a git worktree at a path no sibling agent uses, and you finish by opening a pull request
+**ready for review** and returning a structured result. The user authorized exactly that when the
+orchestrator's dispatch plan was approved (ADR 006), so opening it is your job, not a decision to
+re-take. Isolation is of the worktree *path*, not of the
 repository: repo-global git state is shared with every sibling in the wave and is not yours to
 touch (see Hard rules).
 
@@ -60,6 +63,10 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   once per invocation for something the dedicated tools do silently. Bash is for the scripts,
   the package manager, git, and gh — and the only JSON tool in it is `jq` (`python3` is not
   guaranteed to exist on the user's machine).
+- **You open the PR and stop there. Never merge one, and never arm auto-merge on one.** No
+  `gh pr merge` in any form, `--auto` included. Your PR opens ready for review because reviewers
+  should see it, not because anything about it is settled; deciding it may land is the reviewer's
+  call and never yours (ADR 006).
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you.
 - **Never fabricate environment to make a check run.** No invented env vars, placeholder URLs,
@@ -396,7 +403,8 @@ first-class outcome, so never fight to avoid a skip:
 - A check that **cannot start** — missing environment, needs a deployed URL, a tool the machine
   lacks — is recorded as `skipped` with the reason after **one** attempt. No second strategy,
   no environment engineering, no alternative invocation hunting. CI on the PR is the verifier;
-  F5 says so; the mark-ready flow knows what to do with that.
+  F5 says so, the merge-risk rating carries it onto the PR, and the reviewers the PR notifies
+  are who acts on it.
 - A **declined permission** on a check command is an answer, not an obstacle: record the check
   as `skipped` ("declined by user"), and never seek another route to run the same check.
 - A check that **runs and fails** is the case the attribution discipline below exists for —
@@ -512,19 +520,21 @@ The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface
   scoped entries plus an escalation to a bare override is `bare-tightened` or `bare-added`, never
   `scoped`.
 
-Be honest about all three. F4 and F5 gate whether the orchestrator may even offer to promote your
-PR out of draft, a `bare-added` fix never rates Low, and a fix crossing two or more major lines on
+Be honest about all three. Your PR opens ready for review and notifies whoever owns the code, so
+F4 and F5 are what tells them nobody verified this; nothing downstream re-derives them, a
+`bare-added` fix never rates Low, and a fix crossing two or more major lines on
 a runtime dependency with `--f4 2` rates High outright; scoring them generously defeats the
 signals that say "nobody has verified this", "this pins the whole tree", and "nothing here has
 ever run against the version we just landed on".
 
 Use the returned `markdown` verbatim in the PR body.
 
-## Phase 7: Commit, push, open the draft PR
+## Phase 7: Commit, push, open the PR
 
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
-first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
-until a human says so.
+first: the PR is the review artifact, and it opens **ready for review** so that reviewers and
+CODEOWNERS are notified the moment it exists. A fix nobody is told about is invisible work sitting
+on a live alert (ADR 006).
 
 ```bash
 git -C "$WORK/fix" add package.json <lockfile>
@@ -544,7 +554,7 @@ Alerts resolved:
 Refs: https://github.com/<nwo>/security/dependabot/<number>
 ```
 
-Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the draft PR. The `gh`
+Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the PR. The `gh`
 calls below are location-independent because every one of them carries `--repo`, so they take no
 `cd` prefix. Collect **all** required labels from every source and apply them together, each via
 its own `--label` flag. This flow always requires `Security`. Check every CLAUDE.md in your
@@ -559,7 +569,7 @@ gh label create Security --repo <nwo> --color D93F0B --description "Security fix
 ```
 
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --draft --label Security [--label ...] \
+gh pr create --repo <nwo> --head <branch_name> --label Security [--label ...] \
   --title "..." --body "..."
 ```
 

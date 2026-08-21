@@ -5,25 +5,27 @@ description: >
   entire org or the user's own repos. Discovers open alerts, ranks them by
   severity and EPSS exploitability, and fixes one package, the highest
   severity tier, or everything — one subagent per group (one major line of
-  one package, in one repo) in an isolated worktree through to a draft PR
-  carrying a computed merge-risk rating. Use when asked to fix security
+  one package, in one repo) in an isolated worktree through to a pull
+  request, open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*pr-state.sh status*), Bash(*pr-state.sh automerge*), Bash(*pr-state.sh rebase*), Bash(*preflight-permissions.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
 and rank, ask how much to fix, dispatch one `fix-dependency` subagent per group (one major line of
-one package, in one repo) in parallel, and walk the resulting draft PRs through an evidence-based
-mark-ready decision.
+one package, in one repo) in parallel, and report the resulting pull requests with the evidence
+about each: check state, armed auto-merge, and what nobody verified.
 
 The deterministic work lives in scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/common/`. Call them;
 do not reimplement them. Every script emits JSON on stdout and exits non-zero with an `error` key
 on failure; if one fails, report its error and stop.
 
-You are the control point the user approves. Subagents run unattended through PR creation, so
-**nothing dispatches before the user approves the plan in phase 5**, and **no PR leaves draft
-without the decision flow in phase 9**.
+You are the control point the user approves. Subagents run unattended through PR creation and the
+PRs they open are **ready for review**, so approving the phase 5 plan is approving the pull
+requests themselves: **nothing dispatches before that approval**, the plan must say in so many
+words what approving it creates, and **repos that permit auto-merge are confirmed one by one**
+(ADR 006). Nothing in this skill ever merges a PR or arms auto-merge on one.
 
 ## Phase 1: Detect scope
 
@@ -195,8 +197,34 @@ repos while the audit covers exactly one, so the plan **names the repo it will a
 the top-ranked group, which is the one the user is most likely to be thinking about. It is not a
 cross-repo audit, and the remaining repos are offered in phase 11 like any other.
 
-Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
-from here through draft-PR creation. Nothing dispatches without it.
+**Probe auto-merge before asking, for every repo in the batch:**
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-state.sh automerge <nwo>...
+```
+
+`permitted` is the repository setting, which is the only auto-merge fact that exists before a PR
+does. It is `null` when the token cannot see it; say so rather than reading it as `false`.
+
+Ask for **one** approval of the whole batch, and state plainly what it creates, rather than
+"proceed?" over a table of groups:
+
+> Approving this dispatches N subagent(s) and opens N pull request(s) against `<repo>`(s), **ready
+> for review**, requesting reviewers and notifying CODEOWNERS. Nothing merges them.
+
+This is the control point, and it is the **only** one: subagents run unattended from here through
+PR creation, and there is no gate afterwards (ADR 006 explains why the old post-creation gate was
+worth less than it looked).
+
+**Then, separately, one confirmation per repo that permits auto-merge**, never folded into the
+batch answer:
+
+> `<repo>` permits auto-merge. A PR opened there can be armed by the repository's own automation
+> and merge itself the moment checks pass, with nobody reading the diff. This has happened.
+> Open PRs against `<repo>` anyway?
+
+Declining one repo drops that repo's groups from the batch and the rest proceeds. A `permitted` of
+`null` is disclosed as unknown and confirmed the same way.
 
 ## Phase 6: Resolve local checkouts and preflight (org and user scope only)
 
@@ -385,60 +413,60 @@ reader turns four tested operations into one untested one.
 An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
 audit are independent work that happened to share a wave.
 
-## Phase 9: Decide what may leave draft
+## Phase 9: Report the state of every PR
 
-Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
-work — but promotion is a decision, not a default. This phase covers the `success` results only:
-`no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. Gather the
-evidence:
+The PRs are already open and already requesting review, so this phase decides nothing: it tells
+the user what exists and what is true about it. This covers the `success` results only; `no-op`
+and `failure` results carry a null `pr_url` and there is no PR to report. Gather the evidence:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-state.sh status <pr-url>...
 ```
 
-`mark-ready.sh` operates on PR URLs directly and needs no `repo_root`, so this step is unchanged at
-every scope — a batch's PR URLs can span repos and are handled identically either way.
+`pr-state.sh` operates on PR URLs directly and needs no `repo_root`, so this step is unchanged at
+every scope: a batch's PR URLs can span repos and are handled identically either way.
 
-Merge each PR's `checks` and `auto_merge` with the agent's own `f4`/`f5`, and group:
+Merge each PR's `checks` and `auto_merge` with the agent's own `f4`/`f5`, and report per PR:
 
-| Group | Condition | Offer promotion? |
+| Signal | Condition | What the summary must say |
 |---|---|---|
-| Unverified | agent scored F4 = 2 or F5 = 2, and the checks the agent skipped did **not** run in CI | **No.** Report which checks could not run and why; CI on the draft (or after a human promotes) is the verifier. Offering would let "nobody has verified this" promote itself. |
-| Verified by CI | agent scored F4 = 2 or F5 = 2, but the rollup shows the **specific skipped checks** ran and passed | Offerable — the deferral resolved to the right actor. The offer must name what was skipped locally and which CI check covered it. |
-| Checks failing | `checks` = `failed` | No. List `failing_checks`. |
-| Checks pending | `checks` = `pending` | Not yet. Offer to re-run `status` once before moving on. |
-| No checks ran | `checks` = `none` | Offerable, flagged honestly: the repo runs no CI on drafts (or none at all), so promoting is what starts whatever exists. The user decides. |
-| Ready | `checks` = `passed` | Offerable. |
+| Unverified | agent scored F4 = 2 or F5 = 2, and the checks the agent skipped did **not** run in CI | Name the checks that could not run and why. **Nobody has verified this fix**; the reviewers the PR notified are who must. Never let it pass as an ordinary green entry. |
+| Verified by CI | agent scored F4 = 2 or F5 = 2, but the rollup shows the **specific skipped checks** ran and passed | Say what was skipped locally and which CI check covered it. |
+| Checks failing | `checks` = `failed` | List `failing_checks`. The fix is open for review and failing; say both. |
+| Checks pending | `checks` = `pending` | Say so, and offer to re-run `status` once before finishing. |
+| No checks ran | `checks` = `none` | The rollup is empty: no CI, or none reported yet. Not a green light. |
+| Checks passing | `checks` = `passed` | Report it, with the caveat below about incomplete rollups. |
 
-Two more signals qualify the offer:
+Three signals qualify the report:
 
-- **Auto-merge armed** (`auto_merge.armed` true): promoting this PR **merges it** once checks
-  pass. Confirm it **per PR**, stating exactly that, never as part of a batch offer. "Mark 6 PRs
-  ready for review" and "merge 6 PRs once CI passes" are different decisions and must not share
-  a confirmation prompt. Merely `permitted` changes nothing.
+- **Auto-merge armed** (`auto_merge.armed` true): this PR **merges itself** once checks pass, with
+  or without anyone reading it. Say exactly that, per PR, and give the command that stops it:
+  `gh pr merge --disable-auto <url>`. Never run it yourself, and never arm auto-merge on anything:
+  the repository's merge policy is the repository's (ADR 006). Merely `permitted` was already
+  disclosed in phase 5 and changes nothing here.
 - **`merge_state` = `UNKNOWN`**: GitHub has not computed mergeability yet (common right after
   push). Say so; do not bucket it as clean or behind.
 - **Rollups populate as workflows spawn**, and jobs that have not been reported yet are
-  invisible — absent is not pending. On a PR created minutes ago, or one reporting materially
-  fewer checks than its batch siblings, treat `checks: passed` as provisional: hold the offer
-  and re-run `status` before treating the set as complete.
+  invisible: absent is not pending. On a PR created minutes ago, or one reporting materially
+  fewer checks than its batch siblings, treat `checks: passed` as provisional and re-run `status`
+  before calling the set complete.
 
-Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
-The user can decline any subset and handle those by hand.
+## Phase 10: Rebase whatever fell behind
 
-## Phase 10: Promote
+Two fix PRs in one repository edit the same overrides block, so once one merges the next is
+behind, and Dependabot's own merges race long batches the same way. Where `status` reports
+`behind` true, offer to rebase those PRs:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <approved-urls-only>
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-state.sh rebase <urls>
 ```
 
-The script rebases first (two fix PRs edit the same overrides block, so once one merges the next
-is behind — and Dependabot's own merges race long batches the same way), marks ready only after a
-successful rebase, and **reports conflicts without resolving them**. For a conflicted PR,
-recommend regeneration over hand-resolution: these PRs are machine-generated, so closing the PR,
-deleting its branch, and re-running this skill for that package rebuilds the fix cleanly on the
-new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
-remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
+The verb rebases and nothing else: it never marks a PR ready and never merges one. It **reports
+conflicts without resolving them**. For a conflicted PR, recommend regeneration over
+hand-resolution: these PRs are machine-generated, so closing the PR, deleting its branch, and
+re-running this skill for that package rebuilds the fix cleanly on the new default branch, and
+hand-merging a conflicted lockfile is strictly worse. Manual resolution remains the user's
+fallback. Report the per-PR outcomes, conflicts and errors included.
 
 ## Phase 11: Offer the next batch, then the pin audit
 
@@ -462,5 +490,5 @@ without going through alert resolution at all.
 Recommend it even when this run fixed nothing that touched an override: a repository accumulates
 pins from every past run and from hand edits, and the audit is about all of them.
 
-Otherwise report done, including anything left in the not-promoted groups, any repos still in
-`skipped_repos`, and what would unblock each.
+Otherwise report done, including any group that produced no PR, any repo the user declined in
+phase 5, any repos still in `skipped_repos`, and what would unblock each.

@@ -15,8 +15,9 @@
 #
 # The catalog is the plugin's PRESCRIBED surface only: the bundled scripts,
 # the exact git shapes the fix agent's definition mandates, and the PR tail
-# that batch approval already authorizes (ADR 002: the dispatch approval is
-# the control point; the draft PR is the checkpoint). Deliberately absent:
+# that batch approval already authorizes (ADR 006: the dispatch approval is
+# the control point, and the only one, because the PRs it authorizes open
+# ready for review). Deliberately absent:
 # repo script execution (running a repo's test suite is repo-specific trust)
 # and anything global. Commands agents improvise still prompt — that
 # asymmetry is a feature: the spec'd path runs smooth, deviation gets
