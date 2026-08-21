@@ -41,11 +41,21 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned ShellCheck
+        # set -o pipefail: a run block defaults to bash -e without it, so a
+        # failed download would otherwise exit 0 and shift the red to the
+        # wrong step. The version assertion is what makes the pin real; the
+        # runner preinstalls 0.9.0, and printing a version is not enforcing
+        # one.
         run: |
+          set -o pipefail
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
             | tar -xJ -C "$RUNNER_TEMP"
           sudo install "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
-          shellcheck --version
+          installed=$(/usr/local/bin/shellcheck --version | awk '/^version:/ { print $2 }')
+          if [ "$installed" != "$SHELLCHECK_VERSION" ]; then
+            echo "expected ShellCheck $SHELLCHECK_VERSION, got: $installed"
+            exit 1
+          fi
       - name: ShellCheck every tracked shell file
         run: ./scripts/check.sh lint
 
@@ -61,9 +71,18 @@ jobs:
           persist-credentials: false
       - name: Install pinned Claude Code CLI
         # claude plugin validate needs no auth, no API key, and no network at
-        # validate time; only this install step touches the network.
+        # validate time; only this install step touches the network. The
+        # installer URL itself is mutable (unlike shellspec's tag ref), so
+        # the post-install version assertion is what enforces the pin; the
+        # absolute path matters because GITHUB_PATH only applies to later
+        # steps.
         run: |
+          set -o pipefail
           curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION"
+          "$HOME/.local/bin/claude" --version | grep -qF "$CLAUDE_VERSION" || {
+            echo "expected Claude CLI $CLAUDE_VERSION, got: $("$HOME/.local/bin/claude" --version)"
+            exit 1
+          }
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Validate marketplace and plugin manifests (strict)
         run: ./scripts/check.sh validate
@@ -89,18 +108,28 @@ jobs:
           persist-credentials: false
       - name: Install pinned shellspec
         run: |
+          set -o pipefail
           curl -fsSL "https://raw.githubusercontent.com/shellspec/shellspec/${SHELLSPEC_VERSION}/install.sh" \
             | sh -s -- "$SHELLSPEC_VERSION" --yes
+          installed=$("$HOME/.local/bin/shellspec" --version)
+          if [ "$installed" != "$SHELLSPEC_VERSION" ]; then
+            echo "expected shellspec $SHELLSPEC_VERSION, got: $installed"
+            exit 1
+          fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run the shellspec suite
         run: ./scripts/check.sh spec
 
   gates:
     # The single status check to mark required once runs are established:
-    # green only when every gate is. if: always() so a failed dependency
-    # produces a red check here rather than a skipped one.
+    # green only when every gate is. !cancelled() so a failed dependency
+    # produces a red check here rather than a skipped one, while a
+    # superseded (cancelled) PR run does not publish a spurious red. The
+    # arity floor keeps a gate dropped from `needs:` from shrinking coverage
+    # silently: zero (or two) results iterating to success is the same
+    # found-nothing-is-a-pass shape every other gate refuses.
     needs: [lint, validate, spec]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: All gates green
@@ -108,9 +137,15 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "gate results: $RESULTS"
+          n=0
           for r in $RESULTS; do
+            n=$((n + 1))
             if [ "$r" != "success" ]; then
               echo "a gate did not succeed"
               exit 1
             fi
           done
+          if [ "$n" -ne 3 ]; then
+            echo "expected 3 gate results, got $n"
+            exit 1
+          fi

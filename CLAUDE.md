@@ -35,7 +35,8 @@ Bash scripts are covered by [shellspec](https://shellspec.info): `brew install s
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
 All three quality gates (suite, ShellCheck, `claude plugin validate --strict`) run through one
-entry point, `scripts/check.sh` (`lint` / `validate` / `spec` / `fast` / `all`); target lists
+entry point, `scripts/check.sh` (`lint` / `validate` / `spec` / `fast` / `all` / `targets`);
+target lists
 live there and nowhere else, and empty discovery is a hard failure in every gate. Committed git
 hooks run the fast gates on commit and the suite on push, enabled once per clone with
 `git config core.hooksPath .githooks`; CI runs all three (`.github/workflows/gates.yml`).

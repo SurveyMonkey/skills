@@ -12,8 +12,9 @@ related_issues: [10]
 ## Context
 
 Three quality gates exist for this repo and, until this decision, all of them ran only when
-someone remembered to run them: the shellspec suite (577 examples, measured at 127s serial and
-39s with `--jobs 8`), ShellCheck over every shell file (~2s), and
+someone remembered to run them: the shellspec suite (577 examples before this change, 603 with
+it; roughly two minutes serial and well under one with `--jobs 8` on an M-series laptop, both
+machine-dependent), ShellCheck over every shell file (~2s), and
 `claude plugin validate --strict` over the marketplace and plugin manifests (~2s). Nothing
 enforced any of them, on a repository whose whole purpose is other people installing plugins from
 its default branch. The forcing example is recorded in
@@ -27,8 +28,10 @@ command doing the wrong thing; the suite sees behavior but never reads the manif
 
 Three facts, verified while deciding rather than assumed, constrain the venues:
 
-1. **shellspec exits 0 having run zero examples.** A bare `shellspec` step reports "tests passed"
-   for a suite that never ran, if `spec/` is orphaned or `--require spec_helper` stops resolving.
+1. **shellspec exits 0 having run zero examples, and a skipped example is equally green.** A bare
+   `shellspec` step reports "tests passed" for a suite that never ran, if `spec/` is orphaned or
+   `--require spec_helper` stops resolving; and a suite whose `Skip if` predicates invert
+   converts executed examples to skips with no change in the total count.
 2. **The bash 3.2 parse gate skips on Linux.** `spec/bash32_parse_spec.sh` can only run where
    `/bin/bash` is 3.x, which no ubuntu runner provides, and a skip is green.
 3. **Local and CI disagree by default.** `.shellspec` sets `--shell sh`, which is bash 3.2.57 on
@@ -40,8 +43,8 @@ Three facts, verified while deciding rather than assumed, constrain the venues:
 **One entry point.** `scripts/check.sh` (repo root; dev tooling, not shipped plugin code) is the
 single home of every gate's target list. The hooks, the workflow, and humans all call it. Targets
 are discovered (`git ls-files`, `plugins/*/` enumeration, `spec/*_spec.sh`), never written down,
-and **empty discovery is a hard failure in every gate**, including an explicit example-count
-floor on the shellspec summary, because of fact 1.
+and **empty discovery is a hard failure in every gate**, including a floor on *executed*
+examples (total minus skips) read from the shellspec summary, because of fact 1.
 
 **Local hooks split by cost.** Committed `.githooks/`, activated once per clone with
 `git config core.hooksPath .githooks` (a relative path, so the hooks follow linked worktrees).
@@ -59,9 +62,11 @@ the dash run of the suite, macOS is the only runner that can execute the bash 3.
 its leg sets `REQUIRE_BASH32=1` so that gate failing to run fails the job rather than skipping
 green (facts 2 and 3).
 
-**Tool versions are pinned in CI** to the versions the hooks run locally: ShellCheck 0.11.0 from
-the release tarball, shellspec 0.28.1 installed from its tag ref, the Claude CLI by version with
-`DISABLE_AUTOUPDATER=1` (without which the pin is cosmetic). The suite runs serial in CI:
+**Tool versions are pinned in CI and asserted after install**, to the versions the hooks run
+locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,
+the Claude CLI by version with `DISABLE_AUTOUPDATER=1` (without which the pin is cosmetic). The
+pins are not equivalent: the Claude installer script is fetched from a mutable URL, so for it the
+post-install `--version` assertion is the pin's only enforcement. The suite runs serial in CI:
 parallel is safe by construction (per-specfile workers, per-file workdirs, per-example scratch
 dirs), but shellspec's reducer can truncate the report when a worker crashes, and the enforcement
 boundary optimizes for a legible report over 90 saved seconds.

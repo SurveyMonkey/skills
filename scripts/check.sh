@@ -9,7 +9,9 @@
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
 #   spec      the shellspec suite (serial; set SHELLSPEC_JOBS=N for parallel)
-#   fast      lint + validate (the ~2s pair the pre-commit hook runs)
+#   fast      lint + validate, the ~2s pair, for running by hand (the
+#             pre-commit hook invokes lint and validate separately so each
+#             can warn about its own missing tool)
 #   all       lint + validate + spec
 #   targets   print the lint target list, for inspection
 #
@@ -19,18 +21,27 @@
 # macOS.
 #
 # Every gate refuses when its target discovery finds nothing. Zero shell
-# files, zero plugin manifests, or zero spec examples means discovery broke,
-# not that the tree is clean; "found nothing" reported as success is this
-# repo's signature bug class (root CLAUDE.md), and shellspec itself exits 0
-# on an empty suite, so the floor has to live here.
+# files, zero plugin manifests, or zero executed spec examples means
+# discovery broke, not that the tree is clean; "found nothing" reported as
+# success is this repo's signature bug class (root CLAUDE.md), and shellspec
+# itself exits 0 on an empty suite, so the floor has to live here.
 set -euo pipefail
-
-cd "$(git rev-parse --show-toplevel)"
 
 die() {
   printf 'check: %s\n' "$*" >&2
   exit 2
 }
+
+# git exports GIT_DIR (and sometimes GIT_WORK_TREE) to hooks, under which
+# `rev-parse --show-toplevel` answers for that repository or refuses with
+# "must be run in a work tree" regardless of cwd; observed live from the
+# pre-push hook in a linked worktree. This script is always invoked with the
+# cwd inside the repo it should check, so discovery from cwd is the correct
+# behavior everywhere and the inherited environment never is.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) \
+  || die 'not inside a git repository'
+cd "$repo_root"
 
 # Discovery, never a written-down list: git's index is the source of truth,
 # so a newly staged script is covered the moment it exists and this script
@@ -45,14 +56,17 @@ cmd_targets() {
 }
 
 cmd_lint() {
-  local n=0 f
+  # One discovery feeds both the count and the invocation, so the guard and
+  # the work cannot disagree about what was found.
+  local targets n=0 f
+  targets=$(shell_targets)
   while IFS= read -r f; do
     if [ -n "$f" ]; then n=$((n + 1)); fi
-  done < <(shell_targets)
+  done < <(printf '%s\n' "$targets")
   [ "$n" -gt 0 ] || die 'no shell files discovered; refusing to report a pass'
   # Paths, never stdin: ShellCheck resolves spec/.shellcheckrc relative to
   # the file being checked, and stdin has no path.
-  shell_targets | tr '\n' '\0' | xargs -0 shellcheck
+  printf '%s\n' "$targets" | tr '\n' '\0' | xargs -0 shellcheck
 }
 
 cmd_validate() {
@@ -87,24 +101,42 @@ cmd_spec() {
   done
   [ "$specs" -gt 0 ] || die 'no spec files found under spec/; refusing to report a pass'
   # The suite's own report is the output; the copy kept aside is only for the
-  # example-count floor below.
-  local report
-  report=$(mktemp)
+  # floor below. The trap covers the failing-suite path, where set -e leaves
+  # the rm below unreachable.
+  # Deliberately not local: the EXIT trap fires after locals are gone, where
+  # an unset $report would trip set -u.
+  report=$(mktemp) || die 'mktemp failed'
+  trap 'rm -f "$report"' EXIT
   if [ -n "${SHELLSPEC_JOBS:-}" ]; then
     shellspec --jobs "$SHELLSPEC_JOBS" 2>&1 | tee "$report"
   else
     shellspec 2>&1 | tee "$report"
   fi
-  # shellspec exits 0 having run zero examples, so a green exit alone would
-  # claim "tests passed" for a suite that never ran. Read the count out of
-  # the summary line and refuse anything that is not a positive number.
-  local count
-  count=$(awk '/^[0-9]+ examples?/ { print $1; exit }' "$report")
-  rm -f "$report"
+  # shellspec exits 0 having run zero examples, and a skipped example is
+  # green too, so a green exit alone would pass a suite that never ran or
+  # one whose Skip-if predicates quietly inverted and skipped everything
+  # (the bash 3.2 gate is exactly such a predicate). Read the summary and
+  # require at least one example to have actually executed. ANSI codes are
+  # stripped first: --color via .shellspec-local prefixes the summary line.
+  local esc summary count skips
+  esc=$(printf '\033')
+  summary=$(awk -v esc="$esc" \
+    '{ gsub(esc "\\[[0-9;]*m", "") } /^[0-9]+ examples?,/ { print; exit }' \
+    "$report")
+  count=$(printf '%s\n' "$summary" | awk '{ print $1 }')
+  skips=$(printf '%s\n' "$summary" \
+    | awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^skips?$/) { print $(i - 1); exit } }')
   case "$count" in
     '' | *[!0-9]*) die 'could not read an example count from the shellspec summary' ;;
   esac
+  case "$skips" in
+    '') skips=0 ;;
+    *[!0-9]*) die 'could not read the skip count from the shellspec summary' ;;
+  esac
   [ "$count" -gt 0 ] || die 'the suite ran zero examples; zero is never a pass'
+  [ "$((count - skips))" -gt 0 ] \
+    || die "all $count examples were skipped; a fully skipped suite is never a pass"
+  rm -f "$report"
 }
 
 cmd_fast() {

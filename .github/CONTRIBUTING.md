@@ -57,9 +57,9 @@ git config core.hooksPath .githooks
 ```
 
 `pre-commit` runs ShellCheck and `claude plugin validate --strict` (~2s); `pre-push` runs the
-shellspec suite in parallel (~40s). Both warn and continue if a tool is missing; CI
-(`.github/workflows/gates.yml`) enforces all three gates regardless. Run any gate directly with
-`./scripts/check.sh <lint|validate|spec|fast|all>`. See
+shellspec suite in parallel (roughly a minute, machine-dependent). Both warn and continue if a
+tool is missing; CI (`.github/workflows/gates.yml`) enforces all three gates regardless. Run any
+gate directly with `./scripts/check.sh <lint|validate|spec|fast|all|targets>`. See
 [ADR 005](../docs/adr/005-quality-gate-venues.md).
 
 ## Local Development

@@ -57,6 +57,21 @@ Describe 'scripts/check.sh'
       When run "$CHECK" targets
       The output should equal '.githooks/pre-commit'
     End
+
+    It 'discovers from cwd even when the environment carries another GIT_DIR'
+      # git exports GIT_DIR to hooks, and inheriting it aims every git call
+      # at the hook's repository regardless of cwd; observed live when the
+      # pre-push hook broke in a linked worktree (issue #56). check.sh must
+      # answer for the repo it is run in, never for the environment.
+      touch tracked.sh
+      git add tracked.sh
+      mkdir other
+      git -C other init -q
+      GIT_DIR="$PWD/other/.git"
+      export GIT_DIR
+      When run "$CHECK" targets
+      The output should equal 'tracked.sh'
+    End
   End
 
   Describe 'empty discovery refuses instead of passing'
@@ -86,6 +101,74 @@ Describe 'scripts/check.sh'
       When run "$CHECK" spec
       The status should eq 2
       The stderr should include 'no spec files found'
+    End
+  End
+
+  # The example floor is the guard against shellspec's own "0 examples, 0
+  # failures, exit 0" behavior, and skips are equally green, so the floor is
+  # on executed examples. Exercised with a stub shellspec on PATH printing a
+  # canned summary: this tests how check.sh interprets the summary, not
+  # whether shellspec passes tests, so it needs no real suite and cannot
+  # recurse into this one.
+  Describe 'the executed-example floor'
+    stub_suite() {
+      scratch_repo || return 1
+      mkdir -p bin spec
+      : > spec/dummy_spec.sh
+      printf '#!/bin/sh\ncat summary.txt\nexit 0\n' > bin/shellspec
+      chmod +x bin/shellspec
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before stub_suite
+
+    It 'refuses a suite that ran zero examples'
+      printf '0 examples, 0 failures\n' > summary.txt
+      When run "$CHECK" spec
+      The status should eq 2
+      The output should include '0 examples'
+      The stderr should include 'zero is never a pass'
+    End
+
+    It 'refuses output carrying no summary line at all'
+      printf 'something that is not a summary\n' > summary.txt
+      When run "$CHECK" spec
+      The status should eq 2
+      The output should include 'not a summary'
+      The stderr should include 'could not read an example count'
+    End
+
+    It 'refuses a suite whose every example was skipped'
+      printf '5 examples, 0 failures, 5 skips\n' > summary.txt
+      When run "$CHECK" spec
+      The status should eq 2
+      The output should include '5 skips'
+      The stderr should include 'fully skipped suite is never a pass'
+    End
+
+    It 'refuses the singular form of a fully skipped suite'
+      printf '1 example, 0 failures, 1 skip\n' > summary.txt
+      When run "$CHECK" spec
+      The status should eq 2
+      The output should include '1 skip'
+      The stderr should include 'fully skipped suite is never a pass'
+    End
+
+    It 'passes a suite with executed examples alongside skips'
+      printf '586 examples, 0 failures, 1 skip\n' > summary.txt
+      When run "$CHECK" spec
+      The status should be success
+      The output should include '586 examples'
+    End
+
+    It 'reads the summary through ANSI color codes'
+      # --color via .shellspec-local prefixes the summary line with escape
+      # sequences; the floor must still find the count rather than refusing
+      # a passing suite.
+      printf '\033[32m5 examples, 0 failures\033[0m\n' > summary.txt
+      When run "$CHECK" spec
+      The status should be success
+      The output should include 'examples'
     End
   End
 End
