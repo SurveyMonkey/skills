@@ -1,5 +1,7 @@
 # SurveyMonkey Skills
 
+[![gates](https://github.com/SurveyMonkey/skills/actions/workflows/gates.yml/badge.svg?branch=main)](https://github.com/SurveyMonkey/skills/actions/workflows/gates.yml)
+
 > A Claude Code plugin marketplace containing job-scoped plugins for SurveyMonkey engineering workflows. Each plugin groups related skills under a single namespace so they can be installed and invoked together.
 
 ## Installation
@@ -12,67 +14,75 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 ## Available Plugins
 
-| Plugin | Namespace | Description |
+| Plugin | Namespace | Summary |
 |---|---|---|
-| `gh-security` | `/gh-security:*` | Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, a check-aware mark-ready flow, and a report-only pin audit that finds overrides no longer needed |
+| [gh-security](#gh-security) | `/gh-security:*` | Orchestrated, multi-subagent resolution of Dependabot security alerts, plus a report-only audit of the dependency pins earlier fixes leave behind |
 
-Two entry points: ask Claude to fix the repo's security alerts (the `resolve-alerts` skill
-triggers from natural language) or run `/gh-security:resolve-alerts` explicitly.
-`/gh-security:fix-alert` remains as a deprecated shim that fixes only the top-ranked group.
+### gh-security
 
-**Pin audit.** Overrides and resolutions added to hold a transitive dependency at a safe version
-outlive their reason, and then quietly hold packages back. `/gh-security:audit-pins` reports which
-of a repo's pins are no longer needed, testing each removal in an isolated worktree against every
-published advisory for the package rather than against the repo's own alert history — which the
-pin itself blinds. It also runs automatically in a spare slot when a fix batch is smaller than the
-concurrency cap, and is offered after a batch that filled it. Report-only: it opens no PR.
+Resolves Dependabot security alerts for one repository, an entire org, or all of your own repos.
+Discovery ranks open alerts by severity and EPSS exploitability, you choose how much to fix (one
+package, the highest severity tier, or everything), and the orchestrator dispatches one subagent
+per package major line per repo, each working in an isolated git worktree through to a draft PR
+that carries a computed merge-risk rating.
 
-A PostToolUse hook on `Bash` (and `BashOutput`, for backgrounded commands) also watches for a
-GitHub push-time vulnerability notice, a Dependabot alert URL, or non-zero `npm`/`pnpm`/`yarn
-audit` output, and nudges Claude to offer the `resolve-alerts` skill when one appears. It is a
-local grep with no network calls and never runs `gh` itself: a package-manager-only match nudges
-toward checking GitHub security alerts rather than assuming a fix is needed, since GitHub stays
-the sole data source the fix pipeline acts on.
+| Entry point | Kind | What it does |
+|---|---|---|
+| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents in parallel waves and batch-promotes the resulting draft PRs. |
+| `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
+| `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package. Report-only: changes nothing, opens no PR. |
+| `/gh-security:fix-alert` | Command (deprecated) | Shim that fixes only the single top-ranked alert group, then offers the next batch. Use `resolve-alerts` instead. |
 
-Supports pnpm, npm, and Yarn Berry. Other ecosystems and package managers are reported rather
-than attempted; see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to request one.
+The parallel work is done by two subagents, dispatched by the orchestrator rather than invoked
+directly:
 
-**First-run permissions:** on its first run in a repo, the skill offers a one-decision preflight
-— it shows the exact allow rules for the plugin's own scripts and prescribed git/PR commands and,
-on consent, writes them to that repo's `.claude/settings.local.json` (gitignored, revocable line
-by line). Decline and everything still works; each command just prompts individually as it comes
-up. Fix worktrees live at a stable `.claude/worktrees/` path inside the repo (kept out of
-`git status` via `.git/info/exclude`), so worktree-related approvals persist across runs too. The skill declares `allowed-tools` pre-approval, but
-Claude Code does not currently apply it to plugin skills
-([anthropics/claude-code#80696](https://github.com/anthropics/claude-code/issues/80696),
-[#80802](https://github.com/anthropics/claude-code/issues/80802)); a hook-based fix is tracked in
-[#16](https://github.com/SurveyMonkey/skills/issues/16).
+| Agent | Role |
+|---|---|
+| `fix-dependency` | Fixes every alert for one package major line in one repo, in an isolated worktree, through to a draft PR with a computed merge-risk rating. |
+| `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution. Also rides along automatically in a spare slot when a fix batch does not fill the concurrency cap. |
 
-## Plugin Architecture
+**Supported package managers, by advisory ecosystem:**
 
-Each plugin lives in its own directory under `plugins/` and owns a single namespace. Skills within a plugin are invoked as `/namespace:skill-name`.
+- `npm`: pnpm, npm, and Yarn Berry (v2+). bun and Yarn Classic (v1) are rejected with a clear
+  message rather than guessed at.
+- Every other ecosystem (`pip`, `rubygems`, `maven`, `nuget`, `composer`, `go`, `rust`, and the
+  rest) is reported, not attempted. `pip` is planned as RFC 001 Phase 6
+  ([#9](https://github.com/SurveyMonkey/skills/issues/9)). See
+  [CONTRIBUTING.md](.github/CONTRIBUTING.md) to request one.
 
-```
-plugins/
-  gh-security/
-    .claude-plugin/
-      plugin.json
-    skills/         # orchestrators that run in the main session
-    agents/         # subagents dispatched in parallel, model pinned in frontmatter
-    commands/       # explicit entry points and deprecation shims
-    scripts/
-      common/       # ecosystem-agnostic: scope, discovery, routing, risk scoring, PR state
-      ecosystems/   # one adapter per advisory ecosystem
-    hooks/
-      hooks.json    # PostToolUse hook registration (Bash -> notice-scan.sh)
-```
+**What the plugin does, at headline level:**
 
-Deterministic work belongs in `scripts/` with a JSON contract; skills, agents, and commands carry
-only the judgment.
-Ecosystem-specific behavior stays behind the adapter contract in
-[ADR 001](docs/adr/001-ecosystem-adapter-contract.md).
+- **Parallel fix waves.** One subagent per package major line per repo, each in its own git
+  worktree under the target repo, dispatched in waves sized to the machine's capacity.
+- **Repo, org, or user scope.** Point it at the current repo, a whole GitHub org, or everything
+  you own; org runs filter to repos you can actually push to.
+- **Risk-ranked discovery.** Alerts are grouped by package and major line, then ranked by
+  severity and EPSS exploitability so the worst goes first.
+- **A merge-risk rating on every PR.** Seven scored factors (version delta, runtime exposure,
+  usage surface, test signal, verification, override blast radius, and declared-range distance)
+  band each fix Low, Medium, or High, and a major version delta or a newly added global pin never
+  rates Low.
+- **Lockfile validation that refuses to bluff.** A fix claims completion only when the lockfile
+  proves the vulnerable ranges are gone, and a parser finding nothing is an error, never a pass.
+- **Draft PRs with check-aware promotion.** Fixes land as drafts; the orchestrator batch-promotes
+  them once checks pass, with per-PR confirmation where auto-merge is armed.
+- **Report-only pin audit.** Finds overrides and resolutions that no longer protect anything,
+  judged against the full advisory database (which the pin itself blinds repo alert history to),
+  including collateral effects of removing each pin.
+- **Proactive nudge hook.** A PostToolUse hook watches Bash output for push-time vulnerability
+  notices, Dependabot alert URLs, and non-zero `npm`/`pnpm`/`yarn audit` output. A GitHub-sourced
+  match offers `resolve-alerts` directly; an audit-only match nudges toward checking GitHub
+  alerts first, since GitHub stays the sole source the fix pipeline acts on. Local grep/jq only;
+  it never makes network calls.
+- **First-run permissions bootstrap.** On first run in a repo it offers the exact allow rules the
+  plugin's scripts need and, on consent, writes them to that repo's gitignored
+  `.claude/settings.local.json`; declining just means individual prompts as commands come up.
 
-New plugins should follow this same structure. One namespace per plugin, one concern per namespace.
+## Documentation
+
+How the marketplace and its plugins are structured: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Decision records live in [docs/adr/](docs/adr/index.md) and RFCs in
+[docs/rfc/](docs/rfc/index.md).
 
 ## For SurveyMonkey Engineers
 
