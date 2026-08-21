@@ -3,9 +3,9 @@
 # same entry point, scripts/check.sh; CI is the enforcement boundary because
 # hooks can be uninstalled, skipped, or absent on a fresh clone.
 #
-# No `paths:` filters, ever: the aggregate `gates` job is intended as a
-# required status check, and a PR filtered out of the workflow would never
-# produce it and could never merge (ADR 005).
+# No `paths:` filters, ever: the aggregate `gates` job IS a required status
+# check on the default branch (protect-default ruleset), and a PR filtered out
+# of the workflow would never produce it and could never merge (ADR 005).
 #
 # No secrets in any job, and no pull_request_target: fork PRs must stay
 # harmless.
@@ -125,8 +125,8 @@ jobs:
         run: ./scripts/check.sh spec
 
   gates:
-    # The single status check to mark required once runs are established:
-    # green only when every gate is. !cancelled() so a failed dependency
+    # The single required status check on the default branch, pinned there to
+    # the GitHub Actions app: green only when every gate is. !cancelled() so a failed dependency
     # produces a red check here rather than a skipped one, while a
     # superseded (cancelled) PR run does not publish a spurious red. The
     # arity floor keeps a gate dropped from `needs:` from shrinking coverage
