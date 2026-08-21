@@ -717,6 +717,30 @@ Describe 'node.sh why'
     The output should equal '{"relationship":"transitive","parents":["express","serve-static"]}'
   End
 
+  # The peerDependenciesMeta: exclusion is observable only at the reader's own
+  # output: `why` collapses duplicate parents through sort -u and
+  # `declared_ranges` reads no manifests on Berry (no node_modules), so both
+  # pass unchanged even when the Meta block leaks junk rows (seventh review
+  # pass proved this by patching the pattern). Extract the reader the way
+  # audit_restore_spec.sh extracts the restore commands and assert its rows
+  # exactly. An empty extraction produces zero lines, which the count catches,
+  # so this cannot pass vacuously.
+  yarn_reader_rows() {
+    _prog=$(sed -n '/^YARN_DECLARATION_AWK=/,/^)$/p' "$ADAPTER")
+    [ -n "$_prog" ] || return 1
+    eval "$_prog"
+    awk "$YARN_DECLARATION_AWK" yarn.lock
+  }
+
+  It 'reads exactly the declaration rows, with peerDependenciesMeta excluded'
+    use_fixture yarn-berry-peer-parent
+    When call yarn_reader_rows
+    The status should be success
+    The line 1 of output should equal "$(printf 'express\tsha.js\tnpm:^2.4.11')"
+    The line 2 of output should equal "$(printf 'serve-static\tsha.js\tnpm:^2.4.0')"
+    The lines of output should equal 2
+  End
+
   It 'excludes the yarn workspace entry from parents'
     use_fixture yarn-berry
     When call adapter_jq '.parents' why lodash

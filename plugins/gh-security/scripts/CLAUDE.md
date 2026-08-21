@@ -206,11 +206,12 @@ time, skipped silently, and wrote the plain package name — which does not gove
 so the escalation ladder re-ran the same lookup and the flow dead-ended
 ([#48](https://github.com/SurveyMonkey/skills/issues/48)). The declarations come from
 `.packages["node_modules/<parent>"]` (npm) and each `resolution:` entry (Berry), through one reader
-that `why`, `apply_constraint` and `declared_ranges` all share. Both read the same three blocks —
+that `why`, `apply_constraint` and `declared_ranges` all share — the shared reader is what gave
+Berry a working alias path at all
+([#47](https://github.com/SurveyMonkey/skills/issues/47)). Both read the same three blocks —
 `dependencies`, `optionalDependencies` and `peerDependencies` — because a parent that declares the
 package as a peer is why the copy is in the tree at all; Berry read only `dependencies` until
-[#49](https://github.com/SurveyMonkey/skills/issues/49), which hid exactly that parent — which is also what gave Berry a working alias path at all
-([#47](https://github.com/SurveyMonkey/skills/issues/47)).
+[#49](https://github.com/SurveyMonkey/skills/issues/49), which hid exactly that parent.
 
 Two rules travel with it, both of which the old lookup broke:
 
