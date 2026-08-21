@@ -84,9 +84,15 @@ lefthook, proposed on #10, is not used: it adds a dependency to a repo whose sta
 - The gate definitions cannot drift between venues, because there is only one definition. The
   cost is that `scripts/check.sh` is itself load-bearing: its refusal paths are covered by
   `spec/check_sh_spec.sh`, and it is included in its own lint and bash 3.2 parse targets.
-- Hooks remain bypassable and opt-in per clone. That is accepted: CI is the boundary. Until
-  `gates` is actually marked required (a repo-settings action taken after several observed runs,
-  not part of this change), enforcement is still by convention.
+- Hooks remain bypassable and opt-in per clone. That is accepted: CI is the boundary, and as of
+  2026-08-21 it is an enforced one: `gates` is a required status check on the default branch via
+  the repository's `protect-default` ruleset, pinned to the GitHub Actions app so no other
+  integration can satisfy the context by publishing a status of the same name. The ruleset also
+  blocks deletion and non-fast-forward pushes and requires a squash-merged pull request, with no
+  bypass actors, so `main` takes no direct pushes from anyone. Marking it required was the
+  separate repo-settings action this ADR anticipated, taken once a run record existed; the
+  `paths:` filter prohibition above is load-bearing from that moment, because a PR filtered out of
+  the workflow would never produce the check and could never merge.
 - The three pins need manual bumps, and CI will not notice when a newer Claude CLI would reject
   these manifests, which is what users actually run. Bumping the pins periodically is deliberate
   maintenance, not drift.
