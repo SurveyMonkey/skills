@@ -1,0 +1,56 @@
+{
+  "actions": [],
+  "advisories": {
+    "1115393": {
+      "findings": [
+        {
+          "version": "1.5.2",
+          "paths": [
+            ".>vercel>smol-toml"
+          ]
+        }
+      ],
+      "found_by": null,
+      "deleted": null,
+      "references": "- https://github.com/squirrelchat/smol-toml/security/advisories/GHSA-v3rj-xjv7-4jmq\n- https://github.com/squirrelchat/smol-toml/releases/tag/v1.6.1\n- https://github.com/advisories/GHSA-v3rj-xjv7-4jmq",
+      "created": "2026-03-25T21:03:56.000Z",
+      "id": 1115393,
+      "npm_advisory_id": null,
+      "overview": "### Summary\nAn attacker can send a maliciously crafted TOML to cause the parser to crash, because of a stack overflow caused by thousands of consecutive commented lines.",
+      "reported_by": null,
+      "title": "smol-toml: Denial of Service via TOML documents containing thousands of consecutive commented lines",
+      "metadata": null,
+      "cves": [],
+      "access": "public",
+      "severity": "moderate",
+      "module_name": "smol-toml",
+      "vulnerable_versions": "<1.6.1",
+      "github_advisory_id": "GHSA-v3rj-xjv7-4jmq",
+      "recommendation": "Upgrade to version 1.6.1 or later",
+      "patched_versions": ">=1.6.1",
+      "updated": "2026-03-25T21:03:56.000Z",
+      "cvss": {
+        "score": 5.3,
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+      },
+      "cwe": [
+        "CWE-674"
+      ],
+      "url": "https://github.com/advisories/GHSA-v3rj-xjv7-4jmq"
+    }
+  },
+  "muted": [],
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 2,
+      "moderate": 12,
+      "high": 16,
+      "critical": 0
+    },
+    "dependencies": 835,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 835
+  }
+}

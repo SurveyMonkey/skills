@@ -1,0 +1,17 @@
+{
+  "description": "Nudge toward gh-security resolve-alerts when a Bash (or backgrounded BashOutput) command's output carries a GitHub vulnerability notice or package manager audit findings.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|BashOutput",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/common/notice-scan.sh",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}
