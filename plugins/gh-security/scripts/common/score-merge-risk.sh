@@ -547,7 +547,12 @@ jq -n \
     {id: "F7", name: "Declared-range distance", score: $f7, evidence: $e7}
   ] as $factors
   | ($factors | map(.score) | add) as $score
-  | ($factors | length) * 2 as $max
+  # Fully parenthesized: jq 1.7 binds `as` tighter than `*`, reading
+  # `E * 2 as $max | rest` like `E * (2 as $max | rest)`, which multiplies the
+  # factor count by the final object of the pipeline and aborts. jq 1.8 reads
+  # it as intended, which is how this passed everywhere but ubuntu (issue #59).
+  # This is a jq comment inside a single-quoted shell string; no apostrophes.
+  | (($factors | length) * 2) as $max
   | (if   $score <= 3 then "Low"
      elif $score <= 6 then "Medium"
      else "High" end) as $raw_band
