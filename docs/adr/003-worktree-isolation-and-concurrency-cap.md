@@ -4,7 +4,7 @@ description: Fix agents work in per-major-line worktrees under .claude/worktrees
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5]
+related_issues: [5, 35]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
