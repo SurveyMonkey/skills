@@ -12,7 +12,7 @@ related_issues: [10]
 ## Context
 
 Three quality gates exist for this repo and, until this decision, all of them ran only when
-someone remembered to run them: the shellspec suite (577 examples before this change, 603 with
+someone remembered to run them: the shellspec suite (577 examples before this change, 605 with
 it; roughly two minutes serial and well under one with `--jobs 8` on an M-series laptop, both
 machine-dependent), ShellCheck over every shell file (~2s), and
 `claude plugin validate --strict` over the marketplace and plugin manifests (~2s). Nothing

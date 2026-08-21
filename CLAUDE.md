@@ -36,8 +36,8 @@ Bash scripts are covered by [shellspec](https://shellspec.info): `brew install s
 
 All three quality gates (suite, ShellCheck, `claude plugin validate --strict`) run through one
 entry point, `scripts/check.sh` (`lint` / `validate` / `spec` / `fast` / `all` / `targets`);
-target lists
-live there and nowhere else, and empty discovery is a hard failure in every gate. Committed git
+target lists live there and nowhere else, and empty discovery is a hard failure in every gate.
+Committed git
 hooks run the fast gates on commit and the suite on push, enabled once per clone with
 `git config core.hooksPath .githooks`; CI runs all three (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin

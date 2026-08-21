@@ -300,6 +300,8 @@ committed artifact.
 `compare_versions` will be implemented more than once across adapters. That duplication is the
 point: a single implementation could not be correct for both semver and PEP 440.
 
-Until [#10](https://github.com/SurveyMonkey/skills/issues/10) adds a test harness, the contract is
-verified only against real repositories. The bug this ADR is partly a reaction to is exactly the
-kind a fixture test catches on day one and a real-repo run can miss for months.
+The contract is covered by fixture-driven shellspec suites in `spec/`, enforced on every PR and
+push by the quality gates ([ADR 005](005-quality-gate-venues.md)), and verified against real
+repositories, which the fixtures deliberately do not replace. The bug this ADR is partly a
+reaction to is exactly the kind a fixture test catches on day one and a real-repo run can miss
+for months.
