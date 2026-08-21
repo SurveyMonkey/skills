@@ -1,8 +1,13 @@
+---
+type: ADR
+description: The fix-dependency subagent is pinned to sonnet, the orchestrator inherits the session model, and criteria are set for a future Haiku trial.
+status: stable
+created: 2026-08-20
+owner: brianespinosa
+related_issues: [5]
+---
+
 # ADR 004: Subagent model tiering
-
-## Status
-
-Accepted
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Landed in Phase 2
 ([#5](https://github.com/SurveyMonkey/skills/issues/5)).

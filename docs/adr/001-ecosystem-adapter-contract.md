@@ -1,8 +1,13 @@
+---
+type: ADR
+description: Invocation, exit-code, and JSON-output contract for the per-ecosystem adapter scripts, including the empty-result and range-semantics obligations.
+status: stable
+created: 2026-07-26
+owner: brianespinosa
+related_issues: [4]
+---
+
 # ADR 001: Ecosystem adapter contract
-
-## Status
-
-Accepted
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Landed in Phase 1
 ([#4](https://github.com/SurveyMonkey/skills/issues/4)).

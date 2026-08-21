@@ -1,8 +1,13 @@
+---
+type: ADR
+description: Fix PRs open as drafts and the orchestrator batch-promotes them, with per-PR confirmation where auto-merge is armed.
+status: stable
+created: 2026-07-26
+owner: brianespinosa
+related_issues: [4, 5]
+---
+
 # ADR 002: PR draft state and the approval flow
-
-## Status
-
-Accepted
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Supersedes the RFC's original decision that
 fix PRs open ready for review. Adopted in Phase 1
