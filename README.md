@@ -1,5 +1,7 @@
 # SurveyMonkey Skills
 
+[![gates](https://github.com/SurveyMonkey/skills/actions/workflows/gates.yml/badge.svg?branch=main)](https://github.com/SurveyMonkey/skills/actions/workflows/gates.yml)
+
 > A Claude Code plugin marketplace containing job-scoped plugins for SurveyMonkey engineering workflows. Each plugin groups related skills under a single namespace so they can be installed and invoked together.
 
 ## Installation
