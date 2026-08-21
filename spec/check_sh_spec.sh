@@ -175,9 +175,16 @@ STUB
       printf '5 examples, 0 failures\n' > summary.txt
       CHECK_SPEC_SHELL=bash
       export CHECK_SPEC_SHELL
+      # SHELLSPEC_JOBS is pinned rather than inherited: the pre-push hook
+      # exports it, and an example whose argv depends on the caller's
+      # environment fails exactly there while passing serial CI (issue #61).
+      # Pinning also covers the flag combination the hook actually produces.
+      SHELLSPEC_JOBS=8
+      export SHELLSPEC_JOBS
       When run "$CHECK" spec
       The status should be success
-      The output should include 'argv: --shell bash'
+      The output should include '--jobs 8'
+      The output should include '--shell bash'
     End
 
     It 'reads the summary through ANSI color codes'
