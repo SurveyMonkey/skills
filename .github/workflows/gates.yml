@@ -1,0 +1,155 @@
+# The three quality gates (root CLAUDE.md "Testing", ADR 005), run on every
+# PR and on main. The committed .githooks/ run the same gates locally via the
+# same entry point, scripts/check.sh; CI is the enforcement boundary because
+# hooks can be uninstalled, skipped, or absent on a fresh clone.
+#
+# No `paths:` filters, ever: the aggregate `gates` job is intended as a
+# required status check, and a PR filtered out of the workflow would never
+# produce it and could never merge (ADR 005).
+#
+# No secrets in any job, and no pull_request_target: fork PRs must stay
+# harmless.
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; never cancel main, whose green record matters.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned to the versions the hooks run locally (ADR 005). ubuntu-latest
+  # preinstalls ShellCheck 0.9.0, and newer ShellCheck adds checks, so an
+  # unpinned runner and a local hook disagree in both directions; the repo's
+  # no-disable-directives rule makes that expensive.
+  SHELLCHECK_VERSION: 0.11.0
+  SHELLSPEC_VERSION: 0.28.1
+  CLAUDE_VERSION: 2.1.238
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned ShellCheck
+        # set -o pipefail: a run block defaults to bash -e without it, so a
+        # failed download would otherwise exit 0 and shift the red to the
+        # wrong step. The version assertion is what makes the pin real; the
+        # runner preinstalls 0.9.0, and printing a version is not enforcing
+        # one.
+        run: |
+          set -o pipefail
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP"
+          sudo install "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          installed=$(/usr/local/bin/shellcheck --version | awk '/^version:/ { print $2 }')
+          if [ "$installed" != "$SHELLCHECK_VERSION" ]; then
+            echo "expected ShellCheck $SHELLCHECK_VERSION, got: $installed"
+            exit 1
+          fi
+      - name: ShellCheck every tracked shell file
+        run: ./scripts/check.sh lint
+
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      # Without this the CLI can self-update inside the job, which silently
+      # undoes the version pin.
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Claude Code CLI
+        # claude plugin validate needs no auth, no API key, and no network at
+        # validate time; only this install step touches the network. The
+        # installer URL itself is mutable (unlike shellspec's tag ref), so
+        # the post-install version assertion is what enforces the pin; the
+        # absolute path matters because GITHUB_PATH only applies to later
+        # steps.
+        run: |
+          set -o pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION"
+          "$HOME/.local/bin/claude" --version | grep -qF "$CLAUDE_VERSION" || {
+            echo "expected Claude CLI $CLAUDE_VERSION, got: $("$HOME/.local/bin/claude" --version)"
+            exit 1
+          }
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Validate marketplace and plugin manifests (strict)
+        run: ./scripts/check.sh validate
+
+  spec:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # macOS is the platform that supplies the bash 3.2 the scripts target,
+      # so there spec/bash32_parse_spec.sh must run rather than skip; a skip
+      # is green, and the parse gate silently not running is exactly the
+      # failure mode this flag exists to refuse. ubuntu has no /bin/bash 3.x
+      # and legitimately skips it, contributing modern-bash (5.x) coverage
+      # instead: .shellspec says --shell sh, which is bash 3.2 on macOS but
+      # dash on ubuntu, and dash cannot run the bash-shebanged scripts at all
+      # (the first run proved it: set -o pipefail is not a dash option, issue
+      # #57), so the ubuntu leg overrides the shell rather than testing a
+      # target that never existed.
+      REQUIRE_BASH32: ${{ matrix.os == 'macos-latest' && '1' || '' }}
+      CHECK_SPEC_SHELL: ${{ matrix.os == 'ubuntu-latest' && 'bash' || 'sh' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned shellspec
+        run: |
+          set -o pipefail
+          curl -fsSL "https://raw.githubusercontent.com/shellspec/shellspec/${SHELLSPEC_VERSION}/install.sh" \
+            | sh -s -- "$SHELLSPEC_VERSION" --yes
+          installed=$("$HOME/.local/bin/shellspec" --version)
+          if [ "$installed" != "$SHELLSPEC_VERSION" ]; then
+            echo "expected shellspec $SHELLSPEC_VERSION, got: $installed"
+            exit 1
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run the shellspec suite
+        run: ./scripts/check.sh spec
+
+  gates:
+    # The single status check to mark required once runs are established:
+    # green only when every gate is. !cancelled() so a failed dependency
+    # produces a red check here rather than a skipped one, while a
+    # superseded (cancelled) PR run does not publish a spurious red. The
+    # arity floor keeps a gate dropped from `needs:` from shrinking coverage
+    # silently: zero (or two) results iterating to success is the same
+    # found-nothing-is-a-pass shape every other gate refuses.
+    needs: [lint, validate, spec]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: All gates green
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "gate results: $RESULTS"
+          n=0
+          for r in $RESULTS; do
+            n=$((n + 1))
+            if [ "$r" != "success" ]; then
+              echo "a gate did not succeed"
+              exit 1
+            fi
+          done
+          if [ "$n" -ne 3 ]; then
+            echo "expected 3 gate results, got $n"
+            exit 1
+          fi
