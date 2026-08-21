@@ -1,0 +1,8 @@
+{
+  "name": "root",
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "tool": "portal:./vendor/tool"
+  },
+  "scripts": { "test": "vitest run" }
+}

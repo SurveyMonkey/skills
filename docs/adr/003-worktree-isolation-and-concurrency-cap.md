@@ -4,7 +4,7 @@ description: Fix agents work in per-major-line worktrees under .claude/worktrees
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5]
+related_issues: [5, 35]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
@@ -95,3 +95,26 @@ summary tells the user which branch to inspect or delete; that judgment stays hu
 keeps two agents fixing different lines of one package from colliding, and it is applied to every
 group so a package that grows a second line later does not rename the branch of the line it
 already had.
+
+## Amendment: repo-global git state is the orchestrator's, not the agent's
+
+[Issue #35](https://github.com/SurveyMonkey/skills/issues/35) found the Consequences claim above —
+"agents share nothing but the object store and the remote" — to be false in two places, once the
+spare-slot pin audit made an agent share a `repo_root` with a concurrent sibling **by design**.
+Worktree *paths* are isolated; repository state is not.
+
+- **The `.git/info/exclude` line moves out of the agents.** `common/ensure-worktree-exclude.sh`
+  writes it, called once per repo by the orchestrator (or by `/gh-security:audit-pins`) before any
+  agent is dispatched. Two agents dispatched in one message — the required pattern — start
+  milliseconds apart, and a read-then-append from each can duplicate the line or tear the file.
+  Writing it before the wave removes the race by construction rather than narrowing it. The
+  Decision's "only two writes into the user's repository" is now **one**: the worktree directory.
+- **Cleanup drops `git worktree prune`.** It walks every worktree entry in the repository, so a
+  call timed against a sibling's `worktree add` or `remove` can delete a live registration — and
+  the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
+  removes the caller's own entry, and it is the whole cleanup an agent is entitled to. A remove
+  that fails is reported and left alone; an orphan is recoverable by hand once no wave is in
+  flight.
+
+Everything else above holds. The general rule the two share: an agent may name its own paths, and
+nothing repository-wide.

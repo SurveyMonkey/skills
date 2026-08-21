@@ -1,0 +1,11 @@
+{
+  "name": "demo-partial",
+  "dependencies": {
+    "express": "^4.18.2",
+    "victim": "^1.2.3"
+  },
+  "resolutions": {
+    "express/sha.js": ">=2.4.11 <3"
+  },
+  "scripts": { "test": "vitest run" }
+}

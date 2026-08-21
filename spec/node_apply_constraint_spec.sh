@@ -154,6 +154,163 @@ Describe 'node.sh apply_constraint'
     End
   End
 
+  # An aliased dependency, which `validate` now counts and which nothing could
+  # previously move: `overrides.lodash` does not reach a copy the parent
+  # declared as `lodash-alias`, and a bare range under the alias key names a
+  # package no registry has. Both halves are needed, so both are asserted
+  # (issue #46).
+  #
+  # **Neither fixture below has a `node_modules` directory**, and that is the
+  # point. This verb runs before `install`, in a fresh worktree where
+  # node_modules is gitignored and absent; Yarn PnP never has one at all. The
+  # alias key used to be looked up in `node_modules/<parent>/package.json`, so
+  # every parent was silently skipped and the plain package name was written,
+  # which moves nothing — while `spec/fixtures/npm-alias` committed a
+  # node_modules tree encoding a state that never exists here, which is why the
+  # suite stayed green through it (issue #48).
+  Describe 'a dependency reached through an npm: alias'
+    # The chain, end to end: the key `apply_constraint` writes, and the copy
+    # `validate` says is still vulnerable. A pass means the override that was
+    # written names the same copy the completeness check flags — which is what
+    # "the aliased copy is governed" means before an install has run.
+    alias_chain() {
+      _wrote=$("$ADAPTER" apply_constraint lodash '>=4.18.2 <5' "$@" \
+        | jq -c '[.written[] | select(.value | startswith("npm:")) | .path]')
+      _left=$("$ADAPTER" validate --line 4 --vulnerable '>= 4.18.0, < 4.18.2' \
+        lodash '>=4.18.2 <5' | jq -c '[.unresolved_alerts[].path]')
+      printf 'wrote=%s still_vulnerable=%s\n' "$_wrote" "$_left"
+    }
+
+    It 'writes the alias key, with the protocol, under the parent that declared it'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' alias-parent dupe-parent >/dev/null
+      When call manifest '{aliased: .overrides["alias-parent"], plain: .overrides["dupe-parent"]}'
+      The output should equal '{"aliased":{"lodash-alias":"npm:lodash@>=4.18.2 <5"},"plain":{"lodash":">=4.18.2 <5"}}'
+    End
+
+    It 'governs the aliased copy validate flags, with no node_modules to read'
+      use_fixture npm-alias
+      When call alias_chain alias-parent dupe-parent
+      The status should be success
+      The path node_modules should not be exist
+      The output should equal 'wrote=[["overrides","alias-parent","lodash-alias"]] still_vulnerable=["node_modules/lodash-alias"]'
+    End
+
+    # Yarn Berry, which had no working path at all until `yarn_parents` learned
+    # to read alias declarations: `why` returned no parent, so this call would
+    # have received none and only the root-alias branch could fire — and the
+    # root here never mentions lodash (issue #47).
+    It 'does the same for a Yarn Berry parent that declares through npm:'
+      use_fixture yarn-berry-alias-parent
+      When call alias_chain express
+      The status should be success
+      The path node_modules should not be exist
+      The output should equal 'wrote=[["resolutions","express/lodash-alias"]] still_vulnerable=["lodash-alias@npm:lodash@4.18.1"]'
+    End
+
+    # The result used to report `package` and `range` whatever it had written,
+    # so a PR body quoting it described an edit that was not made (issue #48).
+    It 'reports the key and value it actually wrote'
+      use_fixture npm-alias
+      When call adapter_jq '.written' apply_constraint lodash '>=4.18.2 <5' alias-parent
+      The status should be success
+      The output should equal '[{"parent":"alias-parent","path":["overrides","alias-parent","lodash-alias"],"value":"npm:lodash@>=4.18.2 <5"}]'
+    End
+
+    # Silently skipping a parent whose declaration cannot be read is the whole
+    # failure mode above. pnpm's snapshots record what a dependency resolved to
+    # rather than the key it was declared under, so this adapter has no source
+    # for a pnpm alias declaration and says so rather than guessing.
+    #
+    # `source` is asserted alongside the list because it is what separates the
+    # two readings: `unsupported` lists every parent BY DESIGN, so a definition
+    # that keys the warning on a non-empty list alone raises it on 100% of pnpm
+    # scoped fixes — a permanent false positive on a third of the fleet, which
+    # trains the reading agent to discount the one place the npm/yarn signal
+    # means something (issue #49).
+    It 'names every parent whose declaration it could not read, and why'
+      use_fixture pnpm-v9
+      When call adapter_jq '.alias_lookup' apply_constraint lodash '>=4.17.25 <5' express koa
+      The status should be success
+      The output should equal '{"source":"unsupported","parents_unresolved":["express","koa"]}'
+    End
+
+    # ...and where a declaration source does exist, an empty list is the normal
+    # answer, so the warning is about the parents named rather than about the
+    # ecosystem.
+    It 'resolves every parent where a declaration source exists'
+      use_fixture npm-alias
+      When call adapter_jq '.alias_lookup' apply_constraint lodash '>=4.18.2 <5' alias-parent
+      The status should be success
+      The output should equal '{"source":"lockfile","parents_unresolved":[]}'
+    End
+
+    definition() { grep -c "$1" "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"; }
+
+    It 'has a definition that treats source unsupported as a known limit, not a warning'
+      When call definition 'source: "unsupported"` (pnpm)'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'has a definition that keeps the warning for a lockfile-backed source'
+      When call definition 'source: "lockfile"` (npm, Yarn Berry) with a non-empty'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Berry, through the peer-declared parent the reader could not see until
+    # issue #49: `why` names it, and the scoped entry lands under it.
+    It 'scopes to a Yarn Berry parent that declares the package as a peer'
+      use_fixture yarn-berry-peer-parent
+      When call adapter_jq '.written' apply_constraint 'sha.js' '>=2.4.12 <3' serve-static
+      The status should be success
+      The output should equal '[{"parent":"serve-static","path":["resolutions","serve-static/sha.js"],"value":">=2.4.12 <3"}]'
+    End
+
+    # A real package whose name is another entry's install key. The read path
+    # merges the two toward `inconclusive`, which is fail-safe; the WRITE path
+    # is not — retargeting the colliding declaration produces
+    # `npm:underscore@^4.17.21`, a version of underscore that does not exist,
+    # while the lodash copy the caller meant goes unmoved. Pre-existing and not
+    # fixable in the adapter (neither sense of the name is knowable here), so
+    # `written[]` has to surface it and the definition has to stop on it
+    # (issue #49).
+    It 'writes an npm: value naming a different package when the name collides'
+      use_fixture npm-dual-name
+      When call adapter_jq '[.written[] | select(.value | startswith("npm:")) | .value]' \
+        apply_constraint lodash '>=4.17.21 <5'
+      The status should be success
+      The output should equal '["npm:underscore@^4.17.21"]'
+    End
+
+    It 'has a definition that rejects such a value rather than opening a PR on it'
+      When call definition 'value that names a different package, and fail the run'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The root is a dependent like any other, and it declares both copies here.
+    # Retargeting keeps each declaration's own form: the alias keeps its
+    # protocol and the package it aliases, and a caret stays a caret.
+    It 'retargets a root alias declaration without dropping the protocol'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' >/dev/null
+      When call manifest '{plain: .dependencies.lodash, aliased: .dependencies["lodash-alias"]}'
+      The output should equal '{"plain":"^4.18.2","aliased":"npm:lodash@^4.18.2"}'
+    End
+
+    # `resolved_versions` answers under the alias key too, so an agent may well
+    # pass that name. It must not turn `npm:lodash@^4.18.0` into a bare range,
+    # which would redirect the dependency at a package that does not exist.
+    It 'keeps the protocol when the alias key itself is the named package'
+      use_fixture npm-alias
+      "$ADAPTER" apply_constraint lodash-alias '>=4.18.2 <5' >/dev/null
+      When call manifest '.dependencies["lodash-alias"]'
+      The output should equal '"npm:lodash@^4.18.2"'
+    End
+  End
+
   Describe 'existing entries are merged, never replaced'
     It 'preserves unrelated pnpm overrides'
       use_fixture pnpm-v9

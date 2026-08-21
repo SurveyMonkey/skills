@@ -9,7 +9,7 @@ description: >
   carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -178,6 +178,23 @@ At org or user scope, name every distinct repo the plan touches and say plainly 
 yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
 (phase 6) — this is part of what the approval covers, not a separate consent step.
 
+**Spare slot → the pin audit rides along.** If the approved batch has **fewer groups than `cap`**,
+one `audit-pins` agent joins the first wave and the plan says so, in the same approval:
+
+> 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
+> one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
+> are no longer needed. Report-only, no PR.
+
+Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
+are free — its own removability tests run installs, and a second copy of it would audit the same
+repository twice. When the batch fills every slot, the audit is not dispatched here; phase 11
+offers it instead, because spending a slot on housekeeping in a full dispatch trades away a fix.
+
+**The audit is repo-scoped, at every scope of this skill.** At org or user scope the batch may span
+repos while the audit covers exactly one, so the plan **names the repo it will audit**: the repo of
+the top-ranked group, which is the one the user is most likely to be thinking about. It is not a
+cross-repo audit, and the remaining repos are offered in phase 11 like any other.
+
 Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
 from here through draft-PR creation. Nothing dispatches without it.
 
@@ -221,7 +238,21 @@ for a given repo shares its triple.
 
 ## Phase 7: Dispatch in waves
 
-Take up to `cap` groups **across every repo in the current wave** and dispatch them **in a single
+**Before the first wave, once per distinct repo in the approved batch:**
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
+```
+
+This writes the `.claude/worktrees/` line into that repo's `.git/info/exclude`, keeping the agents'
+worktrees out of `git status`. It is local-only and never committed, it is idempotent, and it is
+**yours to do, not the agents'**: two agents dispatched in the same message start milliseconds
+apart, and a read-then-append from each can duplicate the line or tear the file (issue #35). You
+know the repo set, so one call per repo removes the race by construction. A failure here is not
+fatal — report it and dispatch anyway; the worst case is worktree directories showing up in
+`git status`.
+
+Then take up to `cap` groups **across every repo in the current wave** and dispatch them **in a single
 message with one Task tool call per group** so they run in parallel:
 
 - `subagent_type`: `fix-dependency`
@@ -234,6 +265,28 @@ message with one Task tool call per group** so they run in parallel:
 Two lines of the same package may run in the same wave, whether in the same repo or different
 ones: they carry different `branch_name`s and different worktree paths (worktree paths are always
 under that group's own `repo_root`), so they cannot collide.
+
+When phase 5's approved plan included the pin audit, its Task call goes in that **same first
+message**, counting against `cap` like any other agent:
+
+- `subagent_type`: `audit-pins`
+- prompt: the `{repo, repo_root, default_branch}` triple of the repo named in the plan (phase 1 at
+  repo scope, that repo's phase 6 triple at org or user scope), its `adapter_path` (any of that
+  repo's actionable groups — one repository, one toolchain), and `scripts_dir`, plus the
+  instruction to follow its agent definition and end with its JSON result block.
+
+It works in `.claude/worktrees/audit-pins` under that repo's own `repo_root`, which no fix agent
+uses, so their worktree **paths** cannot collide. That is a statement about directories only. The
+audit shares a repository with the fix agents it rides beside, and **repo-global git state is
+shared**, so while a wave is in flight no agent may touch it: no `.git/info/exclude` write (done
+once above, before dispatch), no `git worktree prune` — repository-wide, and a badly timed one
+deletes a live sibling's registration — no `git gc`, no config writes, no branch or ref
+manipulation outside its own branch. Each agent adds and removes its own worktree by path and
+nothing else. Both agent definitions state this as a hard rule; the reason it is written here too
+is that the earlier absolute phrasing ("cannot collide") is what invited the two calls issue #35
+found.
+
+Dispatch the audit once per run, in the first wave only; later waves are fixes alone.
 
 The cap is a **wave barrier**, machine-wide across every repo in the batch: never issue more than
 `cap` Task calls in one message, and do not start the next wave until every agent in the current
@@ -250,6 +303,19 @@ Present one table for the batch:
 > | Repo | Package | Line | PR | Risk | F4/F5 | Scripts | Notes |
 
 Omit the `Repo` column at repo scope, as in phases 4 and 5.
+
+**A `no-op` result is neither a success nor a failure, and gets its own line, never the failure
+list.** The group's fix was already on the default branch when the agent got there: it made no
+commit, opened no PR, and validate confirmed the alerts are cleared by what is installed. Report
+those separately, with the agent's `no_op.reason` and the merged PR when it named one:
+
+> Already fixed, nothing to do: `undici` 6.x in `octo/app` — the scoped overrides are already on
+> `main` (<PR #597>, merged 2026-08-17), and validate confirms all 8 alerts are cleared by the
+> resolved 6.28.0. Dependabot has not re-scanned yet, which is why they still show as open.
+
+The condition is Dependabot re-scan lag, not a bug anywhere: GitHub reports alerts as open for a
+window after the fix merges. Folding these into the failure list presents a clean outcome as
+needing attention and buries the genuine failures beside it (issue #34).
 
 Failures get their `phase` and `detail`. A result whose `action` is `bare-override` says so in
 Notes (`bare override added` or `bare override tightened`, from `bare_override`): it is the one
@@ -284,17 +350,47 @@ the reason the agent gave, the repo, and the PR that introduced them:
 `unscoped_override` entries are pre-existing, and stay one aggregate line per repo:
 
 > Note: `octo/app` contains N unscoped global override(s): `<keys>`. These may be removable or
-> convertible to scoped pins. The pin audit will test removability
+> convertible to scoped pins. The pin audit tests removability
 > ([#7](https://github.com/SurveyMonkey/skills/issues/7)).
 
 Leads, not findings. Do not act on either. Without deduplication a five-package dispatch would
 report the same pre-existing bare overrides five times. Never fold a newly added pin into that
 count and call it pre-existing debt: this batch is the record of where it came from.
 
+### Audit findings, when the audit rode along
+
+If an `audit-pins` agent ran in phase 7, report its result **after** the fix table and separately
+from it: it fixed nothing and opened nothing, and mixing its rows into the PR table invites
+reading a finding as a change. Name the repo it audited, which at org or user scope is one repo in
+the batch rather than all of them.
+
+**Group the findings by package, one table per package**, exactly as the agent reported them —
+never a flat list of pin keys:
+
+> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
+
+Then say plainly which pins are removable (and that removing them is the user's call, since this
+phase opens no PR), which are `still-required` and against which advisory range, and which came
+back `inconclusive`, `not-tested`, or `not-a-version-pin` — an audit that could not establish
+something must not read as an all-clear. A bare override this batch just added will appear in the
+audit as `still-required`; that is expected, not a contradiction.
+
+**`removable-individually` must never be reported as `removable`.** That status means the package
+carries more than one removable pin and each was tested with the others still in place. Say so, in
+the package's own section, and say that removing more than one of them requires a fresh audit of
+what remains — a real run produced four `minimatch` pins with identical results purely because the
+siblings held those versions during each test. Naming them together without that sentence is how a
+reader turns four tested operations into one untested one.
+
+An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
+audit are independent work that happened to share a wave.
+
 ## Phase 9: Decide what may leave draft
 
 Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
-work — but promotion is a decision, not a default. Gather the evidence:
+work — but promotion is a decision, not a default. This phase covers the `success` results only:
+`no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. Gather the
+evidence:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
@@ -344,8 +440,27 @@ deleting its branch, and re-running this skill for that package rebuilds the fix
 new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
 remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
 
-## Phase 11: Offer the next batch
+## Phase 11: Offer the next batch, then the pin audit
 
 If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
-back to phase 4 with the remaining groups. Otherwise report done, including anything left in the
-not-promoted groups, any repos still in `skipped_repos`, and what would unblock each.
+back to phase 4 with the remaining groups.
+
+Then, **unless an `audit-pins` agent already ran in phase 7**, recommend the pin audit once:
+
+> Every fix in this run added or tightened a pin. The pin audit is the other direction: it finds
+> overrides and resolutions a repository no longer needs, testing each removal in an isolated
+> worktree against every published advisory for the package. Report-only — it opens no PR. It runs
+> one install per pin it tests, so it takes a few minutes. Run it now?
+
+On acceptance, dispatch `audit-pins` with the phase 7 payload and report its findings as phase 8
+describes. The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
+the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
+same `cap` — their removability tests run installs like any fix agent. Recommend it once and take
+the answer; declining is a complete answer, and `/gh-security:audit-pins` runs it later, per repo,
+without going through alert resolution at all.
+
+Recommend it even when this run fixed nothing that touched an override: a repository accumulates
+pins from every past run and from hand edits, and the audit is about all of them.
+
+Otherwise report done, including anything left in the not-promoted groups, any repos still in
+`skipped_repos`, and what would unblock each.

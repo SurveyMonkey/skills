@@ -14,11 +14,18 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 | Plugin | Namespace | Description |
 |---|---|---|
-| `gh-security` | `/gh-security:*` | Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, and a check-aware mark-ready flow |
+| `gh-security` | `/gh-security:*` | Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, a check-aware mark-ready flow, and a report-only pin audit that finds overrides no longer needed |
 
 Two entry points: ask Claude to fix the repo's security alerts (the `resolve-alerts` skill
 triggers from natural language) or run `/gh-security:resolve-alerts` explicitly.
 `/gh-security:fix-alert` remains as a deprecated shim that fixes only the top-ranked group.
+
+**Pin audit.** Overrides and resolutions added to hold a transitive dependency at a safe version
+outlive their reason, and then quietly hold packages back. `/gh-security:audit-pins` reports which
+of a repo's pins are no longer needed, testing each removal in an isolated worktree against every
+published advisory for the package rather than against the repo's own alert history — which the
+pin itself blinds. It also runs automatically in a spare slot when a fix batch is smaller than the
+concurrency cap, and is offered after a batch that filled it. Report-only: it opens no PR.
 
 Supports pnpm, npm, and Yarn Berry. Other ecosystems and package managers are reported rather
 than attempted; see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to request one.

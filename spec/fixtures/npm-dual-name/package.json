@@ -1,0 +1,8 @@
+{
+  "name": "demo-dual",
+  "dependencies": {
+    "lodash": "npm:underscore@^1.13.6",
+    "pkg-a": "^1.0.0"
+  },
+  "scripts": { "test": "jest" }
+}

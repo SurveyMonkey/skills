@@ -1,0 +1,13 @@
+{
+  "name": "demo-patch",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "express": "^4.21.2",
+    "local-tool": "portal:./packages/local-tool",
+    "lodash": "patch:lodash@npm%3A4.17.21#~/.yarn/patches/lodash-npm-4.17.21-abc.patch"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "scripts": { "build": "tsc", "test": "vitest run" }
+}

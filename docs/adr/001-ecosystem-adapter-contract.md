@@ -1,10 +1,10 @@
 ---
 type: ADR
-description: Invocation, exit-code, and JSON-output contract for the per-ecosystem adapter scripts, including the empty-result and range-semantics obligations.
+description: Invocation, exit-code, and JSON-output contract for the per-ecosystem adapter scripts: the empty-result and range-semantics obligations, pin listing, the whole-tree resolution map with self-reported parse coverage, and alias identity across verbs.
 status: stable
 created: 2026-07-26
 owner: brianespinosa
-related_issues: [4]
+related_issues: [4, 7]
 ---
 
 # ADR 001: Ecosystem adapter contract
@@ -72,6 +72,97 @@ Splitting them serves two callers: the merge-risk baseline needs to enumerate ve
 any constraint exists to check against, and `validate` needs the same enumeration plus a
 predicate. One parser, two consumers.
 
+**`resolution_map` answers the whole-tree question `resolved_versions` cannot.** It returns
+`{pm, lockfile_entries, entries_read, entries_expected, unreadable_entries, package_count,
+resolutions}`, where `resolutions` maps every package in the lockfile to its unique, lexically
+sorted version list. The pin audit needs it because an override
+reaches past the package it names: lifting one changes dedup and hoisting and can let a peer
+conflict resolve differently, so a removal can move a package the pin never mentioned. Diffing one
+package before and after a removal is blind to that, and the resulting `removable` verdict is right
+about its own package and silent about the tree
+([#42](https://github.com/SurveyMonkey/skills/issues/42)). A separate verb rather than a widened
+`resolved_versions`: the two answer different questions, and the per-path detail one caller needs is
+not what a diff wants. What does **not** travel with that separation is the identity rule below: both
+verbs answer "what version of X is in the tree", so a change to what counts as X lands in both, even
+when it shifts `validate` ([#46](https://github.com/SurveyMonkey/skills/issues/46)). The empty-parse
+rule above applies unchanged, and for a sharper reason — a diff against an empty map reports every
+package unchanged, which is the wrong-safe answer by yet another route. Versions are sorted for
+comparability, not ranked; callers that need semver order still ask `compare_versions`.
+
+**A package is keyed by what it resolves to, not by where it sits — in both verbs.** Workspace
+links, `portal:` and `exec:` targets, git targets and URL targets are excluded, because "what
+version of X is in the tree" has no registry answer for local or generated code. A `patch:` entry
+is *not* in that set: it wraps a published release, so it is included at the version its innermost
+locator names, unwrapped one nesting level at a time — a patch of an already-patched package escapes
+its inner locator twice, and a single decode left it looking like neither protocol. A patch wrapping
+a workspace or portal target stays excluded on the same rule, and a locator whose version cannot be
+read is **not** quietly dropped: it counts against the parse guard. An `npm:` alias is included under
+the package it aliases rather than the key it installs as, in npm and Berry alike. Each of these was
+previously dropped or mislabeled — a patched package vanished from the map at a real registry
+version, an alias was reported under a name no registry has, and a version carrying Berry's `::`
+binding parameters ranked below the clean release it named
+([#44](https://github.com/SurveyMonkey/skills/issues/44),
+[#46](https://github.com/SurveyMonkey/skills/issues/46)).
+
+The two verbs must agree about any package, since the pin audit treats a disagreement as a parser
+bug and refuses the pin. Their **shapes** differ by design, though — `resolved_versions` reports
+one `{version, path}` per resolution, the map reports each package's versions once — so a caller
+comparing them normalizes first: `[.versions[].version] | unique` against the map's list.
+
+**One documented exception, and only one: an alias key.** `resolved_versions` answers under the key a
+package is installed as *as well as* under the package it resolves to, because the install key is
+what an override entry names and what `list_pins` therefore hands the audit; answering `present:
+false` there reads as "the package left the tree" and recommends deleting the pin. The map keeps the
+single canonical name, because its consumer is an advisory query that an alias key answers
+`no-advisories`. So for an alias key alone, the map legitimately holds no entry while
+`resolved_versions` reports one, and `agents/audit-pins.md` reports that pin `inconclusive` naming
+the alias rather than reading it as a parser bug.
+
+**That exception carries a limit, and the limit is documented rather than fixed.** Answering under
+both names means a real package whose name equals another entry's install key — a repository
+installing `underscore` under the key `lodash` while a dependency pulls the real `lodash` — has its
+versions merged into one `resolved_versions` answer, in npm and Berry alike. Disambiguating by path
+or locator would require the caller to say which sense of the name it meant, and the caller cannot:
+an override key `lodash` is exactly as ambiguous as the lockfile is. On the **read** path the merge
+is fail-safe in direction — it over-reports toward `inconclusive` and `still-required`, never toward
+`removable` — so it is stated here and acted on in the audit rather than guessed at. It presents as
+**two non-empty lists that disagree**, distinct from the alias-key case's `[]` against non-empty,
+and `agents/audit-pins.md` names both shapes so neither is read as a parser bug
+([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
+**On the write path the same ambiguity is not fail-safe, and that is the direction that ships an
+edit.** `apply_constraint lodash '>=4.17.21 <5'` against that repository finds the root's colliding
+declaration `"lodash": "npm:underscore@^1.13.6"` and retargets it in place, because retargeting an
+`npm:` declaration deliberately preserves the protocol and the package it aliases and rewrites only
+the version. The result is `"npm:underscore@^4.17.21"` — a version of `underscore` that does not
+exist, so the install breaks — while the real `lodash` copy the caller meant goes unmoved. Nothing
+in the adapter can tell the two senses apart here either, so the report is what catches it:
+`written[]` states the key and value actually written, and `agents/fix-dependency.md` **rejects any
+written value whose `npm:` protocol names a package other than the one passed**, failing the run
+with the entry quoted rather than opening a PR on it
+([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+
+**The parse guard counts what the parser could read, not what it kept.** A repository whose
+dependencies are all workspaces and portals resolves to no registry version at all, so an empty map
+is a real answer there; a lockfile the parser understood none of produces the same empty map, and a
+diff against it reports every package unchanged. Adapters therefore distinguish "read it and
+excluded it" from "could not read it", and refuse a lockfile whose recognized share has collapsed —
+which also catches the partial parse a zero-check cannot see
+([#46](https://github.com/SurveyMonkey/skills/issues/46)). Every ecosystem's parser owes all three
+answers: an npm workspace link (`link: true`, no `version`) and a pnpm `link:`, `file:` or git
+entry are read and deliberately excluded, exactly as Berry's `workspace:` and `portal:` locators
+are, and counting either as unread hard-failed ordinary monorepos with a "the parser is broken"
+diagnosis ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
+**A guard that only refuses is not enough: the map states its own coverage.** The guard is a ratio,
+so a *single* unreadable locator passes it and its package silently leaves the map — absent from a
+baseline snapshot and from a post-removal one alike, which a whole-tree diff reads as "unchanged".
+`resolution_map` therefore carries `entries_read`, `entries_expected` and `unreadable_entries`, and
+`agents/audit-pins.md` requires `collateral_changes: null` with `collateral_verdict: not-checked`
+whenever the last is non-zero. Without it an unaudited package became an affirmatively clean one,
+because `[]` is documented as the stronger claim than `null`
+([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR
 commits, and parsing it works before any install has run, which the pre-fix baseline requires.
@@ -103,20 +194,52 @@ exits 0 with empty stdout answers nothing, and jq reading empty input emits noth
 failing, so every `has()` check downstream is skipped instead of tripped. A reply is asserted to be
 a JSON object before any field of it is read.
 
+**`apply_constraint` reads every declaration it needs out of the lockfile, and reports what it
+wrote.** It runs *before* `install`, in a fresh worktree where `node_modules` is gitignored and
+absent — and Yarn PnP never has one at all, while pnpm links only direct dependencies into one — so
+the key a parent declares an aliased dependency under comes from the lockfile
+(`.packages["node_modules/<parent>"]` for npm, each `resolution:` entry for Berry, reading
+`dependencies`, `optionalDependencies` and `peerDependencies` in both), never from a parent's
+installed manifest. A parent whose declaration
+the adapter cannot locate is named in `alias_lookup.parents_unresolved`, never skipped: the whole
+failure of the manifest-based lookup was that it skipped silently and wrote the plain package name,
+which does not govern the aliased copy. The result also carries `written[]`, one
+`{parent, path, value}` per entry the call actually created, produced by the same pass that writes
+them — the report used to state `package` and `range` whatever it had written, so a PR body quoting
+it described an edit that was not made ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+pnpm is the one gap and it is reported rather than guessed at: its `snapshots:` blocks record what
+a dependency resolved to, not the key and specifier it was declared with, so `alias_lookup.source`
+is `unsupported` there and every parent is listed unresolved. **`source` is what the list means, so
+a caller reads both.** `unsupported` names an ecosystem limit and nothing about this repository;
+keying the "an aliased copy may not have moved" warning on a non-empty list alone raises it on every
+pnpm scoped fix, which trains the reading agent to discount the one case — `source: "lockfile"` with
+parents still unresolved — where it is a real finding
+([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+
 **`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
 plus the root manifest's own declaration, which is read from those three and `devDependencies` too:
 the repository is a dependent like any other, and a dev-only direct dependency still declares a
 range a fix can leave behind. Parent discovery covers the same three blocks in npm lockfile v3, whose
 entries record each of them under their own key; a parent that declares the package only optionally
-or as a peer still resolves it. The pnpm and Yarn Berry lockfile parsers still discover parents
-through `dependencies` blocks alone, so an optional-only or peer-only parent is missed there; a
-range it declares reaches F7 only if the agent reads it by hand. Widening those parsers is open
-work, not a documented guarantee. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
+or as a peer still resolves it. The Yarn Berry parser covers the same three blocks under each
+`resolution:` entry, which it did not until
+[#49](https://github.com/SurveyMonkey/skills/issues/49): matching `dependencies:` alone left a
+peer-declared Berry parent invisible to `why` and unreachable by `apply_constraint`, contradicting
+this paragraph one block over from where
+[#47](https://github.com/SurveyMonkey/skills/issues/47) had just been fixed. **pnpm remains the
+exception**: its `snapshots:` blocks record what each dependency resolved to rather than the block
+it was declared in, so an optional-only or peer-only pnpm parent is still missed and a range it
+declares reaches F7 only if the agent reads it by hand. Widening that parser is open work, not a
+documented guarantee. Alongside the ranges: `parents_read[]`, `parents_without_range[]`
 (read, but declaring the package in no block, which version skew produces legitimately),
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse, kept inside `parents_unreadable` so every consumer of that list stays
-correct while the corrupt case remains distinguishable from the merely uninstalled one. The verb
+correct while the corrupt case remains distinguishable from the merely uninstalled one. A range is
+read from an `npm:` alias declaration as well as from a plain one, because parent discovery counts
+an aliasing parent as a parent: looking the package up under its own name alone filed that parent
+under `parents_without_range`, which reads as "declared nothing" for a parent that in fact declares
+a live range ([#48](https://github.com/SurveyMonkey/skills/issues/48)). The verb
 belongs behind the contract because finding a parent's manifest is an ecosystem question
 (`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and because the
 shell loop it replaced in the agent definition could not be pre-approved by the preflight catalog,
@@ -124,10 +247,36 @@ discarded every per-parent error, and missed optional dependencies. A parent who
 installed is reported, never guessed at: Yarn PnP has no `node_modules`, and pnpm links only direct
 dependencies into one.
 
-**`list_pins` is reserved but unimplemented.** It is part of the contract and returns exit code 2
-until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is its only
-consumer. Declaring the verb now keeps the contract complete; implementing it now would land code
-with no caller and no way to verify it.
+**~~`list_pins` is reserved but unimplemented.~~** ~~It is part of the contract and returns exit
+code 2 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is
+its only consumer.~~ **Implemented in Phase 4** alongside that consumer. It returns
+`{pm, override_location, block_present, count, bare_count, pins[]}`, one entry per constraint the
+manifest declares, each carrying `key`, `path`, `package`, `selector`, `parents`, `scope`
+(`bare` or `scoped`), `value`, `kind`, `range`, and the alias fields.
+
+Two parts of that shape are contract, not convenience, because each is a wrong reading the audit
+would otherwise make:
+
+- **Keys are parsed, not split.** Every scoping syntax collides with something: pnpm's `>` with
+  version selectors (`handlebars@4`), yarn's `/` with scoped package names (`@babel/core` is one
+  name; `@vercel/fun/undici` is a parent and a dependency), npm's nesting with its `"."` key,
+  which names the parent itself and so is a bare pin wearing a nested shape.
+- **`kind` says what the value is**, and only `range` is a version pin. A resolution may redirect
+  to a **different package** (`"@next/env": "npm:@varlock/nextjs-integration@1.1.6"` → `alias`),
+  point at a patch or a local path (`protocol`), or defer to a declared dependency
+  (`"$lodash"` → `reference`). Reading any of those as a range has the audit reasoning about the
+  version of a pin that was never about a version, and reporting the wrong package. `range` is
+  never inferred: it is what the adapter's own range parser accepts, the same one behind
+  `range_facts`. The version in an `npm:` value is optional, so `npm:esbuild-wasm` and
+  `npm:@babel/core` are aliases with a null `alias_range`, not ranges whose text happens to be a
+  package name.
+
+An empty override block is `count: 0` and exit 0, which does **not** contradict the empty-result
+rule above: this verb reads structured JSON, where absence is a fact, rather than a lockfile,
+where zero parsed entries means the parser failed. A block that is **present but not an object**
+is the third state and exits 1: coercing it to `{}` produced a `count: 0` byte-identical to the
+legitimately empty case, and the audit stops on `count: 0`, so a corrupted manifest audited clean
+— "found nothing" meaning "all clear" by another route.
 
 **Dependencies are `bash`, `jq`, and `gh`.** No `node`, no `npx`. Node has no built-in semver, so
 using it would mean `npx semver` and a cold-cache network fetch in the middle of a security fix.

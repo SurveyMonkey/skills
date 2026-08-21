@@ -22,7 +22,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status and promotion, advisory lookup, worktree ignore setup |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -68,10 +68,40 @@ vulnerable").
 
 ## Prescribed shapes and the preflight catalog move together
 
-`preflight-permissions.sh` pre-approves exactly the command shapes the agent definition
-prescribes. Changing a prescribed shape in `agents/fix-dependency.md` without updating the
-catalog in the same commit reintroduces a permission prompt for spec'd behavior — caught live
-once already (the `rev-parse` → `branch --list` guard change). Keep them in lockstep.
+`preflight-permissions.sh` pre-approves exactly the command shapes the agent definitions
+prescribe. Changing a prescribed shape in `agents/fix-dependency.md` or `agents/audit-pins.md`
+without updating the catalog in the same commit reintroduces a permission prompt for spec'd
+behavior — caught live once already (the `rev-parse` → `branch --list` guard change). Keep them in
+lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
+its definition prescribes them.
+
+## Every `gh` and `git` command runs under `direnv exec <repo_root>`
+
+`direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever
+account the shell defaults to. Both agent definitions and both entry points prescribe
+`direnv exec <repo_root> gh ...` and `direnv exec <repo_root> git -C <path> ...` for that reason;
+`check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+
+The failure modes are misleading rather than obvious, which is why this is a rule and not a tip:
+bare `gh` reports "please run gh auth login" on a correctly configured machine, bare `git fetch`
+reports **`repository not found`** (reads as a renamed or deleted repo, not an auth context), and
+bare `git commit` fails on a missing author identity. Following an agent definition literally
+without the wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
+
+## Repo-global git state belongs to the orchestrator, never to an agent
+
+Agents share a `repo_root` by design — the spare-slot pin audit rides in the same wave as a fix
+agent — and worktree *paths* not colliding is not the same as repository state not colliding
+([#35](https://github.com/SurveyMonkey/skills/issues/35)).
+
+- `.git/info/exclude` is written once per repo by `common/ensure-worktree-exclude.sh`, called by
+  the orchestrator before it dispatches any wave. Agents never write it. Two agents dispatched in
+  one message start milliseconds apart, so a read-then-append from each can duplicate the line or
+  tear the file.
+- **Never `git worktree prune` from an agent.** It walks *every* worktree entry in the repository,
+  so a call timed against a sibling mid `worktree add`/`remove` can delete a live registration —
+  and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
+  removes the caller's own entry; that is the whole cleanup an agent is entitled to.
 
 ## No Bash snippet may depend on the previous call
 
@@ -91,6 +121,111 @@ the whole set today; a verb that starts writing joins it, and the guard is its f
 requires the cwd to sit inside a **linked** worktree, which a primary checkout, any subdirectory
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
+
+## Removability is judged against the advisory database, never repo alert history
+
+`check-advisories.sh` unions the vulnerable ranges of **every published advisory** for a package
+and, given `--adapter` and `--version`, returns a verdict for one candidate version. The pin audit
+has no other source for "is this version safe", and the reason is structural: a pin keeps
+vulnerable versions out of the lockfile, so every advisory published after the pin produced no
+alert on that repository. Asking the repo's own alert history is asking "was anything reported
+while we were protected", whose answer is no by construction.
+
+Its four verdicts exist because three different things get mistaken for safety. `safe` means
+advisories exist, every range was evaluated, and none admits the version. `unknown` means a range
+could not be read — never folded into `safe`, since an unreadable range is exactly where an
+unnoticed match hides. `no-advisories` means the query succeeded and returned nothing, which a
+non-security pin, a misspelled package name, and the wrong ecosystem all produce identically.
+
+When the adapter itself fails on a range, its stderr is kept in `adapter_errors[]` rather than
+discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
+broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
+
+## A removal is judged against the whole tree, not one package
+
+An override is not scoped in its effects the way its key is scoped in its syntax. Lifting one
+changes dedup and hoisting and can let a peer conflict resolve differently, so removing a pin on A
+can move B. `resolved_versions A` cannot see that, and the `removable` verdict it produces is
+correct about A and silent about the tree it was tested in
+([#42](https://github.com/SurveyMonkey/skills/issues/42)).
+
+`resolution_map` is the whole-lockfile answer, and the audit diffs it across every removal.
+Anything else that judges a tree change reads it the same way. Two rules travel with it:
+
+- **Zero entries is an error here too, and for a sharper reason.** A diff against an empty map
+  reports every package unchanged — "found nothing" meaning "all clear" once more, this time
+  wearing the shape of a clean diff. **Guard on what the parser read, never on what a `grep`
+  counted.** The yarn count was a `grep -c 'resolution: "'` while the rows had to survive two more
+  filters, so a lockfile parsed to nothing reported `lockfile_entries: 3, package_count: 0` and
+  exit 0 ([#46](https://github.com/SurveyMonkey/skills/issues/46)). A parser therefore separates
+  "read it and excluded it" from "could not read it" and refuses when the recognized share
+  collapses — a ratio and not a zero-check, because an all-local repository legitimately resolves
+  to no registry version and a *partial* parse passes a zero-check.
+- **A verdict says what it covers.** When the map is unavailable the audit still runs, but its
+  findings say the claim is about the named package only. A narrower finding is a smaller result;
+  a finding that outruns what was checked is a wrong one. The guard is a *ratio*, so a single
+  unreadable locator passes it and drops its package from both snapshots — no change in the diff,
+  and `[]` is the stronger claim. `resolution_map` therefore reports `unreadable_entries`, and
+  `agents/audit-pins.md` maps any non-zero value onto `collateral_changes: null` +
+  `collateral_verdict: not-checked` ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+- **Every parser owes three answers, not two**, and "deliberately excluded" is the one that keeps
+  getting forgotten: an npm workspace link (`link: true`, no `version`) and a pnpm `link:`, `file:`
+  or git entry belong with Berry's `workspace:` and `portal:` locators, not in the unread count.
+  Counting them as unread hard-failed ordinary monorepos with a "the parser is broken" diagnosis,
+  which stops the audit and fails the fix flow's baseline
+  ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+- **A package is identified by what it resolves to, never by where it sits**, and identically in
+  `resolution_map` and `resolved_versions` — the audit reads a disagreement between them as a
+  parser bug. Berry's `patch:` locator percent-encodes the descriptor it wraps, and npm keys an
+  `npm:` alias by the alias with the real name in `.name`; matching a literal `@npm:` or reading
+  the `node_modules/` path lost the first entirely and mislabeled the second
+  ([#44](https://github.com/SurveyMonkey/skills/issues/44)). Neither tripped the zero-entry guard,
+  because the entry count is nonzero and the map merely looks healthy — which is the whole reason
+  to state the identity rule rather than leave it to each parser. The **install key** answers too,
+  in `resolved_versions` only: it is what an override entry for an aliased dependency names, so it
+  is what `list_pins` hands the audit, and `present: false` there is read as "the package left the
+  tree". That is the single place the two verbs differ about a name, it is documented in ADR 001,
+  and `apply_constraint` writes the same key so the copy can also be moved
+  ([#46](https://github.com/SurveyMonkey/skills/issues/46)). Answering under both names has one
+  documented consequence: a real package sharing its name with another entry's install key has its
+  versions merged into one answer. **On the read path** the direction is fail-safe and the audit
+  names the shape. **On the write path it is not**: `apply_constraint` retargets the colliding
+  declaration in place, turning `"lodash": "npm:underscore@^1.13.6"` into
+  `"npm:underscore@^4.17.21"` — a version of `underscore` that does not exist — while the copy the
+  caller meant goes unmoved. The adapter cannot tell the two senses apart there either, so
+  `written[]` reports what it wrote and `agents/fix-dependency.md` fails the run on a written
+  `npm:` value naming a package other than the one passed
+  ([#49](https://github.com/SurveyMonkey/skills/issues/49)). See ADR 001's alias exception.
+
+## What a parent declares comes from the lockfile, never from `node_modules/`
+
+`apply_constraint` runs **before** `install`, in a fresh worktree where `node_modules` is
+gitignored and absent; Yarn PnP never has one, and pnpm links only direct dependencies into one.
+Reading `node_modules/<parent>/package.json` for a parent's alias key therefore found nothing every
+time, skipped silently, and wrote the plain package name — which does not govern the aliased copy,
+so the escalation ladder re-ran the same lookup and the flow dead-ended
+([#48](https://github.com/SurveyMonkey/skills/issues/48)). The declarations come from
+`.packages["node_modules/<parent>"]` (npm) and each `resolution:` entry (Berry), through one reader
+that `why`, `apply_constraint` and `declared_ranges` all share — the shared reader is what gave
+Berry a working alias path at all
+([#47](https://github.com/SurveyMonkey/skills/issues/47)). Both read the same three blocks —
+`dependencies`, `optionalDependencies` and `peerDependencies` — because a parent that declares the
+package as a peer is why the copy is in the tree at all; Berry read only `dependencies` until
+[#49](https://github.com/SurveyMonkey/skills/issues/49), which hid exactly that parent.
+
+Two rules travel with it, both of which the old lookup broke:
+
+- **A parent whose declaration cannot be read is named**, in `alias_lookup.parents_unresolved`.
+  pnpm has no readable declaration at all — its snapshots record what a dependency resolved to, not
+  the key it was declared under — so it reports `source: "unsupported"` rather than guessing.
+- **The result states the key and value actually written**, in `written[]`, produced by the same jq
+  pass that writes them. Two copies of that logic is how the report came to say `package`/`range`
+  while an alias key had been written, putting an edit in the PR body that was never made.
+
+`spec/fixtures/npm-alias` has **no committed `node_modules`** for this reason, and
+`spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`
+reads. A fixture carrying a directory that does not exist where the verb runs is not a specimen of
+reality, and it is why the suite stayed green through this.
 
 ## The rule that matters most
 

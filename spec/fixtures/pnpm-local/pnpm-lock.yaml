@@ -1,0 +1,63 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      express:
+        specifier: ^4.18.2
+        version: 4.18.2
+      git-dep:
+        specifier: github:example/git-dep#abcdef0
+        version: https://codeload.github.com/example/git-dep/tar.gz/abcdef0
+      linked-tool:
+        specifier: link:../linked-tool
+        version: link:../linked-tool
+      local-lib:
+        specifier: file:./vendor/local-lib
+        version: file:vendor/local-lib
+      ssh-dep:
+        specifier: git+ssh://git@github.com/example/ssh-dep.git#abcdef0
+        version: git+ssh://git@github.com/example/ssh-dep.git#abcdef0
+
+packages:
+
+  express@4.18.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  git-dep@https://codeload.github.com/example/git-dep/tar.gz/abcdef0:
+    resolution: {tarball: https://codeload.github.com/example/git-dep/tar.gz/abcdef0}
+    version: 1.0.0
+
+  linked-tool@link:../linked-tool:
+    resolution: {directory: ../linked-tool, type: directory}
+
+  local-lib@file:vendor/local-lib:
+    resolution: {directory: vendor/local-lib, type: directory}
+
+  lodash@4.17.21:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+  ssh-dep@git+ssh://git@github.com/example/ssh-dep.git#abcdef0:
+    resolution: {commit: abcdef0, repo: git+ssh://git@github.com/example/ssh-dep.git, type: git}
+    version: 2.0.0
+
+snapshots:
+
+  express@4.18.2:
+    dependencies:
+      lodash: 4.17.21
+
+  git-dep@https://codeload.github.com/example/git-dep/tar.gz/abcdef0: {}
+
+  linked-tool@link:../linked-tool: {}
+
+  local-lib@file:vendor/local-lib: {}
+
+  lodash@4.17.21: {}
+
+  ssh-dep@git+ssh://git@github.com/example/ssh-dep.git#abcdef0: {}
