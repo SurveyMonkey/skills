@@ -1,6 +1,7 @@
 # SurveyMonkey Skills
 
-Claude Code plugin marketplace. Structure and installation: [README.md](README.md).
+Claude Code plugin marketplace. Installation and plugin overview: [README.md](README.md);
+structure: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Script conventions: [plugins/gh-security/scripts/CLAUDE.md](plugins/gh-security/scripts/CLAUDE.md).
 
 ## Releasing a plugin
