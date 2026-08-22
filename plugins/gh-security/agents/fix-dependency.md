@@ -139,13 +139,51 @@ Setup, as separate simple steps, not one compound block:
    directory so the user can inspect and remove it
    (`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse
    or silently delete it.
-2. **Stale-branch guard**: if the fix branch already exists locally, stop and return a failure
-   (phase `worktree`): discovery only checked for open PRs, so a stale local branch may hold
-   someone's unpushed work.
+2. **Stale-branch guard, and it verifies rather than stops on sight**: discovery only checked for
+   open PRs, so a local branch of your name *may* hold someone's unpushed work — but the common
+   case is a leftover of a previous run of this very flow, and the two are told apart by the tip,
+   never by existence.
 
 ```bash
 git -C <repo_root> fetch origin <default_branch>
-git -C <repo_root> branch --list "<branch_name>"   # any output => branch exists => stop
+git -C <repo_root> fetch origin <branch_name>      # no remote branch of that name is fine
+git -C <repo_root> branch --list "<branch_name>"   # empty => no local branch => nothing to check
+git -C <repo_root> rev-parse "<branch_name>"       # only when branch --list reported one
+git -C <repo_root> rev-parse "origin/<default_branch>"
+git -C <repo_root> rev-parse "origin/<branch_name>"   # only when the fetch found one
+```
+
+**The local tip equal to `origin/<default_branch>` or to `origin/<branch_name>` is this plugin's
+own leftover**, and you may delete and recreate it:
+
+```bash
+git -C <repo_root> branch -D <branch_name>
+```
+
+Equal to `origin/<default_branch>` means a previous run created the branch and committed nothing to
+it — there is no work on it to lose. Equal to `origin/<branch_name>` means a previous run pushed
+it and the remote still carries the same commits, so the local ref is a duplicate of something that
+survives its deletion. Fetch the remote branch first and read a failure there as *no such remote
+branch*, which is the ordinary case and not an error; a fetch that does find one updates the
+remote-tracking ref `origin/<branch_name>`, which is what the `rev-parse` above reads. Only a
+`fetch origin <default_branch>`, a
+`branch --list`, or a `rev-parse` on a ref the previous command reported as existing may fail the
+run (phase `worktree`, quoting git).
+
+**A local tip that is neither is someone's unpushed work.** Stop and return a failure (phase
+`worktree`) naming the branch and quoting the three shas, so the user can inspect it. Never delete
+that one, and never reuse it: your commit would land on top of theirs and your push would carry it.
+
+The guard used to stop on any local branch at all, which deadlocked the flow against its own
+leftovers: cleanup left a branch behind on every run, so the next run of the same group always
+found one and always stopped. `brianespinosa/bork` is the specimen —
+`fix/dependabot-react-router-6x` at `d1e0b48`, this plugin's own pushed commit from the since-closed
+PR #377, and `fix/dependabot-vite-6x` at `a24f38c`, which was `origin/main` at the time, i.e. a run
+that created the branch and committed nothing. Neither held a human's commit, and both blocked a
+rerun until a human deleted them by hand
+([#84](https://github.com/SurveyMonkey/skills/issues/84)).
+
+```bash
 mkdir -p <repo_root>/.claude/worktrees
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
 ```
@@ -688,8 +726,40 @@ sibling agents very likely share this `repo_root` right now; a prune timed again
 `worktree add` or `remove` can delete its live registration, and the breakage then surfaces in the
 victim with no cause it can observe.
 
-The fix branch itself remains (it is pushed, or irrelevant on failure); the worktree never
-survives you. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
+**Then delete the local branch, but only when deleting it is provably safe:**
+
+```bash
+git -C <repo_root> branch -D <branch_name>
+```
+
+Two cases are safe, and nothing else is:
+
+- **You pushed.** The push succeeded with that tip, so the remote carries the same commits and the
+  local ref is a duplicate. Confirm it rather than assume it if you have any doubt about which of
+  your commits reached the remote:
+  `git -C <repo_root> rev-parse <branch_name>` equal to
+  `git -C <repo_root> rev-parse origin/<branch_name>`. The PR is open on the remote ref and does not
+  need a local branch to exist.
+- **You committed nothing.** On any failure path whose branch tip still equals
+  `origin/<default_branch>`, there is nothing on the branch to lose.
+
+**Otherwise leave the branch and say so in `detail`** (in your prose, when the result is a success
+and `failure` is `null`), naming it and its tip: a branch carrying a
+commit that never reached the remote is the one thing here that cannot be recreated, and the same
+judgment that phase 1's guard refuses to make from a distance is not yours to make on the way out
+either.
+
+**Order matters: the worktree comes off first.** Git refuses to delete a branch that is checked out
+in a worktree, so a `branch -D` issued before `worktree remove` fails on exactly the branch it was
+meant to clean up. Any error from `branch -D` goes in `detail` verbatim — never silence it — and
+leaves the branch in place; it is not a failure result on its own, because by this point the work
+either shipped or already failed for its own reason.
+
+Deleting the branch is what keeps the next run of this group from meeting phase 1's guard at all.
+The old rule left it behind on every run ("it is pushed, or irrelevant on failure"), which made the
+flow's own leftovers the guard's most common input
+([#84](https://github.com/SurveyMonkey/skills/issues/84)). The worktree never survives you either
+way. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
 `.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
 flight, but only if the report says it happened.
 
