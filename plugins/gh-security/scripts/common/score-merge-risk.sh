@@ -826,7 +826,13 @@ fi
 case "$OVERRIDE_SCOPE" in
   none)
     F6=0
-    F6_EVIDENCE="no override introduced; the direct dependency was updated" ;;
+    # States only what the scope value attests to, which is that this change
+    # applies no override. `none` is also what the audit-pins agent passes for
+    # a pin *removal* (plugins/gh-security/agents/audit-pins.md), where no
+    # version moved at all, so the old "the direct dependency was updated"
+    # clause asserted a bump the scorer has no input for and that those runs
+    # never made ([#80](https://github.com/SurveyMonkey/skills/issues/80)).
+    F6_EVIDENCE="no override applied by this change" ;;
   scoped)
     F6=0
     F6_EVIDENCE="scoped override: only the dependency paths that carried the alerts are pinned" ;;
