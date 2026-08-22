@@ -76,7 +76,13 @@ End
 Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
 
-  rule_in() { grep -c "$2" "$1"; }
+  # Two readers, because a wrapped paragraph is not one grep line. `rule_in`
+  # counts lines and suits a sentence that fits on one; `phrase_in` flattens
+  # the file first and suits anything the 100-column wrap may split. The
+  # earlier "first option and the recommended" example passed only because
+  # SKILL.md happened to wrap after the last word it matched.
+  rule_in() { grep -c -e "$2" -- "$1"; }
+  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
   # no set has ever been installed together, and a PR removes a set. Without
@@ -84,7 +90,16 @@ Describe 'the rules that gate the removal PR'
   # untested operation, which is the `removable-individually` hazard wearing a
   # commit.
   It 'requires the combined test before any PR'
-    When call rule_in "$AGENT" 'installed and judged as a set'
+    When call rule_in "$AGENT" 'never removes a set that was not installed and judged as a set'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Attempt 1 has to be the maximal set. An attempt 1 that already excluded the
+  # individually-tested pins would never answer the sibling question, and
+  # attempt 2 would be the same set twice.
+  It 'puts the individually-tested pins in attempt 1'
+    When call rule_in "$AGENT" 'includes the individually-tested pins as well'
     The status should be success
     The output should equal '1'
   End
@@ -106,11 +121,74 @@ Describe 'the rules that gate the removal PR'
     The output should equal '1'
   End
 
+  # Attempt 2 measured against a tree still carrying attempt 1's removals is a
+  # result about neither set, and nothing downstream can see that: the
+  # manifest is still valid, the install still succeeds, and both parsers read
+  # a lockfile they have no way to know is wrong.
+  It 'restores the tree between the two attempts'
+    When call rule_in "$AGENT" 'Restore the tree before attempt 2'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # An Edit that silently matched nothing installs the manifest you started
+  # with, and every downstream step then reports the set as removed. The
+  # adapter is the only thing that can say what the manifest now declares.
+  It 'verifies the edits landed before the combined install'
+    When call rule_in "$AGENT" 'Verify the edits landed before installing'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # An install that did not finish is a fact about the environment, not about
+  # the pins, so narrowing the set in response turns a registry timeout into a
+  # smaller PR nobody asked for, and a resolution_map read off a half-written
+  # lockfile is worse still, because it parses.
+  It 'routes a failed combined install to the compose phase'
+    When call rule_in "$AGENT" 'quoting the install error'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # A broken advisory lookup says nothing about the pins, so it must not read
+  # as "the set is not removable". Attempt 2 would ask the same broken tool the
+  # same question and record its silence as a second verdict.
+  It 'routes a broken advisory lookup to the advisories phase, not a failed attempt'
+    When call rule_in "$AGENT" 'quoting the error, not a failed attempt'
+    The status should be success
+    The output should equal '1'
+  End
+
   # Promotion is the dispatcher's call with check state and auto-merge state in
   # front of the user (ADR 002). An agent that promotes its own PR removes the
   # checkpoint entirely, and where auto-merge is armed it merges it.
   It 'never lets the agent mark its own PR ready'
     When call rule_in "$AGENT" 'Never mark the PR ready'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The PR is created on the plugin-owned head and as a draft. Losing --draft
+  # is the one flag change that turns the checkpoint into a merged change.
+  It 'creates the PR as a draft on the plugin-owned head'
+    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --draft'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The agent cannot ask which mode was meant, and the two differ by whether a
+  # PR is opened against a real repository: report silently discards work the
+  # dispatcher asked for, pr opens a PR nobody approved.
+  It 'refuses to default the mode'
+    When call rule_in "$AGENT" 'never defaulted, and an unrecognized value'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Report mode has to leave the repository untouched. Without an explicit
+  # stop, phases 7 and 8 read as unconditional and report mode would commit.
+  It 'stops report mode before the PR phases'
+    When call rule_in "$AGENT" 'mode you stop here'
     The status should be success
     The output should equal '1'
   End
@@ -125,7 +203,7 @@ Describe 'the rules that gate the removal PR'
     End
 
     It "offers it first in $1"
-      When call rule_in "$1" 'first option and the recommended'
+      When call phrase_in "$1" 'first option and the recommended one'
       The status should be success
       The output should equal '1'
     End
