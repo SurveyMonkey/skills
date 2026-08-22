@@ -75,6 +75,14 @@ behavior — caught live once already (the `rev-parse` → `branch --list` guard
 lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
 its definition prescribes them.
 
+The audit's `pr` mode added no rule, and that is a checked fact rather than an assumption. Its
+branch creation is `git -C <repo_root> worktree add ... -b`, its stale-branch guard is
+`git -C <repo_root> branch --list`, its open-PR guard is `gh pr list --repo <nwo>`, and its commit,
+push, `gh label` and `gh pr create` calls are byte-identical in shape to the fix agent's, which the
+catalog already covers through `Bash(git -C *$REPO_ROOT/.claude/worktrees/*)`,
+`Bash(gh label * --repo $NWO *)` and `Bash(gh pr create --repo $NWO *)`. A shape that drifts from
+the fix agent's is a catalog change, in the same commit.
+
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 
 `direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever

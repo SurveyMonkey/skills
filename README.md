@@ -16,7 +16,7 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 | Plugin | Namespace | Summary |
 |---|---|---|
-| [gh-security](#gh-security) | `/gh-security:*` | Orchestrated, multi-subagent resolution of Dependabot security alerts, plus a report-only audit of the dependency pins earlier fixes leave behind |
+| [gh-security](#gh-security) | `/gh-security:*` | Orchestrated, multi-subagent resolution of Dependabot security alerts, plus an audit of the dependency pins earlier fixes leave behind that opens its own draft removal PR |
 
 ### gh-security
 
@@ -30,7 +30,7 @@ that carries a computed merge-risk rating.
 |---|---|---|
 | `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents in parallel waves and batch-promotes the resulting draft PRs. |
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
-| `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package. Report-only: changes nothing, opens no PR. |
+| `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a draft PR removing the confirmed set. Report-only is offered as the alternative. |
 | `/gh-security:fix-alert` | Command (deprecated) | Shim that fixes only the single top-ranked alert group, then offers the next batch. Use `resolve-alerts` instead. |
 
 The parallel work is done by two subagents, dispatched by the orchestrator rather than invoked
@@ -39,7 +39,7 @@ directly:
 | Agent | Role |
 |---|---|
 | `fix-dependency` | Fixes every alert for one package major line in one repo, in an isolated worktree, through to a draft PR with a computed merge-risk rating. |
-| `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution. Also rides along automatically in a spare slot when a fix batch does not fill the concurrency cap. |
+| `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution, and in PR mode removes the confirmed set, tests it in one further install, and opens a draft PR. Also rides along automatically in a spare slot when a fix batch does not fill the concurrency cap. |
 
 **Supported package managers, by advisory ecosystem:**
 
@@ -68,9 +68,11 @@ directly:
 - **Draft PRs with check-aware promotion.** Fixes land as drafts; the orchestrator batch-promotes
   them with check state reported honestly (failing checks block; pending or absent checks are
   flagged, not waited on), with per-PR confirmation where auto-merge is armed.
-- **Report-only pin audit.** Finds overrides and resolutions that no longer protect anything,
-  judged against the full advisory database (which the pin itself blinds repo alert history to),
-  including collateral effects of removing each pin.
+- **Pin audit that opens its own removal PR.** Finds overrides and resolutions that no longer
+  protect anything, judged against the full advisory database (which the pin itself blinds repo
+  alert history to), including collateral effects of removing each pin. Each pin is tested on its
+  own, the removable set is then tested once more together, and a draft PR removes it with that
+  evidence in the body. Report-only stays available as the alternative.
 - **Proactive nudge hook.** A PostToolUse hook watches Bash output for push-time vulnerability
   notices, Dependabot alert URLs, and non-zero `npm`/`pnpm`/`yarn audit` output. A GitHub-sourced
   match offers `resolve-alerts` directly; an audit-only match nudges toward checking GitHub
