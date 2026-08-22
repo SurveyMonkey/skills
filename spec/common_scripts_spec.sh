@@ -291,6 +291,14 @@ Describe 'score-merge-risk.sh'
       no-test-script     2   # test files nothing can run: package.json declares no test script
       tooling-only       0   # no source imports at all, and a build script would catch a broken pin
       no-scripts         2   # no source imports, and neither a build nor a test script
+      test-script-only   1   # no source imports, no build script, but a test script exists
+      test-words         2   # src/latest and src/inspector are modules, not test directories
+      parent-tested      2   # a test imports the parent by name and nothing else
+      coverage-conventions 0 # __tests__/<basename>.* and an alias-path import
+      coverage-index     2   # a test importing the directory does not cover its index module
+      coverage-index-collision 0 # any specifier ending in `index` covers every index module
+      coverage-multiline 2   # a specifier wrapped onto its own line is not seen
+      coverage-many      2   # seven affected modules, none covered
     End
 
     It "scores $1 as F4 $2"
@@ -327,8 +335,16 @@ Describe 'score-merge-risk.sh'
       coverage-full      0   # `on:` block with pull_request, and a `pnpm test` step
       ci-list-trigger    0   # the list form, `on: [push, pull_request]`
       ci-no-steps        1   # PR-triggered, but its only run: is an echo
-      ci-push-only       2   # a workflow, but nothing triggers on a pull request
+      ci-push-only       2   # push-only, and a step whose `if:` names the event is not a trigger
       yarn-berry         2   # no .github/workflows at all
+      ci-pr-target       0   # pull_request_target runs on pull requests too
+      ci-flow-map        0   # the flow-map form, `on: {pull_request: {...}}`
+      ci-quoted-on       0   # a .yaml file with a quoted `"on":` key
+      ci-deep-indent     0   # the block form indented eight spaces
+      ci-scoped-script   0   # a scoped script name, `pnpm test:ci`
+      ci-commented       1   # `# - run: npm test` is a comment and `echo hi` runs nothing
+      ci-with-nested     1   # `cmd: npm test` under `with:` is an input, not a step
+      ci-two-workflows   0   # the first *qualifying* workflow, not the first workflow
     End
 
     It "scores $1 as F5 $2"
@@ -351,6 +367,222 @@ Describe 'score-merge-risk.sh'
     When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[4].evidence, step: .ci.step}'
     The status should be success
     The output should equal '{"e":".github/workflows/ci.yml triggers on pull_request, but no test, build, typecheck, check, or lint step is visible in it","step":null}'
+  End
+
+  # Fix worktrees live at `.claude/worktrees/<name>` inside the repository
+  # being fixed (ADR 003), so a tree with one checked out held a second copy of
+  # every source file. Counted, they inflate the usage surface and list the
+  # same module twice as uncovered; observed on tacoma.fyi, where two source
+  # files scored as eight affected modules.
+  It 'does not count a nested fix worktree as more of the usage surface'
+    use_fixture nested-worktree
+    When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, coverage}'
+    The status should be success
+    The output should equal '{"f3":1,"coverage":{"affected":1,"covered":0,"uncovered":["src/a.js"]}}'
+  End
+
+  # A substring match on the path is not a classification. `src/latest`,
+  # `src/inspector`, `src/contest` and `packages/attestation` every one contain
+  # a test word, and every one dropped out of the usage surface and then, via
+  # the package-by-name route, covered it. A repository with no tests at all
+  # scored F4 0 and the multi-major escalation never fired.
+  It 'does not read a directory that merely contains a test word as a test'
+    use_fixture test-words
+    When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, f4: .factors[3].score, coverage}'
+    The status should be success
+    The output should equal '{"f3":1,"f4":2,"coverage":{"affected":2,"covered":0,"uncovered":["src/inspector/b.js","src/latest/a.js"]}}'
+  End
+
+  It 'escalates a multi-major runtime jump in a tree whose directories are named like tests'
+    use_fixture test-words
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '.band' scoped '^9'
+    The status should be success
+    The output should equal '"High"'
+  End
+
+  # A test that imports the *parent* says nothing about whether the transitive
+  # package underneath it is exercised. Counting it switched the multi-major
+  # escalation off for exactly the shape it exists to catch: the bork#350 case
+  # came back Medium.
+  It 'does not let a test importing the parent cover the package surface'
+    use_fixture parent-tested
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band}' scoped '^9'
+    The status should be success
+    The output should equal '{"f4":2,"band":"High"}'
+  End
+
+  It 'reads a commented-out step and an echo as no step at all'
+    use_fixture ci-commented
+    When call score direct false '[]' 1.0.0 1.0.1 '{f5: .factors[4].score, step: .ci.step}'
+    The status should be success
+    The output should equal '{"f5":1,"step":null}'
+  End
+
+  It 'names the first qualifying workflow, not the first workflow'
+    use_fixture ci-two-workflows
+    When call score direct false '[]' 1.0.0 1.0.1 '.ci'
+    The status should be success
+    The output should equal '{"workflow":".github/workflows/b-test.yml","trigger":"pull_request","step":"pnpm test"}'
+  End
+
+  It 'reports the event a pull_request_target workflow triggers on'
+    use_fixture ci-pr-target
+    When call score direct false '[]' 1.0.0 1.0.1 '{trigger: .ci.trigger, step: .ci.step}'
+    The status should be success
+    The output should equal '{"trigger":"pull_request_target","step":"pnpm test"}'
+  End
+
+  It 'names the uncovered modules, capped at five'
+    use_fixture coverage-many
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[3].evidence, affected: .coverage.affected}'
+    The status should be success
+    The output should equal '{"e":"none of the 7 affected module(s) is covered by a test (src/a.js, src/b.js, src/c.js, src/d.js, src/e.js, and 2 more uncovered)","affected":7}'
+  End
+
+  It 'does not cover an index module from a specifier naming its directory'
+    use_fixture coverage-index
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":0,"uncovered":["src/feature/index.js"]}'
+  End
+
+  It 'covers an index module from any specifier ending in index'
+    use_fixture coverage-index-collision
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":1,"uncovered":[]}'
+  End
+
+  It 'does not see a specifier wrapped onto its own line'
+    use_fixture coverage-multiline
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":0,"uncovered":["src/a.js"]}'
+  End
+
+  # F4 1 for a tree nothing imports the package from: no build script to fail,
+  # but a test script that would at least run. The bork#350 shape lands Medium
+  # here rather than High, because the escalation asks for F4 2.
+  It 'leaves a multi-major jump at Medium when a test script is the only signal'
+    use_fixture test-script-only
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band, escalated}' scoped '^9'
+    The status should be success
+    The output should equal '{"f4":1,"band":"Medium","escalated":false}'
+  End
+
+  # A transitive whose parents nobody could name leaves nothing to grep for.
+  # Scored as an empty pattern it read as "nothing imports it", which is the
+  # risk-lowering direction: F3 0, F4 0, band Low on a measurement that never
+  # happened. `why` legitimately answers this way, so it is the worst case
+  # rather than an error.
+  It 'scores the worst case when a transitive names no parents'
+    use_fixture tooling-only
+    When call score transitive false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, f4: .factors[3].score, band, coverage}'
+    The status should be success
+    The output should equal '{"f3":2,"f4":2,"band":"Medium","coverage":{"affected":null,"covered":null,"uncovered":[]}}'
+  End
+
+  It 'says the surface could not be measured, rather than that nothing imports it'
+    use_fixture tooling-only
+    When call score transitive false '[]' 1.0.0 1.0.1 '{e3: .factors[2].evidence, e4: .factors[3].evidence}'
+    The status should be success
+    The output should equal '{"e3":"no parents known for lodash; usage surface could not be measured","e4":"no parents known for lodash; nothing could be checked for test coverage"}'
+  End
+
+  # Every read this script makes has a risk-lowering failure mode: an
+  # unreadable file scores as a file that imports nothing, an unparseable
+  # manifest as a repository with no test script. Each one fails loudly
+  # instead.
+  Describe 'inputs it could not read'
+    # chmod 000 cannot be committed, so the permission is set on a copied
+    # fixture inside the example and restored before the copy is removed.
+    # Without the restore, `cleanup_fixture`'s rm -rf leaves the directory
+    # behind on some systems.
+    restore_perms() {
+      [ -n "${TEST_DIR:-}" ] || return 0
+      chmod -R u+rwX "$TEST_DIR" 2>/dev/null || true
+    }
+    After 'restore_perms'
+
+    It 'refuses a tree it cannot fully read, instead of scoring it as importing nothing'
+      use_fixture coverage-none
+      chmod 000 src/a.js
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'could not read the tree'
+      The stderr should include 'grep exited 2'
+    End
+
+    It 'refuses a workflows directory it cannot read'
+      use_fixture coverage-none
+      chmod 000 .github/workflows
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include '.github/workflows exists but cannot be read'
+    End
+
+    It 'refuses a workflow file it cannot read'
+      use_fixture coverage-none
+      chmod 000 .github/workflows/ci.yml
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'ci.yml cannot be read'
+    End
+  End
+
+  Describe 'inputs it could not parse'
+    It 'refuses a why payload that is not a JSON object'
+      use_fixture coverage-none
+      printf '{nope\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'did not contain a JSON object'
+    End
+
+    It 'refuses a why payload that is not there'
+      use_fixture coverage-none
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json nope.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include '--why-json file not found'
+    End
+
+    It 'refuses a package.json that does not parse'
+      use_fixture coverage-none
+      printf '{nope\n' > package.json
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'does not parse as a JSON object'
+    End
+
+    It 'refuses a tree with no package.json at all'
+      use_fixture coverage-none
+      rm -f package.json
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'no package.json in'
+    End
+
+    # `has()` accepted `"test": null`, which is a key, not a script.
+    It 'does not read a null test script as a test script'
+      use_fixture coverage-none
+      write_null_test_script() { jq '.scripts.test = null' package.json > p.json && mv p.json package.json; }
+      write_null_test_script
+      When call score direct false '[]' 1.0.0 1.0.1 '{f4: .factors[3].score, e: .factors[3].evidence}'
+      The status should be success
+      The output should equal '{"f4":2,"e":"2 affected module(s), and package.json declares no test script"}'
+    End
   End
 
   # tacoma.fyi#75, the regression issue #71 was filed for: a dev-only

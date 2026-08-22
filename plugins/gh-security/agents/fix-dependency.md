@@ -49,8 +49,8 @@ writing the PR prose. Do not reimplement what the scripts do.
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
-- **Denials are answers.** A declined permission on an essential step — worktree, install,
-  validate, commit, push, PR — ends the run with a failure report. Never respond to a denial by
+- **Denials are answers.** A declined permission on an essential step (worktree, install,
+  validate, commit, push, PR) ends the run with a failure report. Never respond to a denial by
   engineering an alternative route to the denied thing.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
   via Bash.** That includes inspecting JSON: Read `package.json` directly instead of piping
@@ -575,7 +575,7 @@ sibling agents very likely share this `repo_root` right now; a prune timed again
 victim with no cause it can observe.
 
 The fix branch itself remains (it is pushed, or irrelevant on failure); the worktree never
-survives you. If cleanup itself fails, say so in `detail` and leave it — an orphaned worktree under
+survives you. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
 `.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
 flight, but only if the report says it happened.
 

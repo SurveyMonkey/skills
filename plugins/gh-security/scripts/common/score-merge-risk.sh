@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# score-merge-risk.sh — compute the merge-risk rating for a dependency fix PR
+# score-merge-risk.sh: compute the merge-risk rating for a dependency fix PR
 #
 # Usage:
 #   score-merge-risk.sh --package <pkg> --after <version> --adapter <path>
@@ -37,8 +37,10 @@
 # multi-major escalation unreachable without saying so, and a caller whose
 # collection step half-failed looked identical to one with nothing to report.
 #
-# The split of labour is deliberate. F1-F5 are derivable from the repository,
-# the lockfile and the version pair, so they are computed here. F6 (which
+# The split of labour is deliberate. F1 and F7 come from the version pair and
+# the ranges, F2 from the classification the adapter's `why` already produced,
+# and F3, F4 and F5 from the files in the tree, so all of them are computed
+# here. F6 (which
 # remediation shape was applied) is a fact only the agent that did the work
 # knows, so it is passed in. F7 is both: the caller states the ranges its
 # dependents declared, the adapter says what those ranges mean, and this script
@@ -66,24 +68,48 @@
 # module graph this script deliberately does not build.
 #
 # "Is this a test file" is the same path regex F3 excludes by, so the two
-# factors always talk about the same files. It catches configuration named
-# after the runner as well: `vitest.config.ts` importing `astro/config` reads
-# as a test importing the package by name, and covers the surface on that
-# alone (observed on tacoma.fyi). Also an overstatement, and deliberately not
-# fixed by a second, divergent regex: a path that counted as neither a source
-# module nor a test file would disappear from both factors at once.
+# factors always talk about the same files. One regex, not two: a path that
+# counted as neither a source module nor a test file would disappear from both
+# factors at once. It is anchored to whole path segments and to the
+# conventional double-extension suffixes, because a substring match classified
+# `src/latest`, `src/inspector`, `src/contest` and `packages/attestation` as
+# tests, dropped them out of the usage surface, and then let them cover it.
+#
+# Two more F4 limits, both leaving coverage *understated*, which is the safe
+# direction:
+#
+#   - **A specifier split across lines is not seen.** Prettier writes
+#     `import { a } from\n  '../src/a'`, and the import scan reads one line at
+#     a time, so that module reads as uncovered. A multi-line scan would need
+#     to know where a statement ends, which is a parser.
+#   - **A test importing a directory by its path does not cover its index.**
+#     `require('../src/feature')` resolving to `src/feature/index.js` compares
+#     `feature` against `index` and misses; `require('../lib/index')` covers it
+#     for the opposite reason, by basename collision.
 #
 # F5 asks whether CI will run on the pull request, read straight out of
-# `.github/workflows/*.yml` with grep. **Only GitHub Actions is read.** A repo
-# on CircleCI, Buildkite, Jenkins or a self-hosted runner scores 2 here even
-# though its checks will run. That is a documented limit, not a gap to paper
-# over: this flow opens GitHub pull requests and the mark-ready decision reads
-# the GitHub check rollup, so an Actions workflow is the one verifier it can
-# see before the PR exists. A repo scoring 2 on F5 gets a PR whose merge risk
-# says "nothing here proves CI runs", which is the honest reading. Parsing is
-# grep, not YAML: a job literally named `pull_request:` reads as a trigger, and
-# a step invoked through a composite action nobody can see from the workflow
-# file reads as absent.
+# `.github/workflows/*.yml` and `*.yaml` with grep. **Only GitHub Actions is
+# read.** A repo on CircleCI, Buildkite, Jenkins or a self-hosted runner scores
+# 2 here even though its checks will run. That is a documented limit, not a gap
+# to paper over: this flow opens GitHub pull requests and the mark-ready
+# decision reads the GitHub check rollup, so an Actions workflow is the one
+# verifier it can see before the PR exists. A repo scoring 2 on F5 gets a PR
+# whose merge risk says "nothing here proves CI runs", which is the honest
+# reading.
+#
+# Parsing is grep and awk, not YAML, and the limits that leaves are:
+#
+#   - All four `on:` spellings are recognized (scalar, flow sequence
+#     `[push, pull_request]`, flow map `{pull_request: ...}`, and the block
+#     form), and `pull_request_target` counts alongside `pull_request` because
+#     it also runs on pull requests. A *job* named `pull_request:` under
+#     `on: push` does not, because the block form additionally requires a bare
+#     `on:` line above it.
+#   - Only `run:` scalars and `run: |` block bodies are read as steps, so a
+#     commented-out line, a step *name*, and a `cmd:` handed to an action under
+#     `with:` no longer count. A check invoked *inside* a composite action, or
+#     through a reusable workflow, is invisible from the caller's file and
+#     scores as absent.
 #
 # F6 exists because an override touching one parent and one touching the whole
 # tree used to score identically. A bare, unscoped override pins the package
@@ -184,11 +210,34 @@ esac
 if [ "$WHY_JSON" = "-" ]; then
   why=$(cat)
 else
+  [ -f "$WHY_JSON" ] || json_error "--why-json file not found: $WHY_JSON. The classification it carries decides F2 and the whole affected surface, so there is nothing to fall back to."
   why=$(cat "$WHY_JSON")
 fi
 
+# The same rule the adapter answers are held to. Every field below is read
+# through jq with a default, and the defaults are the low-risk ones: an empty
+# or malformed payload scores a direct runtime dependency as a transitive with
+# no parents, which is the worst thing it could quietly become.
+printf '%s' "$why" | jq -e 'type == "object"' >/dev/null 2>&1 \
+  || json_error "--why-json $WHY_JSON did not contain a JSON object. Read through jq, a malformed payload answers every field with a default and the fix scores against a classification nobody supplied."
+
+# package.json is the manifest every node repository has, and both F3's entry
+# points and F4's scripts are read from it. Absent or unparseable it read as
+# "no entry points, no test script", which is a score rather than a reading.
+[ -f package.json ] || json_error "no package.json in $PWD. The scorer runs from the root of the tree being scored, and F3 and F4 read the manifest there; without it the fix would score as a repository that declares no scripts."
+jq -e 'type == "object"' package.json >/dev/null 2>&1 \
+  || json_error "package.json in $PWD does not parse as a JSON object. Read as an absent manifest it scores the fix as having no test script and no entry points, which is lower risk than the truth."
+
+# Checked here rather than in F5 so it fails before the usage-surface grep,
+# which walks the same directory and would report the same problem as an
+# unreadable *tree*, burying the specific cause.
+WORKFLOW_DIR=".github/workflows"
+if [ -d "$WORKFLOW_DIR" ] && [ ! -r "$WORKFLOW_DIR" ]; then
+  json_error "$WORKFLOW_DIR exists but cannot be read, so whether CI runs on this pull request could not be determined. Reported as 'no workflow' it would be indistinguishable from a repository that has none, which is the lower-risk answer."
+fi
+
 # ---------------------------------------------------------------------------
-# Declared ranges — asked of the adapter, because what "^9" admits is a semver
+# Declared ranges: asked of the adapter, because what "^9" admits is a semver
 # question and the next adapter answers it under PEP 440 instead.
 #
 # The caller states the ranges; it does not state what they are worth. A fix
@@ -309,7 +358,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# F1 — version delta
+# F1: version delta
 # ---------------------------------------------------------------------------
 if [ -z "$BEFORE" ]; then
   # No baseline: the package was absent, or the pre-fix lockfile could not be
@@ -337,8 +386,8 @@ else
   # An adapter that does not report the distance cannot be scored against it.
   # Read straight, jq hands back the string "null", `[ "null" -ge 2 ]` errors
   # only on stderr inside an `if`, `set -e` does not see it, and the script
-  # exits 0 reporting majors_crossed: 0 — the escalation this factor exists
-  # for, silently switched off (review follow-up on issue #21).
+  # exits 0 reporting majors_crossed: 0, silently switching off the escalation
+  # this factor exists for (review follow-up on issue #21).
   distance=$(read_field major_distance "$cmp")
   case "$distance" in
     __absent__|__null__)
@@ -366,7 +415,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F2 — runtime exposure
+# F2: runtime exposure
 # ---------------------------------------------------------------------------
 relationship=$(printf '%s' "$why" | jq -r '.relationship // "transitive"')
 dev_only=$(printf '%s' "$why" | jq -r '.dev_only // false')
@@ -383,51 +432,96 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F3 — usage surface
+# F3: usage surface
 #
 # For a direct dependency, count source modules importing it. For a transitive
 # one, count modules importing its direct parents: nothing imports a transitive
 # package by name, so grepping for it would score zero every time.
 # ---------------------------------------------------------------------------
+PARENTS_KNOWN=true
 if [ "$relationship" = "direct" ]; then
   targets="$PACKAGE"
   target_desc="$PACKAGE"
 else
   targets=$(printf '%s' "$why" | jq -r '.parents[]?' | head -20)
   target_desc="parents of $PACKAGE"
+  # A transitive whose parents nobody could name leaves nothing to grep for.
+  # Built into an empty pattern, that read as "nothing in this tree imports
+  # it" and scored F3 0 and F4 0 on a measurement that never happened, which
+  # is the risk-lowering direction. `why` legitimately answers with an empty
+  # `parents[]` (a package manager that cannot walk the tree), so this is the
+  # worst case rather than an error.
+  [ -n "$targets" ] || PARENTS_KNOWN=false
 fi
 
+# `.claude` is excluded alongside the build outputs: fix worktrees live at
+# `.claude/worktrees/<name>` inside the repository being fixed (ADR 003), so a
+# tree with one checked out counts every module in it a second time. Observed
+# on tacoma.fyi, where two source files became eight affected modules and the
+# same file appeared twice in the uncovered list.
+#
 # Build one ERE alternation over every target, matching ESM, CJS, and dynamic
 # import forms plus subpath imports. Dots are escaped so `sha.js` does not
 # match `shaXjs`.
-pattern=""
-for target in $targets; do
-  # `$` sits after `(` deliberately. These are regex metacharacters in a sed
-  # character class, but ordering them so `$` precedes `(` spells the literal
-  # substring `$(`, which ShellCheck reads as a command substitution smuggled
-  # into single quotes (SC2016). This ordering is equivalent and needs no
-  # suppression, so keep `$` away from `(`.
-  escaped=$(printf '%s' "$target" | sed 's/[.[\*^()+?{}|$\\]/\\&/g')
-  alt="(from|import)[[:space:]]*\\(?[[:space:]]*['\"]${escaped}(/[^'\"]*)?['\"]"
-  alt="${alt}|require[[:space:]]*\\([[:space:]]*['\"]${escaped}(/[^'\"]*)?['\"]"
-  if [ -z "$pattern" ]; then pattern="$alt"; else pattern="$pattern|$alt"; fi
-done
+build_import_pattern() {
+  _pat=""
+  for _target in $1; do
+    # `$` sits after `(` deliberately. These are regex metacharacters in a sed
+    # character class, but ordering them so `$` precedes `(` spells the literal
+    # substring `$(`, which ShellCheck reads as a command substitution smuggled
+    # into single quotes (SC2016). This ordering is equivalent and needs no
+    # suppression, so keep `$` away from `(`.
+    _escaped=$(printf '%s' "$_target" | sed 's/[.[\*^()+?{}|$\\]/\\&/g')
+    _alt="(from|import)[[:space:]]*\\(?[[:space:]]*['\"]${_escaped}(/[^'\"]*)?['\"]"
+    _alt="${_alt}|require[[:space:]]*\\([[:space:]]*['\"]${_escaped}(/[^'\"]*)?['\"]"
+    if [ -z "$_pat" ]; then _pat="$_alt"; else _pat="$_pat|$_alt"; fi
+  done
+  printf '%s' "$_pat"
+}
+
+# Two patterns, deliberately. `pattern` is what defines the affected surface
+# (the package for a direct fix, its parents for a transitive one). The second
+# is the package alone, and only it may stand in for coverage of the whole
+# surface: a test that imports `express` says nothing about whether `lodash`
+# underneath it is exercised, and treating it as though it did switched off
+# the multi-major escalation for exactly the shape it exists to catch.
+pattern=$(build_import_pattern "$targets")
+package_pattern=$(build_import_pattern "$PACKAGE")
 
 # One definition of "this path is a test", used to exclude test files from the
 # usage surface (F3) and to select them as coverage evidence (F4). Two copies
 # would let a path count as neither, or as both.
-TEST_PATH_RE='(test|spec|__tests__|__mocks__|e2e|cypress|\.stories\.)'
+#
+# Anchored, because a bare substring match is not a classification: `src/latest`,
+# `src/inspector`, `src/contest` and `packages/attestation` all contain one of
+# these words, and every one of them dropped out of the usage surface *and*
+# counted as a test file. A repository with no tests at all scored F4 0 that
+# way. Directory names match as whole path segments; file names match as the
+# conventional double-extension suffixes.
+TEST_PATH_RE='(^|/)(__tests__|__mocks__|e2e|cypress|tests?|specs?)/|\.(test|spec|stories)\.'
 
 importing_files=""
-if [ -n "$pattern" ]; then
-  importing_files=$(grep -rlE "$pattern" . \
+if [ "$PARENTS_KNOWN" = true ] && [ -n "$pattern" ]; then
+  set +e
+  matched=$(grep -rlE "$pattern" . \
     --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' \
     --include='*.mjs' --include='*.cjs' --include='*.vue' --include='*.svelte' \
     --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
     --exclude-dir=.next --exclude-dir=coverage --exclude-dir=out \
     --exclude-dir=.yarn --exclude-dir=.git --exclude-dir=storybook-static \
-    2>/dev/null | grep -vE "$TEST_PATH_RE" \
-    || true)
+    --exclude-dir=.claude \
+    2>/dev/null)
+  grep_status=$?
+  set -e
+  # grep exits 1 for "nothing matched" and 2 for "something went wrong":
+  # an unreadable file, an I/O error. `|| true` folded the two together, so a
+  # tree the scorer could not read scored identically to a tree that imports
+  # nothing, taking F4 down with it. This recursive pass visits every file F4
+  # greps later, so catching it here catches it for both factors.
+  if [ "$grep_status" -ge 2 ]; then
+    json_error "could not read the tree under $PWD while searching for imports of $target_desc (grep exited $grep_status). A partial read scores the usage surface and its test coverage as zero, so this fails instead of guessing."
+  fi
+  importing_files=$(printf '%s\n' "$matched" | grep -vE "$TEST_PATH_RE" || true)
 fi
 
 if [ -z "$importing_files" ]; then
@@ -439,9 +533,9 @@ fi
 # An import in a declared entry point outweighs raw file count: it means the
 # package loads on every code path, not just in one corner of the tree.
 entry_hit=false
-if [ -n "$importing_files" ] && [ -f package.json ]; then
+if [ -n "$importing_files" ]; then
   entries=$(jq -r '[.main?, .module?, .browser?, (.bin? | if type == "object" then .[] else . end)]
-                   | map(select(type == "string")) | .[]' package.json 2>/dev/null || true)
+                   | map(select(type == "string")) | .[]' package.json)
   for entry in $entries; do
     normalized="${entry#./}"
     if printf '%s\n' "$importing_files" | sed 's|^\./||' | grep -qxF "$normalized"; then
@@ -451,7 +545,10 @@ if [ -n "$importing_files" ] && [ -f package.json ]; then
   done
 fi
 
-if [ "$import_count" -eq 0 ]; then
+if [ "$PARENTS_KNOWN" != true ]; then
+  F3=2
+  F3_EVIDENCE="no parents known for $PACKAGE; usage surface could not be measured"
+elif [ "$import_count" -eq 0 ]; then
   F3=0
   F3_EVIDENCE="no source imports found for $target_desc (build or tooling only)"
 elif [ "$entry_hit" = true ]; then
@@ -466,7 +563,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F4 — test coverage of the affected surface
+# F4: test coverage of the affected surface
 #
 # The affected surface is F3's importing modules, so the two factors always
 # talk about the same files: F3 says how much of the tree touches the package,
@@ -474,13 +571,16 @@ fi
 # cover and the question becomes what would catch a broken tooling pin instead,
 # which is the build script.
 #
-# A repository with no `test` script scores 2 whatever its files look like: a
-# test file nothing ever runs is not coverage, and the pull request this feeds
-# has no way to run it either.
+# When there *are* affected modules, a repository with no `test` script scores
+# 2 whatever its files look like: a test file nothing ever runs is not
+# coverage, and the pull request this feeds has no way to run it either.
 # ---------------------------------------------------------------------------
+# A script is a non-empty string under `.scripts`. `has()` alone accepted
+# `"test": null` and `"test": {}`, neither of which is a runnable script.
 has_script() {
-  [ -f package.json ] || return 1
-  jq -e --arg s "$1" '((.scripts // {})[$s] // "") != ""' package.json >/dev/null 2>&1
+  jq -e --arg s "$1" \
+    '(.scripts // {})[$s] as $v | ($v | type) == "string" and ($v | length) > 0' \
+    package.json >/dev/null 2>&1
 }
 
 # The same tree F3 walked, listed rather than searched, so the test files can
@@ -490,7 +590,7 @@ source_files() {
   find . \
     \( -type d \( -name node_modules -o -name dist -o -name build \
        -o -name .next -o -name coverage -o -name out -o -name .yarn \
-       -o -name .git -o -name storybook-static \) -prune \) -o \
+       -o -name .git -o -name .claude -o -name storybook-static \) -prune \) -o \
     -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \
        -o -name '*.mjs' -o -name '*.cjs' -o -name '*.vue' -o -name '*.svelte' \) \
     -print 2>/dev/null
@@ -516,14 +616,15 @@ if [ -n "$test_files" ]; then
     | sort -u || true)
 fi
 
-# A test that imports the package by name exercises the package surface
-# directly, whatever the importing modules look like. `usage-app`'s
-# `tests/util.test.js` is exactly this shape.
+# A test that imports the package *itself* by name exercises the package
+# surface directly, whatever the importing modules look like. `usage-app`'s
+# `tests/util.test.js` is exactly this shape. Only the package counts here,
+# never its parents: see `package_pattern` above.
 package_tested=false
-if [ -n "$pattern" ] && [ -n "$test_files" ]; then
+if [ -n "$package_pattern" ] && [ -n "$test_files" ]; then
   hits=$(printf '%s\n' "$test_files" | while IFS= read -r tf; do
       [ -n "$tf" ] || continue
-      grep -lE "$pattern" "$tf" 2>/dev/null || true
+      grep -lE "$package_pattern" "$tf" 2>/dev/null || true
     done || true)
   [ -z "$hits" ] || package_tested=true
 fi
@@ -560,15 +661,23 @@ $importing_files
 EOF
 fi
 
+# Sorted, because the order `grep -rl` walks a directory is the filesystem's
+# and differs between machines: unsorted, the same repository produced a
+# different "first five" on macOS and on ubuntu.
+UNCOVERED=$(printf '%s' "$UNCOVERED" | awk 'NF' | sort || true)
+
 # Five names is enough for a reviewer to recognize the shape of what is
 # uncovered; the full list is in the `coverage` object for anyone who wants it.
-uncovered_names=$(printf '%s' "$UNCOVERED" | awk 'NF' | head -5 | tr '\n' ',' | sed 's/,$//; s/,/, /g' || true)
-uncovered_total=$(printf '%s' "$UNCOVERED" | awk 'NF' | grep -c . || true)
+uncovered_names=$(printf '%s\n' "$UNCOVERED" | awk 'NF' | head -5 | tr '\n' ',' | sed 's/,$//; s/,/, /g' || true)
+uncovered_total=$(printf '%s\n' "$UNCOVERED" | awk 'NF' | grep -c . || true)
 if [ "$uncovered_total" -gt 5 ]; then
   uncovered_names="$uncovered_names, and $((uncovered_total - 5)) more"
 fi
 
-if [ "$import_count" -eq 0 ]; then
+if [ "$PARENTS_KNOWN" != true ]; then
+  F4=2
+  F4_EVIDENCE="no parents known for $PACKAGE; nothing could be checked for test coverage"
+elif [ "$import_count" -eq 0 ]; then
   if has_script build; then
     F4=0
     F4_EVIDENCE="no source imports; a build script exists, so a broken tooling pin fails at build"
@@ -594,19 +703,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F5 — CI presence
+# F5: CI presence
 #
-# grep over `.github/workflows/*.yml|yaml`, never a YAML parser: this ships to
-# machines that have jq and nothing else, and the question is coarse enough
-# that a parser would buy accuracy nobody spends. See the header for what that
-# costs (other CI vendors, composite actions, a job named `pull_request`).
+# grep over `.github/workflows/*.yml` and `*.yaml`, never a YAML parser: this
+# ships to machines that have jq and nothing else, and the question is coarse
+# enough that a parser would buy accuracy nobody spends. See the header for
+# what that costs.
 # ---------------------------------------------------------------------------
-# The scalar and list forms live on the `on:` line itself; the block form puts
-# `pull_request:` on an indented line under a bare `on:`. Requiring the bare
-# `on:` for the block form is what keeps `if: github.event_name ==
-# 'pull_request'` inside a step from reading as a trigger.
+# `pull_request_target` counts: it runs on pull requests, which is all this
+# factor asks. The event token is terminated so a key merely starting with the
+# word does not match, and the four spellings GitHub accepts on the `on:` line
+# (scalar, flow sequence `[push, pull_request]`, flow map `{pull_request: ...}`,
+# and the block form below) all land on the same test.
+PR_EVENT_RE='pull_request(_target)?([[:space:],]|\]|\}|:|$)'
 pr_trigger() {
-  _m=$(grep -m1 -E "^[\"']?on[\"']?:[[:space:]]*(pull_request([[:space:]]|\$)|\[[^]]*pull_request)" "$1" 2>/dev/null || true)
+  _m=$(grep -m1 -E "^[\"']?on[\"']?:[[:space:]]*.*$PR_EVENT_RE" "$1" 2>/dev/null || true)
   if [ -n "$_m" ]; then
     # The trigger, not the line it sits on: "on: [push, pull_request]" reads
     # back as "on on: [push, pull_request]" once the evidence puts "on" in
@@ -614,24 +725,54 @@ pr_trigger() {
     printf '%s' "$_m" | sed "s/^[\"']*on[\"']*:[[:space:]]*//; s/[[:space:]]*\$//"
     return 0
   fi
-  if grep -qE "^[\"']?on[\"']?:[[:space:]]*\$" "$1" 2>/dev/null \
-     && grep -qE "^[[:space:]]{1,4}pull_request:" "$1" 2>/dev/null; then
-    printf 'pull_request'
-    return 0
+  # Block form: a bare `on:` line, then the event as an indented key. The bare
+  # `on:` is what distinguishes a trigger from a *job* named `pull_request:` in
+  # a workflow triggered `on: push`; indentation alone cannot tell those apart.
+  # Eight is the indent ceiling because two- and four-space YAML styles both
+  # nest the event one level under `on:`, and some files indent further.
+  if grep -qE "^[\"']?on[\"']?:[[:space:]]*(#.*)?\$" "$1" 2>/dev/null; then
+    _b=$(grep -m1 -E "^[[:space:]]{1,8}pull_request(_target)?:" "$1" 2>/dev/null || true)
+    if [ -n "$_b" ]; then
+      printf '%s' "$_b" | sed 's/^[[:space:]]*//; s/:.*$//'
+      return 0
+    fi
   fi
   return 1
 }
 
+# The commands a workflow actually runs: `run:` scalars, plus the bodies of
+# `run: |` and `run: >` blocks. Reading every line of the file instead matched
+# a commented-out `# - run: npm test`, a step *named* after a check, and a
+# `cmd: npm test` passed to an action under `with:`, each of which scored F5 0
+# for a workflow that runs no check at all.
+run_commands() {
+  awk '
+    { line = $0 }
+    line ~ /^[[:space:]]*#/ { next }
+    { match(line, /^[[:space:]]*/); ind = RLENGTH }
+    inblock == 1 && line !~ /[^[:space:]]/ { next }
+    inblock == 1 && ind > blockind { print; next }
+    { inblock = 0 }
+    line ~ /^[[:space:]]*(-[[:space:]]+)?run:/ {
+      rest = line
+      sub(/^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*/, "", rest)
+      if (rest ~ /^[|>]/) { inblock = 1; blockind = ind; next }
+      print rest
+    }
+  ' "$1" 2>/dev/null
+}
+
 # A step that would exercise this fix: a package-manager invocation of one of
-# the five conventional script names, or a runner invoked directly. `name:`,
-# `uses:`, `if:` and comment lines are dropped so a job *called* "lint" does
-# not read as a job that runs one.
-CI_STEP_RE='(^|[[:space:]&|;(])(npm|pnpm|yarn|bun|npx|bunx)[[:space:]]+(run[[:space:]]+)?(test|build|typecheck|check|lint)([[:space:]]|$)|(^|[[:space:]&|;(/])(vitest|jest|playwright|cypress|tsc)([[:space:]]|$)'
+# the five conventional script names, or a runner invoked directly. The
+# optional `[:-]` tail is what admits the names repositories actually use:
+# `test:unit`, `test:ci`, `lint:fix`, `check-types`. `echo` lines are dropped
+# because a workflow whose only step announces itself runs nothing.
+CI_STEP_RE='(^|[[:space:]&|;(])(npm|pnpm|yarn|bun|npx|bunx)[[:space:]]+(run[[:space:]]+)?(test|build|typecheck|check|lint)([:-][^[:space:]]*)?([[:space:]]|$)|(^|[[:space:]&|;(/])(vitest|jest|playwright|cypress|tsc)([[:space:]]|$)'
 ci_step() {
-  grep -hE "$CI_STEP_RE" "$1" 2>/dev/null \
-    | grep -vE "^[[:space:]]*(#|-[[:space:]]+)?(name|uses|if|id|with):" \
-    | head -1 \
-    | sed 's/^[[:space:]]*//; s/^-[[:space:]]*//; s/^run:[[:space:]]*//; s/[[:space:]]*$//' \
+  run_commands "$1" \
+    | grep -vE '^[[:space:]]*echo([[:space:]]|$)' \
+    | grep -m1 -E "$CI_STEP_RE" \
+    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
     || true
 }
 
@@ -641,8 +782,9 @@ CI_STEP=""
 pr_workflow=""
 pr_workflow_trigger=""
 workflow_count=0
-for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
+for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
   [ -f "$wf" ] || continue
+  [ -r "$wf" ] || json_error "$wf cannot be read, so whether it runs a check on this pull request could not be determined. Skipped silently it would score as a repository with less CI than it has."
   workflow_count=$((workflow_count + 1))
   trigger=$(pr_trigger "$wf" || true)
   [ -n "$trigger" ] || continue
@@ -667,14 +809,14 @@ elif [ -n "$pr_workflow" ]; then
   F5_EVIDENCE="$CI_WORKFLOW triggers on $CI_TRIGGER, but no test, build, typecheck, check, or lint step is visible in it"
 elif [ "$workflow_count" -gt 0 ]; then
   F5=2
-  F5_EVIDENCE="$workflow_count GitHub Actions workflow file(s), none triggering on pull_request"
+  F5_EVIDENCE="$workflow_count GitHub Actions workflow file(s), none triggering on a pull request"
 else
   F5=2
   F5_EVIDENCE="no GitHub Actions workflow triggers on this pull request; another CI vendor is not read"
 fi
 
 # ---------------------------------------------------------------------------
-# F6 — override blast radius
+# F6: override blast radius
 #
 # Categorical rather than a bare number, so the caller states what it did and
 # the script decides what that is worth. The evidence says which shape was
@@ -697,11 +839,11 @@ case "$OVERRIDE_SCOPE" in
 esac
 
 # ---------------------------------------------------------------------------
-# F7 — distance from the declared ranges
+# F7: distance from the declared ranges
 #
 # Distance is the widest of two measures: the majors between the resolved
 # versions, and the majors between any dependent's declared floor and where
-# the fix lands. The second catches what the first cannot — a parent stuck on
+# the fix lands. The second catches what the first cannot: a parent stuck on
 # ^9 while the lockfile already moved to 11.x means a patch bump still leaves
 # two unexercised major lines behind it.
 #
@@ -759,11 +901,21 @@ fi
 # The counts and the workflow the score rests on, so a PR body can cite them
 # without re-deriving anything and a reviewer can check the verdict against
 # what was actually read.
-UNCOVERED_JSON=$(printf '%s' "$UNCOVERED" | jq -Rs 'split("\n") | map(select(length > 0))')
+UNCOVERED_JSON=$(printf '%s\n' "$UNCOVERED" | jq -Rs 'split("\n") | map(select(length > 0))')
+# Null, not zero, when the surface could not be measured: "no affected modules"
+# and "nobody could say which modules are affected" are different facts, and
+# only one of them is evidence the fix is small.
+if [ "$PARENTS_KNOWN" = true ]; then
+  AFFECTED_JSON="$import_count"
+  COVERED_JSON="$COVERED_COUNT"
+else
+  AFFECTED_JSON=null
+  COVERED_JSON=null
+fi
 
 jq -n \
   --argjson declared_ranges "$DECLARED_JSON" \
-  --argjson affected "$import_count" --argjson covered "$COVERED_COUNT" \
+  --argjson affected "$AFFECTED_JSON" --argjson covered "$COVERED_JSON" \
   --argjson uncovered "$UNCOVERED_JSON" \
   --arg ci_workflow "$CI_WORKFLOW" --arg ci_trigger "$CI_TRIGGER" \
   --arg ci_step "$CI_STEP" \

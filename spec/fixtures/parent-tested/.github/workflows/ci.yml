@@ -1,5 +1,6 @@
 name: ci
 on:
+  pull_request:
   push:
     branches: [main]
 jobs:
@@ -7,5 +8,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - if: github.event_name == 'pull_request'
-        run: pnpm test
+      - run: pnpm install
+      - run: pnpm test

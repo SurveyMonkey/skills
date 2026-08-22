@@ -300,7 +300,10 @@ report** — record it as such; never guess fields.
 
 Present one table for the batch:
 
-> | Repo | Package | Line | PR | Risk | Coverage/CI | Notes |
+> | Repo | Package | Line | PR | Risk | F4/F5 | Notes |
+
+`F4/F5` is `risk.f4` and `risk.f5` from the agent's result, which is the whole of the coverage and
+CI signal an agent reports; the scorer's fuller `coverage` and `ci` objects stay in the PR body.
 
 Omit the `Repo` column at repo scope, as in phases 4 and 5.
 
