@@ -183,7 +183,20 @@ one `audit-pins` agent joins the first wave and the plan says so, in the same ap
 
 > 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
 > one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
-> are no longer needed. Report-only, no PR.
+> are no longer needed and, in PR mode, opens a **draft** PR removing the ones it confirms.
+
+**The audit's mode is part of this same approval, never a second prompt.** The agent cannot ask, so
+`mode` is decided here and passed at dispatch. **PR mode is the first option and the recommended
+one**: the audit already does every bit of the work a removal PR needs, so stopping at a report
+makes a human re-derive the diff by hand. Carry it as an option on the batch approval itself:
+
+- **Approve, and let the audit open a draft removal PR** (`mode: pr`, recommended)
+- **Approve, audit report-only** (`mode: report`)
+- Decline
+
+One approval covers the batch and the audit's mode together. Splitting them into two prompts is
+what the one-approval principle exists to prevent, and the audit's PR is a draft that phase 9 gates
+like any other.
 
 Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
 are free — its own removability tests run installs, and a second copy of it would audit the same
@@ -272,8 +285,13 @@ message**, counting against `cap` like any other agent:
 - `subagent_type`: `audit-pins`
 - prompt: the `{repo, repo_root, default_branch}` triple of the repo named in the plan (phase 1 at
   repo scope, that repo's phase 6 triple at org or user scope), its `adapter_path` (any of that
-  repo's actionable groups — one repository, one toolchain), and `scripts_dir`, plus the
-  instruction to follow its agent definition and end with its JSON result block.
+  repo's actionable groups — one repository, one toolchain), `scripts_dir`, and **`mode`, exactly
+  as phase 5's approval settled it**, plus the instruction to follow its agent definition and end
+  with its JSON result block.
+
+**Never omit `mode` and never guess it.** The agent treats a missing or unrecognized value as an
+`input` failure rather than defaulting, because the two modes differ by whether a pull request is
+opened against a real repository.
 
 It works in `.claude/worktrees/audit-pins` under that repo's own `repo_root`, which no fix agent
 uses, so their worktree **paths** cannot collide. That is a statement about directories only. The
@@ -363,20 +381,48 @@ count and call it pre-existing debt: this batch is the record of where it came f
 ### Audit findings, when the audit rode along
 
 If an `audit-pins` agent ran in phase 7, report its result **after** the fix table and separately
-from it: it fixed nothing and opened nothing, and mixing its rows into the PR table invites
-reading a finding as a change. Name the repo it audited, which at org or user scope is one repo in
-the batch rather than all of them.
+from it: its findings are judgments about pins, not changes, and mixing them into the PR table
+invites reading a finding as a change. That holds in `pr` mode too, where the audit does open a PR:
+the findings stay findings, and the PR gets its own report below them. Name the repo it audited,
+which at org or user scope is one repo in the batch rather than all of them.
 
 **Group the findings by package, one table per package**, exactly as the agent reported them —
 never a flat list of pin keys:
 
-> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
+> | Pin | Scope | Value | Attributable to removal | Elsewhere in the tree | Advisories | Finding |
 
-Then say plainly which pins are removable (and that removing them is the user's call, since this
-phase opens no PR), which are `still-required` and against which advisory range, and which came
-back `inconclusive`, `not-tested`, or `not-a-version-pin` — an audit that could not establish
-something must not read as an all-clear. A bare override this batch just added will appear in the
-audit as `still-required`; that is expected, not a contradiction.
+"Elsewhere in the tree" is not optional and never blank: `nothing else moved`, the other packages
+whose resolution changed with their verdicts, or `not checked` when the map was unavailable or only
+partly read. Dropping it turns an unchecked claim into an affirmatively clean one.
+
+Then say plainly which pins are removable, which are `still-required` and against which advisory
+range, and which came back `inconclusive`, `not-tested`, or `not-a-version-pin` — an audit that
+could not establish something must not read as an all-clear. A bare override this batch just added
+will appear in the audit as `still-required`; that is expected, not a contradiction.
+
+**Then, beneath the findings and still separate from the fix table, report the audit's own PR.**
+When `pr` is non-null: its URL, the attempt that passed (`pr.attempt`), `pr.removed_keys`,
+`pr.left_behind` with each reason, and the `pr.risk` band. It is a draft, like every other PR in
+this batch, and phase 9 decides whether it leaves draft. Keep it out of the fix table anyway: the
+fixes add and tighten pins and this one removes them, and one table implying they are the same kind
+of change is what that separation exists to prevent.
+
+When `mode` was `pr` and `pr` is `null`, say which of the five reasons `pr_skipped_reason` gave:
+`open PR already exists` (link `existing_pr_url`), `no pins` (the repository declares none at all),
+`no removable pins found` (it has pins and every one still does something), `partial resolution
+map` (the lockfile could not be read whole, so nothing could be judged against the whole tree), or
+`combined test failed` (name the package and version that failed it, and which attempt ran). None
+of those is a failure. `pr_skipped_detail` carries the evidence beside the reason, including the
+attempt number, since there is no `pr.attempt` to read when `pr` is `null`, plus any second reason
+that also applied.
+
+A `"status": "failure"` result is none of the five: report it as its `failure.phase` and
+`failure.detail`, with the other agents' failures. And **a `pr`-mode success with a `null` `pr`
+whose `pr_skipped_reason` is missing or outside those five values is a contract violation** to
+report as a failure of the agent, quoting what came back, exactly as an unparseable result block
+is. Never guess which reason was meant.
+
+When `mode` was `report`, `pr` is `null` by definition and there is nothing to report about it.
 
 **`removable-individually` must never be reported as `removable`.** That status means the package
 carries more than one removable pin and each was tested with the others still in place. Say so, in
@@ -392,8 +438,10 @@ audit are independent work that happened to share a wave.
 
 Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
 work — but promotion is a decision, not a default. This phase covers the `success` results only:
-`no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. Gather the
-evidence:
+`no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. **The audit's
+own PR joins this phase on the same terms**, when one was opened: pass `pr.url` alongside the fix
+PRs below. It is a draft carrying a computed band, and that band is no more an input here than a
+fix agent's is (ADR 006), so nothing about it wants a separate flow. Gather the evidence:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
@@ -453,11 +501,18 @@ Then, **unless an `audit-pins` agent already ran in phase 7**, recommend the pin
 
 > Every fix in this run added or tightened a pin. The pin audit is the other direction: it finds
 > overrides and resolutions a repository no longer needs, testing each removal in an isolated
-> worktree against every published advisory for the package. Report-only — it opens no PR. It runs
-> one install per pin it tests, so it takes a few minutes. Run it now?
+> worktree against every published advisory for the package. It runs one install per pin it tests,
+> so it takes a few minutes. Run it now?
 
-On acceptance, dispatch `audit-pins` with the phase 7 payload and report its findings as phase 8
-describes. The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
+Ask the mode with the same question, **PR mode first and recommended**, on the same terms phase 5
+sets out: open a draft removal PR for the pins it confirms (`mode: pr`, recommended), or report
+only (`mode: report`). One question, two options plus declining; never a second prompt after the
+answer.
+
+On acceptance, dispatch `audit-pins` with the phase 7 payload including `mode`, report its findings
+and its PR as phase 8 describes, and put that PR through phase 9 like any other draft.
+
+The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
 the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
 same `cap` — their removability tests run installs like any fix agent. Recommend it once and take
 the answer; declining is a complete answer, and `/gh-security:audit-pins` runs it later, per repo,

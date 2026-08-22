@@ -75,6 +75,25 @@ behavior — caught live once already (the `rev-parse` → `branch --list` guard
 lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
 its definition prescribes them.
 
+The audit's `pr` mode added **one** rule, and which shapes needed one is a checked fact rather than
+an assumption. Every write it makes runs **from inside the worktree**, so
+`Bash(git -C *$REPO_ROOT/.claude/worktrees/*)` covers all of those:
+`ls-files -- .yarn/cache`, `checkout HEAD -- .yarn/cache`, `status --porcelain`, `diff --quiet`,
+`add`, `branch -D`, `switch -c`, `commit`, and
+`push -u --force-with-lease=<ref>:<sha> origin <ref>`. Its `gh pr list --repo <nwo> --head ...`
+guards, `gh label` and `gh pr create` are byte-identical in shape to the fix agent's and were
+already in the catalog.
+
+The one addition is `Bash(git -C *$REPO_ROOT* ls-remote --heads origin *)`, for the remnant guard.
+`rev-parse`, `branch --list` and `fetch origin` were already there and `ls-remote` was not, which
+is exactly the lockstep failure this section is about: the guard's other three shapes would have
+run silently while the one that reads the remote prompted.
+
+That the branch is created from inside the worktree rather than at `worktree add` time is a
+deliberate consequence of the same rule: it keeps every branch-manipulating shape under the one
+worktree rule, and it means a run that opens no PR leaves no branch behind. A shape that drifts
+from the fix agent's, or that starts naming `repo_root`, is a catalog change in the same commit.
+
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 
 `direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever

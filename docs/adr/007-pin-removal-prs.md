@@ -1,0 +1,144 @@
+---
+type: ADR
+description: "The pin audit opens one draft removal PR per repository, defaulting to PR mode, gated on a combined test of the whole removed set that fails closed on a partial view of the tree."
+status: stable
+created: 2026-08-21
+owner: brianespinosa
+related_issues: [7, 72]
+---
+
+# ADR 007: Pin-removal PRs
+
+Drives [RFC 001](../rfc/001-alert-orchestration.md), whose Phase 4 shipped the audit report-only
+and deferred removal PRs to "a subsequent minor once findings prove reliable". This records what
+that graduation actually decided.
+
+## Context
+
+The audit does all of the work a removal needs and then stops one step short of it. For each pin it
+gathers provenance, removes the entry, installs in an isolated worktree, reads the whole-lockfile
+resolution map, and judges every version that newly resolves against every published advisory for
+its package. A real run against `brianespinosa/prusa-connect-auto-ready` found 5 of 22 pins cleanly
+removable and 3 more removable individually, each with the advisory evidence for why. Nothing was
+done with any of it. A human then has to translate a report back into a diff by hand, re-deriving
+work that was already done and already verified, which is the step most likely to be skipped
+entirely.
+
+Two facts make "just open the PR" the wrong shape on its own.
+
+**The audit tests one pin per install, deliberately** (RFC 001, Phase 4). Removing several pins at
+once changes the resolution of each, so a batch result is not evidence about any individual pin.
+The consequence runs the other way too, and it is the one that matters here: a set of pins each
+proven removable on its own has never been installed together, so nothing the audit produced is
+evidence about the set a PR would remove. The `removable-individually` status exists precisely
+because a real run reported four `minimatch` pins with byte-identical results purely because the
+siblings held those versions during each test, while a fifth was holding the line. A PR that
+deletes all four has not performed four tested operations; it has performed one untested one.
+
+**A removal is judged against the whole tree, not one package.** An override is not scoped in its
+effects the way its key is scoped in its syntax: lifting one changes dedup and hoisting and can
+let a peer conflict resolve differently ([#42](https://github.com/SurveyMonkey/skills/issues/42)).
+The audit already reads `resolution_map` for this, and already reports a partially-parsed map as
+`not-checked` rather than as a clean diff ([#48](https://github.com/SurveyMonkey/skills/issues/48)),
+because a package missing from both snapshots shows no change and `[]` is the stronger claim.
+
+## Decision
+
+**The audit gains a `mode` input, `report` or `pr`, set before dispatch and never defaulted.** The
+agent cannot ask, and the two modes differ by whether a pull request is opened against a real
+repository, so a missing or unrecognized value is an `input` failure. At every dispatch point (the
+`/gh-security:audit-pins` command, the `resolve-alerts` phase 5 batch approval, and the phase 11
+recommendation) **PR mode is the first and recommended option** and report-only is the alternative.
+In the orchestrator the mode is an option on the single batch approval, not a second prompt: one
+approval covers the batch and the audit's mode together.
+
+**One PR per repository, on a fixed `chore/dependabot-remove-pins` branch, built in two bounded
+attempts, each a full combined test.**
+
+The branch name is fixed and **owned by this plugin**, and the lifecycle **verifies that ownership
+rather than assuming it**. The worktree is created detached in both modes, and the branch is
+created only in phase 8 from inside it, after the staging check passes and immediately before the
+commit, so any run that opens no PR (an empty candidate set, a failed combined test, a partial map,
+a failed check) leaves no branch behind.
+
+Two guards run first. An open PR on that head means the audit reports and opens nothing. With no
+open PR, a branch of that name may still exist locally or on the remote, and it is **proven to be a
+remnant before anything touches it**: the remote sha must equal the `headRefOid` of one of the
+repository's *closed* PRs on that head, and any local tip must equal that same sha. Anything else,
+including a local tip ahead of the remote, no matching closed PR, or a lookup that failed, stops
+the run and deletes nothing.
+
+Only a verified remnant is deleted locally, and the push then carries the verified sha as an
+**explicit lease** (`--force-with-lease=<ref>:<sha>`); where no branch existed the push carries no
+lease at all. A bare `--force-with-lease` would not do: it leases against the local
+remote-tracking ref, which any `git fetch` in that checkout silently advances, so in a
+recently-fetched repository it passes over commits nobody has seen, which is precisely the case the
+guard exists to catch. A conflicted removal PR is regenerated by closing it and re-running, with no
+branch for anyone to clean up by hand.
+
+- Attempt 1's candidate set is every `removable` plus every `removable-individually` pin. Remove
+  them all, install, read `resolution_map`, diff **every** package against the with-all-pins
+  baseline recorded before any pin was tested, and run `check-advisories.sh` on every newly
+  admitted version of every changed package under its own name. Clean means every one comes back
+  `safe`; `unknown` and `no-advisories` fail it, as they do everywhere else in this audit.
+- An attempt whose install did not finish, whose manifest edits did not land, or whose advisory
+  lookup errored is a **failure**, not a failed attempt: those are facts about the environment or
+  the tooling, and narrowing the set in response would turn a registry timeout into a smaller PR
+  nobody asked for. Only an attempt that installed and came back dirty falls through to attempt 2.
+- Attempt 2 runs only if attempt 1 failed, and drops every `removable-individually` pin. Those are
+  exactly the findings with sibling ambiguity, so dropping them is how a failing combined test
+  narrows rather than being overridden. The PR body names the pins left behind and the package and
+  version that admitted them.
+- Both attempts failing opens nothing. That is a finding reported with its evidence, not a failure:
+  the audit answered the question it was asked, and the answer is that this set cannot be removed
+  as a set today. An empty candidate set is the same kind of answer.
+
+**A partial view of the tree fails an attempt closed.** An unavailable `resolution_map`, or one
+whose count of unreadable entries is absent, non-integer, or anything other than zero, ends that
+attempt with no PR; a partial *baseline* map skips both attempts, since every diff is measured
+against it. In
+report mode a partial view degrades to a narrower claim, which is still only words; here the same
+gap would ship a deletion nothing checked.
+
+**The PR reuses the fix flow's tail unchanged**: `score-merge-risk.sh` per removed package with
+`--override-scope none` (this change applies no override, it removes them), F4 and F5 computed by
+the scorer from the tree as [ADR 006](006-merge-risk-is-static-analysis.md) settled, and the PR
+band as the highest across the packages that were scored. A removed package that left the tree, or
+whose delta was empty, has no after-version and is not scored at all; where none was scorable
+`pr.risk` is null throughout, which costs nothing because the promotion gate reads the check rollup
+and never the band. No repository check is run: the combined install is the PR's own evidence and
+CI on the draft is the verifier, so a removal that breaks the build ships as a draft and CI says so
+there. The agent never edits source or tests at all. It is a
+**draft** and the agent never marks it ready; promotion stays the dispatcher's decision under
+[ADR 002](002-pr-draft-state-and-approval-flow.md), with the audit's PR joining the same phase 9
+evidence table on the same terms as a fix PR. An open PR already on the head branch means the audit
+still runs and reports, opens nothing, and returns the existing URL.
+
+## Consequences
+
+**Per-pin PRs were considered and rejected.** They would carry each pin's own test as its own
+evidence, which is superficially the tighter story, but every one of them edits the same override
+block in the same manifest: N PRs that conflict with each other by construction, where merging any
+one makes the rest stale and their evidence wrong. One PR per repository is the only shape whose
+evidence is still true at merge time, and the combined test is what buys that.
+
+The audit now writes to the repository, which it previously never did. The blast radius is bounded
+by the same things that bound the fix agents: an isolated worktree, a draft PR, and a batch
+approval before dispatch. Report mode remains available for anyone who wants the old behavior, and
+it is a single answer away at every entry point.
+
+Removal PRs carry a merge-risk band computed by the same rubric as fix PRs, so the two are directly
+comparable in the summary table and in the promotion decision. That was already RFC 001's intent
+("the audit-pins subagent reuses the same rubric for its removal PRs"); what is settled here is
+that `--override-scope` is `none` for a removal, and that the band is the maximum across packages
+rather than an average.
+
+The combined test costs one further install per attempt (so up to two), on top of the one per pin
+the audit already runs. A repository with many pins therefore pays up to two more installs for a PR, which is
+the same order of cost as one fix agent and buys the only evidence that covers the change actually
+being proposed.
+
+`removable-individually` findings stop being a caveat the reader has to act on and become a
+question the PR answers. When attempt 1 passes, the body says the set was validated together, which
+resolves the caveat rather than restating it. When attempt 2 is what passed, the caveat is still
+resolved, for a smaller set, and the body names what was excluded and why.

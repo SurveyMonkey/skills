@@ -41,13 +41,26 @@ Describe 'the prescribed pin-audit restore'
 
   # The two commands as the definition writes them, with the placeholders
   # substituted exactly as the agent is told to substitute them.
+  #
+  # The pattern requires the `package.json` pathspec, because step 7's pair is
+  # what this file is about and it is not the only restore the definition
+  # prescribes any more: phase 7 restores `.yarn/cache` once, before the
+  # combined test, on a different pathspec and for a different reason (issue
+  # #72). Matching every `checkout`/`diff --quiet` would fold that one in and
+  # silently change what the two examples below execute, since they run
+  # whatever `prescribed` returns.
   prescribed() {
     # `[$]` rather than `\$`: the character class keeps the dollar literal for
     # grep without looking like an unexpanded variable to ShellCheck (SC2016).
-    grep -E 'git -C .[$]WORK/audit. (checkout|diff --quiet)' "$AGENT" \
+    grep -E 'git -C .[$]WORK/audit. (checkout|diff --quiet).*package[.]json' "$AGENT" \
       | sed -e 's/^[[:space:]]*//' \
             -e "s|\"\$WORK/audit\"|$REPO|" \
             -e 's|<lockfile>|yarn.lock|'
+  }
+
+  # Counted, not executed: the command's own example is below.
+  cache_restore() {
+    grep -cE 'git -C .[$]WORK/audit. checkout HEAD -- [.]yarn/cache$' "$AGENT"
   }
 
   # stderr is NOT discarded: a git that fails for some reason other than the one
@@ -92,6 +105,16 @@ EOF
     The status should be success
     The stderr should equal ''
     The output should equal 'exit=0 manifest={"name":"demo","overrides":{"lodash":"^4.17.21"}}'
+  End
+
+  # Phase 7's cache restore is a separate, single, differently-scoped command,
+  # gated on `ls-files` reporting something tracked. Folding it into step 7's
+  # pathspec would run it after every pin; dropping it would let per-pin cache
+  # residue reach the removal commit.
+  It 'prescribes the cache restore once, on its own pathspec'
+    When call cache_restore
+    The status should be success
+    The output should equal '1'
   End
 
   # And the verification on its own must fail for a tree that matches only the

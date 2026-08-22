@@ -68,3 +68,176 @@ Describe 'the audit rules that read a partially-parsed map'
     The output should equal '1'
   End
 End
+
+# The removal PR (issue #72) is where a finding stops being words and becomes a
+# deletion in someone's repository, so the definition's own guards are what
+# stand between a plausible per-pin verdict and a bad merge. Each example below
+# names one guard and fails if the sentence carrying it leaves the file.
+Describe 'the rules that gate the removal PR'
+  AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+
+  # Two readers, because a wrapped paragraph is not one grep line. `rule_in`
+  # counts lines and suits a sentence that fits on one; `phrase_in` flattens
+  # the file first and suits anything the 100-column wrap may split. The
+  # earlier "first option and the recommended" example passed only because
+  # SKILL.md happened to wrap after the last word it matched.
+  rule_in() { grep -c -e "$2" -- "$1"; }
+  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+  # `grep -c` exits 1 on no match, which is the expected answer for a shape
+  # that must be ABSENT, so this one reports the count without failing on it.
+  count_in() { grep -c -e "$2" -- "$1" || true; }
+
+  # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
+  # no set has ever been installed together, and a PR removes a set. Without
+  # this sentence the PR would ship N individually-tested deletions as one
+  # untested operation, which is the `removable-individually` hazard wearing a
+  # commit.
+  It 'requires the combined test before any PR'
+    When call rule_in "$AGENT" 'never removes a set that was not installed and judged as a set'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Attempt 1 has to be the maximal set. An attempt 1 that already excluded the
+  # individually-tested pins would never answer the sibling question, and
+  # attempt 2 would be the same set twice.
+  It 'puts the individually-tested pins in attempt 1'
+    When call rule_in "$AGENT" 'includes the individually-tested pins as well'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # A single unreadable locator drops its package from both snapshots, so the
+  # diff reports no change for it. In report mode that degrades to a narrower
+  # claim; here it would ship a deletion nothing checked, so it fails closed.
+  It 'fails an attempt closed on a partially-read map'
+    When call rule_in "$AGENT" 'fails the attempt closed'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Attempt 2 is the narrowing fallback. Keeping the individually-tested pins
+  # in it would re-run the set that just failed, minus nothing that mattered.
+  It 'narrows attempt 2 by dropping the individually-tested pins'
+    When call rule_in "$AGENT" 'drops every pin whose finding was'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Attempt 2 measured against a tree still carrying attempt 1's removals is a
+  # result about neither set, and nothing downstream can see that: the
+  # manifest is still valid, the install still succeeds, and both parsers read
+  # a lockfile they have no way to know is wrong.
+  It 'restores the tree between the two attempts'
+    When call rule_in "$AGENT" 'Restore the tree before attempt 2'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # An Edit that silently matched nothing installs the manifest you started
+  # with, and every downstream step then reports the set as removed. The
+  # adapter is the only thing that can say what the manifest now declares.
+  It 'verifies the edits landed before the combined install'
+    When call rule_in "$AGENT" 'Verify the edits landed before installing'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # An install that did not finish is a fact about the environment, not about
+  # the pins, so narrowing the set in response turns a registry timeout into a
+  # smaller PR nobody asked for, and a resolution_map read off a half-written
+  # lockfile is worse still, because it parses.
+  It 'routes a failed combined install to the compose phase'
+    When call phrase_in "$AGENT" 'failure result (phase .compose.) quoting the install error'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # A broken advisory lookup says nothing about the pins, so it must not read
+  # as "the set is not removable". Attempt 2 would ask the same broken tool the
+  # same question and record its silence as a second verdict.
+  It 'routes a broken advisory lookup to the advisories phase, not a failed attempt'
+    When call rule_in "$AGENT" 'quoting the error, not a failed attempt'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Promotion is the dispatcher's call with check state and auto-merge state in
+  # front of the user (ADR 002). An agent that promotes its own PR removes the
+  # checkpoint entirely, and where auto-merge is armed it merges it.
+  It 'never lets the agent mark its own PR ready'
+    When call rule_in "$AGENT" 'Never mark the PR ready'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The PR is created on the plugin-owned head and as a draft. Losing --draft
+  # is the one flag change that turns the checkpoint into a merged change.
+  It 'creates the PR as a draft on the plugin-owned head'
+    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --draft'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The agent cannot ask which mode was meant, and the two differ by whether a
+  # PR is opened against a real repository: report silently discards work the
+  # dispatcher asked for, pr opens a PR nobody approved.
+  It 'refuses to default the mode'
+    When call rule_in "$AGENT" 'never defaulted, and an unrecognized value'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Report mode has to leave the repository untouched. Without an explicit
+  # stop, phases 7 and 8 read as unconditional and report mode would commit.
+  It 'stops report mode before the PR phases'
+    When call rule_in "$AGENT" 'mode you stop here'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The lease has to name the sha the remnant guard verified. A bare
+  # --force-with-lease leases against the local remote-tracking ref, which any
+  # fetch in that checkout silently advances, so in a recently-fetched
+  # repository it passes over commits nobody has seen: exactly the case the
+  # guard exists to catch, waved through by the flag meant to catch it.
+  It 'leases the push against the verified sha, not the tracking ref'
+    When call rule_in "$AGENT" '--force-with-lease=chore/dependabot-remove-pins:'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # And the sha has to have been verified against a closed PR of this plugin's
+  # own making. Without that, "the name is owned by this plugin" is an
+  # assumption, and acting on it destroys whatever a human put there.
+  It 'verifies a remnant against a closed PR head before touching it'
+    When call phrase_in "$AGENT" 'must equal the .headRefOid. of one of those closed PRs'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # `branch -D` must not have its stderr silenced. The error that matters is a
+  # branch checked out in another worktree, which means a sibling agent or the
+  # user is on it right now, and `2>/dev/null || true` swallows precisely that.
+  It 'does not silence the branch delete'
+    When call count_in "$AGENT" 'branch -D chore/dependabot-remove-pins 2>/dev/null'
+    The status should be success
+    The output should equal '0'
+  End
+
+  # PR mode first at every dispatch point, because the audit already did the
+  # work a removal PR needs; a report-first default makes a human re-derive the
+  # diff by hand, which is the step most likely to be skipped entirely.
+  Describe 'PR mode leads the choice wherever the mode is asked'
+    Parameters
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+    End
+
+    It "offers it first in $1"
+      When call phrase_in "$1" 'first option and the recommended one'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+End

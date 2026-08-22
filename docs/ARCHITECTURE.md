@@ -64,6 +64,11 @@ pass**. Conventions and their reasoning live in
   ShellCheck, `claude plugin validate --strict`) run through one entry point,
   `scripts/check.sh`, from committed git hooks locally and from
   `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions.
+- **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening
+  one draft removal PR per repository, gated on a combined test of the whole removed set (the
+  per-pin tests prove nothing about a set) that fails closed on a partial view of the lockfile.
+  The branch name is plugin-owned, created only at commit time, and a leftover of it is verified
+  against a closed PR's head sha before anything deletes or force-pushes it.
 
 The multi-agent orchestration itself, phases and all, is specified in
 [RFC 001](rfc/001-alert-orchestration.md).
