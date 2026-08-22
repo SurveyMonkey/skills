@@ -3,8 +3,9 @@ description: >
   Audit this repo's dependency pins — the overrides and resolutions added to
   hold transitive dependencies at safe versions — and report which are no
   longer needed. Each removal is tested in an isolated worktree against every
-  published advisory for the package. Report-only: nothing is changed and no PR
-  is opened.
+  published advisory for the package, and the removable set is tested once more
+  together before a draft removal PR is opened. Report-only is offered as the
+  alternative.
 ---
 
 The user explicitly invoked `/gh-security:audit-pins`. Run the pin audit on the current
@@ -70,14 +71,31 @@ is repo-global state, and an agent may share a `repo_root` with a concurrent sib
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)). A failure here is not fatal — report it
 and dispatch anyway.
 
-## 5. Dispatch the audit
+## 5. Ask which mode, then dispatch
 
-One Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
-`default_branch`, `adapter_path` (from step 3), and `scripts_dir`
-(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), plus the instruction to follow its agent definition and
-end with its JSON result block.
+The agent cannot ask anything, so the mode is decided here and passed in. AskUserQuestion, once,
+with two options. **PR mode is the first option and the recommended one**, because the audit
+already does every bit of the work a removal PR needs and stopping at a report makes a human
+re-derive the diff by hand:
 
-The audit runs an install per pin it tests, so it is not instant. Say so before dispatching.
+- **Open a draft PR** (`mode: pr`, recommended): audit as usual, then remove the pins the audit
+  confirms, install once with all of them gone, re-check every version that newly resolves against
+  every published advisory, and open a **draft** PR with that evidence. Nothing is merged and
+  nothing leaves draft without your say-so.
+- **Report only** (`mode: report`): the findings and nothing else; the repository is left exactly
+  as it is.
+
+Then one Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
+`default_branch`, `adapter_path` (from step 3), `scripts_dir`
+(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and `mode`, plus the instruction to follow its agent
+definition and end with its JSON result block.
+
+**Never omit `mode` and never guess it.** The agent treats a missing or unrecognized value as an
+`input` failure rather than defaulting, because the two modes differ by whether a pull request is
+opened against a real repository.
+
+The audit runs an install per pin it tests, plus one more for the combined test in PR mode, so it
+is not instant. Say so before dispatching.
 
 ## 6. Report
 
@@ -100,6 +118,40 @@ Then, in order:
 - **Not a version pin**: aliases, patches, workspace and git targets, npm `"$pkg"` references.
   These are not stale pins; they are how the repository gets a different package or a patched one.
 
-This phase is **report-only**. Do not remove any pin, do not open a PR, and do not offer to —
-removal PRs graduate in a later minor
-([#7](https://github.com/SurveyMonkey/skills/issues/7)). The user acts on the findings.
+In `report` mode that is the whole result: nothing was changed, and the user acts on the findings.
+
+## 7. Report the PR, then offer promotion
+
+In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
+passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the
+`pr.risk` band beside the findings above.
+
+When `pr` is `null`, say which of the reasons in `pr_skipped_reason` it was and stop here: no
+removable pins found, the combined test failed (name the package and version that failed it), a
+partial resolution map, or an open PR already on `chore/dependabot-remove-pins` (link
+`existing_pr_url`). None of those is a failure; the audit answered the question it was asked.
+
+Otherwise gather the promotion evidence:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr.url>
+```
+
+Then apply the `resolve-alerts` skill's phase 9 table to that one PR, unchanged. In particular:
+
+- **`pr.risk.f4` or `pr.risk.f5` at 2 suppresses the offer** unless the rollup shows the specific
+  checks the agent skipped ran in CI and passed. Report what could not run and why; offering would
+  let "nobody has verified this" promote itself.
+- **Auto-merge armed** (`auto_merge.armed`) means promoting **merges** this PR once checks pass.
+  Confirm it saying exactly that, per PR, never folded into any other question.
+- Failing checks, pending checks, an empty rollup and `merge_state: UNKNOWN` are all read as that
+  table reads them.
+
+On consent:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <pr.url>
+```
+
+Report the outcome, conflicts included. A conflicted removal PR is better regenerated than
+hand-resolved: close it, delete the branch, and re-run this command.
