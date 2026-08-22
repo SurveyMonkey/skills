@@ -408,9 +408,12 @@ fix, and this phase is about what the repository's own checks say (ADR 006).
 | Group | Condition | Offer promotion? |
 |---|---|---|
 | Checks failing | `checks` = `failed` | No. List `failing_checks`. |
-| Checks pending | `checks` = `pending` | Not yet. Offer to re-run `status` once before moving on. |
-| No checks ran | `checks` = `none` | Offerable, flagged honestly: the repo runs no CI on drafts (or none at all), so promoting is what starts whatever exists. The user decides. |
+| No checks ran or still running | `checks` = `none` or `pending` | Offerable, flagged honestly: nothing has finished. Promoting is what starts or surfaces whatever CI exists; the reviewer should let it finish before merging. The user decides. |
 | Ready | `checks` = `passed` | Offerable. |
+
+The Unverified row takes precedence over `pending`: if the agent scored F4 = 2 or F5 = 2 and the
+specific skipped checks have not completed in CI, the PR stays Unverified and is not offerable.
+`pending` does not relax that.
 
 Two more signals qualify the offer:
 
