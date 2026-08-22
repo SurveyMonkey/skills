@@ -183,7 +183,7 @@ one `audit-pins` agent joins the first wave and the plan says so, in the same ap
 
 > 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
 > one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
-> are no longer needed, and opens a **draft** PR removing the ones it confirms.
+> are no longer needed and, in PR mode, opens a **draft** PR removing the ones it confirms.
 
 **The audit's mode is part of this same approval, never a second prompt.** The agent cannot ask, so
 `mode` is decided here and passed at dispatch. **PR mode is the first option and the recommended
@@ -411,10 +411,18 @@ When `mode` was `pr` and `pr` is `null`, say which of the five reasons `pr_skipp
 `open PR already exists` (link `existing_pr_url`), `no pins` (the repository declares none at all),
 `no removable pins found` (it has pins and every one still does something), `partial resolution
 map` (the lockfile could not be read whole, so nothing could be judged against the whole tree), or
-`combined test failed` (name the package and version that failed it, and the attempt). None of
-those is a failure, and `pr_skipped_detail` carries the evidence beside the reason, and any second
-reason that also applied. When `mode` was
-`report`, `pr` is `null` by definition and there is nothing to report about it.
+`combined test failed` (name the package and version that failed it, and which attempt ran). None
+of those is a failure. `pr_skipped_detail` carries the evidence beside the reason, including the
+attempt number, since there is no `pr.attempt` to read when `pr` is `null`, plus any second reason
+that also applied.
+
+A `"status": "failure"` result is none of the five: report it as its `failure.phase` and
+`failure.detail`, with the other agents' failures. And **a `pr`-mode success with a `null` `pr`
+whose `pr_skipped_reason` is missing or outside those five values is a contract violation** to
+report as a failure of the agent, quoting what came back, exactly as an unparseable result block
+is. Never guess which reason was meant.
+
+When `mode` was `report`, `pr` is `null` by definition and there is nothing to report about it.
 
 **`removable-individually` must never be reported as `removable`.** That status means the package
 carries more than one removable pin and each was tested with the others still in place. Say so, in

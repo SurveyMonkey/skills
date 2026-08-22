@@ -142,10 +142,21 @@ When `pr` is `null`, say which of the five reasons in `pr_skipped_reason` it was
 | `no pins` | the repository declares no overrides or resolutions at all |
 | `no removable pins found` | it has pins, and every one of them is still doing something |
 | `partial resolution map` | the lockfile could not be read whole, so no removal could be judged against the whole tree; report the count of unreadable entries |
-| `combined test failed` | the confirmed pins are not removable as a set; name the package and version that failed it, and the attempt |
+| `combined test failed` | the confirmed pins are not removable as a set; name the package and version that failed it, and which attempt ran |
 
 None of those is a failure; the audit answered the question it was asked. `pr_skipped_detail`
-carries the evidence beside the reason, and any second reason that also applied.
+carries the evidence beside the reason: the attempt number (there is no `pr.attempt` to read, since
+`pr` is `null` here), the package and version that failed the test or the count of unreadable
+entries, and any second reason that also applied.
+
+**A `"status": "failure"` result is none of the five.** Report it as its `failure.phase` and
+`failure.detail`, in the failure's own terms. The run stopped part-way, which is not one of the
+ways a completed audit declines to open a PR, and presenting it as one hides a broken run among
+ordinary outcomes.
+
+**A `pr`-mode success with a `null` `pr` and a `pr_skipped_reason` that is missing or outside those
+five values is a contract violation.** Report it as a failure of the agent, quoting what came back,
+exactly as an unparseable result block is reported. Never guess which reason was meant.
 
 Otherwise gather the promotion evidence:
 
