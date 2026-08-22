@@ -58,9 +58,7 @@ Describe 'the prescribed pin-audit restore'
             -e 's|<lockfile>|yarn.lock|'
   }
 
-  # And the cache restore is a separate, single, differently-scoped command.
-  # Folding it into step 7's pathspec would run it after every pin, and
-  # dropping it would let per-pin cache residue reach the removal commit.
+  # Counted, not executed: the command's own example is below.
   cache_restore() {
     grep -cE 'git -C .[$]WORK/audit. checkout HEAD -- [.]yarn/cache$' "$AGENT"
   }
@@ -109,15 +107,19 @@ EOF
     The output should equal 'exit=0 manifest={"name":"demo","overrides":{"lodash":"^4.17.21"}}'
   End
 
-  # And the verification on its own must fail for a tree that matches only the
-  # index: that is a restore which did not happen, which is exactly the case
-  # step 7 exists to stop the run on.
+  # Phase 7's cache restore is a separate, single, differently-scoped command,
+  # gated on `ls-files` reporting something tracked. Folding it into step 7's
+  # pathspec would run it after every pin; dropping it would let per-pin cache
+  # residue reach the removal commit.
   It 'prescribes the cache restore once, on its own pathspec'
     When call cache_restore
     The status should be success
     The output should equal '1'
   End
 
+  # And the verification on its own must fail for a tree that matches only the
+  # index: that is a restore which did not happen, which is exactly the case
+  # step 7 exists to stop the run on.
   It 'fails verification on a tree that matches the index but not HEAD'
     audit_repo
     stage_removal

@@ -83,6 +83,9 @@ Describe 'the rules that gate the removal PR'
   # SKILL.md happened to wrap after the last word it matched.
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+  # `grep -c` exits 1 on no match, which is the expected answer for a shape
+  # that must be ABSENT, so this one reports the count without failing on it.
+  count_in() { grep -c -e "$2" -- "$1" || true; }
 
   # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
   # no set has ever been installed together, and a PR removes a set. Without
@@ -145,7 +148,7 @@ Describe 'the rules that gate the removal PR'
   # smaller PR nobody asked for, and a resolution_map read off a half-written
   # lockfile is worse still, because it parses.
   It 'routes a failed combined install to the compose phase'
-    When call rule_in "$AGENT" 'quoting the install error'
+    When call phrase_in "$AGENT" 'failure result (phase .compose.) quoting the install error'
     The status should be success
     The output should equal '1'
   End
@@ -191,6 +194,35 @@ Describe 'the rules that gate the removal PR'
     When call rule_in "$AGENT" 'mode you stop here'
     The status should be success
     The output should equal '1'
+  End
+
+  # The lease has to name the sha the remnant guard verified. A bare
+  # --force-with-lease leases against the local remote-tracking ref, which any
+  # fetch in that checkout silently advances, so in a recently-fetched
+  # repository it passes over commits nobody has seen: exactly the case the
+  # guard exists to catch, waved through by the flag meant to catch it.
+  It 'leases the push against the verified sha, not the tracking ref'
+    When call rule_in "$AGENT" '--force-with-lease=chore/dependabot-remove-pins:'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # And the sha has to have been verified against a closed PR of this plugin's
+  # own making. Without that, "the name is owned by this plugin" is an
+  # assumption, and acting on it destroys whatever a human put there.
+  It 'verifies a remnant against a closed PR head before touching it'
+    When call phrase_in "$AGENT" 'must equal the .headRefOid. of one of those closed PRs'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # `branch -D` must not have its stderr silenced. The error that matters is a
+  # branch checked out in another worktree, which means a sibling agent or the
+  # user is on it right now, and `2>/dev/null || true` swallows precisely that.
+  It 'does not silence the branch delete'
+    When call count_in "$AGENT" 'branch -D chore/dependabot-remove-pins 2>/dev/null'
+    The status should be success
+    The output should equal '0'
   End
 
   # PR mode first at every dispatch point, because the audit already did the
