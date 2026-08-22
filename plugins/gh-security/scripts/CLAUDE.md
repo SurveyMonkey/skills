@@ -160,6 +160,41 @@ When the adapter itself fails on a range, its stderr is kept in `adapter_errors[
 discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
 broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
 
+## An override's key is scoped; its effect is not, and only a baseline sees the difference
+
+The pin audit already knows this on the removal side. The fix side learned it the hard way: a
+scoped entry can move a copy of the package on a major line the group does not own, and every
+check in the fix flow was scoped to `--line` and structurally unable to notice
+([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+The mechanism is per-manager, and Yarn's is the one that bites. Verified empirically against a
+throwaway worktree of a real repository, and against Yarn's `reduceDependency` hook:
+
+- **Yarn** compares the `from` half of a `resolutions` key by `locatorHash` equality against the
+  parent's **resolved locator**. A bare `minimatch/brace-expansion` falls back to the parent's own
+  reference, so it matches every copy of `minimatch` — that is the defect. Only the parent's exact
+  resolved version narrows (`minimatch@npm:10.2.5/...`, protocol optional). A **range** there
+  parses and then silently never matches: no warning, exit 0, nothing applied. That is a worse
+  failure than the collapse, and it is why "just narrow the key" is not a one-line fix.
+- **pnpm** matches `parent@^10>dep` with `semver.satisfies` against the parent's resolved version.
+- **npm** matches `{"parent@^10": {...}}` with `semver.intersects` on the edge's descriptor and
+  `semver.satisfies` on the node's resolved version, and its nesting is transitive rather than
+  direct-child-only.
+
+So `validate --baseline` detects rather than prevents, and that ordering is deliberate: detection
+is the guard that has to exist under any of the three narrowing schemes, including the one that
+fails open. `other_line_moves` is `null` when no baseline was passed and `[]` when one was and
+nothing moved — the same "not checked" versus "checked and clean" distinction the audit draws with
+`collateral_changes: null`, and for the same reason. Only majors **present in the baseline** are
+compared; a major that first appears after the install is the install adding a copy, not this fix
+moving one.
+
+The parent list is the second route to the same damage. `why` has no `--line` and answers about
+the package as a whole, so `agents/fix-dependency.md` narrows to `declared_ranges --line`'s
+`parents_read` before calling `apply_constraint`. A parent in `parents_other_lines` never receives
+a scoped entry: on a live run, passing all of `undici`'s parents for the 6.x group would have
+pinned `@vercel/sandbox` (7.28.0) and `vercel` (5.29.0) under `>=6.28.0 <7`.
+
 ## A removal is judged against the whole tree, not one package
 
 An override is not scoped in its effects the way its key is scoped in its syntax. Lifting one

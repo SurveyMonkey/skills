@@ -248,3 +248,108 @@ Describe 'node.sh validate --vulnerable (completeness)'
     The output should equal '{"ok":true,"checked":2,"unresolved_alerts":[],"requires_major_bump":[]}'
   End
 End
+
+# ---------------------------------------------------------------------------
+# --baseline: the cross-line collateral check (issue #83)
+#
+# The specimen is arsenalamerica/app at origin/main, trimmed: `minimatch@3.1.5`
+# declaring `brace-expansion: "npm:^1.1.7"` and `minimatch@10.2.5` declaring
+# `"npm:^5.0.5"`, resolving to 1.1.18 and 5.0.6. The collapsed fixture is the
+# lockfile a real `yarn install` produced there after the resolutions key
+# `minimatch/brace-expansion` was written, which Yarn applies to every copy of
+# minimatch regardless of version.
+#
+# These assert the VERDICT, not the parse. The first example is the shipped
+# defect: the fix for line 5 passes validation while minimatch@3's 1.x copy has
+# been dragged across a major. The rest are the fail-closed path that stops it.
+# ---------------------------------------------------------------------------
+Describe 'node.sh validate --baseline'
+  After 'cleanup_fixture'
+
+  # `resolved_versions` in the pre-fix worktree, verbatim, as phase 2 records it.
+  BASELINE='{"pm":"yarn","package":"brace-expansion","present":true,"count":2,"versions":[{"version":"1.1.18","path":"brace-expansion@npm:1.1.18"},{"version":"5.0.6","path":"brace-expansion@npm:5.0.6"}],"lockfile_entries":10}'
+
+  It 'passes the collapsed tree when no baseline is supplied'
+    use_fixture yarn-cross-line-collapsed
+    When call adapter_jq '{ok, checked, other_line_moves, resolved_versions}' \
+      validate --line 5 --vulnerable '< 5.0.9' brace-expansion '>=5.0.9 <6'
+    The status should be success
+    The output should equal '{"ok":true,"checked":1,"other_line_moves":null,"resolved_versions":["5.0.9"]}'
+  End
+
+  # The same tree, the same arguments, plus the baseline: 1.1.18 is gone, and
+  # the run has to stop rather than open a PR that moved it.
+  It 'fails closed on a copy dragged off another major line'
+    use_fixture yarn-cross-line-collapsed
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 5 --vulnerable '< 5.0.9' --baseline "$BASELINE" \
+      brace-expansion '>=5.0.9 <6'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":1,"before":["1.1.18"],"after":[],"status":"vanished"}]}'
+  End
+
+  # A run that changed nothing outside its line reports `[]`, which is the
+  # positive claim `null` is not allowed to impersonate.
+  It 'reports an empty array when nothing outside the line moved'
+    use_fixture yarn-cross-line
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 5 --vulnerable '< 5.0.5' --baseline "$BASELINE" \
+      brace-expansion '>=5.0.5 <6'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
+  End
+
+  # A major that only appears after the install is the install adding a copy,
+  # not this fix moving one. Reporting it would fire on every new resolution.
+  It 'ignores a major line absent from the baseline'
+    use_fixture yarn-cross-line
+    When call adapter_jq '.other_line_moves' \
+      validate --line 5 --vulnerable '< 5.0.5' \
+      --baseline '{"package":"brace-expansion","versions":[{"version":"5.0.6"}]}' \
+      brace-expansion '>=5.0.5 <6'
+    The status should be success
+    The output should equal '[]'
+  End
+
+  It 'refuses a baseline with no line to exclude'
+    use_fixture yarn-cross-line
+    When run script "$ADAPTER" validate --baseline "$BASELINE" brace-expansion '>=5.0.5 <6'
+    The status should not equal 0
+    The stderr should include '--baseline requires --line'
+  End
+
+  # A baseline that cannot be read must not degrade into "nothing moved". Each
+  # of these reaches the same clean-looking answer by checking nothing.
+  Describe 'unusable baselines'
+    Parameters
+      not-json      'nope'
+      not-an-object '["1.1.18"]'
+      wrong-package '{"package":"minimatch","versions":[{"version":"3.1.5"}]}'
+      no-versions   '{"package":"brace-expansion"}'
+      versions-type '{"package":"brace-expansion","versions":"1.1.18"}'
+      untyped-entry '{"package":"brace-expansion","versions":[{"version":118}]}'
+      empty         ''
+    End
+
+    It "refuses a $1 baseline"
+      use_fixture yarn-cross-line-collapsed
+      When run script "$ADAPTER" validate --line 5 --vulnerable '< 5.0.9' \
+        --baseline "$2" brace-expansion '>=5.0.9 <6'
+      The status should not equal 0
+      The stderr should include 'baseline'
+    End
+  End
+
+  # `present: false` is a legitimate baseline (a package not in the tree before
+  # the fix). Nothing existed to be moved, so the answer is `[]` and not a
+  # refusal — and not `null` either, because the question was asked.
+  It 'accepts an empty baseline as nothing to move'
+    use_fixture yarn-cross-line
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 5 --vulnerable '< 5.0.5' \
+      --baseline '{"package":"brace-expansion","present":false,"count":0,"versions":[]}' \
+      brace-expansion '>=5.0.5 <6'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
+  End
+End

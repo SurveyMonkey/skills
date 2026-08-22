@@ -167,11 +167,15 @@ covered too; only git needs the `-C` form.
 cd "$WORK/fix" && $ADAPTER resolved_versions <package>
 ```
 
-Keep this output. The merge-risk rating needs the version resolved *before* the fix, and once you
-install it is gone.
+**Keep this output verbatim; you pass it back to `validate` in phase 4.** It has two consumers,
+and once you install it is gone: the merge-risk rating needs the version resolved *before* the fix,
+and validate's cross-line collateral check needs every copy that existed before it — including the
+copies on major lines your group does not own, which no other check in this flow ever looks at.
 
 If `present` is false the package is not currently in the lockfile, which is legitimate for a new
-direct dependency. Record that there is no baseline and continue; phase 5 handles it.
+direct dependency. Record that there is no baseline and continue; phase 5 handles it. Pass the
+`present: false` output to phase 4's `--baseline` anyway: nothing existed to be moved, so the
+collateral check answers `[]` honestly rather than going unasked.
 
 If the script errors about parsing zero entries, the lockfile is unreadable. Stop and return a
 failure (phase `baseline`). Do not treat a failed parse as an empty result.
@@ -182,8 +186,26 @@ failure (phase `baseline`). Do not treat a failed parse as an empty result.
 cd "$WORK/fix" && $ADAPTER why <package>
 ```
 
-`relationship` is `direct` or `transitive`, and `parents` lists the direct parents a scoped
-override must target. Keep `raw` for the PR body.
+`relationship` is `direct` or `transitive`, and `parents` lists the direct parents of the package.
+Keep `raw` for the PR body.
+
+**`parents` spans every major line, and only the parents on yours may receive a scoped entry.**
+`why` has no `--line`, so it answers about the package as a whole: on a real run its `undici`
+parents included `@vercel/sandbox` (resolving 7.28.0) and `vercel` (resolving 5.29.0) alongside the
+line-6 parents. Passing all of them to `apply_constraint` for the 6.x group would have written
+`>=6.28.0 <7` over two lines the group does not own — the same cross-line damage as
+[#83](https://github.com/SurveyMonkey/skills/issues/83), arriving through the parent list instead
+of through the key. Narrow it before phase 4:
+
+```bash
+cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
+```
+
+The parents that get scoped entries are exactly its `parents_read`. A parent listed in
+`parents_other_lines` **never** does: its copy of the package is on another major, a sibling agent
+owns it, and there is no argument for touching it here. `parents_unreadable` and
+`parents_without_range` are the ordinary partial-view cases the PR body already discloses; they
+stay eligible, because an undeterminable line is not evidence of a different one.
 
 ## Phase 4: Apply the fix, install, validate
 
@@ -196,7 +218,7 @@ is your `major_line` and the one above it.
 # direct dependency
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>'
 
-# transitive: pass every parent from phase 3
+# transitive: pass the parents_read set from phase 3, and only those
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
 ```
 
@@ -240,7 +262,7 @@ what tells a bare override you *tightened* from one you *added*.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
-cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 2 resolved_versions JSON>' <package> '>=<version> <<next_major>'
 ```
 
 Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
@@ -250,7 +272,13 @@ hard error, because without the ranges validate cannot tell a finished fix from 
 Copy each range exactly: a range validate cannot parse is also a hard error naming it, since an
 unreadable range would otherwise mark every resolved copy not vulnerable.
 
-`validate` answers two separate questions and fails if either does:
+**`--baseline` takes phase 2's `resolved_versions` output verbatim, single-quoted.** It is JSON
+from the adapter and never contains a quote character. It is checked, not trusted: a payload that
+is truncated, or captured for a different package, is a hard error naming itself, because a
+baseline nobody could read would report no collateral at all — the clean-looking answer produced by
+checking nothing. `--baseline` also requires `--line`.
+
+`validate` answers three separate questions and fails if any of them does:
 
 - **Constraint**, in `violations[]`: copies **in your line** that do not satisfy the range. Copies
   in other lines are out of scope; a sibling agent owns them.
@@ -258,6 +286,29 @@ unreadable range would otherwise mark every resolved copy not vulnerable.
   ranges. A satisfied constraint with a non-empty `unresolved_alerts` is exactly the silent
   partial fix this check exists to catch. `checked` is how many copies were in your line; if
   `line_present` is false, nothing in your line is installed and you validated nothing.
+- **Collateral**, in `other_line_moves[]`: copies on the *other* major lines that the install
+  moved or removed. `null` means you passed no baseline and the question went unasked; `[]` means
+  it was asked and nothing moved. Never read `null` as `[]`.
+
+**A non-empty `other_line_moves` stops the run.** Do not commit, do not push, do not open a PR.
+Return `"status": "failure"` with `failure.phase` = `"validate"`, and quote the array verbatim in
+`detail` along with the entries `apply_constraint` wrote. This is a fail-closed condition and not a
+judgement call: the constraint and completeness checks are both scoped to `--line` and are
+structurally incapable of seeing an out-of-line copy, so `ok: true` from them is not evidence about
+any line but yours.
+
+What it means: your override reached a copy of the package under a parent on another major line.
+A live run wrote the Yarn resolutions key `minimatch/brace-expansion` for the 5.x group, and
+because a Yarn key's parent half carries no version, Yarn applied it to **every** copy of
+`minimatch`. `minimatch@3.1.5`, which `require()`s `brace-expansion` at `^1.1.7`, had its copy
+dragged from `1.1.18` to `5.0.9`: a different major, and a plausible runtime break. `validate
+--line 5` returned `ok: true` throughout, and the PR shipped with the damage described in prose
+only ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+Narrowing the key yourself is not the remedy and you must not try it. Yarn's parent half matches
+the parent's **exact resolved version** and a range there parses and then silently never matches;
+pnpm and npm accept a range but with two further different semantics. Escalate the repository
+instead: say which line moved, from what to what, and which parent carries it.
 
 Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout
 worth one retry, a version that does not exist.
@@ -269,7 +320,8 @@ git -C "$WORK/fix" status --porcelain
 ```
 
 **Empty output after `apply_constraint` and `install`, with `validate` returning `ok: true`,
-`violations: []` and `unresolved_alerts: []`, means the fix is already on the default branch.**
+`violations: []`, `unresolved_alerts: []` and `other_line_moves: []`, means the fix is already on
+the default branch.**
 `apply_constraint` merged into entries that already carried the right range, the install changed no
 lockfile entry, and validate confirms every alert in your group is already cleared by what is
 installed. Nothing is wrong and nothing needs doing.
@@ -568,6 +620,8 @@ PR body:
 
 - [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
       `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
+- [x] No collateral: every copy of `<package>` on the other major lines resolves exactly as it did
+      before this change (`other_line_moves: []`, against the pre-fix baseline)
 - CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
@@ -577,6 +631,31 @@ PR body:
 
 EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
+
+**Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
+`## Collateral` section placed immediately before `## Verification`.** Two situations reach it, and
+neither may be left to the reader to infer from a missing tick:
+
+- **`null`** — no usable baseline existed, so the check was never run. Say that, and say the PR
+  makes no claim about the other major lines. A verdict states what it covers; silence here reads
+  as "clean".
+- **non-empty** — the install moved a copy on a line this group does not own. Phase 4 stops on
+  this, so a PR only exists if a human re-dispatched you with that move explicitly accepted. Name
+  who accepted it and why, and give the table below. Never write this section from your own
+  judgement that a move looks harmless.
+
+> ## Collateral
+>
+> This change also moved a copy of `brace-expansion` on a major line this PR does not own. The
+> Yarn resolutions key `minimatch/brace-expansion` carries no version on its parent half, so Yarn
+> applies it to every resolved copy of `minimatch`.
+>
+> | Line | Before | After | Parent | Declared |
+> |---|---|---|---|---|
+> | 1.x | 1.1.18 | (gone) | `minimatch@npm:3.1.5` | `brace-expansion: "npm:^1.1.7"` |
+>
+> `minimatch@3.1.5` requires `^1.1.7` and now resolves 5.0.9, a different major. Review this
+> before merging.
 
 If you tightened **or added** a bare override in phase 4, the body gets a `## Global override`
 section after `## Changes`. It is required, not a nicety: a reviewer seeing a new unscoped entry
@@ -650,6 +729,9 @@ End your final message with exactly one fenced JSON block:
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can
   reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
   the orchestrator reports it.
+- A non-empty `other_line_moves` never reaches a `success` result. It is a `failure` with
+  `failure.phase` = `"validate"`, whose `detail` quotes the array verbatim
+  ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
 - `observations` is the adapter's `apply_constraint` observations array, passed through
   **verbatim** so the orchestrator can deduplicate across agents, plus **one entry of your own
   appended to it when, and only when, `bare_override` is `added`**:
@@ -684,7 +766,7 @@ End your final message with exactly one fenced JSON block:
     "evidence": {
       "diff": "",
       "resolved_version": "6.28.0",
-      "validate": {"ok": true, "violations": [], "unresolved_alerts": [], "checked": 2},
+      "validate": {"ok": true, "violations": [], "unresolved_alerts": [], "other_line_moves": [], "checked": 2},
       "merged_pr_url": "https://github.com/<nwo>/pull/597"
     }
   }

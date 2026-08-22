@@ -14,7 +14,7 @@
 #   apply_constraint <pkg> <range> [parent...] -> {mode, parents[], written[],
 #                                                  alias_lookup, observations[]}
 #   install                                    -> pass-through, exit code is the signal
-#   validate [--line <major>] [--vulnerable <range>]... <pkg> <range>
+#   validate [--line <major>] [--vulnerable <range>]... [--baseline <json>] <pkg> <range>
 #                                              -> {ok, line_present, checked,
 #                                                  violations[],
 #                                                  unresolved_alerts[],
@@ -1152,10 +1152,11 @@ verb_why() {
 # ---------------------------------------------------------------------------
 # validate — composes resolved_versions and applies the constraint
 #
-# Usage: validate [--line <major>] [--vulnerable <range>]... <pkg> <constraint>
+# Usage: validate [--line <major>] [--vulnerable <range>]... [--baseline <json>]
+#                 <pkg> <constraint>
 #
-# Two independent questions, because passing the first is not passing the
-# second (issue #19):
+# Three independent questions, because passing one is not passing the others
+# (issues #19 and #83):
 #
 #   1. Constraint. Does every resolved copy satisfy the range the fix applied?
 #      `--line` narrows this to the major line the group targets: a package
@@ -1165,6 +1166,35 @@ verb_why() {
 #      from the group's alerts? Meeting the constraint on the copy you fixed
 #      says nothing about the copies you did not, which is how a partial fix
 #      used to report success.
+#   3. Collateral. Did the install move a copy on a major line this group does
+#      not own? `--baseline` takes the pre-fix `resolved_versions` output and
+#      answers it in `other_line_moves[]`.
+#
+# The third question exists because the first two are *both* scoped to `--line`
+# and therefore cannot see an out-of-line copy at all. A Yarn `resolutions` key
+# is not: `minimatch/brace-expansion` carries no version on its parent half, and
+# Yarn applies it to every resolved copy of `minimatch`. On a live run that
+# dragged `minimatch@3.1.5`'s `brace-expansion` from `1.1.18` to `5.0.9` — a
+# different major than the `^1.1.7` that parent `require()`s — while
+# `validate --line 5` returned `ok: true`, because 1.x was never in its window
+# ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+#
+# Narrowing the key instead is a separate change with three different
+# semantics behind it, and Yarn's is the one that fails open: its `from` half is
+# compared by `locatorHash` equality against the parent's *resolved* locator, so
+# only the exact resolved version narrows and a **range there parses and then
+# silently never matches**. pnpm (`parent@^10>dep`, `semver.satisfies` on the
+# resolved version) and npm (`{"parent@^10": {...}}`) can express what Yarn
+# cannot. Detection is the guard that has to exist either way.
+#
+# `other_line_moves` is `null` when no baseline was passed and `[]` when one was
+# and nothing moved. Never `[]` for both: "not checked" collapsing into "checked
+# and clean" is the same failure as the pin audit's `collateral_changes` (#48),
+# and here it would launder the very defect this answers.
+#
+# Only lines *present in the baseline* are compared. A major that appears for
+# the first time after the install is the install adding a copy, not this fix
+# moving one, and reporting it would fire on every legitimate new resolution.
 #
 # A still-vulnerable copy *below* the target line is separated out as
 # `requires_major_bump`: no advisory in this group offers a fix within that
@@ -1186,14 +1216,25 @@ verb_why() {
 #     satisfaction answers false for a token it cannot read, which on this side
 #     of the check means "no copy is vulnerable", the unsafe direction. A typo
 #     or an advisory form the tokenizer does not know is an error, not a pass.
+#
+# A third joins them for the same reason: `--baseline` is checked against the
+# contract it is supposed to satisfy before it is used. A truncated payload, or
+# one captured for a different package, would compare the current tree against
+# nothing and report no cross-line moves at all — a clean answer produced by
+# having checked nothing, which is the unsafe direction here.
 # ---------------------------------------------------------------------------
 verb_validate() {
   line=""
   vuln_ranges=""
+  baseline=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --line)
         line="${2:?--line requires a major}"
+        shift 2
+        ;;
+      --baseline)
+        baseline="${2:?--baseline requires the pre-fix resolved_versions JSON}"
         shift 2
         ;;
       --vulnerable)
@@ -1218,6 +1259,28 @@ verb_validate() {
 
   if [ -n "$line" ] && [ -z "$vuln_ranges" ]; then
     die "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19)."
+  fi
+
+  if [ -n "$baseline" ] && [ -z "$line" ]; then
+    die "validate: --baseline requires --line. A cross-line move is defined against the line this group owns; with no line to exclude, every move looks like collateral (issue #83)."
+  fi
+
+  # The baseline is checked against the shape `resolved_versions` promises, and
+  # for the package actually being validated. `[]` is a legitimate `.versions`
+  # (a package absent before the fix), so emptiness is not the test: presence
+  # and type are, exactly as ADR 001 requires of every contract field.
+  baseline_json=null
+  if [ -n "$baseline" ]; then
+    baseline_json=$(printf '%s' "$baseline" | jq -c --arg pkg "$pkg" '
+      select(type == "object"
+             and has("package") and .package == $pkg
+             and has("versions") and (.versions | type) == "array"
+             and (.versions | all(type == "object" and has("version")
+                                  and (.version | type) == "string")))' 2>/dev/null) \
+      || baseline_json=""
+    if [ -z "$baseline_json" ]; then
+      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 2 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
+    fi
   fi
 
   vuln_json=$(printf '%s' "$vuln_ranges" \
@@ -1257,6 +1320,7 @@ verb_validate() {
 
   result=$(printf '%s' "$resolved" \
     | jq --arg range "$range" --arg line "$line" --argjson vulnerable "$vuln_json" \
+      --argjson baseline "$baseline_json" \
       "$SEMVER_JQ"'
     def major_of: semver_parse | (.core[0] // 0);
 
@@ -1273,9 +1337,25 @@ verb_validate() {
             below_line: ($lineno != null and (($v.version | major_of) < $lineno))} ]) as $still
     | ([ $still[] | select(.below_line     ) | del(.below_line) ]) as $bump
     | ([ $still[] | select(.below_line|not) | del(.below_line) ]) as $unresolved
+    # Every baseline major other than the one this group owns, listed only when
+    # the set of versions on it changed. `vanished` is the shape the live defect
+    # took: the 1.x copy was not moved within its line, it stopped existing.
+    | (if $baseline == null then null
+       else [ $baseline.versions
+              | map(select((.version | major_of) != $lineno))
+              | group_by(.version | major_of)[]
+              | (.[0].version | major_of) as $m
+              | {major: $m,
+                 before: ([ .[].version ] | unique),
+                 after: ([ $r.versions[]
+                           | select((.version | major_of) == $m) | .version ] | unique)}
+              | select(.before != .after)
+              | . + {status: (if (.after | length) == 0 then "vanished" else "moved" end)} ]
+       end) as $other_moves
     | {ok: (($bad | length) == 0
             and ($unresolved | length) == 0
-            and ($lineno == null or ($inline | length) > 0)),
+            and ($lineno == null or ($inline | length) > 0)
+            and ($other_moves == null or ($other_moves | length) == 0)),
        package: $r.package, range: $range,
        line: (if $line == "" then null else $line end),
        line_present: ($lineno == null or ($inline | length) > 0),
@@ -1284,6 +1364,7 @@ verb_validate() {
        violations: $bad,
        unresolved_alerts: $unresolved,
        requires_major_bump: $bump,
+       other_line_moves: $other_moves,
        resolved_versions: ([$r.versions[].version] | unique)}')
 
   printf '%s\n' "$result"
