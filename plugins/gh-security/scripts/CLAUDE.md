@@ -75,13 +75,18 @@ behavior — caught live once already (the `rev-parse` → `branch --list` guard
 lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
 its definition prescribes them.
 
-The audit's `pr` mode added no rule, and that is a checked fact rather than an assumption. Its
-branch creation is `git -C <repo_root> worktree add ... -b`, its stale-branch guard is
-`git -C <repo_root> branch --list`, its open-PR guard is `gh pr list --repo <nwo>`, and its commit,
-push, `gh label` and `gh pr create` calls are byte-identical in shape to the fix agent's, which the
-catalog already covers through `Bash(git -C *$REPO_ROOT/.claude/worktrees/*)`,
-`Bash(gh label * --repo $NWO *)` and `Bash(gh pr create --repo $NWO *)`. A shape that drifts from
-the fix agent's is a catalog change, in the same commit.
+The audit's `pr` mode added no rule, and that is a checked fact rather than an assumption. Every
+one of its writes runs **from inside the worktree**, so
+`Bash(git -C *$REPO_ROOT/.claude/worktrees/*)` covers all of them: `branch -D`, `switch -c`,
+`checkout HEAD -- .yarn/cache`, `add`, `commit`, and `push --force-with-lease`. Its open-PR guard
+is `gh pr list --repo <nwo>` and its `gh label` and `gh pr create` calls are byte-identical in
+shape to the fix agent's, all three already in the catalog. Nothing it does runs `git` against
+`repo_root` beyond the `fetch`, `worktree` and `status` shapes that were already there.
+
+That the branch is created from inside the worktree rather than at `worktree add` time is a
+deliberate consequence of this: it keeps every branch-manipulating shape under the one worktree
+rule, and it means a run that opens no PR leaves no branch behind. A shape that drifts from the fix
+agent's, or that starts naming `repo_root`, is a catalog change in the same commit.
 
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 
