@@ -239,11 +239,27 @@ of through the key. Narrow it before phase 4:
 cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
 ```
 
-The parents that get scoped entries are exactly its `parents_read`. A parent listed in
-`parents_other_lines` **never** does: its copy of the package is on another major, a sibling agent
-owns it, and there is no argument for touching it here. `parents_unreadable` and
-`parents_without_range` are the ordinary partial-view cases the PR body already discloses; they
-stay eligible, because an undeterminable line is not evidence of a different one.
+**The eligible set is `parents_read` plus `parents_unreadable` plus `parents_without_range`, minus
+nothing else.** The only parents excluded are those in `parents_other_lines`, which **never**
+receive a scoped entry: their copy of the package is on another major, a sibling agent owns it, and
+there is no argument for touching it here. The other three stay eligible, including when
+`parents_read` is empty and every parent is unreadable — an undeterminable line is not evidence of a
+different one, and dropping those parents abandons the fix on exactly the repositories where the
+copy is hardest to find. A live run reached that state (`parents_read: []`, the only parent in
+`parents_unreadable`) and had to guess, because these two sentences said "exactly `parents_read`"
+and "they stay eligible" ([#76](https://github.com/SurveyMonkey/skills/issues/76),
+[#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+Two consequences travel with it:
+
+- **Scope by parent name.** `parents_other_lines` entries may carry the parent's resolved version
+  (`minimatch@3.1.5`), because a parent in the tree at several versions is excluded per copy. Such
+  a parent appears in **both** lists and is eligible — one of its copies is on your line. Pass the
+  bare name.
+- **Name every unreadable parent you scoped to in the PR body**, marking any that are also in
+  `parents_malformed` as a damaged install, and say that its entry rests on a declaration no source
+  could be read for. Same disclosure phase 5 requires for the risk score, and for the same reason:
+  a reviewer must be able to see which entries were written against a partial view.
 
 ## Phase 4: Apply the fix, install, validate
 
@@ -481,10 +497,14 @@ disk but does not parse.
 read, they declare a range, and that range governs a copy on another major line. They are not a
 partial view and need no disclosure in the PR body; a parent whose resolved copy could not be
 determined at all is **kept** rather than excluded, so an unreadable install over-reports distance
-rather than silently lowering the score.
+rather than silently lowering the score. An entry carries the parent's resolved version
+(`minimatch@3.1.5`) when the exclusion was decided per copy, which is how a parent in the tree at
+several versions can appear both here and in `parents_read`
+([#85](https://github.com/SurveyMonkey/skills/issues/85)).
 
-Unreadable parents are usually normal rather than a failure: Yarn PnP installs no `node_modules` at
-all and pnpm links only direct dependencies there. A **malformed** one is not normal, and says the
+An unreadable parent is now rarer than it was and means more: the adapter falls back to the
+lockfile for a parent with no installed manifest, so Yarn PnP and pnpm's partly-linked
+`node_modules` no longer produce one on their own. A **malformed** one is not normal, and says the
 install is damaged. **Name every unreadable parent in the PR body**, marking any malformed ones as
 such, so a reviewer knows the distance was measured against a partial view; `why.json`'s `raw`
 field often carries the ranges the package manager printed for them.
