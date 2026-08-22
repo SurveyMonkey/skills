@@ -99,9 +99,18 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
 
 ## Phase 1: Create the isolated worktree
 
-Your workspace is `<repo_root>/.claude/worktrees/audit-pins` — written `$WORK` here as shorthand,
-but **substitute the literal path in every command**. A stable in-repo path means the permission
+`$WORK` is shorthand for the **workspace root**, `<repo_root>/.claude/worktrees/audit-pins`, and
+**the literal path is substituted in every command**. A stable in-repo path means the permission
 rules a user accepts for it persist across runs.
+
+**`$WORK` is a container, and no git worktree is ever created at `$WORK` itself.** The worktree
+lives one level down, at **`$WORK/audit`**, which is the only checkout this agent has and the
+directory every `cd "$WORK/audit"` below refers to. `$WORK` holds it alongside the run's scratch
+files (`$WORK/why-<package>.json`, `$WORK/bin`), which is why cleanup can remove the whole
+directory in one step. A live run read the shorthand as naming the worktree and created it at
+`$WORK`, which puts a git checkout on top of the scratch area
+([#79](https://github.com/SurveyMonkey/skills/issues/79)). There is no `$WORK/base`: this flow
+installs one tree, not a baseline tree and a test tree.
 
 **Crashed-run guard**: if `$WORK` already exists, a previous run crashed before cleanup. Stop and
 return a failure (phase `worktree`) naming the directory, so the user can inspect and remove it
@@ -315,11 +324,22 @@ Then, for each `range` pin, in priority order — **bare pins first** (they cons
 in the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
 
 1. Remove exactly that entry from `package.json` with Edit. Remove the whole override block if it
-   is the last entry, and nothing else. Then **verify the edit landed before installing**:
+   is the last entry, and nothing else. Then **verify the edit landed before installing**, in two
+   steps and in this order:
 
    ```bash
+   cd "$WORK/audit" && jq . package.json >/dev/null
    cd "$WORK/audit" && $ADAPTER list_pins
    ```
+
+   **`jq . package.json` comes first because a removal can leave the manifest syntactically
+   broken**, and the classic way is a trailing comma where the removed entry was the last one in
+   its block. That happened on `prusa-connect-auto-ready#40` removing the picomatch/minimatch
+   entries. A non-zero exit here is a failure result (phase `install`) quoting jq's own parse
+   error: the manifest is corrupt, and every verdict measured against an install of it would be
+   fiction. Do not repair it by re-editing around the error — restore the file per step 7 and stop.
+   Reaching `list_pins` with a broken manifest instead makes the corruption surface as whatever
+   that verb happens to do with unparseable JSON, which is not a report of the actual problem.
 
    `pins[]` must no longer carry this pin's `key`, and `count` must be phase 2's count minus one.
    Anything else is a failure result (phase `install`) quoting the key still present. An Edit that
@@ -351,6 +371,27 @@ in the tree, so they are both the most costly and the most likely to be over-bro
    in the summary — how many entries could not be read. This is the same fallback as an
    unavailable `resolution_map` below, for the same reason: a partial view is not a whole-tree
    view, and a verdict that outruns what was checked is a wrong one.
+   **A large collateral fan-out is checked, not sampled, unless it is a platform-binary family.**
+   Removing one pin on `prusa-connect-auto-ready#40` moved 26 `@esbuild/*` packages together. The
+   default is that **every** collateral entry is judged against the advisory database, because a
+   list of 26 is 26 packages that moved and "most of them look alike" is not a verdict. The one
+   exception is a **platform-binary family**: sibling packages published from a single release of
+   one parent, under one scope, at **identical** versions, whose only difference is the platform
+   triple in the name — `@esbuild/*`, `@rolldown/binding-*`, `lightningcss-*`, `@swc/core-*` and
+   the like. There, one member's verdict may stand for the family, on three conditions that are
+   checked and not assumed:
+
+   - every member is under the same scope or name prefix,
+   - every member's `baseline` and `without_pin` versions are identical across the family, and
+   - the family moved as one unit in the same diff.
+
+   When any condition fails, check every member. When the sample is used, **say so in the
+   verdict**: `collateral_verdict` is `sampled-family`, and the collateral entry names the member
+   actually judged, the family's size, and the shared version. A verdict is worth exactly what was
+   checked, so a family verdict that presents itself as 26 checks is the failure this rule exists
+   to prevent — as is reporting `not-checked` for a fan-out that was simply large, which claims
+   less than was actually established.
+
 7. **Restore the tree, then verify the restore, before the next pin:**
 
    ```bash
@@ -783,6 +824,23 @@ cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
   what a reviewer needs either way. When phase 4's baseline holds several versions of the package,
   `--before` is the **lowest** of them, as `fix-dependency` passes it: the widest true distance,
   and the one a reviewer would compute by hand.
+- `--after` follows the same rule from the other end: when removing the pins admits **more than
+  one** newly resolved version of the package, `--after` is the **highest** of them. Same
+  rationale as `--before` — widest true distance — and the pair is what makes it a rule rather
+  than a preference. On `prusa-connect-auto-ready#40` picomatch was held at 2.3.2 by one pin and
+  4.0.4 by another, and minimatch at 3.1.4 and 10.2.3; "lowest" and "most common" were equally
+  available readings and would each have produced a different, equally undocumented score
+  ([#79](https://github.com/SurveyMonkey/skills/issues/79)). Say in the PR body which versions the
+  span covers when it is more than one, so a reviewer can see the number was a span and not a
+  single move.
+- **When two scored packages share the top band, one of them supplies `pr.risk.f4` / `pr.risk.f5`,
+  and which one is decided, not picked.** Take the higher `score` within the band; on a tie, the
+  package with the larger version delta between its `--before` and `--after` (majors first, then
+  minors, then patches); on a tie there too, the first alphabetically. The point is that two runs
+  over the same commit report the same factors, so a reviewer comparing two audits is comparing
+  the audits and not the order the packages happened to be scored in. Every package's own
+  `markdown` still goes into the body regardless; this decides only whose factors the summary
+  carries.
 - `--override-scope none` is a statement of fact, not a discount. F6 rates the blast radius of an
   override this change **applies**, and this change applies none; it removes them. Reporting
   `scoped` or `bare-*` here would score the pin that is going away.
@@ -856,6 +914,24 @@ phase `push`.
 git -C "$WORK/audit" commit -m "..."
 ```
 
+**The repository's own commit and push hooks are the repository's, and they run.** A repo with
+lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
+and *your* push, and that is correct: you are committing to that repository on its terms.
+`tacoma.fyi` ran biome on commit and vitest plus `astro check` on push through the audit run.
+Three rules follow, and none of them is a judgment call:
+
+- **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
+  `core.hooksPath`. This is the user-level git convention as well as this flow's.
+- **A hook that fails the commit or push is a failure result** (phase `push`, which covers both
+  the commit and the push here), quoting the hook's own output. Report it and stop; do not retry.
+- **Never edit code, tests or configuration to satisfy a hook.** Your diff is a set of removed pin
+  entries and the lockfile they produced. A hook failing on it is a real finding about the removal,
+  which is what a reviewer needs to see, and editing until it passes destroys that signal.
+
+This is a different mechanism from [ADR 006](../../../docs/adr/006-merge-risk-is-static-analysis.md),
+which says you never *choose* to run a repository's checks for scoring. A hook the repository
+attached to `git commit` runs automatically, is not yours to run or skip, and feeds no factor.
+
 Then push. **Which push depends on what phase 1's guard 2 found**, and there are only two forms:
 
 ```bash
@@ -893,11 +969,16 @@ Removed:
 - <key>: <value> (was holding <package> at <version>; now resolves <version>)
 
 Refs: https://github.com/<nwo>/pull/412
+Refs: https://github.com/<nwo>/commit/<sha>
 Refs: https://github.com/<nwo>/security/dependabot/93
 ```
 
 The `Refs:` lines are phase 3's provenance, one per line: the PR or commit that introduced each
-removed pin and the fixed alerts for its package. **Omit the trailer entirely when phase 3 found
+removed pin and the fixed alerts for its package. **A pin introduced by a direct commit with no
+pull request uses the `/commit/<sha>` form**, with the full 40-character sha, which is why it has
+its own template line: on `tacoma.fyi#77` that was the provenance for one removed pin and the
+line was improvised ([#79](https://github.com/SurveyMonkey/skills/issues/79)). Use the PR URL when
+there is a PR and the commit URL when there is not; never both for the same pin. **Omit the trailer entirely when phase 3 found
 none.** A trailer naming the tool that wrote the commit tells a reader nothing they cannot see; a
 trailer pointing at the PR that added the pin is the other half of this one's story.
 
@@ -946,6 +1027,11 @@ every package whose resolution moved, every newly admitted version, and its advi
 ## Pins left behind
 
 <omit this section entirely when nothing was left behind>
+
+<this section is *only* for candidates an attempt excluded — the attempt-2 case. A pin that is
+`still-required` or `inconclusive` never belongs here: it is a finding, and it is already in the
+findings table above. When attempt 1 passed, nothing was left behind and the section is omitted,
+however many findings the audit produced (issue #81)>
 
 | Pin | Why |
 |---|---|
@@ -1081,14 +1167,22 @@ End your final message with exactly one fenced JSON block:
 - `collateral_changes` is phase 4 step 6's whole-lockfile diff: one entry per **other** package
   whose resolved version set changed, `[]` when nothing else moved, and `null` when the pin was not
   tested, `resolution_map` was unavailable, or the map's `unreadable_entries` was non-zero.
-  `collateral_verdict` is `none`, `safe`, `vulnerable`, `inconclusive`, or `not-checked`, and
-  `null` for an untested pin. `null` and `[]` are not interchangeable: one says nothing else moved,
+  `collateral_verdict` is `none`, `safe`, `vulnerable`, `inconclusive`, `sampled-family`, or
+  `not-checked`, and `null` for an untested pin. `sampled-family` is phase 4 step 6's
+  platform-binary rule and is the only verdict that stands for packages not individually judged;
+  its entry names the member checked, the family size and the shared version, so the verdict says
+  exactly how far the checking went. `null` and `[]` are not interchangeable: one says nothing else moved,
   the other says nobody looked. A partially-read map produces the second, never the first
   ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 - `advisory_verdict`, `advisory_count` and `matched_ranges` come from `check-advisories.sh`
   verbatim **for the tested package**, and are `null`/`[]` for a pin that was not tested or whose
   delta was empty. A collateral package's advisory result lives in `collateral_verdict`, never
   folded into these.
+- `provenance` is phase 3's, and `provenance.fixed_alerts` is an **array of alert numbers as bare
+  integers** (`[93, 148]`), never objects. `arsenalamerica/app#303` populated it with
+  `{number, ghsa, range}` elements, a defensible reading of a field only ever shown by example
+  ([#81](https://github.com/SurveyMonkey/skills/issues/81)). It is `[]` when the provenance commit
+  referenced no alert. The GHSA ids and ranges belong to the advisory verdict fields, not here.
 - `detail` carries the judgment: the install error for `inconclusive`, the reason for
   `not-tested`, what the entry really is for `not-a-version-pin`.
 - `mode` is the value you were dispatched with, verbatim: `report` or `pr`. It is what tells a
@@ -1110,7 +1204,17 @@ End your final message with exactly one fenced JSON block:
   travels with it.
 - Inside `pr`: `removed_keys[]` is every manifest key the commit deleted; `left_behind[]` is one
   `{key, reason}` per candidate the passing attempt excluded, `[]` when attempt 1 passed and
-  nothing was dropped; `attempt` is `1` or `2` and names the last attempt that ran, which on a
+  nothing was dropped.
+  **A pin whose `status` is `still-required` never appears in `left_behind`**,
+  and neither does an `inconclusive` one: those are *findings*, reported in
+  `findings[]` and in the findings table, and they were never candidates for removal in the first
+  place. `left_behind` is exclusively the attempt-2 case — a candidate that would have passed on
+  its own but was dropped from the combined attempt because a sibling admitted something unsafe.
+  Two live runs read this both ways: `arsenalamerica/app#303` listed all four `still-required` pins
+  in `left_behind` after attempt 1 passed with nothing excluded, while `tacoma.fyi#77` left the
+  section empty with `still-required` findings present
+  ([#81](https://github.com/SurveyMonkey/skills/issues/81)). When attempt 1 passes, `left_behind`
+  is `[]` however many findings the audit produced. `attempt` is `1` or `2` and names the last attempt that ran, which on a
   successful PR is the one whose combined install the body describes; `risk` is the **highest**
   band across the packages that were scored, with that package's `f4` and `f5` read off the
   scorer's `factors[]`, and all four fields are `null` when no package was scorable. Nothing

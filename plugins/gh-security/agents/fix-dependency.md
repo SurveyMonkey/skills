@@ -459,6 +459,24 @@ Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"
 first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
 until a human says so.
 
+**The repository's own commit and push hooks are the repository's, and they run.** A repo with
+lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
+and *your* push, and that is correct: you are committing to that repository on its terms.
+`arsenalamerica/app` ran biome and knip on commit and its test and typecheck suite on push through
+every fix run. Three rules follow, and none of them is a judgment call:
+
+- **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
+  `core.hooksPath`. This is the user-level git convention as well as this flow's.
+- **A hook that fails the commit or push is a failure result** (phase `commit` or `push`
+  respectively), quoting the hook's own output. Report it and stop; do not retry the command.
+- **Never edit code, tests or configuration to satisfy a hook.** Your diff is the dependency fix.
+  A hook failing on it is a fact about this change meeting the repository's standards, which is
+  exactly what a reviewer needs to see, and editing until it passes destroys that signal.
+
+This is a different mechanism from [ADR 006](../../../docs/adr/006-merge-risk-is-static-analysis.md),
+which says you never *choose* to run a repository's checks for scoring. A hook the repository
+attached to `git commit` runs automatically, is not yours to run or skip, and feeds no factor.
+
 ```bash
 git -C "$WORK/fix" add package.json <lockfile>
 git -C "$WORK/fix" commit -m "..."
