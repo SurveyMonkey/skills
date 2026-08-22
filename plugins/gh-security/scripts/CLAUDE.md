@@ -84,6 +84,13 @@ an assumption. Every write it makes runs **from inside the worktree**, so
 guards, `gh label` and `gh pr create` are byte-identical in shape to the fix agent's and were
 already in the catalog.
 
+The fix agent's leftover-branch cleanup is the mirror image, and the one *writing* git shape either
+definition prescribes at `<repo_root>`: git refuses to delete a branch that is checked out in a
+worktree, so `branch -D <branch_name>` runs **after** `worktree remove`, when no worktree is left to
+run it from. `Bash(git -C *$REPO_ROOT* branch --list *)` is read-only and does not match it, so the
+catalog carries `Bash(git -C *$REPO_ROOT* branch -D *)`
+([#84](https://github.com/SurveyMonkey/skills/issues/84)).
+
 The one addition is `Bash(git -C *$REPO_ROOT* ls-remote --heads origin *)`, for the remnant guard.
 `rev-parse`, `branch --list` and `fetch origin` were already there and `ls-remote` was not, which
 is exactly the lockstep failure this section is about: the guard's other three shapes would have

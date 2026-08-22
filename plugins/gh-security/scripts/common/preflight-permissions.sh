@@ -79,7 +79,15 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # is the pin audit's remnant guard: before `pr` mode touches a leftover
 # `chore/dependabot-remove-pins` branch it reads the remote sha and requires it
 # to match a closed PR's head, so the rule is scoped to `--heads origin` rather
-# than admitting arbitrary `ls-remote` targets. The alerts rule carries no
+# than admitting arbitrary `ls-remote` targets. `branch -D` is the one
+# *writing* git shape agents/fix-dependency.md prescribes at `<repo_root>`
+# rather than inside the worktree, and it has to be: a branch checked out in a
+# worktree cannot be deleted, so the leftover-branch cleanup runs after
+# `worktree remove`, when there is no worktree left to run it from. The
+# audit's `branch -D` and its `push --force-with-lease=<ref>:<sha>` run inside
+# `$WORK/audit` and stay covered by the worktree rule
+# ([#84](https://github.com/SurveyMonkey/skills/issues/84)). The alerts rule
+# carries no
 # wildcard between
 # `gh api` and the path, deliberately: one there would match
 # `gh api -X PATCH repos/<nwo>/dependabot/alerts/42 -f state=dismissed` and
@@ -96,6 +104,7 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 RULES="Bash($PLUGIN_ROOT/scripts/*)
 Bash(git -C *$REPO_ROOT* status *)
 Bash(git -C *$REPO_ROOT* branch --list *)
+Bash(git -C *$REPO_ROOT* branch -D *)
 Bash(git -C *$REPO_ROOT* rev-parse *)
 Bash(git -C *$REPO_ROOT* ls-remote --heads origin *)
 Bash(git -C *$REPO_ROOT* fetch origin *)

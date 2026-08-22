@@ -17,7 +17,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{exists, missing_count, present}' check "$REPO"
     The status should be success
-    The output should equal '{"exists":false,"missing_count":11,"present":[]}'
+    The output should equal '{"exists":false,"missing_count":12,"present":[]}'
   End
 
   It 'adds the gh rules only when an nwo is supplied'
@@ -88,10 +88,24 @@ Describe 'preflight-permissions.sh'
     The output should equal "[\"Bash(git -C *$REPO* ls-remote --heads origin *)\"]"
   End
 
+  # The fix agent's leftover-branch cleanup (#84) runs `branch -D` at
+  # <repo_root>, not in the worktree, and it has to: git refuses to delete a
+  # branch that is checked out in a worktree, so the deletion happens after
+  # `worktree remove`, when no worktree is left to run it from. The read-only
+  # `branch --list` rule does not match it, and prescribed shapes and this
+  # catalog move together (scripts/CLAUDE.md).
+  It 'covers the leftover-branch deletion the fix agent runs at the repo root'
+    make_repo
+    When call common_jq preflight-permissions.sh '[.missing[] | select(test("branch"))]' check "$REPO"
+    The status should be success
+    The output should equal "[\"Bash(git -C *$REPO* branch --list *)\",\"Bash(git -C *$REPO* branch -D *)\"]"
+  End
+
   # Push is `git -C <worktree> push ...` like every other git call, so the
   # worktree rule covers it and a bare-push rule would be dead weight. That
-  # holds for the audit's `push --force-with-lease=<ref>:<sha>` too: it is the
-  # same `git -C <worktree>` shape carrying more flags.
+  # holds for the audit's `push --force-with-lease=<ref>:<sha>` and its own
+  # `branch -D` too: both are the same `git -C <worktree>` shape carrying more
+  # flags, and only the fix agent's repo-root `branch -D` needs a rule (#84).
   It 'carries no bare git push rule'
     make_repo
     When call common_jq preflight-permissions.sh '[.missing[] | select(startswith("Bash(git push"))] | length' check "$REPO"
@@ -111,7 +125,7 @@ Describe 'preflight-permissions.sh'
     make_repo
     When call common_jq preflight-permissions.sh '{added: (.added | length), dirs: (.additional_directories_added | length)}' apply "$REPO"
     The status should be success
-    The output should equal '{"added":11,"dirs":1}'
+    The output should equal '{"added":12,"dirs":1}'
     The path "$REPO/.claude/settings.local.json" should be exist
   End
 
@@ -131,7 +145,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call jq -c '{model, first: .permissions.allow[0], second: .permissions.allow[1], deny: .permissions.deny, total: (.permissions.allow | length)}' "$REPO/.claude/settings.local.json"
     The status should be success
-    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":13}'
+    The output should equal '{"model":"opus","first":"Bash(ls *)","second":"Bash(git status)","deny":["Read(.env)"],"total":14}'
   End
 
   It 'counts pre-existing catalog rules as present, not missing'
@@ -139,7 +153,7 @@ Describe 'preflight-permissions.sh'
     "$COMMON/preflight-permissions.sh" apply "$REPO" > /dev/null
     When call common_jq preflight-permissions.sh '{missing_count, present: (.present | length)}' check "$REPO"
     The status should be success
-    The output should equal '{"missing_count":0,"present":11}'
+    The output should equal '{"missing_count":0,"present":12}'
   End
 
   It 'refuses to touch a settings file that is not valid JSON'
