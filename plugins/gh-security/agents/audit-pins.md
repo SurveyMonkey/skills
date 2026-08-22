@@ -185,7 +185,9 @@ left it, and nobody has added to it since.
 **Anything else is a failure result (phase `worktree`)**, quoting both shas and saying plainly that
 a human may have worked on the branch. Specifically: no closed PR whose `headRefOid` matches, a
 local tip ahead of (or simply different from) the remote, a local branch with no remote at all, or
-a non-zero exit from any of these commands. **Never delete and never force anything in that case**,
+a non-zero exit from `ls-remote`, `branch --list`, `gh pr list`, or a `rev-parse` run on a branch
+`branch --list` reported (`rev-parse` only runs then; on no local branch it is never issued).
+**Never delete and never force anything in that case**,
 and do not try to work out whose commit it is: the guard exists because that judgment cannot be
 made from here.
 
@@ -895,13 +897,13 @@ git -C "$WORK/audit" branch -D chore/dependabot-remove-pins
 git -C "$WORK/audit" switch -c chore/dependabot-remove-pins
 ```
 
-**Run `branch -D` only when phase 1's guard 2 verified a local tip**, and skip it entirely
-otherwise: an unverified branch of that name is the case that guard refused to let you reach.
-**Do not silence its stderr.** A "branch not found" message is fine and expected when the guard
-found no local branch but you ran it anyway; every other error is a failure result (phase `push`)
-quoting it, and the one that matters is a branch checked out in another worktree, which git refuses
-to delete and which means a sibling agent or the user is on it right now. `2>/dev/null || true`
-would swallow exactly that. A non-zero exit from `switch -c` is also phase `push`.
+**Run `branch -D` only when phase 1's guard 2 verified a local tip**, and never otherwise: with
+no local branch there is nothing to delete, and an unverified branch of that name is the case that
+guard refused to let you reach. **Do not silence its stderr.** Any error from it is a failure
+result (phase `push`) quoting it, and the one that matters is a branch checked out in another
+worktree, which git refuses to delete and which means a sibling agent or the user is on it right
+now. `2>/dev/null || true` would swallow exactly that. A non-zero exit from `switch -c` is also
+phase `push`.
 
 ```bash
 git -C "$WORK/audit" commit -m "..."
