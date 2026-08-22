@@ -94,8 +94,9 @@ definition and end with its JSON result block.
 `input` failure rather than defaulting, because the two modes differ by whether a pull request is
 opened against a real repository.
 
-The audit runs an install per pin it tests, plus one more for the combined test in PR mode, so it
-is not instant. Say so before dispatching.
+The audit runs an install per pin it tests. PR mode adds up to two more for the combined test, plus
+one if a failing check needs attributing against the default branch. It is not instant; say so
+before dispatching.
 
 ## 6. Report
 
@@ -103,7 +104,13 @@ Parse the agent's fenced JSON result. **An unparseable or missing result block i
 report** — say so; never guess fields. Present its findings **grouped by package, one table per
 package**, as the agent reported them — never a flat list of pin keys:
 
-> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
+> | Pin | Scope | Value | Attributable to removal | Elsewhere in the tree | Advisories | Finding |
+
+"Elsewhere in the tree" is not optional and never blank. It reads `nothing else moved`, or names
+each other package whose resolution changed with its verdict, or reads `not checked` when the map
+was unavailable or only partly read. A verdict with an empty column and one with an unchecked
+column are different claims, and a reader who cannot tell them apart is being told the stronger
+one.
 
 Then, in order:
 
@@ -124,12 +131,21 @@ In `report` mode that is the whole result: nothing was changed, and the user act
 
 In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
 passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the
-`pr.risk` band beside the findings above.
+`pr.risk` band beside the findings above, or "not scored" when `pr.risk.band` is `null` because no
+removed package had a version move to rate.
 
-When `pr` is `null`, say which of the reasons in `pr_skipped_reason` it was and stop here: no
-removable pins found, the combined test failed (name the package and version that failed it), a
-partial resolution map, or an open PR already on `chore/dependabot-remove-pins` (link
-`existing_pr_url`). None of those is a failure; the audit answered the question it was asked.
+When `pr` is `null`, say which of the five reasons in `pr_skipped_reason` it was and stop here:
+
+| `pr_skipped_reason` | What to say |
+|---|---|
+| `open PR already exists` | a removal PR is already open on `chore/dependabot-remove-pins`; link `existing_pr_url` and say these findings are what tells them whether it is still the right one |
+| `no pins` | the repository declares no overrides or resolutions at all |
+| `no removable pins found` | it has pins, and every one of them is still doing something |
+| `partial resolution map` | the lockfile could not be read whole, so no removal could be judged against the whole tree; report the count of unreadable entries |
+| `combined test failed` | the confirmed pins are not removable as a set; name the package and version that failed it, and the attempt |
+
+None of those is a failure; the audit answered the question it was asked. `pr_skipped_detail`
+carries the evidence beside the reason, and any second reason that also applied.
 
 Otherwise gather the promotion evidence:
 
@@ -140,8 +156,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr.url>
 Then apply the `resolve-alerts` skill's phase 9 table to that one PR, unchanged. In particular:
 
 - **`pr.risk.f4` or `pr.risk.f5` at 2 suppresses the offer** unless the rollup shows the specific
-  checks the agent skipped ran in CI and passed. Report what could not run and why; offering would
-  let "nobody has verified this" promote itself.
+  checks the agent skipped ran in CI and passed. Both are always set, even where `pr.risk.band` is
+  `null`, which is why the gate reads them and not the band. Report what could not run and why;
+  offering would let "nobody has verified this" promote itself.
 - **Auto-merge armed** (`auto_merge.armed`) means promoting **merges** this PR once checks pass.
   Confirm it saying exactly that, per PR, never folded into any other question.
 - Failing checks, pending checks, an empty rollup and `merge_state: UNKNOWN` are all read as that
@@ -154,4 +171,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <pr.url>
 ```
 
 Report the outcome, conflicts included. A conflicted removal PR is better regenerated than
-hand-resolved: close it, delete the branch, and re-run this command.
+hand-resolved: close it and re-run this command. There is no branch to clean up by hand. The audit
+owns `chore/dependabot-remove-pins`, creates it only at commit time, deletes any local remnant and
+force-pushes over a remote one that carries no open PR, so the next run rebuilds it from the
+current default branch on its own.

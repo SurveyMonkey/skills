@@ -383,13 +383,17 @@ count and call it pre-existing debt: this batch is the record of where it came f
 If an `audit-pins` agent ran in phase 7, report its result **after** the fix table and separately
 from it: its findings are judgments about pins, not changes, and mixing them into the PR table
 invites reading a finding as a change. That holds in `pr` mode too, where the audit does open a PR:
-the findings stay findings, and the PR gets its own report below them. Name the repo it audited, which at org or user scope is one repo in
-the batch rather than all of them.
+the findings stay findings, and the PR gets its own report below them. Name the repo it audited,
+which at org or user scope is one repo in the batch rather than all of them.
 
 **Group the findings by package, one table per package**, exactly as the agent reported them —
 never a flat list of pin keys:
 
-> | Pin | Scope | Value | Attributable to removal | Advisories | Finding |
+> | Pin | Scope | Value | Attributable to removal | Elsewhere in the tree | Advisories | Finding |
+
+"Elsewhere in the tree" is not optional and never blank: `nothing else moved`, the other packages
+whose resolution changed with their verdicts, or `not checked` when the map was unavailable or only
+partly read. Dropping it turns an unchecked claim into an affirmatively clean one.
 
 Then say plainly which pins are removable, which are `still-required` and against which advisory
 range, and which came back `inconclusive`, `not-tested`, or `not-a-version-pin` — an audit that
@@ -403,11 +407,14 @@ this batch, and phase 9 decides whether it leaves draft. Keep it out of the fix 
 fixes add and tighten pins and this one removes them, and one table implying they are the same kind
 of change is what that separation exists to prevent.
 
-When `mode` was `pr` and `pr` is `null`, say which reason `pr_skipped_reason` gave: no removable
-pins found, the combined test failed (name the package and version that failed it), a partial
-resolution map, or an open PR already on `chore/dependabot-remove-pins` (link `existing_pr_url`).
-None of those is a failure. When `mode` was `report`, `pr` is `null` by definition and there is
-nothing to report about it.
+When `mode` was `pr` and `pr` is `null`, say which of the five reasons `pr_skipped_reason` gave:
+`open PR already exists` (link `existing_pr_url`), `no pins` (the repository declares none at all),
+`no removable pins found` (it has pins and every one still does something), `partial resolution
+map` (the lockfile could not be read whole, so nothing could be judged against the whole tree), or
+`combined test failed` (name the package and version that failed it, and the attempt). None of
+those is a failure, and `pr_skipped_detail` carries the evidence beside the reason, and any second
+reason that also applied. When `mode` was
+`report`, `pr` is `null` by definition and there is nothing to report about it.
 
 **`removable-individually` must never be reported as `removable`.** That status means the package
 carries more than one removable pin and each was tested with the others still in place. Say so, in
@@ -426,8 +433,9 @@ work — but promotion is a decision, not a default. This phase covers the `succ
 `no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. **The audit's
 own PR joins this phase on the same terms**, when one was opened: pass `pr.url` alongside the fix
 PRs below, and read its `pr.risk.f4` and `pr.risk.f5` where the table says F4 and F5, exactly as a
-fix agent's own `f4`/`f5` are read. It is a draft carrying a computed band and a check run, so
-nothing about it wants a separate flow. Gather the evidence:
+fix agent's own `f4`/`f5` are read. Those two are always set, even where `pr.risk.band` is `null`,
+which is why the gate reads them and not the band. It is a draft carrying a computed band and a
+check run, so nothing about it wants a separate flow. Gather the evidence:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
@@ -496,7 +504,9 @@ only (`mode: report`). One question, two options plus declining; never a second 
 answer.
 
 On acceptance, dispatch `audit-pins` with the phase 7 payload including `mode`, report its findings
-and its PR as phase 8 describes, and put that PR through phase 9 like any other draft. The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
+and its PR as phase 8 describes, and put that PR through phase 9 like any other draft.
+
+The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
 the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
 same `cap` — their removability tests run installs like any fix agent. Recommend it once and take
 the answer; declining is a complete answer, and `/gh-security:audit-pins` runs it later, per repo,
