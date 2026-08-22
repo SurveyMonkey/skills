@@ -411,10 +411,6 @@ fix, and this phase is about what the repository's own checks say (ADR 006).
 | No checks ran or still running | `checks` = `none` or `pending` | Offerable, flagged honestly: for `none`, no checks have reported, so promoting is what starts whatever CI exists; for `pending`, cite `check_counts` (for example "3 of 5 finished, 2 still running"). Either way the reviewer should let CI finish before merging. The user decides. |
 | Ready | `checks` = `passed` | Offerable. |
 
-The Unverified row takes precedence over `pending`: if the agent scored F4 = 2 or F5 = 2 and the
-specific skipped checks have not completed in CI, the PR stays Unverified and is not offerable.
-`pending` does not relax that.
-
 Two more signals qualify the offer:
 
 - **Auto-merge armed** (`auto_merge.armed` true): promoting this PR **merges it** once checks

@@ -92,7 +92,8 @@ already running. Either way, waiting for pending checks before offering promotio
 the orchestrator still had to re-run `status` and promote the stragglers separately once checks
 caught up. Phase 9 now offers `pending` alongside `none`, stating plainly what stage the checks
 are in and that promoting is what starts or surfaces whatever CI exists. What still blocks or
-qualifies the offer is unchanged: failing checks block outright, the Unverified group stays
-unofferable until CI covers what the agent skipped, armed auto-merge still needs a per-PR
-confirmation because promoting it merges on green, and a rebase conflict is still reported rather
-than resolved.
+qualifies the offer is unchanged: failing checks block outright, armed auto-merge still needs a
+per-PR confirmation because promoting it merges on green, and a rebase conflict is still reported
+rather than resolved. The merge-risk band is not an input to this decision either way: since
+[ADR 006](006-merge-risk-is-static-analysis.md) no agent runs the repository's checks, so there is
+no "unverified" group for `pending` to interact with, and CI on the draft is the only verifier.

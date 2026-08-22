@@ -66,9 +66,8 @@ directly:
 - **Lockfile validation that refuses to bluff.** A fix claims completion only when the lockfile
   proves the vulnerable ranges are gone, and a parser finding nothing is an error, never a pass.
 - **Draft PRs with check-aware promotion.** Fixes land as drafts; the orchestrator batch-promotes
-  them with check state reported honestly (failing checks block, unverified fixes the agent
-  skipped and CI has not covered also block, pending or absent checks are flagged), with per-PR
-  confirmation where auto-merge is armed.
+  them with check state reported honestly (failing checks block; pending or absent checks are
+  flagged, not waited on), with per-PR confirmation where auto-merge is armed.
 - **Report-only pin audit.** Finds overrides and resolutions that no longer protect anything,
   judged against the full advisory database (which the pin itself blinds repo alert history to),
   including collateral effects of removing each pin.
