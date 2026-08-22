@@ -51,8 +51,8 @@ pass**. Conventions and their reasoning live in
   `<adapter>.sh <verb>` calls that emit JSON on stdout and fail with `{"error": ...}`. Adding an
   ecosystem means adding an adapter, not touching `common/`.
 - **PR flow** ([ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix PRs open as drafts;
-  the orchestrator batch-promotes them once checks pass, confirming per PR where auto-merge is
-  armed.
+  the orchestrator batch-promotes them with check state reported honestly, confirming per PR
+  where auto-merge is armed.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
   `.claude/worktrees/`, and waves are sized by a per-machine concurrency cap enforced as a
