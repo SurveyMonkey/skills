@@ -20,7 +20,6 @@
 #                                                  unresolved_alerts[],
 #                                                  requires_major_bump[]}
 #                                                 (--line requires --vulnerable)
-#   verification_commands                      -> {commands[], skipped[]}
 #   compare_versions <a> <b>                   -> {result, delta, major_distance}
 #   range_facts <range> <version>              -> {parseable, satisfied, pinned,
 #                                                  floor_major, majors_ahead}
@@ -1578,7 +1577,7 @@ verb_apply_constraint() {
 }
 
 # ---------------------------------------------------------------------------
-# install / verification_commands / compare_versions / list_pins
+# install / compare_versions / list_pins
 # ---------------------------------------------------------------------------
 # Every verb that writes runs only inside a linked git worktree, and the set is
 # exactly `apply_constraint` (rewrites package.json), `install` (rewrites the
@@ -1588,9 +1587,8 @@ verb_apply_constraint() {
 # in scripts/CLAUDE.md. A mutating verb that runs anywhere else (a cwd mistake
 # before worktree setup) silently edits the user's tree, observed live in Phase
 # 2 testing. The classification lives in
-# common/require-linked-worktree.sh, which run-check.sh also invokes, so the
-# two guards cannot drift; it already emits the adapter's JSON error shape on
-# stderr, so this only has to relay the exit status.
+# common/require-linked-worktree.sh; it already emits the adapter's JSON error
+# shape on stderr, so this only has to relay the exit status.
 refuse_primary_checkout() {
   "$SCRIPT_DIR/../common/require-linked-worktree.sh" "refusing to run '$VERB' here" || exit 1
 }
@@ -1600,26 +1598,6 @@ verb_install() {
   cmd=$(verb_detect | jq -r '.install_cmd')
   printf 'Running: %s\n' "$cmd" >&2
   $cmd
-}
-
-verb_verification_commands() {
-  pm=$(verb_detect | jq -r '.pm_exec')
-  # Emits *candidates*, not a running order. Name-based filtering catches the
-  # obvious servers but cannot recognize every one (`start-verdaccio` is a
-  # registry, `nx-migrate` is a codemod), so the caller reviews the list and
-  # skips what is not a check. Matching the last colon-separated segment as
-  # well as the whole name keeps `storybook:build` while dropping `test:watch`
-  # and `storybook:dev`.
-  jq --arg pm "$pm" '
-    ["dev","start","serve","watch","storybook","preview"] as $long
-    | def is_long: . as $s
-        | ($long | index($s)) != null
-          or ($long | index($s | split(":") | last)) != null;
-      ((.scripts // {}) | keys) as $all
-    | {
-        commands: [ $all[] | select(is_long | not) | "\($pm) \(.)" ],
-        skipped:  [ $all[] | select(is_long) ]
-      }' package.json
 }
 
 verb_compare_versions() {
@@ -2037,7 +2015,6 @@ case "$VERB" in
   apply_constraint)      verb_apply_constraint "$@" ;;
   install)               verb_install ;;
   validate)              verb_validate "$@" ;;
-  verification_commands) verb_verification_commands ;;
   compare_versions)      verb_compare_versions "$@" ;;
   range_facts)           verb_range_facts "$@" ;;
   declared_ranges)       verb_declared_ranges "$@" ;;

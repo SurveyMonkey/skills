@@ -217,16 +217,20 @@ Describe 'score-merge-risk.sh'
   # --declared-range flag. Ranges reach the script as positional arguments
   # rather than a word-split string because a range may contain a space
   # (">=1 <2"), which word splitting would tear in half.
+  #
+  # There are no f4/f5 columns any more: both are read out of the tree the
+  # example is standing in (issue #71, ADR 006), so the *fixture* is what sets
+  # them and every example says which one it wants.
   score() {
-    _rel=$1; _dev=$2; _parents=$3; _before=$4; _after=$5; _f4=$6; _f5=$7; _filter=$8
-    _scope=${9:-none}
-    if [ $# -gt 9 ]; then shift 9; else shift $#; fi
+    _rel=$1; _dev=$2; _parents=$3; _before=$4; _after=$5; _filter=$6
+    _scope=${7:-none}
+    if [ $# -gt 7 ]; then shift 7; else shift $#; fi
     : > ranges.txt
     for _range in "$@"; do printf '%s\n' "$_range" >> ranges.txt; done
     jq -n --arg rel "$_rel" --argjson dev "$_dev" --argjson parents "$_parents" \
       '{relationship: $rel, dev_only: $dev, parents: $parents, package: "lodash"}' > why.json
     set -- --package lodash --after "$_after" --adapter "$ADAPTER" \
-           --why-json why.json --f4 "$_f4" --f5 "$_f5" --override-scope "$_scope"
+           --why-json why.json --override-scope "$_scope"
     if [ -n "$_before" ]; then
       set -- "$@" --before "$_before"
     fi
@@ -244,17 +248,17 @@ Describe 'score-merge-risk.sh'
 
   Describe 'factor scoring'
     Parameters
-      # rel        dev    parents        before   after    f4 f5  expected F1,F2
-      direct       false  '[]'           1.0.0    2.0.0    0  0   '{"f1":2,"f2":2}'
-      direct       true   '[]'           1.0.0    1.1.0    0  0   '{"f1":1,"f2":0}'
-      transitive   false  '["express"]'  1.0.0    1.0.1    0  0   '{"f1":0,"f2":1}'
+      # rel        dev    parents        before   after    expected F1,F2
+      direct       false  '[]'           1.0.0    2.0.0    '{"f1":2,"f2":2}'
+      direct       true   '[]'           1.0.0    1.1.0    '{"f1":1,"f2":0}'
+      transitive   false  '["express"]'  1.0.0    1.0.1    '{"f1":0,"f2":1}'
     End
 
     It "scores F1 and F2 for a $1 dependency"
       use_fixture usage-app
-      When call score "$1" "$2" "$3" "$4" "$5" "$6" "$7" '{f1: .factors[0].score, f2: .factors[1].score}'
+      When call score "$1" "$2" "$3" "$4" "$5" '{f1: .factors[0].score, f2: .factors[1].score}'
       The status should be success
-      The output should equal "$8"
+      The output should equal "$6"
     End
   End
 
@@ -262,39 +266,358 @@ Describe 'score-merge-risk.sh'
     # src/index.js, src/util.js, and src/helper.ts import lodash or express;
     # tests/util.test.js also does but must not count.
     use_fixture usage-app
-    When call score direct false '[]' 1.0.0 1.0.1 0 0 '.factors[2].evidence'
+    When call score direct false '[]' 1.0.0 1.0.1 '.factors[2].evidence'
     The status should be success
     The output should include '2 module'
   End
 
   It 'scores usage surface as zero when nothing imports the package'
-    use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.0.1 0 0 '.factors[2].score'
+    use_fixture tooling-only
+    When call score direct false '[]' 1.0.0 1.0.1 '.factors[2].score'
     The status should be success
     The output should equal '0'
   End
 
-  Describe 'bands'
+  # F4, test coverage of the affected surface (issue #71). The fixture is the
+  # input: each one is a repository shape the factor has to tell apart, and
+  # "no tests exist here" and "one check could not start" are no longer the
+  # same answer because the agent no longer runs anything.
+  Describe 'test coverage of the affected surface'
     Parameters
-      # rel       dev   before  after   f4 f5  expected band
-      direct      true  1.0.0   1.0.1   0  0   Low
-      direct      false 1.0.0   1.1.0   1  1   Medium
-      direct      false 1.0.0   2.0.0   2  2   High
+      # fixture          expected F4
+      coverage-full      0   # every affected module imported by a test or given a sibling spec
+      coverage-partial   1   # src/a.js covered, src/b.js not
+      coverage-none      2   # a test script, but nothing testing these modules
+      no-test-script     2   # test files nothing can run: package.json declares no test script
+      tooling-only       0   # no source imports at all, and a build script would catch a broken pin
+      no-scripts         2   # no source imports, and neither a build nor a test script
+      test-script-only   1   # no source imports, no build script, but a test script exists
+      test-words         2   # src/latest and src/inspector are modules, not test directories
+      parent-tested      2   # a test imports the parent by name and nothing else
+      coverage-conventions 0 # __tests__/<basename>.* and an alias-path import
+      coverage-index     2   # a test importing the directory does not cover its index module
+      coverage-index-collision 0 # any specifier ending in `index` covers every index module
+      coverage-multiline 2   # a specifier wrapped onto its own line is not seen
+      coverage-many      2   # seven affected modules, none covered
     End
 
-    It "bands a $1 dependency as $7"
-      use_fixture yarn-berry
-      When call score "$1" "$2" '[]' "$3" "$4" "$5" "$6" '.band'
+    It "scores $1 as F4 $2"
+      use_fixture "$1"
+      When call score direct false '[]' 1.0.0 1.0.1 '.factors[3].score'
       The status should be success
-      The output should equal "\"$7\""
+      The output should equal "$2"
+    End
+  End
+
+  It 'names the uncovered modules in the coverage evidence'
+    use_fixture coverage-partial
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[3].evidence, coverage}'
+    The status should be success
+    The output should equal '{"e":"1 of 2 affected modules are imported by a test (src/b.js uncovered)","coverage":{"affected":2,"covered":1,"uncovered":["src/b.js"]}}'
+  End
+
+  # A test importing the package by name exercises the package surface
+  # directly, whatever the importing modules look like: usage-app's
+  # tests/util.test.js requires lodash and nothing else.
+  It 'counts a test that imports the package itself as covering the surface'
+    use_fixture usage-app
+    When call score direct false '[]' 1.0.0 1.0.1 '{f4: .factors[3].score, e: .factors[3].evidence}'
+    The status should be success
+    The output should equal '{"f4":0,"e":"all 2 affected module(s) are covered by a test"}'
+  End
+
+  # F5, CI presence (issue #71). Read out of .github/workflows with grep: the
+  # question is whether anything will run on the pull request this fix is
+  # about to open.
+  Describe 'CI presence'
+    Parameters
+      # fixture          expected F5
+      coverage-full      0   # `on:` block with pull_request, and a `pnpm test` step
+      ci-list-trigger    0   # the list form, `on: [push, pull_request]`
+      ci-no-steps        1   # PR-triggered, but its only run: is an echo
+      ci-push-only       2   # push-only, and a step whose `if:` names the event is not a trigger
+      yarn-berry         2   # no .github/workflows at all
+      ci-pr-target       0   # pull_request_target runs on pull requests too
+      ci-flow-map        0   # the flow-map form, `on: {pull_request: {...}}`
+      ci-quoted-on       0   # a .yaml file with a quoted `"on":` key
+      ci-deep-indent     0   # the block form indented eight spaces
+      ci-scoped-script   0   # a scoped script name, `pnpm test:ci`
+      ci-commented       1   # `# - run: npm test` is a comment and `echo hi` runs nothing
+      ci-with-nested     1   # `cmd: npm test` under `with:` is an input, not a step
+      ci-two-workflows   0   # the first *qualifying* workflow, not the first workflow
+    End
+
+    It "scores $1 as F5 $2"
+      use_fixture "$1"
+      When call score direct false '[]' 1.0.0 1.0.1 '.factors[4].score'
+      The status should be success
+      The output should equal "$2"
+    End
+  End
+
+  It 'names the workflow and the step it matched'
+    use_fixture ci-list-trigger
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[4].evidence, ci}'
+    The status should be success
+    The output should equal '{"e":".github/workflows/ci.yml triggers on [push, pull_request] and runs: npm run build","ci":{"workflow":".github/workflows/ci.yml","trigger":"[push, pull_request]","step":"npm run build"}}'
+  End
+
+  It 'reports a PR-triggered workflow with no visible check step'
+    use_fixture ci-no-steps
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[4].evidence, step: .ci.step}'
+    The status should be success
+    The output should equal '{"e":".github/workflows/ci.yml triggers on pull_request, but no test, build, typecheck, check, or lint step is visible in it","step":null}'
+  End
+
+  # Fix worktrees live at `.claude/worktrees/<name>` inside the repository
+  # being fixed (ADR 003), so a tree with one checked out held a second copy of
+  # every source file. Counted, they inflate the usage surface and list the
+  # same module twice as uncovered; observed on tacoma.fyi, where two source
+  # files scored as eight affected modules.
+  It 'does not count a nested fix worktree as more of the usage surface'
+    use_fixture nested-worktree
+    When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, coverage}'
+    The status should be success
+    The output should equal '{"f3":1,"coverage":{"affected":1,"covered":0,"uncovered":["src/a.js"]}}'
+  End
+
+  # A substring match on the path is not a classification. `src/latest`,
+  # `src/inspector`, `src/contest` and `packages/attestation` every one contain
+  # a test word, and every one dropped out of the usage surface and then, via
+  # the package-by-name route, covered it. A repository with no tests at all
+  # scored F4 0 and the multi-major escalation never fired.
+  It 'does not read a directory that merely contains a test word as a test'
+    use_fixture test-words
+    When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, f4: .factors[3].score, coverage}'
+    The status should be success
+    The output should equal '{"f3":1,"f4":2,"coverage":{"affected":2,"covered":0,"uncovered":["src/inspector/b.js","src/latest/a.js"]}}'
+  End
+
+  It 'escalates a multi-major runtime jump in a tree whose directories are named like tests'
+    use_fixture test-words
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '.band' scoped '^9'
+    The status should be success
+    The output should equal '"High"'
+  End
+
+  # A test that imports the *parent* says nothing about whether the transitive
+  # package underneath it is exercised. Counting it switched the multi-major
+  # escalation off for exactly the shape it exists to catch: the bork#350 case
+  # came back Medium.
+  It 'does not let a test importing the parent cover the package surface'
+    use_fixture parent-tested
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band}' scoped '^9'
+    The status should be success
+    The output should equal '{"f4":2,"band":"High"}'
+  End
+
+  It 'reads a commented-out step and an echo as no step at all'
+    use_fixture ci-commented
+    When call score direct false '[]' 1.0.0 1.0.1 '{f5: .factors[4].score, step: .ci.step}'
+    The status should be success
+    The output should equal '{"f5":1,"step":null}'
+  End
+
+  It 'names the first qualifying workflow, not the first workflow'
+    use_fixture ci-two-workflows
+    When call score direct false '[]' 1.0.0 1.0.1 '.ci'
+    The status should be success
+    The output should equal '{"workflow":".github/workflows/b-test.yml","trigger":"pull_request","step":"pnpm test"}'
+  End
+
+  It 'reports the event a pull_request_target workflow triggers on'
+    use_fixture ci-pr-target
+    When call score direct false '[]' 1.0.0 1.0.1 '{trigger: .ci.trigger, step: .ci.step}'
+    The status should be success
+    The output should equal '{"trigger":"pull_request_target","step":"pnpm test"}'
+  End
+
+  It 'names the uncovered modules, capped at five'
+    use_fixture coverage-many
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[3].evidence, affected: .coverage.affected}'
+    The status should be success
+    The output should equal '{"e":"none of the 7 affected module(s) is covered by a test (src/a.js, src/b.js, src/c.js, src/d.js, src/e.js, and 2 more uncovered)","affected":7}'
+  End
+
+  It 'does not cover an index module from a specifier naming its directory'
+    use_fixture coverage-index
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":0,"uncovered":["src/feature/index.js"]}'
+  End
+
+  It 'covers an index module from any specifier ending in index'
+    use_fixture coverage-index-collision
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":1,"uncovered":[]}'
+  End
+
+  It 'does not see a specifier wrapped onto its own line'
+    use_fixture coverage-multiline
+    When call score direct false '[]' 1.0.0 1.0.1 '.coverage'
+    The status should be success
+    The output should equal '{"affected":1,"covered":0,"uncovered":["src/a.js"]}'
+  End
+
+  # F4 1 for a tree nothing imports the package from: no build script to fail,
+  # but a test script that would at least run. The bork#350 shape lands Medium
+  # here rather than High, because the escalation asks for F4 2.
+  It 'leaves a multi-major jump at Medium when a test script is the only signal'
+    use_fixture test-script-only
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band, escalated}' scoped '^9'
+    The status should be success
+    The output should equal '{"f4":1,"band":"Medium","escalated":false}'
+  End
+
+  # A transitive whose parents nobody could name leaves nothing to grep for.
+  # Scored as an empty pattern it read as "nothing imports it", which is the
+  # risk-lowering direction: F3 0, F4 0, band Low on a measurement that never
+  # happened. `why` legitimately answers this way, so it is the worst case
+  # rather than an error.
+  It 'scores the worst case when a transitive names no parents'
+    use_fixture tooling-only
+    When call score transitive false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, f4: .factors[3].score, band, coverage}'
+    The status should be success
+    The output should equal '{"f3":2,"f4":2,"band":"Medium","coverage":{"affected":null,"covered":null,"uncovered":[]}}'
+  End
+
+  It 'says the surface could not be measured, rather than that nothing imports it'
+    use_fixture tooling-only
+    When call score transitive false '[]' 1.0.0 1.0.1 '{e3: .factors[2].evidence, e4: .factors[3].evidence}'
+    The status should be success
+    The output should equal '{"e3":"no parents known for lodash; usage surface could not be measured","e4":"no parents known for lodash; nothing could be checked for test coverage"}'
+  End
+
+  # Every read this script makes has a risk-lowering failure mode: an
+  # unreadable file scores as a file that imports nothing, an unparseable
+  # manifest as a repository with no test script. Each one fails loudly
+  # instead.
+  Describe 'inputs it could not read'
+    # chmod 000 cannot be committed, so the permission is set on a copied
+    # fixture inside the example and restored before the copy is removed.
+    # Without the restore, `cleanup_fixture`'s rm -rf leaves the directory
+    # behind on some systems.
+    restore_perms() {
+      [ -n "${TEST_DIR:-}" ] || return 0
+      chmod -R u+rwX "$TEST_DIR" 2>/dev/null || true
+    }
+    After 'restore_perms'
+
+    It 'refuses a tree it cannot fully read, instead of scoring it as importing nothing'
+      use_fixture coverage-none
+      chmod 000 src/a.js
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'could not read the tree'
+      The stderr should include 'grep exited 2'
+    End
+
+    It 'refuses a workflows directory it cannot read'
+      use_fixture coverage-none
+      chmod 000 .github/workflows
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include '.github/workflows exists but cannot be read'
+    End
+
+    It 'refuses a workflow file it cannot read'
+      use_fixture coverage-none
+      chmod 000 .github/workflows/ci.yml
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'ci.yml cannot be read'
+    End
+  End
+
+  Describe 'inputs it could not parse'
+    It 'refuses a why payload that is not a JSON object'
+      use_fixture coverage-none
+      printf '{nope\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'did not contain a JSON object'
+    End
+
+    It 'refuses a why payload that is not there'
+      use_fixture coverage-none
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json nope.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include '--why-json file not found'
+    End
+
+    It 'refuses a package.json that does not parse'
+      use_fixture coverage-none
+      printf '{nope\n' > package.json
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'does not parse as a JSON object'
+    End
+
+    It 'refuses a tree with no package.json at all'
+      use_fixture coverage-none
+      rm -f package.json
+      printf '{"relationship":"direct","dev_only":false,"parents":[],"package":"lodash"}\n' > why.json
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
+        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should include 'no package.json in'
+    End
+
+    # `has()` accepted `"test": null`, which is a key, not a script.
+    It 'does not read a null test script as a test script'
+      use_fixture coverage-none
+      write_null_test_script() { jq '.scripts.test = null' package.json > p.json && mv p.json package.json; }
+      write_null_test_script
+      When call score direct false '[]' 1.0.0 1.0.1 '{f4: .factors[3].score, e: .factors[3].evidence}'
+      The status should be success
+      The output should equal '{"f4":2,"e":"2 affected module(s), and package.json declares no test script"}'
+    End
+  End
+
+  # tacoma.fyi#75, the regression issue #71 was filed for: a dev-only
+  # transitive pin under a build tool, nothing importing it, six checks green
+  # and one skipped for lack of a dev server. It rated High 7/14 and CI went
+  # green. Nothing about that repository is high risk, and the band has to say
+  # so without anyone running a check.
+  It 'does not rate a dev-only tooling pin as High'
+    use_fixture tooling-only
+    When call score transitive true '["astro"]' 1.3.0 1.4.2 '{score, band, escalated}'
+    The status should be success
+    The output should equal '{"score":1,"band":"Low","escalated":false}'
+  End
+
+  Describe 'bands'
+    Parameters
+      # fixture           rel     dev    before  after   expected band
+      tooling-only        direct  true   1.0.0   1.0.1   Low
+      coverage-partial    direct  false  1.0.0   1.1.0   Medium
+      coverage-none       direct  false  1.0.0   2.0.0   High
+    End
+
+    It "bands a $2 dependency in $1 as $6"
+      use_fixture "$1"
+      When call score "$2" "$3" '[]' "$4" "$5" '.band'
+      The status should be success
+      The output should equal "\"$6\""
     End
   End
 
   # A major bump of an untested, widely imported runtime dependency belongs
   # where a reviewer will look at it, regardless of the raw total.
   It 'never rates a major delta as Low'
-    use_fixture yarn-berry
-    When call score direct true '[]' 1.0.0 2.0.0 0 0 '{score, band, escalated}'
+    use_fixture tooling-only
+    When call score direct true '[]' 1.0.0 2.0.0 '{score, band, escalated}'
     The status should be success
     The output should equal '{"score":2,"band":"Medium","escalated":true}'
   End
@@ -312,27 +635,26 @@ Describe 'score-merge-risk.sh'
     End
 
     It "scores $1 as $2"
-      use_fixture yarn-berry
-      When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '.factors[5].score' "$1"
+      use_fixture tooling-only
+      When call score transitive false '["express"]' 1.0.0 1.0.1 '.factors[5].score' "$1"
       The status should be success
       The output should equal "$2"
     End
   End
 
   It 'says what an added bare override does, in the evidence'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '.factors[5].evidence' bare-added
+    use_fixture tooling-only
+    When call score transitive false '["express"]' 1.0.0 1.0.1 '.factors[5].evidence' bare-added
     The status should be success
     The output should equal '"new unscoped override pins lodash for every consumer, including copies that were never vulnerable"'
   End
 
   # The thresholds are absolute risk points, not proportions of the maximum,
-  # so neither the sixth nor the seventh factor may reband a fix that
-  # introduced no override and crossed no line. Same inputs, same band as
-  # before either existed.
+  # so neither the sixth nor the seventh factor may reband a fix, and neither
+  # may the redefinition of F4 and F5: the factor count never moved.
   It 'reports the new maximum without moving the bands'
-    use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.1.0 1 1 '{score, max, band}'
+    use_fixture coverage-partial
+    When call score direct false '[]' 1.0.0 1.1.0 '{score, max, band}'
     The status should be success
     The output should equal '{"score":5,"max":14,"band":"Medium"}'
   End
@@ -340,29 +662,29 @@ Describe 'score-merge-risk.sh'
   # Everything else clean would total 1 and rate Low; a global pin this PR
   # created belongs where a reviewer will look at it.
   It 'never rates an added bare override as Low'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' 1.0.0 1.0.1 0 0 '{score, band, escalated, escalation_reason}' bare-added
+    use_fixture tooling-only
+    When call score transitive false '["express"]' 1.0.0 1.0.1 '{score, band, escalated, escalation_reason}' bare-added
     The status should be success
     The output should equal '{"score":3,"band":"Medium","escalated":true,"escalation_reason":"a newly added unscoped override never rates Low"}'
   End
 
   It 'names the blocker that escalated a major delta'
-    use_fixture yarn-berry
-    When call score direct true '[]' 1.0.0 2.0.0 0 0 '{escalation_reason, markdown: (.markdown | split("\n")[2])}'
+    use_fixture tooling-only
+    When call score direct true '[]' 1.0.0 2.0.0 '{escalation_reason, markdown: (.markdown | split("\n")[2])}'
     The status should be success
     The output should equal '{"escalation_reason":"a major version delta never rates Low","markdown":"> Escalated from Low: a major version delta never rates Low."}'
   End
 
   It 'scores a missing baseline as a major delta and says so'
-    use_fixture yarn-berry
-    When call score direct true '[]' '' 2.0.0 0 0 '{f1: .factors[0].score, evidence: .factors[0].evidence}'
+    use_fixture tooling-only
+    When call score direct true '[]' '' 2.0.0 '{f1: .factors[0].score, evidence: .factors[0].evidence}'
     The status should be success
     The output should equal '{"f1":2,"evidence":"no pre-fix baseline available; scored as major"}'
   End
 
   It 'emits a markdown table for the PR body'
-    use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.1.0 1 0 '.markdown'
+    use_fixture tooling-only
+    When call score direct false '[]' 1.0.0 1.1.0 '.markdown'
     The status should be success
     The output should include 'Merge risk:'
     The output should include '| Factor | Score | Evidence |'
@@ -387,8 +709,8 @@ Describe 'score-merge-risk.sh'
     End
 
     It "scores $1 -> $2 against '$3' as $4"
-      use_fixture yarn-berry
-      When call score direct false '[]' "$1" "$2" 0 0 '.factors[6].score' none "$3"
+      use_fixture tooling-only
+      When call score direct false '[]' "$1" "$2" '.factors[6].score' none "$3"
       The status should be success
       The output should equal "$4"
     End
@@ -397,15 +719,15 @@ Describe 'score-merge-risk.sh'
   # The headline complaint: with everything else held equal, a jump that skips
   # a major line must not tie a single-major bump.
   It 'ranks a two-major jump above a comparable one-major bump'
-    use_fixture yarn-berry
-    When call score direct false '[]' 9.0.1 10.0.0 1 1 '.score'
+    use_fixture coverage-partial
+    When call score direct false '[]' 9.0.1 10.0.0 '.score'
     The status should be success
     The output should equal '6'
   End
 
   It 'scores the same fix higher when it skips a major line'
-    use_fixture yarn-berry
-    When call score direct false '[]' 9.0.1 11.1.1 1 1 '.score'
+    use_fixture coverage-partial
+    When call score direct false '[]' 9.0.1 11.1.1 '.score'
     The status should be success
     The output should equal '7'
   End
@@ -413,22 +735,22 @@ Describe 'score-merge-risk.sh'
   # Item 4 of the issue: the evidence carries the signal even before the
   # weights do. This is the string it asks for, verbatim.
   It 'names the number of majors and the ranges being left behind'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' 9.0.1 11.1.1 0 0 '.factors[0].evidence' scoped '^9'
+    use_fixture tooling-only
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '.factors[0].evidence' scoped '^9'
     The status should be success
     The output should equal '"9.0.1 -> 11.1.1 (2 majors; parents declare ^9)"'
   End
 
   It 'reports a crossed pin in the evidence'
-    use_fixture yarn-berry
-    When call score direct false '[]' 6.14.0 7.0.0 0 0 '.factors[6].evidence' none '~6.14.0'
+    use_fixture tooling-only
+    When call score direct false '[]' 6.14.0 7.0.0 '.factors[6].evidence' none '~6.14.0'
     The status should be success
     The output should equal '"one major line crossed; dependents declare ~6.14.0; crosses the pinned range ~6.14.0"'
   End
 
   It 'says so when the caller states no dependent ranges could be read'
-    use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.0.1 0 0 '{e: .factors[6].evidence, declared_ranges}'
+    use_fixture tooling-only
+    When call score direct false '[]' 1.0.0 1.0.1 '{e: .factors[6].evidence, declared_ranges}'
     The status should be success
     The output should equal '{"e":"no major line crossed; caller stated no dependent ranges could be read","declared_ranges":"none-stated"}'
   End
@@ -447,16 +769,16 @@ Describe 'score-merge-risk.sh'
     End
 
     It "scores '$3' against $2 as F7 $4"
-      use_fixture yarn-berry
-      When call score direct false '[]' "$1" "$2" 0 0 '{f7: .factors[6].score, majors_crossed}' none "$3"
+      use_fixture tooling-only
+      When call score direct false '[]' "$1" "$2" '{f7: .factors[6].score, majors_crossed}' none "$3"
       The status should be success
       The output should equal "{\"f7\":$4,\"majors_crossed\":$5}"
     End
   End
 
   It 'does not escalate a patch bump under a permissive satisfied range'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' 11.0.0 11.1.1 2 0 '{band, escalated}' scoped '>=1'
+    use_fixture coverage-none
+    When call score transitive false '["express"]' 11.0.0 11.1.1 '{band, escalated}' scoped '>=1'
     The status should be success
     The output should equal '{"band":"Medium","escalated":false}'
   End
@@ -464,8 +786,8 @@ Describe 'score-merge-risk.sh'
   # `workspace:^`, `latest` and git URLs are not version ranges. Reported as
   # unsatisfied they became dependents the fix had supposedly left behind.
   It 'counts an unreadable specifier separately instead of calling it left behind'
-    use_fixture yarn-berry
-    When call score direct false '[]' 1.0.0 1.0.1 0 0 '{f1: .factors[0].evidence, f7: .factors[6].evidence}' none 'workspace:^' '^1.0.0'
+    use_fixture tooling-only
+    When call score direct false '[]' 1.0.0 1.0.1 '{f1: .factors[0].evidence, f7: .factors[6].evidence}' none 'workspace:^' '^1.0.0'
     The status should be success
     The output should equal '{"f1":"1.0.0 -> 1.0.1 (patch)","f7":"no major line crossed; dependents declare ^1.0.0; 1 dependent range not evaluated (workspace:^)"}'
   End
@@ -473,8 +795,8 @@ Describe 'score-merge-risk.sh'
   # Without a baseline there is no resolved-version distance, so the declared
   # floors are the only thing that can drive the escalation.
   It 'measures distance from the declared floors alone when there is no baseline'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' '' 11.1.1 2 0 '{majors_crossed, band, escalated}' scoped '^9'
+    use_fixture no-scripts
+    When call score transitive false '["express"]' '' 11.1.1 '{majors_crossed, band, escalated}' scoped '^9'
     The status should be success
     The output should equal '{"majors_crossed":2,"band":"High","escalated":true}'
   End
@@ -482,8 +804,8 @@ Describe 'score-merge-risk.sh'
   # A pin crossed inside one major line is the whole finding; prefixing it with
   # "no major line crossed" contradicted it.
   It 'states a crossed pin without denying it in the same breath'
-    use_fixture yarn-berry
-    When call score direct false '[]' 6.14.0 6.15.0 0 0 '.factors[6].evidence' none '~6.14.0'
+    use_fixture tooling-only
+    When call score direct false '[]' 6.14.0 6.15.0 '.factors[6].evidence' none '~6.14.0'
     The status should be success
     The output should equal '"crosses the pinned range ~6.14.0; dependents declare ~6.14.0"'
   End
@@ -514,7 +836,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"result":1,"delta":"patch"}' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 1.0.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'major_distance'
@@ -524,7 +846,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":false,"floor_major":9}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range '^9'
       The status should not equal 0
       The stderr should include 'majors_ahead'
@@ -538,7 +860,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'no JSON object'
@@ -552,7 +874,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"delta":"patch","major_distance":0}' ''
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range '^1'
       The status should not equal 0
       The stderr should include 'no JSON object'
@@ -565,7 +887,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"delta":"major","major_distance":"lots"}' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'non-negative integer'
@@ -575,7 +897,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":false,"floor_major":9,"majors_ahead":"two"}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range '^9'
       The status should not equal 0
       The stderr should include 'non-negative integer'
@@ -587,7 +909,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"result":1,"major_distance":2}' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'delta'
@@ -600,7 +922,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"result":1,"delta":null,"major_distance":2}' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'delta'
@@ -611,7 +933,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{"result":1,"delta":"breaking","major_distance":2}' '{}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --before 1.0.0 --after 3.0.0 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range none
       The status should not equal 0
       The stderr should include 'major|minor|patch|prerelease|none'
@@ -624,7 +946,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{}' '{"parseable":true,"satisfied":"no","pinned":false,"floor_major":9,"majors_ahead":2}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range '^9'
       The status should not equal 0
       The stderr should include 'true or false'
@@ -634,7 +956,7 @@ STUB
       use_fixture yarn-berry
       stub_adapter '{}' '{"parseable":true,"satisfied":false,"pinned":null,"floor_major":9,"majors_ahead":2}'
       When run script "$COMMON/score-merge-risk.sh" --package lodash --after 11.1.1 \
-        --adapter ./stub.sh --why-json why.json --f4 0 --f5 0 --override-scope none \
+        --adapter ./stub.sh --why-json why.json --override-scope none \
         --declared-range '^9'
       The status should not equal 0
       The stderr should include 'true or false'
@@ -644,58 +966,79 @@ STUB
   # Nobody has evidence the tree still works, and the fix dragged a runtime
   # dependency across two major lines. Medium reads as "skim it".
   It 'never rates an unverified multi-major runtime jump below High'
-    use_fixture yarn-berry
-    When call score transitive false '["express"]' 9.0.1 11.1.1 2 0 '{score, band, escalated, escalation_reason}' scoped '^9'
+    use_fixture no-scripts
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{score, band, escalated, escalation_reason}' scoped '^9'
     The status should be success
     The output should equal '{"score":6,"band":"High","escalated":true,"escalation_reason":"a multi-major jump on a runtime dependency with no test signal never rates below High"}'
   End
 
+  # Same escalation reached from the other direction: modules that do import
+  # the package, a test script that exists, and nothing testing them.
+  It 'rates an uncovered multi-major runtime jump High'
+    use_fixture coverage-none
+    When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, score, band}' scoped '^9'
+    The status should be success
+    The output should equal '{"f4":2,"score":7,"band":"High"}'
+  End
+
   It 'leaves a dev-only multi-major jump where the total puts it'
-    use_fixture yarn-berry
-    When call score direct true '[]' 9.0.1 11.1.1 2 0 '{band, escalated}' scoped '^9'
+    use_fixture no-scripts
+    When call score direct true '[]' 9.0.1 11.1.1 '{band, escalated}' scoped '^9'
     The status should be success
     The output should equal '{"band":"Medium","escalated":false}'
   End
 
-  # The three PRs from the sweep in issue #21. F3 is 0 against this fixture,
-  # and F4/F5 are set to the values that reproduce the totals the issue
-  # reported, so the before column here is the score those PRs carried.
+  # The three PRs from the sweep in issue #21, re-pinned against the fixtures
+  # that reproduce their coverage and CI shape now that F4 and F5 are read from
+  # the tree rather than passed in. The `was` column is what those PRs carried
+  # under the old agent-supplied factors.
   Describe 'the sweep cases from issue #21'
     Parameters
-      # case    rel        before  after   f4 f5 scope  declared  was  expected
-      "bork#350"  transitive 9.0.1  11.1.1  2  1  scoped '^9'  6 '{"score":7,"band":"High"}'
-      "gcal#63"   transitive 9.0.1  11.1.1  1  0  scoped '^9'  4 '{"score":5,"band":"Medium"}'
-      "bork#351"  direct     2.4.2  3.0.6   1  1  none   ''    6 '{"score":6,"band":"Medium"}'
+      # case       fixture           rel         before  after   scope   declared  was  expected
+      "bork#350"   no-scripts        transitive  9.0.1   11.1.1  scoped  '^9'      "High 7"    '{"score":6,"band":"High"}'
+      "gcal#63"    coverage-partial  transitive  9.0.1   11.1.1  scoped  '^9'      "Medium 5"  '{"score":6,"band":"Medium"}'
+      "bork#351"   coverage-partial  direct      2.4.2   3.0.6   none    ''        "Medium 6"  '{"score":6,"band":"Medium"}'
     End
 
-    It "rescores $1 from $9"
-      use_fixture yarn-berry
-      When call score "$2" false '["express"]' "$3" "$4" "$5" "$6" '{score, band}' "$7" "$8"
+    It "rescores $1 from $8"
+      use_fixture "$2"
+      When call score "$3" false '["express"]' "$4" "$5" '{score, band}' "$6" "$7"
       The status should be success
-      The output should equal "${10}"
+      The output should equal "$9"
     End
   End
 
   Describe 'argument validation'
-    It 'rejects an out-of-range factor score'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 5 --f5 0 --override-scope none --declared-range none
+    # F4 and F5 are computed from the tree now, so the flags that used to carry
+    # them are gone. A caller still passing one is running against an agent
+    # definition that predates ADR 006, and must be told so rather than have
+    # the flag quietly ignored.
+    It 'rejects the retired --f4 flag as an unknown argument'
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --override-scope none --declared-range none
       The status should not equal 0
-      The stderr should include 'must be 0, 1, or 2'
+      The stderr should equal '{"error":"Unknown argument: --f4"}'
+    End
+
+    It 'rejects the retired --f5 flag as an unknown argument'
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f5 0 --override-scope none --declared-range none
+      The status should not equal 0
+      The stderr should equal '{"error":"Unknown argument: --f5"}'
     End
 
     # Optional, its absence made the multi-major escalation unreachable however
     # far the fix jumped, and looked exactly like a package with no dependents.
     It 'requires the declared ranges, or an explicit statement that there are none'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --override-scope none
       The status should not equal 0
       The stderr should include 'Missing required argument: --declared-range'
     End
 
     It 'refuses the none sentinel alongside stated ranges'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none --declared-range none --declared-range '^1'
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --override-scope none --declared-range none --declared-range '^1'
       The status should not equal 0
       The stderr should include 'cannot be combined'
     End
@@ -703,14 +1046,14 @@ STUB
     # `${2:?}` answered an empty-string argument with bash's own "parameter
     # null or not set", which is neither JSON nor named after the flag.
     It 'reports an empty flag value in the script own error shape'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package '' --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope none --declared-range none
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package '' --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --override-scope none --declared-range none
       The status should not equal 0
       The stderr should equal '{"error":"--package requires a value"}'
     End
 
     It 'rejects a missing required argument'
-      use_fixture yarn-berry
+      use_fixture tooling-only
       When run script "$COMMON/score-merge-risk.sh" --package lodash
       The status should not equal 0
       The stderr should include 'Missing required argument'
@@ -719,15 +1062,15 @@ STUB
     # The remediation shape is a fact the caller knows and the score depends
     # on, so there is no safe default to silently fall back to.
     It 'requires the override scope'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null
       The status should not equal 0
       The stderr should include 'Missing required argument: --override-scope'
     End
 
     It 'rejects an unknown override scope'
-      use_fixture yarn-berry
-      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --f4 0 --f5 0 --override-scope global --declared-range none
+      use_fixture tooling-only
+      When run script "$COMMON/score-merge-risk.sh" --package lodash --after 1.0.0 --adapter "$ADAPTER" --why-json /dev/null --override-scope global --declared-range none
       The status should not equal 0
       The stderr should include 'must be none, scoped, bare-tightened, or bare-added'
     End

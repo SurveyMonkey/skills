@@ -1,0 +1,10 @@
+name: ci
+on: pull_request
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: run npm test
+        uses: some/action@v1
+        with:
+          cmd: npm test

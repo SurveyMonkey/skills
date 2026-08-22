@@ -1,0 +1,9 @@
+name: ci
+on: pull_request
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # - run: npm test
+      - run: echo hi

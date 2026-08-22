@@ -300,7 +300,10 @@ report** — record it as such; never guess fields.
 
 Present one table for the batch:
 
-> | Repo | Package | Line | PR | Risk | F4/F5 | Scripts | Notes |
+> | Repo | Package | Line | PR | Risk | F4/F5 | Notes |
+
+`F4/F5` is `risk.f4` and `risk.f5` from the agent's result, which is the whole of the coverage and
+CI signal an agent reports; the scorer's fuller `coverage` and `ci` objects stay in the PR body.
 
 Omit the `Repo` column at repo scope, as in phases 4 and 5.
 
@@ -399,12 +402,11 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
 `mark-ready.sh` operates on PR URLs directly and needs no `repo_root`, so this step is unchanged at
 every scope — a batch's PR URLs can span repos and are handled identically either way.
 
-Merge each PR's `checks` and `auto_merge` with the agent's own `f4`/`f5`, and group:
+Group by the rollup and `auto_merge` alone. The merge-risk band is not an input here: it rates the
+fix, and this phase is about what the repository's own checks say (ADR 006).
 
 | Group | Condition | Offer promotion? |
 |---|---|---|
-| Unverified | agent scored F4 = 2 or F5 = 2, and the checks the agent skipped did **not** run in CI | **No.** Report which checks could not run and why; CI on the draft (or after a human promotes) is the verifier. Offering would let "nobody has verified this" promote itself. |
-| Verified by CI | agent scored F4 = 2 or F5 = 2, but the rollup shows the **specific skipped checks** ran and passed | Offerable — the deferral resolved to the right actor. The offer must name what was skipped locally and which CI check covered it. |
 | Checks failing | `checks` = `failed` | No. List `failing_checks`. |
 | Checks pending | `checks` = `pending` | Not yet. Offer to re-run `status` once before moving on. |
 | No checks ran | `checks` = `none` | Offerable, flagged honestly: the repo runs no CI on drafts (or none at all), so promoting is what starts whatever exists. The user decides. |

@@ -23,10 +23,11 @@ one. The question is which model, and what evidence would justify moving.
 
 **`fix-dependency` is pinned to `sonnet`.** With discovery, override insertion, lockfile
 validation, and risk-band arithmetic all scripted, the judgment that remains is interpreting
-install failures, triaging failing repo scripts, and attributing failures to the update or to
+install failures, ~~triaging failing repo scripts, and attributing failures to the update or to
 pre-existing breakage via the base-branch comparison. That triage is exactly where a too-small
 model produces confident nonsense, and the attribution call is the single highest-value judgment
-the agent makes; Haiku was considered and rejected for it.
+the agent makes~~ **choosing the override shape, and writing the PR prose** (amended below by ADR
+006: no script triage or attribution happens any more); Haiku was considered and rejected for it.
 
 **The orchestrator inherits the session model.** Skills cannot pin one. With endpoint logic,
 ranking, capacity, and PR state all script-side, the orchestrator is presentation and routing;
@@ -42,9 +43,18 @@ to be considered after roughly twenty real fix PRs have shipped, and only if all
    where judgment was needed ended in failure reports a human picked up, not in the agent
    reasoning its way to a wrong fix.
 
-If trialed, Haiku takes the narrowest slice first — Low-band direct patch bumps — with `sonnet`
-retained for transitives and for anything that reaches the base-branch comparison. The trial
-reverts on the first misattribution.
+If trialed, Haiku takes the narrowest slice first, Low-band direct patch bumps, with `sonnet`
+retained for transitives ~~and for anything that reaches the base-branch comparison~~ **and for
+anything that reaches a bare override** (amended below by ADR 006). The trial reverts on the first
+~~misattribution~~ **wrong override shape**.
+
+**Amended by [ADR 006](006-merge-risk-is-static-analysis.md).** Agents no longer run a
+repository's checks, so the base-branch comparison and the attribution judgment it fed are gone
+from the flow entirely. Criteria 1 and 3 above describe work that no longer happens and no longer
+apply; criterion 2 is subsumed by them. The re-evaluation reduces to a single test: **no wrong
+override shape in twenty PRs.** The `sonnet` pin itself is unchanged, and now stands on the
+judgment that remains: interpreting install failures, choosing between scoped and bare overrides,
+and writing the PR prose.
 
 ## Consequences
 

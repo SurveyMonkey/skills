@@ -1,0 +1,10 @@
+name: label
+on:
+  pull_request:
+    types: [opened]
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: lint the title
+        run: echo "thanks for the pull request"

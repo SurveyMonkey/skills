@@ -1,0 +1,5 @@
+{
+  "name": "ci-two-workflows",
+  "devDependencies": { "astro": "^5.0.0" },
+  "scripts": { "build": "astro build" }
+}

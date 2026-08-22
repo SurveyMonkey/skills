@@ -17,9 +17,14 @@ Drives [RFC 001](../rfc/001-alert-orchestration.md). Landed in Phase 1
 RFC 001 moves the deterministic surface of `gh-security` out of command prose and into scripts,
 and isolates ecosystem-specific behavior behind an adapter so `npm` and `pip` alerts can share one
 orchestrator. The RFC names the verbs (`detect`, `why`, `apply_constraint`, `install`, `validate`,
-`list_pins`, `verification_commands`, `compare_versions`) but not how adapters are invoked, what
-they return, or how failure is signalled. Phases 2 through 6 all build against this, so the
-operational details need settling before the second adapter exists rather than after.
+`list_pins`, `compare_versions`) but not how adapters are invoked, what they return, or how
+failure is signalled. Phases 2 through 6 all build against this, so the operational details need
+settling before the second adapter exists rather than after.
+
+The RFC's list also carried `verification_commands`, which enumerated a repository's own check
+scripts for an agent to run. It is retired: agents no longer run a repository's checks at all, so
+no adapter implements it and no new one has to
+([ADR 006](006-merge-risk-is-static-analysis.md)).
 
 Two things pushed specific decisions here.
 
