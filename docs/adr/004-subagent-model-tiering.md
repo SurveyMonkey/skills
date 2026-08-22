@@ -46,6 +46,14 @@ If trialed, Haiku takes the narrowest slice first — Low-band direct patch bump
 retained for transitives and for anything that reaches the base-branch comparison. The trial
 reverts on the first misattribution.
 
+**Amended by [ADR 006](006-merge-risk-is-static-analysis.md).** Agents no longer run a
+repository's checks, so the base-branch comparison and the attribution judgment it fed are gone
+from the flow entirely. Criteria 1 and 3 above describe work that no longer happens and no longer
+apply; criterion 2 is subsumed by them. The re-evaluation reduces to a single test: **no wrong
+override shape in twenty PRs.** The `sonnet` pin itself is unchanged, and now stands on the
+judgment that remains: interpreting install failures, choosing between scoped and bare overrides,
+and writing the PR prose.
+
 ## Consequences
 
 Subagent token cost drops relative to running everything at the session model, which is the
