@@ -1754,10 +1754,12 @@ verb_range_facts() {
 # dev-only direct dependency still declares a range this fix can leave behind.
 #
 # A parent whose manifest is not on disk is not an error: Yarn PnP installs no
-# node_modules at all, and pnpm only links direct dependencies there. Those
-# parents are listed in `parents_unreadable` so the caller can say in the PR
-# body which ranges nobody could read; a parent whose manifest is on disk but
-# will not parse joins them, and is additionally named in `parents_malformed`.
+# node_modules at all, and pnpm only links direct dependencies there. Its
+# declaration comes from the lockfile instead (see `parent_copy_rows`), and
+# only a parent no source could answer for is listed in `parents_unreadable`;
+# a parent whose manifest is on disk but will not parse joins them — a damaged
+# install, reported rather than substituted for — and is additionally named in
+# `parents_malformed`.
 #
 # `--line <major>` narrows the collection to the parents this fix actually
 # moves, mirroring `validate --line`. A package resolved at 5.x, 6.x and 7.x
@@ -1821,6 +1823,158 @@ resolved_major_for_parent() {
   return 1
 }
 
+# Per-parent-*copy* declarations, read out of the lockfile
+#
+# `node_modules/<parent>/package.json` answers for one copy of a parent, and a
+# parent in the tree at several versions has several — each declaring its own
+# range and each resolving its own copy of the package. Asking the installed
+# manifest for a multi-version parent therefore attributes one copy's range to
+# every line the parent sits on, and asking `resolved_major_for_parent` for its
+# line answers about the hoisted copy or about nothing at all. On
+# arsenalamerica/app (Yarn Berry, no `node_modules` in the pre-install
+# worktree) `declared_ranges --line 5 brace-expansion` returned
+# `parents_read: []`, `parents_unreadable: ["minimatch"]` and `ranges: []`,
+# while the lockfile plainly recorded minimatch@3.1.5 -> brace-expansion@^1.1.7
+# and minimatch@10.2.5 -> brace-expansion@^5.0.5
+# ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+#
+# The lockfile has all of it per copy, and it is the source scripts/CLAUDE.md
+# already names for what a parent declares. These rows carry the parent's own
+# resolved version, the range that copy declares, and the version of the
+# package *that copy* resolves to — which is what `--line` has to filter on.
+#
+# npm resolves a declaration by walking `node_modules` upward from the
+# declaring path, so the candidate list is that walk against the lockfile's own
+# `packages` keys. Berry resolves a descriptor (`<key>@<value>`) through the
+# entry whose key list contains it, so the rows are joined against a descriptor
+# -> version map built from the same file.
+#
+# pnpm has no rows here for the same reason `apply_constraint`'s `alias_lookup`
+# reports `unsupported` for it: its `snapshots:` blocks record what a dependency
+# resolved to, never the specifier it was declared with. A pnpm parent keeps the
+# installed-manifest path below rather than getting a guessed declaration.
+NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
+def prefixes:
+  if . == "" then [""]
+  else [.] + ((sub("/?node_modules/[^/]+$"; "")) | prefixes) end;
+def candidates($dk):
+  prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
+.packages // {} as $pkgs
+| [ $pkgs | to_entries[]
+    | .key as $path
+    | .value as $v
+    | (if $path == "" then "__root__"
+       else ($path | split("node_modules/") | last) end) as $parent
+    | ([ ($v.dependencies         // {}),
+         ($v.optionalDependencies // {}),
+         ($v.peerDependencies     // {}) ] | add // {})
+    | to_entries[]
+    | select(.value | type == "string")
+    | select(.key == $pkg or (.value | startswith("npm:" + $pkg + "@")))
+    | .key as $dk
+    | { parent: $parent,
+        parent_version: ($v.version // null),
+        range: (if $dk == $pkg then .value
+                else (.value | .[(($pkg | length) + 5):]) end),
+        resolved: ([ $path | candidates($dk)[] as $c
+                     | select($pkgs | has($c)) | $pkgs[$c].version // empty ]
+                   | first // null) } ]
+JQLIB
+)
+
+npm_copy_rows() {
+  jq -c --arg pkg "$1" "$NPM_COPY_ROWS_JQ" package-lock.json
+}
+
+# Berry's rows, plus the descriptor -> version map its resolution needs.
+#
+# `D` rows are one per descriptor in an entry's key list; `P` rows are one per
+# declaration in a `dependencies:`, `peerDependencies:` or
+# `optionalDependencies:` block, carrying the declaring entry's own name and
+# version. Workspace entries are dropped exactly as `yarn_declaration_rows`
+# drops them.
+#
+# The double-quote character comes from `sprintf` for the bash 3.2 reason
+# `YARN_DECLARATION_AWK` documents: an unpaired `"` in a heredoc body cuts the
+# command substitution short.
+YARN_COPY_AWK=$(cat <<'AWKLIB'
+    BEGIN { q = sprintf("%c", 34) }
+    /^[^[:space:]#]/ {
+      ndesc = 0; cur = ""; ver = ""; indeps = 0
+      keyline = $0
+      if (substr(keyline, length(keyline), 1) == ":") {
+        keys = substr(keyline, 1, length(keyline) - 1)
+        gsub(q, "", keys)
+        ndesc = split(keys, desc, ", ")
+      }
+      next
+    }
+    /^  version: / {
+      ver = substr($0, 12)
+      gsub(q, "", ver)
+      sub(/^[[:space:]]+/, "", ver)
+      sub(/[[:space:]]+$/, "", ver)
+      for (i = 1; i <= ndesc; i++) printf "D\t%s\t%s\n", desc[i], ver
+      next
+    }
+    /resolution: / {
+      i = index($0, "resolution: ")
+      rest = substr($0, i + 13)
+      j = index(rest, q)
+      res = substr(rest, 1, j - 1)
+      if (index(res, "@workspace:") > 0) { cur = ""; next }
+      at = 0
+      for (k = length(res); k > 1; k--) {
+        if (substr(res, k, 1) == "@") { at = k; break }
+      }
+      cur = (at > 1) ? substr(res, 1, at - 1) : res
+      next
+    }
+    /^  (dependencies|peerDependencies|optionalDependencies):/ { indeps = 1; next }
+    /^  [a-zA-Z]/ { indeps = 0 }
+    indeps && /^    / {
+      dep = $0
+      sub(/^    /, "", dep)
+      c = index(dep, ":")
+      if (c == 0) next
+      name = substr(dep, 1, c - 1)
+      val  = substr(dep, c + 1)
+      gsub(q, "", name)
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      gsub(q, "", val)
+      if (cur != "") printf "P\t%s\t%s\t%s\t%s\n", cur, ver, name, val
+    }
+AWKLIB
+)
+
+YARN_COPY_ROWS_JQ=$(cat <<'JQLIB'
+split("\n") | map(select(length > 0) | split("\t")) as $rows
+| ([ $rows[] | select(.[0] == "D") | {key: .[1], value: .[2]} ] | from_entries) as $dmap
+| [ $rows[]
+    | select(.[0] == "P")
+    | {parent: .[1], parent_version: .[2], key: .[3], value: .[4]}
+    | select(.key == $pkg or (.value | startswith("npm:" + $pkg + "@")))
+    | {parent: .parent,
+       parent_version: .parent_version,
+       range: (if .key == $pkg then (.value | ltrimstr("npm:"))
+               else (.value | .[(($pkg | length) + 5):]) end),
+       resolved: ($dmap[.key + "@" + .value] // null)} ]
+JQLIB
+)
+
+yarn_copy_rows() {
+  awk "$YARN_COPY_AWK" yarn.lock | jq -Rs -c --arg pkg "$1" "$YARN_COPY_ROWS_JQ"
+}
+
+parent_copy_rows() {
+  case "$1" in
+    npm)  npm_copy_rows "$2"  ;;
+    yarn) yarn_copy_rows "$2" ;;
+    *)    printf '[]'         ;;
+  esac
+}
+
 verb_declared_ranges() {
   line=""
   while [ $# -gt 0 ]; do
@@ -1875,9 +2029,74 @@ verb_declared_ranges() {
     root_range=""
   fi
 
+  copy_rows=$(parent_copy_rows "$pm" "$pkg")
+  tab=$(printf '\t')
+
   while IFS= read -r parent; do
     [ -n "$parent" ] || continue
     [ "$parent" != "__root__" ] || continue
+
+    # A parent the installed tree cannot answer for goes to the lockfile rows,
+    # which carry one declaration per copy of the parent. Two cases reach here:
+    # the parent is in the tree at several versions, where a single installed
+    # manifest describes at most one of them and attributing its range to every
+    # line is the defect; and the parent has no installed manifest at all,
+    # where the range was simply lost — the pre-install worktree a fix runs in,
+    # Yarn PnP, and every pnpm parent that is not a direct dependency
+    # ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+    #
+    # A manifest that is on disk stays the answer for a single-copy parent: it
+    # is the state actually installed, version skew against the lockfile is
+    # real, and a manifest on disk that will not parse is a damaged install
+    # that must keep saying so rather than being papered over.
+    parent_rows=$(printf '%s' "$copy_rows" | jq -c --arg p "$parent" '[ .[] | select(.parent == $p) ]')
+    copy_count=$(printf '%s' "$parent_rows" | jq '[ .[].parent_version ] | unique | length')
+    if [ "$copy_count" -gt 1 ] \
+      || { [ "$copy_count" -ge 1 ] && [ ! -f "node_modules/$parent/package.json" ]; }; then
+      row_read=""
+      row_no_range=""
+      while IFS="$tab" read -r copy_version copy_range copy_major; do
+        [ -n "$copy_version$copy_range$copy_major" ] || continue
+        if [ -n "$line" ] && [ -n "$copy_major" ] && [ "$copy_major" != "$line" ]; then
+          # Named with the parent's own version: a parent on two lines appears
+          # in `parents_read` and here, and only the version says which copy is
+          # which.
+          if [ "$copy_version" = "-" ]; then
+            other_lines="$other_lines$parent
+"
+          else
+            other_lines="$other_lines$parent@$copy_version
+"
+          fi
+          continue
+        fi
+        if [ -n "$copy_range" ] && [ "$copy_range" != "-" ]; then
+          ranges="$ranges$copy_range
+"
+          row_read=y
+        else
+          row_no_range=y
+        fi
+      done <<EOF
+$(printf '%s' "$parent_rows" | jq -r '
+        .[] | [ (.parent_version // "-"),
+                (.range // "-"),
+                ((.resolved // "") | ltrimstr("v") | split(".")[0]
+                 | if type == "string" and test("^[0-9]+$") then . else "" end) ]
+        | @tsv')
+EOF
+      if [ -n "$row_read" ]; then
+        read_parents="$read_parents$parent
+"
+      elif [ -n "$row_no_range" ]; then
+        read_parents="$read_parents$parent
+"
+        no_range="$no_range$parent
+"
+      fi
+      continue
+    fi
+
     # The line filter comes first, and files the parent in none of the four
     # existing lists. A parent whose own copy sits on another major line was
     # not read-and-declaring-nothing and was not unreadable; it is simply not

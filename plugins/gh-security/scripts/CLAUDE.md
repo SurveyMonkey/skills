@@ -276,6 +276,20 @@ Two rules travel with it, both of which the old lookup broke:
   pass that writes them. Two copies of that logic is how the report came to say `package`/`range`
   while an alias key had been written, putting an edit in the PR body that was never made.
 
+`declared_ranges` is the one verb that also reads the installed manifest, and it may: it runs
+**after** `install`, and the manifest on disk is the state actually installed, which is how a
+parent that declares nothing in the release the lockfile recorded is told apart from one nobody
+could read. But it is per parent *name*, and a parent in the tree at several versions has one
+declaration per copy, each resolving its own copy of the package. Asking one file for a
+multi-version parent attributes one copy's range to every line; asking it in a worktree that has
+no `node_modules` — Berry PnP, or any fix worktree before `install` — loses the range entirely and
+reports the parent as unreadable, which is what happened on a live `brace-expansion` fix
+([#85](https://github.com/SurveyMonkey/skills/issues/85)). So the lockfile answers **per parent
+copy** whenever the manifest cannot: more than one copy, or no manifest on disk. A manifest that
+is on disk and will not parse is a damaged install and stays `parents_unreadable` +
+`parents_malformed` rather than falling back — the reviewer needs that fact, not a substitute for
+it. pnpm has no rows here at all, for the same reason `alias_lookup` reports `unsupported` for it.
+
 `spec/fixtures/npm-alias` has **no committed `node_modules`** for this reason, and
 `spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`
 reads. A fixture carrying a directory that does not exist where the verb runs is not a specimen of
