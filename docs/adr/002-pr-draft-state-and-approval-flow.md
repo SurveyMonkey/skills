@@ -4,7 +4,7 @@ description: Fix PRs open as drafts and the orchestrator batch-promotes them, wi
 status: stable
 created: 2026-07-26
 owner: brianespinosa
-related_issues: [4, 5]
+related_issues: [4, 5, 70]
 ---
 
 # ADR 002: PR draft state and the approval flow
@@ -85,11 +85,14 @@ repository, and that the orchestrator confirms armed PRs **per PR** — stating 
 merges on green — while everything else keeps the one-batch offer.
 
 **Promotion is not gated on pending checks** (added after a 58-group batch run, issue #70).
-Marking a PR ready only lifts the draft flag; it merges nothing and CI keeps running either way.
-Waiting for pending checks before offering promotion bought nothing but a second poll: the
-orchestrator still had to re-run `status` and promote the stragglers separately once checks caught
-up. Phase 9 now offers `pending` alongside `none`, stating plainly that nothing has finished and
-that promoting is what starts or surfaces whatever CI exists. What still blocks or qualifies the
-offer is unchanged: failing checks block outright, the Unverified group stays unofferable until
-CI covers what the agent skipped, armed auto-merge still needs a per-PR confirmation because
-promoting it merges on green, and a rebase conflict is still reported rather than resolved.
+`promote` rebases first if the PR is behind (`gh pr update-branch --rebase`, mark-ready.sh:204)
+and only then lifts the draft flag (`gh pr ready`, mark-ready.sh:226); it merges nothing. A rebase
+pushes a new head, which restarts CI, and a PR that was already current keeps whatever checks were
+already running. Either way, waiting for pending checks before offering promotion bought nothing:
+the orchestrator still had to re-run `status` and promote the stragglers separately once checks
+caught up. Phase 9 now offers `pending` alongside `none`, stating plainly what stage the checks
+are in and that promoting is what starts or surfaces whatever CI exists. What still blocks or
+qualifies the offer is unchanged: failing checks block outright, the Unverified group stays
+unofferable until CI covers what the agent skipped, armed auto-merge still needs a per-PR
+confirmation because promoting it merges on green, and a rebase conflict is still reported rather
+than resolved.

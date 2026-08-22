@@ -408,7 +408,7 @@ fix, and this phase is about what the repository's own checks say (ADR 006).
 | Group | Condition | Offer promotion? |
 |---|---|---|
 | Checks failing | `checks` = `failed` | No. List `failing_checks`. |
-| No checks ran or still running | `checks` = `none` or `pending` | Offerable, flagged honestly: nothing has finished. Promoting is what starts or surfaces whatever CI exists; the reviewer should let it finish before merging. The user decides. |
+| No checks ran or still running | `checks` = `none` or `pending` | Offerable, flagged honestly: for `none`, no checks have reported, so promoting is what starts whatever CI exists; for `pending`, cite `check_counts` (for example "3 of 5 finished, 2 still running"). Either way the reviewer should let CI finish before merging. The user decides. |
 | Ready | `checks` = `passed` | Offerable. |
 
 The Unverified row takes precedence over `pending`: if the agent scored F4 = 2 or F5 = 2 and the
@@ -424,9 +424,12 @@ Two more signals qualify the offer:
 - **`merge_state` = `UNKNOWN`**: GitHub has not computed mergeability yet (common right after
   push). Say so; do not bucket it as clean or behind.
 - **Rollups populate as workflows spawn**, and jobs that have not been reported yet are
-  invisible — absent is not pending. On a PR created minutes ago, or one reporting materially
-  fewer checks than its batch siblings, treat `checks: passed` as provisional: hold the offer
-  and re-run `status` before treating the set as complete.
+  invisible — absent is not pending. This caution applies to `passed` only: `none` and `pending`
+  already say CI is incomplete. On a PR created minutes ago, or one reporting materially fewer
+  checks than its batch siblings, treat `checks: passed` as provisional: do not present the set
+  as CI-complete, and re-run `status` before treating it that way. For a PR with
+  `auto_merge.armed`, re-run `status` before its per-PR confirmation regardless of how recent the
+  PR is: a false green there merges.
 
 Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
 The user can decline any subset and handle those by hand.
