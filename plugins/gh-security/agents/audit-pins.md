@@ -63,8 +63,10 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   or stash in `repo_root`, and never edit checked-out files under it. Two writes into the user's
   repository are sanctioned and no others: the `.claude/worktrees/` directory your work lives in,
   and, in `pr` mode only, the `chore/dependabot-remove-pins` branch phase 8 creates **inside that
-  worktree** and pushes. Phase 8's `git switch -c` names `$WORK/audit`, which is why it is not the
-  `git switch` this rule forbids.
+  worktree** and pushes, **including deleting a remnant of that name that phase 1's guard 2 proved
+  is one** and force-pushing over it with that guard's sha as an explicit lease. An unverified
+  branch of that name is not yours to touch. Phase 8's `git switch -c` names `$WORK/audit`, which
+  is why it is not the `git switch` this rule forbids.
 - **Repo-global git state is not yours.** You may add and remove your own worktree, and nothing
   else. Never write `.git/info/exclude` (your dispatcher already did, once, before the wave) and
   never run `git worktree prune`, `git gc`, or any other repository-wide command: a fix agent is
@@ -132,12 +134,16 @@ The name is fixed because this flow opens **one PR per repository** (see phase 7
 One guard runs before the worktree is created. Unlike the crashed-run guard above, it does not stop
 the audit; it stops the PR.
 
-**Open-PR guard.** A removal PR already open on this head is a previous run's work, and a second
-one would conflict with it on the same override block.
+**Guard 1, the open-PR guard.** A removal PR already open on this head is a previous run's work,
+and a second one would conflict with it on the same override block.
 
 ```bash
-gh pr list --repo <nwo> --search "head:chore/dependabot-remove-pins" --state open --json number,url
+gh pr list --repo <nwo> --head chore/dependabot-remove-pins --state open --json number,url
 ```
+
+`--head` and not `--search "head:..."`: the search qualifier is a text match and reaches PRs from
+forks, so it can both miss the branch and answer about a PR on someone else's copy of it. `--head`
+is an exact match on this repository's ref, which is the question being asked.
 
 **A non-zero exit here is a failure result (phase `worktree`) quoting stderr, never an answer.** An
 empty list and a call that could not run look identical once you stop reading the exit status, and
@@ -146,13 +152,45 @@ reading a failed lookup as "no PR is open" is what opens the second conflicting 
 A non-empty list means: **run the audit exactly as in `report` mode and report every finding**, but
 skip phases 7 and 8 entirely. Set `pr` to `null`, `pr_skipped_reason` to `open PR already exists`,
 and put that PR's URL in `existing_pr_url`. The findings are still worth having, since they are
-what tells the user whether the open PR is still the right one, so this is not a failure.
+what tells the user whether the open PR is still the right one, so this is not a failure. Guard 2
+does not run: there is nothing to overwrite, because nothing will be pushed.
 
-**A branch of that name with no open PR is a remnant, not someone's work in progress.** Its only
-possible content is a commit this plugin pushed for a removal PR that has since been merged or
-closed, because nothing else writes the name. Phase 8 deletes the local one before creating its own
-and force-pushes over the remote one, both explained there; nothing about a remnant stops the audit
-here.
+**Guard 2, the remnant guard.** With no open PR, a branch of that name may still exist locally or
+on the remote. ADR 006 says the name is owned by this plugin, so such a branch *should* be the
+leftover of a removal PR that was merged or closed. **This guard is what turns that ownership
+assumption into a checked fact**, because phase 8 deletes and force-pushes on the strength of it,
+and the cost of the assumption being wrong is destroying someone's commits.
+
+```bash
+git -C <repo_root> ls-remote --heads origin chore/dependabot-remove-pins
+git -C <repo_root> branch --list chore/dependabot-remove-pins
+git -C <repo_root> rev-parse chore/dependabot-remove-pins
+```
+
+The first gives the remote sha (empty output means no remote branch), the second says whether a
+local branch exists, and the third gives its tip when it does. **If neither branch exists, there is
+no remnant**: record that, and phase 8 pushes plainly with no lease and no delete.
+
+If either exists, the branch has to be proven to be a remnant before anything may touch it:
+
+```bash
+gh pr list --repo <nwo> --head chore/dependabot-remove-pins --state closed \
+  --json number,url,headRefOid,mergedAt
+```
+
+**The remote sha must equal the `headRefOid` of one of those closed PRs, and any local tip must
+equal that same sha.** That is the whole proof: the ref is exactly where a PR this plugin opened
+left it, and nobody has added to it since.
+
+**Anything else is a failure result (phase `worktree`)**, quoting both shas and saying plainly that
+a human may have worked on the branch. Specifically: no closed PR whose `headRefOid` matches, a
+local tip ahead of (or simply different from) the remote, a local branch with no remote at all, or
+a non-zero exit from any of these commands. **Never delete and never force anything in that case**,
+and do not try to work out whose commit it is: the guard exists because that judgment cannot be
+made from here.
+
+Record the verified remote sha. Phase 8 passes it as the explicit lease value, and having it is the
+condition under which phase 8 is allowed to delete the local branch at all.
 
 No `cd` of its own follows the worktree creation, here or anywhere in this document: cwd does not
 survive to the next call, so every later command carries its own location instead.
@@ -537,16 +575,31 @@ Attempt 1 is that test; attempt 2 is the one fallback, and there is no third.
 
 Work in the same `$WORK/audit` worktree, which phase 4 step 7 left matching `HEAD`.
 
-**Before attempt 1, restore the cache too, where the repository tracks one:**
+**Before attempt 1, restore the cache too, where the repository tracks one.** Ask git whether it
+does rather than looking for the directory: an untracked `.yarn/cache` is a perfectly ordinary
+non-zero-install Berry repository, and `checkout` against a pathspec matching nothing tracked is an
+error, not a no-op.
 
 ```bash
+git -C "$WORK/audit" ls-files -- .yarn/cache
 git -C "$WORK/audit" checkout HEAD -- .yarn/cache
 ```
 
-Only when `.yarn/cache` is tracked in this repository; it is a no-op question everywhere else.
+**Run the `checkout` only when `ls-files` printed at least one path.** Empty output means nothing
+under `.yarn/cache` is tracked here, so there is nothing to restore and the second command is
+skipped entirely. When it does run, **a non-zero exit is a failure result (phase `restore`)**,
+quoting git's output: it is the same restore obligation phase 4 step 7 carries, on a different
+pathspec, and a restore that did not happen leaves per-pin residue in the tree that phase 8 would
+stage.
+
 Phase 4's per-pin restore deliberately leaves those archives alone because they cannot change how
 the next pin resolves, but in `pr` mode there is a commit at the end of this, and per-pin residue
 in it would be an artifact of tests rather than of the change being proposed.
+
+This restores tracked archives only. **Untracked ones the installs created are caught later**, by
+phase 8's porcelain check, which fails on any `?? ` entry it did not put there, `.yarn/cache`
+included. Nothing under that directory reaches a commit without one of the two having looked at
+it.
 
 **Both maps have to be whole, and the baseline is checked first.** If phase 4's with-all-pins
 baseline `resolution_map` was unavailable, or its `unreadable_entries` was anything other than
@@ -648,10 +701,12 @@ fail-closed rule on a partial map, and same `advisories` failure on a broken adv
 
 If attempt 2's candidate set is empty, every removable finding having been
 `removable-individually`, there is no second attempt to run. That is still
-`pr_skipped_reason` `combined test failed`, with `attempt` `1` (the last attempt that actually ran)
-and a `pr_skipped_detail` saying the second set was empty because every removable finding carried
-sibling ambiguity. It is not a separate reason: what happened is that the combined test failed and
-the fallback had nothing left to narrow to.
+`pr_skipped_reason` `combined test failed`, with a `pr_skipped_detail` that says both which attempt
+ran and that the second set was empty because every removable finding carried sibling ambiguity:
+`"attempt 1 admitted lodash 4.17.20 via eslint; attempt 2 set was empty"`. **The attempt number has
+no field of its own when no PR was opened**, since `attempt` lives inside `pr` and `pr` is `null`
+here, so `pr_skipped_detail` is where it travels. It is not a separate reason either: what happened
+is that the combined test failed and the fallback had nothing left to narrow to.
 
 **Both attempts failing means no PR**, and the result says so with the evidence: which attempt,
 which package and version were newly admitted, and what verdict they earned. That is a finding,
@@ -798,21 +853,11 @@ Every scored package's returned `markdown` goes into the body verbatim, under it
 per-package rating averaged or collapsed into one number would hide the package that earned the
 band, which is the one a reviewer should read first.
 
-### Create the branch, commit, push, open the draft PR
+### Stage, create the branch, commit, push, open the draft PR
 
-**The branch is created here, from inside the worktree, not in phase 1.** Everything up to this
-point could still have ended without a PR, and a branch left behind by a run that opened none is
-debt nothing points at.
-
-```bash
-git -C "$WORK/audit" branch -D chore/dependabot-remove-pins 2>/dev/null || true
-git -C "$WORK/audit" switch -c chore/dependabot-remove-pins
-```
-
-The delete is unconditional and safe **because of what phase 1 established**: no PR is open on that
-head, and the name is owned by this plugin, so any local branch of that name is a remnant of a
-removal PR that was merged or closed. Its only possible content is a commit this plugin pushed and
-GitHub already has. The `2>/dev/null || true` is for the ordinary case where no such branch exists.
+**Stage before creating the branch, in that order.** Staging needs no branch, and the check below
+can still end the run: doing it first means a `verify` failure never leaves a branch behind, which
+is the same reason phase 1 creates none.
 
 **Stage exactly three things, by name.** `package.json`, the lockfile, and, in a zero-install Yarn
 Berry repository, every `.yarn/cache/` path that `status --porcelain` reports as modified, added or
@@ -828,23 +873,63 @@ git -C "$WORK/audit" status --porcelain
 
 **Never stage `.gh-security-check.log`** (`run-check.sh` writes it into the worktree) and never
 stage a source file, a test, or anything else: the change this PR proposes is the deletion of
-manifest entries, and nothing you did should have touched anything else. The second
-`status --porcelain` must come back empty apart from that log. **Anything else still showing there
-is unexplained, and unexplained is a failure result (phase `verify`) quoting the output** rather
-than a commit that quietly leaves half the change behind or sweeps something in.
+manifest entries, and nothing you did should have touched anything else.
+
+**The second `status --porcelain` runs after the `add`, so it is not empty and must not be read as
+if it should be.** Exactly two kinds of line may appear in it, and nothing else:
+
+- **the paths you just staged**, each with its index column set (`M `, `A `, `D `), and
+- **`?? .gh-security-check.log`**.
+
+**Anything else is a failure result (phase `verify`) quoting the output.** That covers a staged
+path that also carries a worktree-column modification (`MM`, `AM`: something changed it after you
+staged it), a tracked file modified and not staged, and **any other `?? ` entry, including one
+under `.yarn/cache`**. An untracked archive there is a file the install created that phase 7's
+restore never saw, and letting it through is how something nobody examined joins the commit. Read
+the columns, not just the paths; the point of this check is what is *not* on your list.
+
+Only now the branch:
+
+```bash
+git -C "$WORK/audit" branch -D chore/dependabot-remove-pins
+git -C "$WORK/audit" switch -c chore/dependabot-remove-pins
+```
+
+**Run `branch -D` only when phase 1's guard 2 verified a local tip**, and skip it entirely
+otherwise: an unverified branch of that name is the case that guard refused to let you reach.
+**Do not silence its stderr.** A "branch not found" message is fine and expected when the guard
+found no local branch but you ran it anyway; every other error is a failure result (phase `push`)
+quoting it, and the one that matters is a branch checked out in another worktree, which git refuses
+to delete and which means a sibling agent or the user is on it right now. `2>/dev/null || true`
+would swallow exactly that. A non-zero exit from `switch -c` is also phase `push`.
 
 ```bash
 git -C "$WORK/audit" commit -m "..."
-git -C "$WORK/audit" push -u --force-with-lease origin chore/dependabot-remove-pins
 ```
 
-`--force-with-lease` is there for the same remnant phase 1 described: a remote branch of this name
-with no open PR is a merged or closed removal PR's leftover, and overwriting it is the intent.
-`--force-with-lease` rather than `--force` because it refuses when the remote moved since your
-fetch, which is the one case that is not a remnant. **A push that fails for any reason, that lease
-check included, is a failure result (phase `push`) quoting git's output.** Do not retry it with
-`--force`, and do not fall back to a different branch name: a lease refusal means something you did
-not account for is on that ref, and the whole basis for overwriting it was that nothing could be.
+Then push. **Which push depends on what phase 1's guard 2 found**, and there are only two forms:
+
+```bash
+# a verified remnant existed on the remote
+git -C "$WORK/audit" push -u --force-with-lease=chore/dependabot-remove-pins:<verified remote sha> origin chore/dependabot-remove-pins
+
+# no branch of that name existed anywhere
+git -C "$WORK/audit" push -u origin chore/dependabot-remove-pins
+```
+
+**The explicit lease value is what turns ADR 006's ownership assumption into a checked fact.** A
+bare `--force-with-lease` leases against your own remote-tracking ref, which any `git fetch` in
+that repository silently updates, so in a checkout that fetched recently it passes over commits you
+have never seen: the very case the guard exists to catch, waved through by the flag that was
+supposed to catch it. Naming the sha means the push succeeds only if the remote is still exactly
+where a closed PR of this plugin's left it, which is the thing phase 1 actually verified. Where
+there was no remnant at all, no lease belongs on the command: a plain push already fails if
+anything appeared on that ref in the meantime, and reaching for a force there would discard it.
+
+**A push that fails for any reason, the lease check included, is a failure result (phase `push`)
+quoting git's output.** Do not retry with `--force`, do not re-derive the lease value, and do not
+fall back to another branch name. A lease refusal means the ref is not where the guard proved it
+was, and the entire basis for overwriting it was that it could not have moved.
 
 Commit message, where N is the number of removed entries:
 
@@ -1069,12 +1154,16 @@ End your final message with exactly one fenced JSON block:
   `not-tested`, what the entry really is for `not-a-version-pin`.
 - `mode` is the value you were dispatched with, verbatim: `report` or `pr`. It is what tells a
   reader whether a `null` `pr` means "not asked for" or "asked for and not reached".
-- `pr` is `null` in `report` mode, always, and in `pr` mode whenever no PR was opened. **Whenever
-  it is `null` in `pr` mode, `pr_skipped_reason` is non-null**, and it is exactly one of
+- `pr` is `null` in `report` mode, always, and in `pr` mode whenever no PR was opened. **On a
+  `"status": "success"` result in `pr` mode, a `null` `pr` always carries a non-null
+  `pr_skipped_reason`**, and it is exactly one of
   `open PR already exists` (with that PR's URL in `existing_pr_url`), `no pins`,
   `no removable pins found`, `partial resolution map`, or `combined test failed`, chosen by the
   precedence phase 7 states. A null PR with no reason is indistinguishable from a mode that never
-  tried, which is the one thing the dispatcher must be able to tell apart.
+  tried, which is the one thing the dispatcher must be able to tell apart. **On a
+  `"status": "failure"` result the reason is `null` and `failure` carries the phase and detail
+  instead**: the run stopped, which is not one of the five ways a completed audit declines to open
+  a PR, and dressing it as one would hide a broken run among ordinary outcomes.
 - `pr_skipped_detail` is the prose beside that one-word reason: the package and version that failed
   the combined test, the count of entries the parser could not read, or any **second** reason that
   also applied and lost the precedence. It is `null` whenever `pr_skipped_reason` is. The field
