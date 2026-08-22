@@ -91,10 +91,9 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you, and the session scratchpad is shared with agents running beside
   you, so one agent's cleanup deletes another's files.
-- **Never fabricate environment to make a check run** (phase 8). No invented env vars, placeholder
-  URLs, dummy tokens. A check that cannot run as-is is recorded as `skipped` with the reason, F5
-  says so, and CI is the right verifier. A check passed under fabricated environment is not
-  verification; it is a claim the PR body cannot honestly make.
+- **Never run the repository's checks** (phase 8). Not its tests, not its build, not its linters,
+  not to confirm a removal and not to attribute a failure: the merge-risk score is static analysis
+  of the worktree, and CI on the draft PR is the verifier (ADR 006).
 - **Clean up on every exit path.** The worktrees you created are removed before you return.
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
 
@@ -156,7 +155,7 @@ what tells the user whether the open PR is still the right one, so this is not a
 does not run: there is nothing to overwrite, because nothing will be pushed.
 
 **Guard 2, the remnant guard.** With no open PR, a branch of that name may still exist locally or
-on the remote. ADR 006 says the name is owned by this plugin, so such a branch *should* be the
+on the remote. ADR 007 says the name is owned by this plugin, so such a branch *should* be the
 leftover of a removal PR that was merged or closed. **This guard is what turns that ownership
 assumption into a checked fact**, because phase 8 deletes and force-pushes on the strength of it,
 and the cost of the assumption being wrong is destroying someone's commits.
@@ -727,68 +726,18 @@ When an attempt is clean, **leave its removals in the tree**, which is the diff 
 and carry into phase 8: which attempt passed, the removed keys, the pins left behind with the
 attempt that excluded them, the collateral list, and the advisory verdicts.
 
-## Phase 8: Repo checks, merge risk, and the draft PR
+## Phase 8: Merge risk and the draft PR
 
-This mirrors `fix-dependency`'s phases 5 to 7. The pins are already out of the tree and installed;
-what remains is showing the change is safe to merge and putting it where a human reviews it.
+This mirrors `fix-dependency`'s phases 5 and 6. The pins are already out of the tree and installed;
+what remains is rating the change and putting it where a human reviews it.
 
-### Repo checks
-
-```bash
-cd "$WORK/audit" && $ADAPTER verification_commands
-```
-
-`commands` is a **candidate list, not a running order**. Skip anything that is not a check:
-servers, migration or codemod runners, release and publish scripts, and `postinstall` (the install
-already ran it). Record every skip and its reason. Then run each remaining candidate:
-
-```bash
-cd "$WORK/audit" && <scripts_dir>/run-check.sh <pm_exec> <script-name>
-```
-
-`pm_exec` is the field of that name on `cd "$WORK/audit" && $ADAPTER detect`, the same call phase 4
-took `lockfile` from. It returns `{command, exit, log, lines, tail}`; the outcome is that JSON, so
-never re-run a check to see how it went.
-
-**A reply with no `exit` field is the runner refusing, not a check result.** `run-check.sh` emits
-`{"error": ...}` and exits non-zero when it will not run at all, which in practice means the `cd`
-prefix was dropped (so it landed in `repo_root`, which `require-linked-worktree.sh` refuses) or the
-worktree is not the linked one it expects. Recording that as `skipped` would score F5 for a check
-that was never attempted, on a defect in the invocation rather than in the environment. **This is
-the one place a re-issue is allowed**: if the prefix was missing, issue the command once more with
-it. Otherwise, or if the second call refuses too, return a failure result (phase `verify`) quoting
-the error.
-
-**One attempt each, then CI.** A check that cannot start (missing environment, a tool the machine
-lacks, a declined permission) is `skipped` with the reason after one attempt, and F5 says so. No
-second strategy and no environment engineering.
-
-**Never attribute a failure to pre-existing breakage without running the same check against the
-default branch.** Not "if unsure": always. Removing a pin moves versions, and a latent defect that
-has sat green for months reads exactly like pre-existing breakage until both trees have been run.
-Create the base worktree lazily, only when a failure actually needs attributing, because it costs a
-full install:
-
-```bash
-git -C <repo_root> worktree add --detach "$WORK/base" "origin/<default_branch>"
-cd "$WORK/base" && $ADAPTER install
-cd "$WORK/base" && <scripts_dir>/run-check.sh <the failing command>
-```
-
-**A failed base install voids the comparison**: check its exit status first. `fail-preexisting` is
-the one verdict a missing baseline cannot support, and it is the one that would not block the PR,
-so return a failure result (phase `verify`) saying the baseline could not be established. There is
-no third option here as there is in `fix-dependency`: the conservative fallback there is
-`fail-caused`, and in this agent that ends the run too.
-
-**A check this removal breaks ends the run.** Return a failure result (phase `verify`) naming the
-check and the version move you attributed it to. You do not edit source or tests, at all, in either
-mode: the whole change this PR proposes is the deletion of manifest entries, and a repository whose
-suite goes red on that has told you the pin was load-bearing in a way no advisory range describes.
-Patching around it would put a code change nobody asked for in a `chore(deps)` PR, and dropping the
-pin from the set would be re-running a combined test that already answered.
-
-Pre-existing failures are noted, go in the PR body, and do not block.
+**You run none of the repository's checks.** Not its tests, not its build, not its linters: the
+merge-risk score is static analysis of the worktree, and CI on the draft PR is the verifier
+(ADR 006). That also means there is no failure to attribute and no base worktree to build for a
+comparison. A removal that breaks the build ships as a draft and CI reports it there, on a PR
+nobody has promoted, which is the same trade the fix agent makes. What phase 7's combined test
+established is narrower, and it is still the whole of this PR's own evidence: the set installs,
+and no newly admitted version matches a published advisory.
 
 ### Merge risk, per removed package
 
@@ -809,11 +758,12 @@ thing about that script a caller cannot be wrong about and still be reporting a 
 these packages in the PR's risk section under **"not scored: no longer resolved / no version
 moved"**, saying which of the two it was.
 
-**The PR band is the highest band across the packages that were scored.** If none were scored,
-`pr.risk.band` and `pr.risk.score` are `null` while `f4` and `f5` are still set from the checks.
-That is not a gap: the dispatcher's promotion gate reads F4 and F5, not the band (ADR 002, and the
-`resolve-alerts` phase 9 table), so a PR that removes only packages with no version move still
-carries the verification signal the gate needs.
+**The PR band is the highest band across the packages that were scored**, and `pr.risk.f4` and
+`pr.risk.f5` are that package's factors, read off the scorer's `factors[]`. If none were scored,
+`pr.risk` is `{"band": null, "score": null, "f4": null, "f5": null}`. That is not a gap: the
+dispatcher's promotion gate reads the check rollup and auto-merge state alone, never the band or
+its factors (ADR 006, and the `resolve-alerts` phase 9 table), so a PR that removes only packages
+with no version move carries everything the gate needs, which is the PR itself.
 
 ```bash
 cd "$WORK/audit" && $ADAPTER why <package> > "$WORK/why-<package>.json"
@@ -824,7 +774,6 @@ cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
   --after <the version that resolves now> \
   --adapter $ADAPTER \
   --why-json "$WORK/why-<package>.json" \
-  --f4 <0|1|2> --f5 <0|1|2> \
   --override-scope none \
   --declared-range <range> [--declared-range <range>]...
 ```
@@ -846,9 +795,9 @@ cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
   conclusion is not. Name every unreadable parent, marking any `parents_malformed[]` ones as such,
   since malformed says the install is damaged where merely unreadable is normal under Yarn PnP and
   pnpm.
-- **F4 and F5 are shared across the PR**, because one PR runs one check suite: F4 is the test
-  signal of that suite, F5 its verification completeness. Score them once and pass the same pair to
-  every package.
+- **F4 and F5 come out of the scorer**, per package, from the worktree it runs in: F4 is whether
+  anything tests the modules that import that package, F5 whether a workflow runs on the pull
+  request. You supply neither, and you run nothing to learn them.
 - Read the script's own header comment for the full flag contract before invoking it.
 
 Every scored package's returned `markdown` goes into the body verbatim, under its own heading. A
@@ -873,15 +822,13 @@ git -C "$WORK/audit" add package.json <lockfile> [<each changed .yarn/cache path
 git -C "$WORK/audit" status --porcelain
 ```
 
-**Never stage `.gh-security-check.log`** (`run-check.sh` writes it into the worktree) and never
-stage a source file, a test, or anything else: the change this PR proposes is the deletion of
+**Never stage a source file, a test, or anything else**: the change this PR proposes is the deletion of
 manifest entries, and nothing you did should have touched anything else.
 
 **The second `status --porcelain` runs after the `add`, so it is not empty and must not be read as
-if it should be.** Exactly two kinds of line may appear in it, and nothing else:
+if it should be.** Exactly one kind of line may appear in it, and nothing else:
 
-- **the paths you just staged**, each with its index column set (`M `, `A `, `D `), and
-- **`?? .gh-security-check.log`**.
+- **the paths you just staged**, each with its index column set (`M `, `A `, `D `).
 
 **Anything else is a failure result (phase `verify`) quoting the output.** That covers a staged
 path that also carries a worktree-column modification (`MM`, `AM`: something changed it after you
@@ -919,7 +866,7 @@ git -C "$WORK/audit" push -u --force-with-lease=chore/dependabot-remove-pins:<ve
 git -C "$WORK/audit" push -u origin chore/dependabot-remove-pins
 ```
 
-**The explicit lease value is what turns ADR 006's ownership assumption into a checked fact.** A
+**The explicit lease value is what turns ADR 007's ownership assumption into a checked fact.** A
 bare `--force-with-lease` leases against your own remote-tracking ref, which any `git fetch` in
 that repository silently updates, so in a checkout that fetched recently it passes over commits you
 have never seen: the very case the guard exists to catch, waved through by the flag that was
@@ -1018,19 +965,16 @@ their advisory verdicts; "nothing else moved" when the diff was empty>
 
 - [x] Combined install: <N> pin(s) removed together, <K> package(s) moved, every newly admitted
       version checked against every published advisory for its own package
-- [x] `<command>` passes
-- [ ] `<command>` skipped: <reason>; CI is the verifier
-- [ ] `<command>` fails on `<default_branch>` too (pre-existing; the same command was run there)
+- CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
 
 - <the PR or commit that introduced each pin, and the fixed alerts for its package, from phase 3>
 ```
 
-**`[x]` is only for a check that ran and passed.** One entry per command actually run, and a
-skipped check or a pre-existing failure renders `[ ]` with the reason, never `[x]` with a
-parenthetical: a reviewer scanning the boxes reads the marks, not the text beside them, and a
-skipped check shown as ticked is the specific claim F5 exists to keep this flow from making.
+**`[x]` is only for something this run did.** The combined install is the one box, ticked by the
+attempt that passed and by nothing else. Never add a box for a check: you ran none, and a ticked
+check nobody ran is the specific claim ADR 006 took out of this flow.
 
 Every claim in that body is one this run made. **Never state that a pin is unnecessary on
 provenance alone**: the fixed alerts say why the pin was probably added and nothing about whether
@@ -1045,13 +989,10 @@ Before returning — on success **and** on every failure path:
 
 ```bash
 git -C <repo_root> worktree remove --force "$WORK/audit"
-git -C <repo_root> worktree remove --force "$WORK/base" 2>/dev/null || true
 rm -rf "$WORK"
 ```
 
-The `$WORK/base` line is phase 8's attribution worktree, which exists only when a check failure
-needed one; the `|| true` is why it costs nothing when it does not. The worktrees never survive
-you. A `pr` mode run that got as far as pushing leaves its branch behind, which is the point of the
+The worktree never survives you. A `pr` mode run that got as far as pushing leaves its branch behind, which is the point of the
 run; one that stopped earlier created no branch at all, which is why phase 8 and not phase 1 is
 where it is made.
 
@@ -1117,11 +1058,7 @@ End your final message with exactly one fenced JSON block:
       {"key": "eslint>minimatch", "reason": "attempt 1 admitted minimatch 3.0.4, which GHSA-f8q6-p94x-37v3 admits"}
     ],
     "attempt": 2,
-    "risk": {"band": "Low", "score": 2, "f4": 0, "f5": 0},
-    "scripts": [
-      {"command": "pnpm test", "result": "pass", "detail": null},
-      {"command": "pnpm e2e", "result": "skipped", "detail": "needs deployed preview URL; CI is the signal"}
-    ]
+    "risk": {"band": "Low", "score": 2, "f4": 0, "f5": 0}
   },
   "pr_skipped_reason": null,
   "pr_skipped_detail": null,
@@ -1171,28 +1108,21 @@ End your final message with exactly one fenced JSON block:
   also applied and lost the precedence. It is `null` whenever `pr_skipped_reason` is. The field
   exists so the reason stays a fixed enum a dispatcher can branch on while the evidence still
   travels with it.
-- `pr.scripts[].result` is `pass`, `fail-preexisting`, or `skipped`, and never `fail-caused`: a
-  check this removal breaks ends the run, so there is no successful PR for that outcome to sit on.
-  When it happens, the run is a `verify` failure and the check, its output and the version move you
-  attributed it to go in `failure.detail` and in your prose, since `pr` is `null` there and
-  `pr.scripts` with it.
 - Inside `pr`: `removed_keys[]` is every manifest key the commit deleted; `left_behind[]` is one
   `{key, reason}` per candidate the passing attempt excluded, `[]` when attempt 1 passed and
   nothing was dropped; `attempt` is `1` or `2` and names the last attempt that ran, which on a
   successful PR is the one whose combined install the body describes; `risk` is the **highest**
-  band across the packages that were scored, with the shared F4/F5, and its `band` and `score` are
-  `null` when no package was scorable (`f4` and `f5` are set either way, because that is what the
-  dispatcher's promotion gate reads);
-  `scripts[]` is phase 8's check outcomes, with `detail` carrying the judgment.
+  band across the packages that were scored, with that package's `f4` and `f5` read off the
+  scorer's `factors[]`, and all four fields are `null` when no package was scorable. Nothing
+  reads them as a gate: promotion groups on the check rollup and auto-merge state (ADR 006).
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, `pr` is
   `null`, and `failure` is
   `{"phase": "input | worktree | list | install | restore | advisories | compose | verify | push | pr", "detail": "..."}`.
   `restore` is phase 4 step 7's: the tree could not be returned to its pre-pin state, so every
   later pin would have been tested against a manifest carrying an earlier removal. The last four
   are `pr` mode's. `compose` is phase 7's: edits that did not land, or an install that did not
-  finish. `verify` is phase 8's: a check this removal broke, a base tree that would not install so
-  the comparison could not be made, `run-check.sh` refusing to run at all, a usage error from
-  `score-merge-risk.sh`, or an unexplained `status --porcelain` before the commit. `push` and `pr`
+  finish. `verify` is phase 8's: a usage error from `score-merge-risk.sh`, or an unexplained
+  `status --porcelain` before the commit. `push` and `pr`
   are the git push (the `--force-with-lease` refusal included) and `gh pr create` themselves.
   A combined test that ran and came back dirty is **not** a failure. It is `pr_skipped_reason`
   `combined test failed` on a `"status": "success"` result, because the audit answered the question

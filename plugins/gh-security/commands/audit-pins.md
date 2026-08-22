@@ -94,9 +94,8 @@ definition and end with its JSON result block.
 `input` failure rather than defaulting, because the two modes differ by whether a pull request is
 opened against a real repository.
 
-The audit runs an install per pin it tests. PR mode adds up to two more for the combined test, plus
-one if a failing check needs attributing against the default branch. It is not instant; say so
-before dispatching.
+The audit runs an install per pin it tests. PR mode adds up to two more for the combined test. It
+is not instant; say so before dispatching.
 
 ## 6. Report
 
@@ -166,10 +165,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr.url>
 
 Then apply the `resolve-alerts` skill's phase 9 table to that one PR, unchanged. In particular:
 
-- **`pr.risk.f4` or `pr.risk.f5` at 2 suppresses the offer** unless the rollup shows the specific
-  checks the agent skipped ran in CI and passed. Both are always set, even where `pr.risk.band` is
-  `null`, which is why the gate reads them and not the band. Report what could not run and why;
-  offering would let "nobody has verified this" promote itself.
+- **`pr.risk` is not an input.** The band and its factors rate the change; the gate reads the
+  check rollup and auto-merge state alone (ADR 006). A `null` band, where no removed package had a
+  version move to rate, changes nothing here.
 - **Auto-merge armed** (`auto_merge.armed`) means promoting **merges** this PR once checks pass.
   Confirm it saying exactly that, per PR, never folded into any other question.
 - Failing checks, pending checks, an empty rollup and `merge_state: UNKNOWN` are all read as that

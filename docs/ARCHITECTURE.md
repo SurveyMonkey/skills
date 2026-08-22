@@ -64,7 +64,7 @@ pass**. Conventions and their reasoning live in
   ShellCheck, `claude plugin validate --strict`) run through one entry point,
   `scripts/check.sh`, from committed git hooks locally and from
   `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions.
-- **Pin-removal PRs** ([ADR 006](adr/006-pin-removal-prs.md)). The pin audit defaults to opening
+- **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening
   one draft removal PR per repository, gated on a combined test of the whole removed set (the
   per-pin tests prove nothing about a set) that fails closed on a partial view of the lockfile.
   The branch name is plugin-owned, created only at commit time, and a leftover of it is verified

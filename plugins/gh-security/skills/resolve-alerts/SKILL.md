@@ -440,10 +440,8 @@ Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks re
 work — but promotion is a decision, not a default. This phase covers the `success` results only:
 `no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. **The audit's
 own PR joins this phase on the same terms**, when one was opened: pass `pr.url` alongside the fix
-PRs below, and read its `pr.risk.f4` and `pr.risk.f5` where the table says F4 and F5, exactly as a
-fix agent's own `f4`/`f5` are read. Those two are always set, even where `pr.risk.band` is `null`,
-which is why the gate reads them and not the band. It is a draft carrying a computed band and a
-check run, so nothing about it wants a separate flow. Gather the evidence:
+PRs below. It is a draft carrying a computed band, and that band is no more an input here than a
+fix agent's is (ADR 006), so nothing about it wants a separate flow. Gather the evidence:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...

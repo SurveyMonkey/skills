@@ -7,7 +7,7 @@ owner: brianespinosa
 related_issues: [7, 72]
 ---
 
-# ADR 006: Pin-removal PRs
+# ADR 007: Pin-removal PRs
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md), whose Phase 4 shipped the audit report-only
 and deferred removal PRs to "a subsequent minor once findings prove reliable". This records what
@@ -100,15 +100,15 @@ against it. In
 report mode a partial view degrades to a narrower claim, which is still only words; here the same
 gap would ship a deletion nothing checked.
 
-**The PR reuses the fix flow's tail unchanged**: the repository's own `verification_commands`
-through `run-check.sh` with the base-branch attribution rule, `score-merge-risk.sh` per removed
-package with `--override-scope none` (this change applies no override, it removes them), shared
-F4/F5 because one PR runs one check suite, and the PR band as the highest across the packages that
-were scored. A removed package that left the tree, or whose delta was empty, has no after-version
-and is not scored at all; where none was scorable the band is `null` while F4 and F5 are still set,
-because the promotion gate reads those two and not the band. Unlike the fix agent, this one never
-edits source or tests, so a check the removal breaks ends the run rather than being fixed in
-place. It is a
+**The PR reuses the fix flow's tail unchanged**: `score-merge-risk.sh` per removed package with
+`--override-scope none` (this change applies no override, it removes them), F4 and F5 computed by
+the scorer from the tree as [ADR 006](006-merge-risk-is-static-analysis.md) settled, and the PR
+band as the highest across the packages that were scored. A removed package that left the tree, or
+whose delta was empty, has no after-version and is not scored at all; where none was scorable
+`pr.risk` is null throughout, which costs nothing because the promotion gate reads the check rollup
+and never the band. No repository check is run: the combined install is the PR's own evidence and
+CI on the draft is the verifier, so a removal that breaks the build ships as a draft and CI says so
+there. The agent never edits source or tests at all. It is a
 **draft** and the agent never marks it ready; promotion stays the dispatcher's decision under
 [ADR 002](002-pr-draft-state-and-approval-flow.md), with the audit's PR joining the same phase 9
 evidence table on the same terms as a fix PR. An open PR already on the head branch means the audit
@@ -134,8 +134,7 @@ that `--override-scope` is `none` for a removal, and that the band is the maximu
 rather than an average.
 
 The combined test costs one further install per attempt (so up to two), on top of the one per pin
-the audit already runs, plus one more if a failing check has to be attributed against the default
-branch. A repository with many pins therefore pays up to two more installs for a PR, which is
+the audit already runs. A repository with many pins therefore pays up to two more installs for a PR, which is
 the same order of cost as one fix agent and buys the only evidence that covers the change actually
 being proposed.
 
