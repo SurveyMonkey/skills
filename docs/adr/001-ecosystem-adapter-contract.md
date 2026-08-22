@@ -221,7 +221,7 @@ pnpm scoped fix, which trains the reading agent to discount the one case — `so
 parents still unresolved — where it is a real finding
 ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
-**`declared_ranges <pkg>` collects what the dependents declare.** It returns the union of
+**`declared_ranges [--line <major>] <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
 plus the root manifest's own declaration, which is read from those three and `devDependencies` too:
 the repository is a dependent like any other, and a dev-only direct dependency still declares a
@@ -251,6 +251,20 @@ shell loop it replaced in the agent definition could not be pre-approved by the 
 discarded every per-parent error, and missed optional dependencies. A parent whose manifest is not
 installed is reported, never guessed at: Yarn PnP has no `node_modules`, and pnpm links only direct
 dependencies into one.
+
+**`--line <major>` scopes the collection to the parents a line-bounded fix moves**, mirroring
+`validate --line`. A package resolved at several majors at once has parents on each of them, and a
+major-bounded override touches exactly one line; collecting every declaration of the name regardless
+of which copy the parent resolves to measured F7's distance against dependents the fix leaves
+untouched, scoring a 7.28.0 -> 7.29.0 bump as two major lines crossed plus a crossed 5.x pin
+([#76](https://github.com/SurveyMonkey/skills/issues/76)). Which line a parent's own copy sits on is
+an ecosystem question like finding its manifest is, which is why the filter belongs behind the
+contract: here it is node resolution over the installed tree, a parent's nested copy before the
+hoisted one. Excluded parents are returned in `parents_other_lines[]`, deliberately none of the four
+lists above, since such a parent is neither unreadable nor declaring nothing. A parent whose
+resolved copy cannot be determined is kept, because over-reporting distance is recoverable and a
+silently dropped range is not. The flag is optional and omitting it is the pre-existing behavior;
+`line` echoes back what was applied, `null` when nothing was.
 
 **~~`list_pins` is reserved but unimplemented.~~** ~~It is part of the contract and returns exit
 code 2 until Phase 4 ([#7](https://github.com/SurveyMonkey/skills/issues/7)), whose pin audit is

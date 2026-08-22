@@ -365,8 +365,19 @@ has been tested against `9.x` and never saw `10.x`, so how far past that a fix l
 number that predicts breakage, and it is not visible in the before/after delta:
 
 ```bash
-cd "$WORK/fix" && $ADAPTER declared_ranges <package>
+cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
 ```
+
+**Always pass `--line <major_line>`**, the same major line you passed to `validate --line` in phase
+4. Without it the verb collects every declaration of the package name anywhere in the lockfile,
+including parents whose own resolved copy sits on a major line your override never touches, and
+their ranges then score as distance this fix crossed. On `arsenalamerica/app#300` a 7.28.0 ->
+7.29.0 bump scoped to line 7 scored F7 = 2, "2 major lines crossed ... crosses the pinned range
+5.28.4", entirely on the strength of 5.x and 6.x parents that a line-bounded override leaves
+exactly where they were ([#76](https://github.com/SurveyMonkey/skills/issues/76)). Distance is
+measured from the dependents the override actually moves ([ADR
+006](../../../docs/adr/006-merge-risk-is-static-analysis.md); RFC 001 F7), and those are the
+parents resolved on your line.
 
 It returns `ranges[]` (every distinct range its parents declare across `dependencies`,
 `optionalDependencies` and `peerDependencies`, plus the root manifest's own declaration, which is
@@ -375,6 +386,12 @@ range this fix can leave behind). Alongside it: `parents_read[]`, `parents_witho
 but the installed manifest declares the package in no block, which happens under version skew),
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse.
+
+`parents_other_lines[]` is the parents `--line` excluded, and it is none of those things: they were
+read, they declare a range, and that range governs a copy on another major line. They are not a
+partial view and need no disclosure in the PR body; a parent whose resolved copy could not be
+determined at all is **kept** rather than excluded, so an unreadable install over-reports distance
+rather than silently lowering the score.
 
 Unreadable parents are usually normal rather than a failure: Yarn PnP installs no `node_modules` at
 all and pnpm links only direct dependencies there. A **malformed** one is not normal, and says the

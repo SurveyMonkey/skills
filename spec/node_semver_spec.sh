@@ -241,6 +241,90 @@ Describe 'node.sh declared_ranges'
   End
 End
 
+# --line, the F7 scoping fix (issue #76).
+#
+# The fixture is trimmed from arsenalamerica/app at the commit that opened its
+# PR #300: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously, five
+# parents declaring across all three lines, and a fix scoped to line 7 moving
+# 7.28.0 -> 7.29.0. Collecting every declaration of the name regardless of
+# which copy the parent resolves to scored that minor bump as two major lines
+# crossed plus a crossed pin, on the strength of 5.x and 6.x parents a
+# line-bounded override never touches.
+Describe 'node.sh declared_ranges --line'
+  After 'cleanup_fixture'
+
+  It 'collects every line without --line, the shape that mis-scored #300'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{ranges, line, parents_other_lines}' declared_ranges undici
+    The status should be success
+    The output should equal '{"ranges":["5.28.4","5.29.0","^6.22.0","^6.23.0","^7.27.1"],"line":null,"parents_other_lines":[]}'
+  End
+
+  It 'keeps only the ranges of parents resolved on the fix line'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{ranges, line}' declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"ranges":["^7.27.1"],"line":7}'
+  End
+
+  # The excluded parents must not be laundered through a list that means
+  # something else: they were read fine and they declare a range, it is simply
+  # a range for a copy this fix does not move.
+  It 'files the excluded parents under their own field, not as unread or rangeless'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{parents_read, parents_other_lines, parents_without_range, parents_unreadable, parents_malformed}' \
+      declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"parents_read":["@vercel/sandbox"],"parents_other_lines":["@sentry/cli","@vercel/blob","@vercel/node","vercel"],"parents_without_range":[],"parents_unreadable":[],"parents_malformed":[]}'
+  End
+
+  # Dropping a range on a guess lowers a risk score silently, so a parent whose
+  # own copy cannot be found on disk is kept rather than excluded.
+  It 'keeps a parent whose resolved copy cannot be determined'
+    use_fixture yarn-line-scoped
+    rm -rf node_modules/undici node_modules/vercel/node_modules node_modules/@vercel/sandbox/node_modules
+    When call adapter_jq '{ranges, parents_other_lines}' declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"ranges":["5.28.4","5.29.0","^6.22.0","^6.23.0","^7.27.1"],"parents_other_lines":[]}'
+  End
+
+  It 'rejects a --line that is not a major number'
+    use_fixture yarn-line-scoped
+    When run script "$ADAPTER" declared_ranges --line 7.x undici
+    The status should not equal 0
+    The stderr should include 'must be a major number'
+  End
+
+  # The verdict, not the parse: what mattered on #300 is the number that
+  # reached the PR body, so both halves are scored through score-merge-risk.sh.
+  Describe 'the score those ranges produce'
+    score_undici() {
+      "$ADAPTER" why undici > why.json 2>/dev/null || true
+      _scope=$1
+      shift
+      set -- --package undici --before 7.28.0 --after 7.29.0 \
+             --adapter "$ADAPTER" --why-json why.json --override-scope "$_scope" "$@"
+      "$COMMON/score-merge-risk.sh" "$@" \
+        | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
+    }
+
+    It 'reproduces the F7 of 2 the unscoped collection produced on #300'
+      use_fixture yarn-line-scoped
+      When call score_undici scoped --declared-range 5.28.4 --declared-range 5.29.0 \
+        --declared-range '^6.22.0' --declared-range '^6.23.0' --declared-range '^7.27.1'
+      The status should be success
+      The output should equal '{"f7":2,"evidence":"2 major lines crossed; dependents declare 5.28.4, 5.29.0, ^6.22.0, ^6.23.0, ^7.27.1; crosses the pinned range 5.28.4"}'
+    End
+
+    It 'scores the same fix 0 on the ranges --line 7 returns'
+      use_fixture yarn-line-scoped
+      When call score_undici scoped --declared-range '^7.27.1'
+      The status should be success
+      The output should equal '{"f7":0,"evidence":"no major line crossed; dependents declare ^7.27.1"}'
+    End
+  End
+End
+
 # `satisfies` is internal, so it is exercised through validate against a fixture
 # whose resolved versions are known: undici resolves to 5.28.4 and 6.19.8, and
 # lodash to 4.17.21.

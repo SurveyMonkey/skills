@@ -24,11 +24,12 @@
 #   range_facts <range> <version>              -> {parseable, satisfied, pinned,
 #                                                  floor_major, majors_ahead}
 #                                                 (all null when not parseable)
-#   declared_ranges <pkg>                      -> {ranges[], root_range,
+#   declared_ranges [--line <major>] <pkg>     -> {ranges[], root_range,
 #                                                  parents_read[],
 #                                                  parents_without_range[],
 #                                                  parents_unreadable[],
-#                                                  parents_malformed[]}
+#                                                  parents_malformed[],
+#                                                  parents_other_lines[], line}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> {pm, override_location, block_present,
 #                                                  count, bare_count, pins[]}
@@ -1677,6 +1678,20 @@ verb_range_facts() {
 # body which ranges nobody could read; a parent whose manifest is on disk but
 # will not parse joins them, and is additionally named in `parents_malformed`.
 #
+# `--line <major>` narrows the collection to the parents this fix actually
+# moves, mirroring `validate --line`. A package resolved at 5.x, 6.x and 7.x
+# concurrently has parents on each of those lines, and a major-bounded fix
+# touches exactly one of them: on arsenalamerica/app#300 a 7.28.0 -> 7.29.0
+# bump scoped to line 7 was scored "2 major lines crossed" against the 5.x and
+# 6.x parents' declarations, because every declaration of the name anywhere in
+# the lockfile was collected regardless of which copy the parent resolves to
+# ([#76](https://github.com/SurveyMonkey/skills/issues/76)). Those parents are
+# a different, untouched consumer: not something the change could regress, and
+# distance measured against them is measured from dependents the override does
+# not move. They come back in `parents_other_lines[]`, which is deliberately
+# none of the four existing lists — a parent excluded by the line is neither
+# unreadable nor declaring nothing.
+#
 # A range is read from an `npm:` alias declaration as well as from a plain one.
 # `npm_parents` and `yarn_parents` count an aliasing parent as a parent, so
 # looking up the package name verbatim here put it in `parents_without_range` —
@@ -1694,8 +1709,59 @@ def declared_ranges_of($pkg):
 JQLIB
 )
 
+# The major line a parent's own copy of the package resolves to, printed on
+# stdout, or nothing with a non-zero status when it cannot be determined.
+#
+# Node resolution, read off the installed tree: a parent's nested copy wins,
+# and a parent with no nested copy reaches the hoisted one. That is exactly
+# what `--line` needs to know and it is the same tree `declared_ranges`
+# already reads its manifests out of, so it introduces no new dependency on
+# the install being present than the verb already had.
+#
+# A version that is not `<digits>.<...>` yields nothing rather than a guess.
+# Callers treat "undeterminable" as "keep the parent", the direction that can
+# only over-report distance.
+resolved_major_for_parent() {
+  _rmp_parent=$1
+  _rmp_pkg=$2
+  for _rmp_manifest in \
+    "node_modules/$_rmp_parent/node_modules/$_rmp_pkg/package.json" \
+    "node_modules/$_rmp_pkg/package.json"; do
+    [ -f "$_rmp_manifest" ] || continue
+    _rmp_major=$(jq -r '
+      (.version // "") | ltrimstr("v") | split(".")[0]
+      | if type == "string" and test("^[0-9]+$") then . else empty end
+    ' "$_rmp_manifest" 2>/dev/null) || _rmp_major=""
+    if [ -n "$_rmp_major" ]; then
+      printf '%s' "$_rmp_major"
+      return 0
+    fi
+  done
+  return 1
+}
+
 verb_declared_ranges() {
+  line=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --line)
+        line="${2:?--line requires a major}"
+        shift 2
+        ;;
+      --) shift; break ;;
+      -*) die "declared_ranges: unknown option '$1'" ;;
+      *)  break ;;
+    esac
+  done
+
   pkg="${1:?declared_ranges requires a package name}"
+
+  case "$line" in
+    ''|*[!0-9]*)
+      [ -z "$line" ] || die "declared_ranges: --line must be a major number, got '$line'"
+      ;;
+  esac
+
   pm=$(pm_of)
   case "$pm" in
     npm)  parents=$(npm_parents "$pkg")  ;;
@@ -1716,9 +1782,37 @@ verb_declared_ranges() {
   no_range=""
   unreadable=""
   malformed=""
+  other_lines=""
+
+  # The root is a dependent like any other, so `--line` filters it on the same
+  # rule: it has no nested copy of its own, and reaches the hoisted one.
+  if [ -n "$root_range" ] && [ -n "$line" ] \
+    && root_major=$(resolved_major_for_parent __root__ "$pkg") \
+    && [ "$root_major" != "$line" ]; then
+    other_lines="__root__
+"
+    root_range=""
+  fi
+
   while IFS= read -r parent; do
     [ -n "$parent" ] || continue
     [ "$parent" != "__root__" ] || continue
+    # The line filter comes first, and files the parent in none of the four
+    # existing lists. A parent whose own copy sits on another major line was
+    # not read-and-declaring-nothing and was not unreadable; it is simply not
+    # a dependent this fix moves, and saying so under its own field keeps
+    # `parents_read` / `parents_without_range` / `parents_unreadable` honest
+    # ([#76](https://github.com/SurveyMonkey/skills/issues/76)).
+    #
+    # An undeterminable line keeps the parent, because the alternative is
+    # dropping a range on a guess: over-reporting distance is the recoverable
+    # direction, and every dropped range lowers a risk score silently.
+    if [ -n "$line" ] && parent_major=$(resolved_major_for_parent "$parent" "$pkg") \
+      && [ "$parent_major" != "$line" ]; then
+      other_lines="$other_lines$parent
+"
+      continue
+    fi
     manifest="node_modules/$parent/package.json"
     if [ ! -f "$manifest" ]; then
       unreadable="$unreadable$parent
@@ -1771,20 +1865,23 @@ EOF
 "
 
   printf '%s' "$ranges" | jq -Rs \
-    --arg pkg "$pkg" --arg pm "$pm" --arg root "$root_range" \
+    --arg pkg "$pkg" --arg pm "$pm" --arg root "$root_range" --arg line "$line" \
     --argjson read_parents "$(printf '%s' "$read_parents" | jq -Rs 'split("\n") | map(select(length > 0))')" \
     --argjson no_range "$(printf '%s' "$no_range" | jq -Rs 'split("\n") | map(select(length > 0))')" \
     --argjson unreadable "$(printf '%s' "$unreadable" | jq -Rs 'split("\n") | map(select(length > 0))')" \
-    --argjson malformed "$(printf '%s' "$malformed" | jq -Rs 'split("\n") | map(select(length > 0))')" '
+    --argjson malformed "$(printf '%s' "$malformed" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+    --argjson other_lines "$(printf '%s' "$other_lines" | jq -Rs 'split("\n") | map(select(length > 0))')" '
     {
       pm: $pm,
       package: $pkg,
+      line: (if $line == "" then null else ($line | tonumber) end),
       ranges: (split("\n") | map(select(length > 0)) | unique),
       root_range: (if $root == "" then null else $root end),
       parents_read: $read_parents,
       parents_without_range: $no_range,
       parents_unreadable: $unreadable,
-      parents_malformed: $malformed
+      parents_malformed: $malformed,
+      parents_other_lines: $other_lines
     }'
 }
 
