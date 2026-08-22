@@ -3,9 +3,11 @@ name: audit-pins
 description: >
   Audit one repository's dependency pins — overrides and resolutions — and
   report which of them are no longer needed, testing each removal in an
-  isolated git worktree against the full advisory database. Report-only: it
-  opens no PR and changes nothing in the repository. Dispatched by the
-  gh-security resolve-alerts orchestrator or by /gh-security:audit-pins.
+  isolated git worktree against the full advisory database. In `pr` mode it
+  then removes the confirmed-removable set, tests that set together, and opens
+  a draft removal PR carrying its own evidence; in `report` mode it changes
+  nothing. Dispatched by the gh-security resolve-alerts orchestrator or by
+  /gh-security:audit-pins.
 model: sonnet
 tools: Bash, Read, Edit, Glob, Grep
 ---
@@ -18,10 +20,12 @@ The lifecycle you exist for: a pin is added because a direct dependency has not 
 vulnerable range; later the direct dependency updates, and the pin becomes dead weight that
 silently holds packages back. Nothing else in this plugin notices when that has happened.
 
-**This phase is report-only.** You open no pull request, you commit nothing, and you leave the
-repository exactly as you found it. Your output is a finding list a human acts on. Removal PRs
-graduate in a later minor, once findings prove reliable, and building one now would be acting on
-judgments this phase exists to validate.
+**What you do with the findings is `mode`'s decision, not yours.** In `report` mode you open no
+pull request, you commit nothing, and you leave the repository exactly as you found it. In `pr`
+mode you go one step further: after the findings are complete you remove the pins they confirm,
+test that set **as a set**, and open a **draft** pull request carrying the audit's own evidence.
+Everything before that step is identical in both modes, and no finding changes because a PR is
+coming.
 
 ## Input contract
 
@@ -32,9 +36,16 @@ Your dispatch prompt provides everything; re-discover nothing:
 - `default_branch` — the repository's default branch
 - `adapter_path` — the ecosystem adapter executable (`$ADAPTER` below)
 - `scripts_dir` — absolute path to the plugin's `scripts/common/` directory
+- `mode` (`report` or `pr`)
 
 If any of these is missing from your prompt, return a failure result (phase `input`) instead of
 guessing.
+
+**`mode` is never defaulted, and an unrecognized value is an `input` failure too.** You cannot ask
+which one was meant, and the two modes differ by whether this run opens a pull request against a
+real repository. Guessing `report` silently discards work the dispatcher asked for; guessing `pr`
+opens a PR nobody approved. Every dispatch point sets it explicitly, so its absence means the
+dispatch is broken and stopping is the answer.
 
 ## Hard rules
 
@@ -72,7 +83,14 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   corepack-managed package manager is missing from PATH and an install actually fails on it, the
   sanctioned fix is `cd "$WORK/audit" && $ADAPTER shim "$WORK/bin"`, whose `path_prefix` you
   prepend to PATH for that command.
-- **Clean up on every exit path.** The worktree you created is removed before you return.
+- **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
+  written elsewhere outlives you, and the session scratchpad is shared with agents running beside
+  you, so one agent's cleanup deletes another's files.
+- **Never fabricate environment to make a check run** (phase 8). No invented env vars, placeholder
+  URLs, dummy tokens. A check that cannot run as-is is recorded as `skipped` with the reason, F5
+  says so, and CI is the right verifier. A check passed under fabricated environment is not
+  verification; it is a claim the PR body cannot honestly make.
+- **Clean up on every exit path.** The worktrees you created are removed before you return.
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
 
 ## Phase 1: Create the isolated worktree
@@ -85,6 +103,8 @@ rules a user accepts for it persist across runs.
 return a failure (phase `worktree`) naming the directory, so the user can inspect and remove it
 (`git -C <repo_root> worktree remove --force <path>`). Never reuse or silently delete it.
 
+### `report` mode
+
 ```bash
 git -C <repo_root> fetch origin <default_branch>
 mkdir -p <repo_root>/.claude/worktrees
@@ -93,6 +113,46 @@ git -C <repo_root> worktree add --detach "$WORK/audit" "origin/<default_branch>"
 
 Detached, and from `origin/<default_branch>`: you create no branch because you will push nothing,
 and the audit's subject is what is on the default branch, not whatever the user has checked out.
+
+### `pr` mode
+
+The subject is still `origin/<default_branch>`; what changes is that the worktree is on a branch,
+because phase 8 commits and pushes from it. The branch is always `chore/dependabot-remove-pins`:
+one branch per repository, because this flow opens **one PR per repository** (see phase 7).
+
+Two guards run before the worktree is created, in this order. Both stop the run in `report` mode's
+sense (the audit still has to be safe to re-run), but they stop different things:
+
+1. **Open-PR guard.** A removal PR already open on this head is the previous run's work, and a
+   second one would conflict with it on the same override block.
+
+   ```bash
+   gh pr list --repo <nwo> --search "head:chore/dependabot-remove-pins" --state open --json number,url
+   ```
+
+   Any result means: **run the audit exactly as in `report` mode and report every finding**, but
+   skip phases 7 and 8 entirely. Set `pr` to `null`, `pr_skipped_reason` to
+   `open PR already exists on chore/dependabot-remove-pins`, and put that PR's URL in
+   `existing_pr_url`. The findings are still worth having, since they are what tells the user
+   whether the open PR is still the right one, so this is not a failure. Create the worktree
+   detached, as in `report` mode, since nothing will be pushed.
+2. **Stale-branch guard.** If the branch exists locally but no PR is open on it, someone may hold
+   unpushed work on it. Stop and return a failure (phase `worktree`).
+
+   ```bash
+   git -C <repo_root> branch --list "chore/dependabot-remove-pins"   # any output => branch exists => stop
+   ```
+
+Then, with both guards clear:
+
+```bash
+git -C <repo_root> fetch origin <default_branch>
+mkdir -p <repo_root>/.claude/worktrees
+git -C <repo_root> worktree add "$WORK/audit" -b chore/dependabot-remove-pins "origin/<default_branch>"
+```
+
+No `cd` of its own follows, here or anywhere in this document: cwd does not survive to the next
+call, so every later command carries its own location instead.
 
 ## Phase 2: List the pins
 
@@ -106,7 +166,8 @@ and `alias_range` (see [ADR 001](../../../docs/adr/001-ecosystem-adapter-contrac
 the phases below needs them, beyond quoting `range` and the alias fields in your report.
 
 `count` of 0 is a complete answer: this repository pins nothing, so report that and stop after
-cleanup. Unlike a lockfile parse, an empty override block is read from structured JSON and cannot
+cleanup. In `pr` mode that also means `pr` is `null` with `pr_skipped_reason`
+`no removable pins found`: there was never a candidate set to test. Unlike a lockfile parse, an empty override block is read from structured JSON and cannot
 mean "the parser failed".
 
 **A non-zero exit is not an empty result.** The adapter fails rather than reporting zero pins when
@@ -257,9 +318,11 @@ in the tree, so they are both the most costly and the most likely to be over-bro
    repository every install also rewrites the committed `.yarn/cache/*.zip` entries, which are
    tracked, outside this pathspec, and restored by nothing here. That is deliberate rather than
    overlooked: cache archives are content-addressed artifacts of the lockfile, so they cannot make
-   the next pin resolve differently, and the whole worktree is a scratch checkout that phase 7
-   removes — none of it reaches the user's own tree. So say the two files match HEAD, which is what
-   was checked; do not report the worktree as clean.
+   the next pin resolve differently, and Cleanup removes the whole worktree, so none of it reaches
+   the user's own tree. So say the two files match HEAD, which is what
+   was checked; do not report the worktree as clean. In `pr` mode those archives stop being
+   ignorable once there is a commit to make; phase 8 says what to stage. They still cannot perturb
+   a pin test, which is why this pathspec does not grow.
 
 **Step 6 is not bookkeeping; it is the reason a `removable` verdict can be trusted.** An override
 reaches past its own target: lifting it changes dedup and hoisting, and lets a peer conflict
@@ -436,7 +499,277 @@ A single removable pin on a package keeps the plain `removable` status: there is
 misread.
 
 Recommend nothing beyond removal of the entries you tested. In particular do not propose version
-bumps, do not propose converting bare pins to scoped ones, and do not open a PR.
+bumps and do not propose converting bare pins to scoped ones. **In `report` mode you stop here**:
+skip phases 7 and 8, set `pr` to `null`, and go to Cleanup. The findings are the deliverable, and
+the user acts on them.
+
+## Phase 7: In `pr` mode, test the removable set together
+
+Phases 4 and 5 tested **one pin per install**, which is what makes each verdict evidence about
+that pin. It is also why no set of pins has yet been installed together, and a PR removes a set.
+So the PR earns its own test, and the rule is absolute:
+**a PR never removes a set that was not installed and judged as a set.**
+Attempt 1 is that test; attempt 2 is the one fallback, and there is no third.
+
+Work in the same `$WORK/audit` worktree, which phase 4 step 7 left matching `HEAD`.
+
+### Attempt 1: every removable pin at once
+
+The candidate set is every finding whose status is `removable` **or**
+`removable-individually`, the two statuses phase 5 judged safe, differing only in whether siblings
+held the line during the individual test, which is exactly the question this combined install
+answers. Nothing else joins it: `still-required`, `inconclusive`, `not-tested` and
+`not-a-version-pin` are not confirmed safe, and a PR is not the place to find out.
+
+**An empty candidate set is a complete answer.** Nothing was found removable, so there is nothing
+to open a PR about. Set `pr` to `null` with `pr_skipped_reason` `no removable pins found`, say so
+in the report, and go to Cleanup.
+
+Otherwise:
+
+1. Remove **every** candidate entry from `package.json` with Edit, removing the whole override
+   block if nothing survives, and nothing else.
+2. `cd "$WORK/audit" && $ADAPTER install`
+3. `cd "$WORK/audit" && $ADAPTER resolution_map`
+4. **Diff every package in that map against phase 4's with-all-pins baseline map**, every package,
+   not only the ones the removed pins name. That is the point: an override reaches past its own
+   target, and a set of them reaches further than any one did alone. For each package whose version
+   set changed, record `{package, baseline, without_pins, newly_admitted}`.
+5. **Run `check-advisories.sh` on every newly admitted version of every changed package, each
+   under its own package name:**
+
+   ```bash
+   <scripts_dir>/check-advisories.sh --adapter $ADAPTER --version <newly admitted version> <that package>
+   ```
+
+   The attempt is **clean** only when every one of those comes back `safe`. `vulnerable` fails it,
+   and so do `unknown` and `no-advisories`, for the reason phase 5 gives: neither is a synonym for
+   safe, and this is the one place in the audit where the answer becomes a change to a real
+   repository rather than a sentence in a report.
+
+**A partial view of the tree fails the attempt closed, never into a PR.** If `resolution_map` is
+unavailable, or errors, or comes back with a count of entries the parser could not read that is
+anything other than zero, you have no whole-tree answer and cannot get one. In `report` mode a
+partial view degrades to a narrower claim, because a narrower claim is still only words. Here the
+same gap would ship a deletion no one checked. Record the reason (`partial resolution map` in
+`pr_skipped_reason` if it ends the run) and go to attempt 2, which is measured the same way and
+fails the same way for the same cause.
+
+**Restore the tree before attempt 2**, with phase 4 step 7's two commands and its verification,
+including that a non-zero exit ends the run (phase `restore`). Everything that rule protects is
+still true here: an attempt 2 measured against a tree still carrying attempt 1's removals is a
+result about neither.
+
+### Attempt 2: the `removable` pins only
+
+Only if attempt 1 failed. The candidate set **drops every pin whose finding was
+`removable-individually`**, keeping the pins that were the sole removable pin on their package.
+They are the findings with no sibling ambiguity at all, so the set is the most conservative one the audit can still stand behind, and
+dropping them is how a failing combined test narrows rather than being overridden.
+
+Run the identical procedure: Edit them all out, install, `resolution_map`, diff every package
+against phase 4's baseline map, `check-advisories.sh` on every newly admitted version of every
+package. Same clean bar, same fail-closed rule on a partial map.
+
+If attempt 2's candidate set is empty, every removable finding having been
+`removable-individually`, there is no second attempt to run. Report attempt 1's evidence and open
+no PR.
+
+**Both attempts failing means no PR**, and the result says so with the evidence: which attempt,
+which package and version were newly admitted, and what verdict they earned. That is a finding,
+not a failure; the audit did its job and the answer is that this set cannot be removed as a set
+today. Set `pr` to `null` with `pr_skipped_reason` `combined test failed`, restore the tree, and go
+to Cleanup.
+
+When an attempt is clean, **leave its removals in the tree**, which is the diff phase 8 commits,
+and carry into phase 8: which attempt passed, the removed keys, the pins left behind with the
+attempt that excluded them, the collateral list, and the advisory verdicts.
+
+## Phase 8: Repo checks, merge risk, and the draft PR
+
+This mirrors `fix-dependency`'s phases 5 to 7. The pins are already out of the tree and installed;
+what remains is showing the change is safe to merge and putting it where a human reviews it.
+
+### Repo checks
+
+```bash
+cd "$WORK/audit" && $ADAPTER verification_commands
+```
+
+`commands` is a **candidate list, not a running order**. Skip anything that is not a check:
+servers, migration or codemod runners, release and publish scripts, and `postinstall` (the install
+already ran it). Record every skip and its reason. Then run each remaining candidate:
+
+```bash
+cd "$WORK/audit" && <scripts_dir>/run-check.sh <pm_exec> <script-name>
+```
+
+`pm_exec` is the field of that name on `cd "$WORK/audit" && $ADAPTER detect`, the same call phase 4
+took `lockfile` from. It returns `{command, exit, log, lines, tail}`; the outcome is that JSON, so
+never re-run a check to see how it went.
+
+**One attempt each, then CI.** A check that cannot start (missing environment, a tool the machine
+lacks, a declined permission) is `skipped` with the reason after one attempt, and F5 says so. No
+second strategy and no environment engineering.
+
+**Never attribute a failure to pre-existing breakage without running the same check against the
+default branch.** Not "if unsure": always. Removing a pin moves versions, and a latent defect that
+has sat green for months reads exactly like pre-existing breakage until both trees have been run.
+Create the base worktree lazily, only when a failure actually needs attributing, because it costs a
+full install:
+
+```bash
+git -C <repo_root> worktree add --detach "$WORK/base" "origin/<default_branch>"
+cd "$WORK/base" && $ADAPTER install
+cd "$WORK/base" && <scripts_dir>/run-check.sh <the failing command>
+```
+
+**A failed base install voids the comparison**: check its exit status first, and never classify a
+failure `fail-preexisting` off a base tree that did not install: that is the one verdict a missing
+baseline cannot support, and it is the one that does not block the PR. Classify `fail-caused` or
+return a failure (phase `verify`) saying the baseline could not be established.
+
+Failures this removal causes must be fixed here, or the PR abandoned with a failure result (phase
+`verify`). Pre-existing failures are noted and do not block.
+
+### Merge risk, per removed package
+
+Score **one rating per package whose pin the PR removes**, because the rubric rates a version
+move and each package moved separately:
+
+```bash
+cd "$WORK/audit" && $ADAPTER why <package> > "$WORK/why-<package>.json"
+cd "$WORK/audit" && $ADAPTER declared_ranges <package>
+cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
+  --package <package> \
+  --before <the version the pin was holding, from phase 4's baseline> \
+  --after <the version that resolves now> \
+  --adapter $ADAPTER \
+  --why-json "$WORK/why-<package>.json" \
+  --f4 <0|1|2> --f5 <0|1|2> \
+  --override-scope none \
+  --declared-range <range> [--declared-range <range>]...
+```
+
+- `--before` is the pinned resolved version and `--after` the naturally resolved one. That is the
+  removal's actual delta, and it is frequently a *downgrade*: the rubric rates distance, which is
+  what a reviewer needs either way.
+- `--override-scope none` is a statement of fact, not a discount. F6 rates the blast radius of an
+  override this change **applies**, and this change applies none; it removes them. Reporting
+  `scoped` or `bare-*` here would score the pin that is going away.
+- `--declared-range` is **required**, one flag per distinct range from `declared_ranges`, verbatim.
+  Pass `--declared-range none` for an empty `ranges[]`, and say in the PR body which of the two
+  ways produced it: nothing could be read (`parents_read[]` empty), or parents were read and
+  declare nothing. The sentinel is the same and the reviewer's conclusion is not.
+- **F4 and F5 are shared across the PR**, because one PR runs one check suite: F4 is the test
+  signal of that suite, F5 its verification completeness. Score them once and pass the same pair to
+  every package.
+- Read the script's own header comment for the full flag contract before invoking it.
+
+**The PR's band is the highest band across the packages**, and every package's returned `markdown`
+goes into the body verbatim, under its own heading. A per-package rating averaged or collapsed into
+one number would hide the package that earned the band, which is the one a reviewer should read
+first.
+
+### Commit, push, open the draft PR
+
+Stage `package.json` and the lockfile explicitly. In a zero-install Yarn Berry repository the
+install also rewrites tracked `.yarn/cache/*.zip` archives, and those belong in the commit: they
+are the lockfile's committed state, and a branch that moves one without the other does not install.
+Stage exactly what the install touched, named from `git -C "$WORK/audit" status --porcelain`, and
+nothing else.
+
+```bash
+git -C "$WORK/audit" add package.json <lockfile>
+git -C "$WORK/audit" commit -m "..."
+git -C "$WORK/audit" push -u origin chore/dependabot-remove-pins
+```
+
+Commit message, where N is the number of removed entries:
+
+```
+chore(deps): remove <N> stale dependency pin(s)
+
+Every removed entry was tested individually and then as a set: with all of
+them out, no published advisory range admits any newly resolved version, in
+this package or anywhere else in the lockfile.
+
+Removed:
+- <key>: <value> (was holding <package> at <version>; now resolves <version>)
+
+Refs: pin audit, <nwo>
+```
+
+Then create the PR. The `gh` calls carry `--repo`, so they are location-independent and take no
+`cd` prefix. `gh pr create` fails outright if a label does not exist, so check and create first:
+
+```bash
+gh label list --repo <nwo> --json name --jq '.[].name'
+gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --draft --label security \
+  --title "..." --body "..."
+```
+
+Label names are case-insensitive for uniqueness and case-preserving, so passing lowercase
+`security` is safe whether the repository holds `security` or an older capitalized `Security`; the
+`|| true` absorbs the duplicate report and leaves the existing label untouched. Collect any
+additional labels every CLAUDE.md in your context requires and pass each via its own `--label`;
+labels are additive and no source overrides another.
+
+PR body:
+
+```markdown
+## Summary
+
+Removes <N> dependency pin(s) this audit found no longer needed. Each was tested on its own (pin
+out, install, every newly resolved version judged against every published advisory for its
+package), and then the whole set was tested together in one install.
+
+## Pins removed
+
+| Pin | Scope | Value | Was holding | Now resolves | Advisories checked |
+|---|---|---|---|---|---|
+| `express>sha.js` | scoped | `>=2.4.11 <3` | `sha.js` 2.4.11 | 2.4.9 | 4, none admits 2.4.9 |
+
+## Tested together
+
+<the attempt that passed, in those terms: "all N pins removed in one install" for attempt 1, or
+"the M pins with no sibling ambiguity" for attempt 2, and what the combined install produced:
+every package whose resolution moved, every newly admitted version, and its advisory verdict>
+
+## Pins left behind
+
+<omit this section entirely when nothing was left behind>
+
+| Pin | Why |
+|---|---|
+| `eslint>minimatch` | attempt 1 admitted `minimatch` 3.0.4, which GHSA-… admits; excluded from attempt 2 |
+
+## Collateral changes
+
+<every other package whose resolved version set changed, with its newly admitted versions and
+their advisory verdicts; "nothing else moved" when the diff was empty>
+
+<merge-risk markdown for each removed package, verbatim, under its own heading>
+
+## Verification
+
+- [x] Combined install: <N> pin(s) removed together, <K> package(s) moved, every newly admitted
+      version checked against every published advisory for its own package
+- [x] `<command>` passes (one entry per command actually run; note skips and pre-existing
+      failures, including the default-branch comparison results)
+
+## References
+
+- <the PR or commit that introduced each pin, and the fixed alerts for its package, from phase 3>
+```
+
+Every claim in that body is one this run made. **Never state that a pin is unnecessary on
+provenance alone**: the fixed alerts say why the pin was probably added and nothing about whether
+it is still load-bearing (phase 3).
+
+**Never mark the PR ready**, and do not offer to. Promotion is the dispatcher's decision, made with
+check state and auto-merge state in front of the user (ADR 002).
 
 ## Cleanup
 
@@ -444,8 +777,13 @@ Before returning — on success **and** on every failure path:
 
 ```bash
 git -C <repo_root> worktree remove --force "$WORK/audit"
+git -C <repo_root> worktree remove --force "$WORK/base" 2>/dev/null || true
 rm -rf "$WORK"
 ```
+
+The `$WORK/base` line is phase 8's attribution worktree, which exists only when a check failure
+needed one; the `|| true` is why it costs nothing when it does not. In `pr` mode the branch itself
+survives, pushed or irrelevant on failure, and the worktrees never do.
 
 `--force` because the install dirties the tree. `worktree remove` already drops your
 administrative entry, and it names your path: that is the entire cleanup you are entitled to.
@@ -464,6 +802,7 @@ End your final message with exactly one fenced JSON block:
 {
   "status": "success",
   "repo": "<nwo>",
+  "mode": "pr",
   "pm": "pnpm",
   "override_location": "pnpm.overrides",
   "pins_found": 7,
@@ -500,6 +839,22 @@ End your final message with exactly one fenced JSON block:
       "detail": "removing the entry newly admits sha.js 2.4.9 (2.4.11 is held elsewhere either way); no published advisory range admits 2.4.9. It also newly admits readable-stream 2.3.8 elsewhere in the tree, which no advisory range admits either"
     }
   ],
+  "pr": {
+    "url": "https://github.com/<nwo>/pull/531",
+    "branch": "chore/dependabot-remove-pins",
+    "removed_keys": ["express>sha.js"],
+    "left_behind": [
+      {"key": "eslint>minimatch", "reason": "attempt 1 admitted minimatch 3.0.4, which GHSA-f8q6-p94x-37v3 admits"}
+    ],
+    "attempt": 2,
+    "risk": {"band": "Low", "score": 2, "f4": 0, "f5": 0},
+    "scripts": [
+      {"command": "pnpm test", "result": "pass", "detail": null},
+      {"command": "pnpm e2e", "result": "skipped", "detail": "needs deployed preview URL; CI is the signal"}
+    ]
+  },
+  "pr_skipped_reason": null,
+  "existing_pr_url": null,
   "failure": null
 }
 ```
@@ -528,8 +883,28 @@ End your final message with exactly one fenced JSON block:
   folded into these.
 - `detail` carries the judgment: the install error for `inconclusive`, the reason for
   `not-tested`, what the entry really is for `not-a-version-pin`.
-- On failure: `"status": "failure"`, `findings` holds everything completed before stopping, and
-  `failure` is
-  `{"phase": "input | worktree | list | install | restore | advisories", "detail": "..."}`.
+- `mode` is the value you were dispatched with, verbatim: `report` or `pr`. It is what tells a
+  reader whether a `null` `pr` means "not asked for" or "asked for and not reached".
+- `pr` is `null` in `report` mode, always, and in `pr` mode whenever no PR was opened. **Whenever it
+  is `null` in `pr` mode, `pr_skipped_reason` is non-null** and says which of the four reasons it
+  was: `no removable pins found`, `combined test failed`,
+  `open PR already exists on chore/dependabot-remove-pins` (with that PR's URL in
+  `existing_pr_url`), or `partial resolution map`. A null PR with no reason is
+  indistinguishable from a mode that never tried, which is the one thing the dispatcher must be
+  able to tell apart.
+- Inside `pr`: `removed_keys[]` is every manifest key the commit deleted; `left_behind[]` is one
+  `{key, reason}` per candidate the passing attempt excluded, `[]` when attempt 1 passed and
+  nothing was dropped; `attempt` is `1` or `2` and names the attempt whose combined install the
+  body describes; `risk` is the **highest** band across the removed packages with the shared F4/F5;
+  `scripts[]` is phase 8's check outcomes, `result` being `pass`, `fail-preexisting`,
+  `fail-caused`, or `skipped`, with `detail` carrying the judgment.
+- On failure: `"status": "failure"`, `findings` holds everything completed before stopping, `pr` is
+  `null`, and `failure` is
+  `{"phase": "input | worktree | list | install | restore | advisories | compose | verify | push | pr", "detail": "..."}`.
   `restore` is phase 4 step 7's: the tree could not be returned to its pre-pin state, so every
-  later pin would have been tested against a manifest carrying an earlier removal.
+  later pin would have been tested against a manifest carrying an earlier removal. The last four
+  are `pr` mode's: `compose` is phase 7's edit or install failing, `verify` is phase 8's checks
+  (a caused failure that could not be fixed, or a baseline that could not be established), and
+  `push` and `pr` are the git push and `gh pr create` themselves. A combined test that ran and came
+  back dirty is **not** a failure. It is `pr_skipped_reason` `combined test failed` on a
+  `"status": "success"` result, because the audit answered the question it was asked.

@@ -78,7 +78,9 @@ SETTINGS="$SETTINGS_DIR/settings.local.json"
 # `status` and `rev-parse`. The alerts rule carries no wildcard between
 # `gh api` and the path, deliberately: one there would match
 # `gh api -X PATCH repos/<nwo>/dependabot/alerts/42 -f state=dismissed` and
-# pre-approve *mutating* an alert in a plugin whose audit is report-only.
+# pre-approve *mutating* an alert, which nothing in this plugin does: the pin
+# audit's own writes are a branch, a commit and a draft PR, never an alert's
+# state.
 # Having no flag slot before the path is also why agents/audit-pins.md
 # prescribes `gh api repos/<nwo>/dependabot/alerts -X GET -f state=fixed ...`
 # with the method AFTER the path: `gh api` switches to POST whenever any `-f`
