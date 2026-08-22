@@ -68,3 +68,66 @@ Describe 'the audit rules that read a partially-parsed map'
     The output should equal '1'
   End
 End
+
+# The removal PR (issue #72) is where a finding stops being words and becomes a
+# deletion in someone's repository, so the definition's own guards are what
+# stand between a plausible per-pin verdict and a bad merge. Each example below
+# names one guard and fails if the sentence carrying it leaves the file.
+Describe 'the rules that gate the removal PR'
+  AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+
+  rule_in() { grep -c "$2" "$1"; }
+
+  # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
+  # no set has ever been installed together, and a PR removes a set. Without
+  # this sentence the PR would ship N individually-tested deletions as one
+  # untested operation, which is the `removable-individually` hazard wearing a
+  # commit.
+  It 'requires the combined test before any PR'
+    When call rule_in "$AGENT" 'installed and judged as a set'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # A single unreadable locator drops its package from both snapshots, so the
+  # diff reports no change for it. In report mode that degrades to a narrower
+  # claim; here it would ship a deletion nothing checked, so it fails closed.
+  It 'fails an attempt closed on a partially-read map'
+    When call rule_in "$AGENT" 'fails the attempt closed'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Attempt 2 is the narrowing fallback. Keeping the individually-tested pins
+  # in it would re-run the set that just failed, minus nothing that mattered.
+  It 'narrows attempt 2 by dropping the individually-tested pins'
+    When call rule_in "$AGENT" 'drops every pin whose finding was'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # Promotion is the dispatcher's call with check state and auto-merge state in
+  # front of the user (ADR 002). An agent that promotes its own PR removes the
+  # checkpoint entirely, and where auto-merge is armed it merges it.
+  It 'never lets the agent mark its own PR ready'
+    When call rule_in "$AGENT" 'Never mark the PR ready'
+    The status should be success
+    The output should equal '1'
+  End
+
+  # PR mode first at every dispatch point, because the audit already did the
+  # work a removal PR needs; a report-first default makes a human re-derive the
+  # diff by hand, which is the step most likely to be skipped entirely.
+  Describe 'PR mode leads the choice wherever the mode is asked'
+    Parameters
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+    End
+
+    It "offers it first in $1"
+      When call rule_in "$1" 'first option and the recommended'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+End
