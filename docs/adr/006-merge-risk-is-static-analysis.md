@@ -47,9 +47,15 @@ module's basename, when a `<basename>.test.*` / `<basename>.spec.*` sibling or
 name. Where nothing imports the package at all, the question becomes what would catch a broken
 tooling pin, which is the build script.
 
-F5 asks whether CI will run on the pull request, read out of `.github/workflows/*.yml` with grep:
-0 when a pull-request-triggered workflow runs a test, build, typecheck, check, or lint step, 1
-when such a workflow exists with no visible step, 2 when nothing triggers on a pull request.
+Where there *are* affected modules and `package.json` declares no `test` script, F4 is 2 whatever
+the files look like. A test file nothing runs is not coverage, and the pull request this feeds has
+no way to run it either.
+
+F5 asks whether CI will run on the pull request, read out of `.github/workflows/*.yml` and
+`*.yaml` with grep: 0 when a pull-request-triggered workflow runs a test, build, typecheck, check,
+or lint step, 1 when such a workflow exists with no visible step, 2 when nothing triggers on a
+pull request. `pull_request_target` counts alongside `pull_request`, because it also runs on pull
+requests, which is the only thing the factor asks.
 
 **CI on the draft pull request is the verifier.** The agent analyzes, scores, opens the draft, and
 moves on. A band that CI later contradicts is the repository's tests doing their job, not a defect
