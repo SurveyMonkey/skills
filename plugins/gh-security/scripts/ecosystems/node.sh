@@ -1853,13 +1853,22 @@ resolved_major_for_parent() {
 # reports `unsupported` for it: its `snapshots:` blocks record what a dependency
 # resolved to, never the specifier it was declared with. A pnpm parent keeps the
 # installed-manifest path below rather than getting a guessed declaration.
+#
+# The parentheses around `.packages // {}` are load-bearing, not style. `as`
+# binds its whole right-hand side, so `A // B as $x | body` parses as
+# `A // (B as $x | body)`: with a `packages` map present the alternative
+# short-circuits and the program returns that map instead of the rows. jq 1.8
+# happens to give the intended reading, jq 1.7 (ubuntu-latest, and the floor
+# these scripts support) gives the other one, so on Linux every lockfile-read
+# parent came back `parents_unreadable` while macOS was green. Bind first,
+# always: every other `//`-defaulted binding in these scripts is parenthesized.
 NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
 def prefixes:
   if . == "" then [""]
   else [.] + ((sub("/?node_modules/[^/]+$"; "")) | prefixes) end;
 def candidates($dk):
   prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
-.packages // {} as $pkgs
+(.packages // {}) as $pkgs
 | [ $pkgs | to_entries[]
     | .key as $path
     | .value as $v

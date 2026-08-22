@@ -10,6 +10,14 @@ JSON contract; interpreting failures and writing prose stays with the agent.
 `python`. Semver comparison is implemented in jq rather than shelling out to `npx semver`, which
 would mean a cold-cache network fetch in the middle of a security fix.
 
+**Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
+Homebrew, so anything the two versions read differently goes green locally and red only in CI.
+**Parenthesize a `//` default before binding it**: `(A // B) as $x`, never `A // B as $x`. `as`
+takes its whole right-hand side, so the unparenthesized form parses as `A // (B as $x | body)`
+and short-circuits to `A` whenever `A` is present — 1.8 reads it as intended, 1.7 does not
+([#82](https://github.com/SurveyMonkey/skills/pull/82)). `spec/jq_binding_spec.sh` gates the
+shape on every platform.
+
 **Target bash 3.2** (the macOS default). Not every engineer has Homebrew bash on PATH. That rules
 out associative arrays, `mapfile`/`readarray`, `${var,,}`, and `**`. jq carries the data
 structures instead.
