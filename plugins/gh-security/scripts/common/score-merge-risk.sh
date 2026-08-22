@@ -3,15 +3,16 @@
 #
 # Usage:
 #   score-merge-risk.sh --package <pkg> --after <version> --adapter <path>
-#                       --why-json <file|-> --f4 <0|1|2> --f5 <0|1|2>
+#                       --why-json <file|->
 #                       --override-scope <none|scoped|bare-tightened|bare-added>
 #                       --declared-range <range|none> [--declared-range <range>]...
 #                       [--before <version>]
-#                       [--f4-evidence <text>] [--f5-evidence <text>]
+#
+# Run from the root of the tree being scored: F3, F4 and F5 read that tree.
 #
 # Output: {package, score, max, band, escalated, escalation_reason, delta,
-#          majors_crossed, declared_ranges, override_scope, factors: [...],
-#          markdown}
+#          majors_crossed, declared_ranges, override_scope, coverage, ci,
+#          factors: [...], markdown}
 #
 # Seven factors, each 0-2, summed to 0-14. Bands: Low 0-3, Medium 4-6, High 7+,
 # with three escalation rules: neither a major version delta nor a newly added
@@ -19,27 +20,70 @@
 # dependency with no test signal never rates below High.
 #
 # The band thresholds are absolute risk points, not proportions of the maximum,
-# so they did not move when F6 was added (issue #20) and did not move for F7
-# (issue #21). What changes a band is a fix that scores on the new factors or
-# trips the new escalation, which is the point of adding them: the sweep case
-# bork#350 goes from Medium 6 to High 7 on exactly that route. A fix that
-# scores 0 on both new factors, as every direct update or scoped override
-# crossing at most one major line and no pin does, keeps the band it had. The
-# "no pin" half is not decoration: a single-major bump past a dependent's
-# `~1.2.3` scores 1 on F7 and can move Medium to High on that alone.
+# so they did not move when F6 was added (issue #20), did not move for F7
+# (issue #21), and did not move when F4 and F5 were redefined as static
+# analysis (issue #71, ADR 006): that redefinition changed what the two factors
+# measure, not how many there are, so the maximum stays 14 and every threshold
+# stays where it was. What changes a band is a fix that scores on a factor or
+# trips an escalation, which is the point of having them: the sweep case
+# bork#350 rates High on exactly that route. A fix that scores 0 on F6 and F7,
+# as every direct update or scoped override crossing at most one major line and
+# no pin does, keeps the band it had. The "no pin" half is not decoration: a
+# single-major bump past a dependent's `~1.2.3` scores 1 on F7 and can move
+# Medium to High on that alone.
 #
 # `--declared-range` is required, with an explicit `none` sentinel for "no
 # dependent range could be read". Left optional, its absence made the
 # multi-major escalation unreachable without saying so, and a caller whose
 # collection step half-failed looked identical to one with nothing to report.
 #
-# The split of labour is deliberate. F1-F3 are derivable from the repository
-# and the lockfile, so they are computed here. F4 (test signal), F5
-# (verification completeness) and F6 (which remediation shape was applied) are
-# facts only the agent that did the work knows, so they are passed in. F7 is
-# both: the caller states the ranges its dependents declared, the adapter says
-# what those ranges mean, and this script decides what that is worth. This
-# script applies the bands either way.
+# The split of labour is deliberate. F1-F5 are derivable from the repository,
+# the lockfile and the version pair, so they are computed here. F6 (which
+# remediation shape was applied) is a fact only the agent that did the work
+# knows, so it is passed in. F7 is both: the caller states the ranges its
+# dependents declared, the adapter says what those ranges mean, and this script
+# decides what that is worth. This script applies the bands either way.
+#
+# F4 and F5 used to be passed in too, as "did the tests pass" and "did every
+# repo script run", which meant the agent had to run the repository's checks
+# before a score existed. That collapsed "this repo has no tests" and "one
+# check could not start in this sandbox" into the same 2, and it did not scale:
+# at hundreds of alerts, running every repo's suite per fix is CI's job, not an
+# agent's (issue #71, ADR 006). Both are static analysis now, and CI on the
+# draft PR is the verifier. A High that CI later contradicts is the tests
+# working, not a scoring defect.
+#
+# F4 asks whether anything tests the surface this fix touches, reusing F3's
+# importing modules. A module counts as covered when a test file imports it by
+# a specifier whose last path segment is the module's basename, or when a
+# `<basename>.test.*` / `<basename>.spec.*` sibling or `__tests__/<basename>.*`
+# entry sits next to it, or when a test file imports the package itself by
+# name. The specifier match is a **basename heuristic**: `../src/util`,
+# `./util.js` and `@/lib/util` all count as covering `src/util.js`, and so
+# would a test importing an unrelated `lib/util.js`. Two modules with the same
+# basename in different directories are not told apart, which overstates
+# coverage rather than understating it; a resolver would fix that and needs a
+# module graph this script deliberately does not build.
+#
+# "Is this a test file" is the same path regex F3 excludes by, so the two
+# factors always talk about the same files. It catches configuration named
+# after the runner as well: `vitest.config.ts` importing `astro/config` reads
+# as a test importing the package by name, and covers the surface on that
+# alone (observed on tacoma.fyi). Also an overstatement, and deliberately not
+# fixed by a second, divergent regex: a path that counted as neither a source
+# module nor a test file would disappear from both factors at once.
+#
+# F5 asks whether CI will run on the pull request, read straight out of
+# `.github/workflows/*.yml` with grep. **Only GitHub Actions is read.** A repo
+# on CircleCI, Buildkite, Jenkins or a self-hosted runner scores 2 here even
+# though its checks will run. That is a documented limit, not a gap to paper
+# over: this flow opens GitHub pull requests and the mark-ready decision reads
+# the GitHub check rollup, so an Actions workflow is the one verifier it can
+# see before the PR exists. A repo scoring 2 on F5 gets a PR whose merge risk
+# says "nothing here proves CI runs", which is the honest reading. Parsing is
+# grep, not YAML: a job literally named `pull_request:` reads as a trigger, and
+# a step invoked through a composite action nobody can see from the workflow
+# file reads as absent.
 #
 # F6 exists because an override touching one parent and one touching the whole
 # tree used to score identically. A bare, unscoped override pins the package
@@ -64,10 +108,6 @@ BEFORE=""
 AFTER=""
 ADAPTER=""
 WHY_JSON=""
-F4=""
-F5=""
-F4_EVIDENCE=""
-F5_EVIDENCE=""
 OVERRIDE_SCOPE=""
 DECLARED_RANGES=""
 DECLARED_RANGES_SEEN=false
@@ -95,10 +135,6 @@ while [ $# -gt 0 ]; do
     --after)          need_value "$1" "${2-}"; AFTER="$2"; shift 2 ;;
     --adapter)        need_value "$1" "${2-}"; ADAPTER="$2"; shift 2 ;;
     --why-json)       need_value "$1" "${2-}"; WHY_JSON="$2"; shift 2 ;;
-    --f4)             need_value "$1" "${2-}"; F4="$2"; shift 2 ;;
-    --f5)             need_value "$1" "${2-}"; F5="$2"; shift 2 ;;
-    --f4-evidence)    need_value "$1" "${2-}"; F4_EVIDENCE="$2"; shift 2 ;;
-    --f5-evidence)    need_value "$1" "${2-}"; F5_EVIDENCE="$2"; shift 2 ;;
     --override-scope) need_value "$1" "${2-}"; OVERRIDE_SCOPE="$2"; shift 2 ;;
     # Repeatable and required: one flag per distinct range a dependent declares
     # for the package, or the single sentinel `none`. Ranges may contain spaces
@@ -118,7 +154,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-for required in PACKAGE AFTER ADAPTER WHY_JSON F4 F5 OVERRIDE_SCOPE; do
+for required in PACKAGE AFTER ADAPTER WHY_JSON OVERRIDE_SCOPE; do
   eval "value=\${$required}"
   if [ -z "$value" ]; then
     printf '{"error":"Missing required argument: --%s"}\n' \
@@ -139,8 +175,6 @@ if [ "$DECLARED_RANGES_NONE" = true ] && [ "$DECLARED_RANGES_STATED" = true ]; t
   exit 1
 fi
 
-case "$F4" in 0|1|2) ;; *) printf '{"error":"--f4 must be 0, 1, or 2"}\n' >&2; exit 1 ;; esac
-case "$F5" in 0|1|2) ;; *) printf '{"error":"--f5 must be 0, 1, or 2"}\n' >&2; exit 1 ;; esac
 case "$OVERRIDE_SCOPE" in
   none|scoped|bare-tightened|bare-added) ;;
   *) printf '{"error":"--override-scope must be none, scoped, bare-tightened, or bare-added"}\n' >&2
@@ -379,6 +413,11 @@ for target in $targets; do
   if [ -z "$pattern" ]; then pattern="$alt"; else pattern="$pattern|$alt"; fi
 done
 
+# One definition of "this path is a test", used to exclude test files from the
+# usage surface (F3) and to select them as coverage evidence (F4). Two copies
+# would let a path count as neither, or as both.
+TEST_PATH_RE='(test|spec|__tests__|__mocks__|e2e|cypress|\.stories\.)'
+
 importing_files=""
 if [ -n "$pattern" ]; then
   importing_files=$(grep -rlE "$pattern" . \
@@ -387,7 +426,7 @@ if [ -n "$pattern" ]; then
     --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
     --exclude-dir=.next --exclude-dir=coverage --exclude-dir=out \
     --exclude-dir=.yarn --exclude-dir=.git --exclude-dir=storybook-static \
-    2>/dev/null | grep -vE '(test|spec|__tests__|__mocks__|e2e|cypress|\.stories\.)' \
+    2>/dev/null | grep -vE "$TEST_PATH_RE" \
     || true)
 fi
 
@@ -427,21 +466,211 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# F4 / F5 — supplied by the agent that ran verification
+# F4 — test coverage of the affected surface
+#
+# The affected surface is F3's importing modules, so the two factors always
+# talk about the same files: F3 says how much of the tree touches the package,
+# F4 says how much of that anything tests. When F3 is 0 there is no surface to
+# cover and the question becomes what would catch a broken tooling pin instead,
+# which is the build script.
+#
+# A repository with no `test` script scores 2 whatever its files look like: a
+# test file nothing ever runs is not coverage, and the pull request this feeds
+# has no way to run it either.
 # ---------------------------------------------------------------------------
-if [ -z "$F4_EVIDENCE" ]; then
-  case "$F4" in
-    0) F4_EVIDENCE="tests pass and exercise the affected modules" ;;
-    1) F4_EVIDENCE="tests pass; affected modules not clearly exercised" ;;
-    2) F4_EVIDENCE="no test script, or tests could not run" ;;
-  esac
+has_script() {
+  [ -f package.json ] || return 1
+  jq -e --arg s "$1" '((.scripts // {})[$s] // "") != ""' package.json >/dev/null 2>&1
+}
+
+# The same tree F3 walked, listed rather than searched, so the test files can
+# be selected by path. `find` with prunes rather than a second `grep -r`
+# because nothing here needs the file contents yet.
+source_files() {
+  find . \
+    \( -type d \( -name node_modules -o -name dist -o -name build \
+       -o -name .next -o -name coverage -o -name out -o -name .yarn \
+       -o -name .git -o -name storybook-static \) -prune \) -o \
+    -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \
+       -o -name '*.mjs' -o -name '*.cjs' -o -name '*.vue' -o -name '*.svelte' \) \
+    -print 2>/dev/null
+}
+
+test_files=$(source_files | grep -E "$TEST_PATH_RE" || true)
+
+# Every module basename the test files import, collected in one pass rather
+# than one grep per affected module: a repository with 400 test files and 30
+# affected modules would otherwise fork 12,000 greps.
+#
+# Only quoted strings on lines that carry `from`, `import` or `require` are
+# read, and only those containing a `/`: a bare `'util'` is a package name, not
+# a sibling module, and a quoted URL on a `const endpoint =` line is neither.
+TEST_IMPORT_BASES=""
+if [ -n "$test_files" ]; then
+  TEST_IMPORT_BASES=$(printf '%s\n' "$test_files" | while IFS= read -r tf; do
+      [ -n "$tf" ] || continue
+      grep -hE "(^|[^A-Za-z0-9_])(from|import|require)([^A-Za-z0-9_]|$)" "$tf" 2>/dev/null || true
+    done \
+    | grep -oE "['\"][^'\"]*/[^'\"]*['\"]" \
+    | sed "s/^['\"]//; s/['\"]\$//; s|.*/||; s|\\.[A-Za-z0-9]\\{1,5\\}\$||" \
+    | sort -u || true)
 fi
-if [ -z "$F5_EVIDENCE" ]; then
-  case "$F5" in
-    0) F5_EVIDENCE="all repo scripts ran clean" ;;
-    1) F5_EVIDENCE="scripts ran; pre-existing failures noted" ;;
-    2) F5_EVIDENCE="one or more scripts skipped or partially run" ;;
-  esac
+
+# A test that imports the package by name exercises the package surface
+# directly, whatever the importing modules look like. `usage-app`'s
+# `tests/util.test.js` is exactly this shape.
+package_tested=false
+if [ -n "$pattern" ] && [ -n "$test_files" ]; then
+  hits=$(printf '%s\n' "$test_files" | while IFS= read -r tf; do
+      [ -n "$tf" ] || continue
+      grep -lE "$pattern" "$tf" 2>/dev/null || true
+    done || true)
+  [ -z "$hits" ] || package_tested=true
+fi
+
+module_covered() {
+  if [ "$package_tested" = true ]; then return 0; fi
+  _m="${1#./}"
+  _dir=$(dirname "$_m")
+  _base=$(basename "$_m")
+  _base="${_base%.*}"
+  for _cand in "$_dir/$_base".test.* "$_dir/$_base".spec.* "$_dir/__tests__/$_base".*; do
+    if [ -f "$_cand" ]; then return 0; fi
+  done
+  if [ -n "$TEST_IMPORT_BASES" ] \
+     && printf '%s\n' "$TEST_IMPORT_BASES" | grep -qxF "$_base"; then
+    return 0
+  fi
+  return 1
+}
+
+COVERED_COUNT=0
+UNCOVERED=""
+if [ "$import_count" -gt 0 ]; then
+  while IFS= read -r module; do
+    [ -n "$module" ] || continue
+    if module_covered "$module"; then
+      COVERED_COUNT=$((COVERED_COUNT + 1))
+    else
+      UNCOVERED="${UNCOVERED}${module#./}
+"
+    fi
+  done <<EOF
+$importing_files
+EOF
+fi
+
+# Five names is enough for a reviewer to recognize the shape of what is
+# uncovered; the full list is in the `coverage` object for anyone who wants it.
+uncovered_names=$(printf '%s' "$UNCOVERED" | awk 'NF' | head -5 | tr '\n' ',' | sed 's/,$//; s/,/, /g' || true)
+uncovered_total=$(printf '%s' "$UNCOVERED" | awk 'NF' | grep -c . || true)
+if [ "$uncovered_total" -gt 5 ]; then
+  uncovered_names="$uncovered_names, and $((uncovered_total - 5)) more"
+fi
+
+if [ "$import_count" -eq 0 ]; then
+  if has_script build; then
+    F4=0
+    F4_EVIDENCE="no source imports; a build script exists, so a broken tooling pin fails at build"
+  elif has_script test; then
+    F4=1
+    F4_EVIDENCE="no source imports and no build script; the test script is the only thing that would notice"
+  else
+    F4=2
+    F4_EVIDENCE="no source imports, and neither a build nor a test script exists"
+  fi
+elif ! has_script test; then
+  F4=2
+  F4_EVIDENCE="$import_count affected module(s), and package.json declares no test script"
+elif [ "$COVERED_COUNT" -eq "$import_count" ]; then
+  F4=0
+  F4_EVIDENCE="all $import_count affected module(s) are covered by a test"
+elif [ "$COVERED_COUNT" -gt 0 ]; then
+  F4=1
+  F4_EVIDENCE="$COVERED_COUNT of $import_count affected modules are imported by a test ($uncovered_names uncovered)"
+else
+  F4=2
+  F4_EVIDENCE="none of the $import_count affected module(s) is covered by a test ($uncovered_names uncovered)"
+fi
+
+# ---------------------------------------------------------------------------
+# F5 — CI presence
+#
+# grep over `.github/workflows/*.yml|yaml`, never a YAML parser: this ships to
+# machines that have jq and nothing else, and the question is coarse enough
+# that a parser would buy accuracy nobody spends. See the header for what that
+# costs (other CI vendors, composite actions, a job named `pull_request`).
+# ---------------------------------------------------------------------------
+# The scalar and list forms live on the `on:` line itself; the block form puts
+# `pull_request:` on an indented line under a bare `on:`. Requiring the bare
+# `on:` for the block form is what keeps `if: github.event_name ==
+# 'pull_request'` inside a step from reading as a trigger.
+pr_trigger() {
+  _m=$(grep -m1 -E "^[\"']?on[\"']?:[[:space:]]*(pull_request([[:space:]]|\$)|\[[^]]*pull_request)" "$1" 2>/dev/null || true)
+  if [ -n "$_m" ]; then
+    # The trigger, not the line it sits on: "on: [push, pull_request]" reads
+    # back as "on on: [push, pull_request]" once the evidence puts "on" in
+    # front of it.
+    printf '%s' "$_m" | sed "s/^[\"']*on[\"']*:[[:space:]]*//; s/[[:space:]]*\$//"
+    return 0
+  fi
+  if grep -qE "^[\"']?on[\"']?:[[:space:]]*\$" "$1" 2>/dev/null \
+     && grep -qE "^[[:space:]]{1,4}pull_request:" "$1" 2>/dev/null; then
+    printf 'pull_request'
+    return 0
+  fi
+  return 1
+}
+
+# A step that would exercise this fix: a package-manager invocation of one of
+# the five conventional script names, or a runner invoked directly. `name:`,
+# `uses:`, `if:` and comment lines are dropped so a job *called* "lint" does
+# not read as a job that runs one.
+CI_STEP_RE='(^|[[:space:]&|;(])(npm|pnpm|yarn|bun|npx|bunx)[[:space:]]+(run[[:space:]]+)?(test|build|typecheck|check|lint)([[:space:]]|$)|(^|[[:space:]&|;(/])(vitest|jest|playwright|cypress|tsc)([[:space:]]|$)'
+ci_step() {
+  grep -hE "$CI_STEP_RE" "$1" 2>/dev/null \
+    | grep -vE "^[[:space:]]*(#|-[[:space:]]+)?(name|uses|if|id|with):" \
+    | head -1 \
+    | sed 's/^[[:space:]]*//; s/^-[[:space:]]*//; s/^run:[[:space:]]*//; s/[[:space:]]*$//' \
+    || true
+}
+
+CI_WORKFLOW=""
+CI_TRIGGER=""
+CI_STEP=""
+pr_workflow=""
+pr_workflow_trigger=""
+workflow_count=0
+for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
+  [ -f "$wf" ] || continue
+  workflow_count=$((workflow_count + 1))
+  trigger=$(pr_trigger "$wf" || true)
+  [ -n "$trigger" ] || continue
+  step=$(ci_step "$wf" || true)
+  if [ -n "$step" ] && [ -z "$CI_WORKFLOW" ]; then
+    CI_WORKFLOW="$wf"
+    CI_TRIGGER="$trigger"
+    CI_STEP="$step"
+  elif [ -z "$pr_workflow" ]; then
+    pr_workflow="$wf"
+    pr_workflow_trigger="$trigger"
+  fi
+done
+
+if [ -n "$CI_WORKFLOW" ]; then
+  F5=0
+  F5_EVIDENCE="$CI_WORKFLOW triggers on $CI_TRIGGER and runs: $CI_STEP"
+elif [ -n "$pr_workflow" ]; then
+  F5=1
+  CI_WORKFLOW="$pr_workflow"
+  CI_TRIGGER="$pr_workflow_trigger"
+  F5_EVIDENCE="$CI_WORKFLOW triggers on $CI_TRIGGER, but no test, build, typecheck, check, or lint step is visible in it"
+elif [ "$workflow_count" -gt 0 ]; then
+  F5=2
+  F5_EVIDENCE="$workflow_count GitHub Actions workflow file(s), none triggering on pull_request"
+else
+  F5=2
+  F5_EVIDENCE="no GitHub Actions workflow triggers on this pull request; another CI vendor is not read"
 fi
 
 # ---------------------------------------------------------------------------
@@ -527,8 +756,17 @@ else
   DECLARED_JSON='"none-stated"'
 fi
 
+# The counts and the workflow the score rests on, so a PR body can cite them
+# without re-deriving anything and a reviewer can check the verdict against
+# what was actually read.
+UNCOVERED_JSON=$(printf '%s' "$UNCOVERED" | jq -Rs 'split("\n") | map(select(length > 0))')
+
 jq -n \
   --argjson declared_ranges "$DECLARED_JSON" \
+  --argjson affected "$import_count" --argjson covered "$COVERED_COUNT" \
+  --argjson uncovered "$UNCOVERED_JSON" \
+  --arg ci_workflow "$CI_WORKFLOW" --arg ci_trigger "$CI_TRIGGER" \
+  --arg ci_step "$CI_STEP" \
   --argjson f1 "$F1" --argjson f2 "$F2" --argjson f3 "$F3" \
   --argjson f4 "$F4" --argjson f5 "$F5" --argjson f6 "$F6" \
   --argjson f7 "$F7" --argjson majors "$MAJORS_CROSSED" \
@@ -541,8 +779,8 @@ jq -n \
     {id: "F1", name: "Version delta",           score: $f1, evidence: $e1},
     {id: "F2", name: "Runtime exposure",        score: $f2, evidence: $e2},
     {id: "F3", name: "Usage surface",           score: $f3, evidence: $e3},
-    {id: "F4", name: "Test signal",             score: $f4, evidence: $e4},
-    {id: "F5", name: "Verification",            score: $f5, evidence: $e5},
+    {id: "F4", name: "Test coverage",           score: $f4, evidence: $e4},
+    {id: "F5", name: "CI presence",             score: $f5, evidence: $e5},
     {id: "F6", name: "Override blast radius",   score: $f6, evidence: $e6},
     {id: "F7", name: "Declared-range distance", score: $f7, evidence: $e7}
   ] as $factors
@@ -589,6 +827,12 @@ jq -n \
       majors_crossed: $majors,
       declared_ranges: $declared_ranges,
       override_scope: $override_scope,
+      coverage: {affected: $affected, covered: $covered, uncovered: $uncovered},
+      ci: {
+        workflow: (if $ci_workflow == "" then null else $ci_workflow end),
+        trigger:  (if $ci_trigger == ""  then null else $ci_trigger end),
+        step:     (if $ci_step == ""     then null else $ci_step end)
+      },
       factors: $factors,
       markdown: (
         "## Merge risk: \($band) (\($score)/\($max))\n\n"

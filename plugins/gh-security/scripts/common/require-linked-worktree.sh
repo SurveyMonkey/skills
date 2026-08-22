@@ -49,9 +49,9 @@
 # guard keeps working when git is missing or the cwd is a scratch directory,
 # and so it stays testable without building a real repository per example.
 #
-# Both callers invoke this script instead of sourcing a shared function:
-# `ecosystems/node.sh` gates its mutating verbs with it, `common/run-check.sh`
-# gates every check run. One implementation, no drift.
+# Callers invoke this script instead of sourcing a shared function, so one
+# implementation serves every guard with no drift: `ecosystems/node.sh` gates
+# its mutating verbs with it, and any script that starts writing joins them.
 
 set -uo pipefail
 

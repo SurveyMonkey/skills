@@ -1,0 +1,5 @@
+{
+  "name": "no-test-script",
+  "dependencies": { "express": "^4.18.2", "lodash": "^4.17.21" },
+  "scripts": { "lint": "eslint ." }
+}

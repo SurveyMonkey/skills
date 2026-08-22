@@ -1,6 +1,6 @@
 #!/bin/sh
 # shellcheck shell=sh
-# node.sh detect, resolved_versions, why, and verification_commands.
+# node.sh detect, resolved_versions, and why.
 #
 # The regression that motivated this suite: v0.1.0's yarn validation used a grep
 # pattern that could never match, so it returned zero lines against every
@@ -753,32 +753,5 @@ Describe 'node.sh why'
     When call adapter_jq '.parents' why lodash
     The status should be success
     The output should equal '["express"]'
-  End
-End
-
-Describe 'node.sh verification_commands'
-  After 'cleanup_fixture'
-
-  It 'prefixes each script with the runnable pm_exec'
-    use_fixture npm-v3
-    When call adapter_jq '.commands | sort' verification_commands
-    The status should be success
-    The output should equal '["npm build","npm test"]'
-  End
-
-  It 'skips long-running servers'
-    use_fixture npm-v3
-    When call adapter_jq '.skipped' verification_commands
-    The status should be success
-    The output should equal '["start"]'
-  End
-
-  # Matching only the whole name would run test:watch forever; matching any
-  # segment would drop storybook:build, which is a real check.
-  It 'skips test:watch but keeps storybook:build'
-    use_fixture yarn-berry
-    When call adapter_jq '{skipped: (.skipped | sort), keeps_build: (.commands | any(test("storybook:build")))}' verification_commands
-    The status should be success
-    The output should equal '{"skipped":["dev","storybook","test:watch"],"keeps_build":true}'
   End
 End

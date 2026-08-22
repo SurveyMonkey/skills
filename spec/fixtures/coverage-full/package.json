@@ -1,6 +1,5 @@
 {
-  "name": "usage-app",
-  "main": "src/index.js",
+  "name": "coverage-full",
   "dependencies": { "express": "^4.18.2", "lodash": "^4.17.21" },
   "scripts": { "test": "vitest run" }
 }

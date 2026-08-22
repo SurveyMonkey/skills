@@ -42,15 +42,14 @@ If any of these is missing from your prompt, return a failure result (phase `inp
 guessing.
 
 Every script emits JSON on stdout and exits non-zero with an `error` key on failure. Your job is
-the judgment: interpreting install failures, deciding whether a failing script is pre-existing or
-caused by this change, and writing the PR prose. Do not reimplement what the scripts do.
+the judgment: interpreting install failures, deciding which override shape the tree needs, and
+writing the PR prose. Do not reimplement what the scripts do.
 
 ## Hard rules
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
-- **Denials are answers.** A declined permission on a verification command means skip that check
-  and defer to CI (phase 5). A declined permission on an essential step — worktree, install,
+- **Denials are answers.** A declined permission on an essential step — worktree, install,
   validate, commit, push, PR — ends the run with a failure report. Never respond to a denial by
   engineering an alternative route to the denied thing.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
@@ -62,15 +61,6 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   guaranteed to exist on the user's machine).
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
   written elsewhere outlives you.
-- **Never fabricate environment to make a check run.** No invented env vars, placeholder URLs,
-  dummy tokens. A check that cannot run in your environment as-is is recorded as `skipped` with
-  the reason (a config that hard-fails on a missing variable is the repository's defect to
-  note, not yours to work around), F5 says so, and CI or the repo owner is the right fixer. A
-  check passed under fabricated environment is not verification — it is a claim the PR body
-  cannot honestly make. **An error message saying "set X" is not permission to invent a
-  value**: it is scoped to the feature it belongs to (an e2e config wanting a real deployment
-  URL), and satisfying it with a placeholder so an unrelated tool can load the config is
-  fabrication with extra steps.
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
@@ -80,9 +70,8 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
   is `cd "$WORK/fix" && $ADAPTER shim "$WORK/bin"` — one silent call that writes the shim (it
   detects the package manager from the worktree, so it needs the prefix like every other adapter
   call) and returns its
-  `path_prefix` to prepend to PATH for that command. The shim exists so commits can succeed; it
-  is not license to retry a verification check that could not run (phase 5: one attempt, then
-  CI). Never hand-roll
+  `path_prefix` to prepend to PATH for that command. The shim exists so commits can succeed and
+  for nothing else. Never hand-roll
   the shim (three separate commands, each drawing security review) and never place one in the
   session scratchpad: that directory is shared with agents running in parallel, so one agent's
   cleanup deletes another's tooling. `$WORK` is yours alone and your cleanup already removes
@@ -97,7 +86,7 @@ caused by this change, and writing the PR prose. Do not reimplement what the scr
 - **Every Bash call starts fresh; nothing carries over from the last one.** The tool resets cwd
   to the session directory between invocations and shell variables do not survive, so a `cd`
   issued once does not govern the calls after it. **Every command locates itself**: git uses
-  `git -C <literal path>`, the `gh` calls in phase 7 locate themselves with `--repo <nwo>` and
+  `git -C <literal path>`, the `gh` calls in phase 6 locate themselves with `--repo <nwo>` and
   take no prefix, and every other non-git command carries its own `cd "$WORK/fix" && ` prefix.
   A command that relies on an earlier `cd` runs in `repo_root` instead, which is exactly how a
   live run bumped a package and regenerated a lockfile in the user's checkout.
@@ -169,8 +158,8 @@ rules). Worktrees do not share installed dependencies, so your install in phase 
 `git -C <literal path>`. The compound form (`cd "$WORK/fix" && git diff`) trips a per-command
 "cd before git" security review that no permission rule can silence, interrupting the user once
 per invocation, while the `-C` form is covered by the standing rules and runs silently. Non-git
-commands (the adapter, the check runner, the risk scorer) take the `cd "$WORK/fix" && ` prefix
-instead, which is covered too; only git needs the `-C` form.
+commands (the adapter, the risk scorer) take the `cd "$WORK/fix" && ` prefix instead, which is
+covered too; only git needs the `-C` form.
 
 ## Phase 2: Record the pre-fix baseline
 
@@ -182,7 +171,7 @@ Keep this output. The merge-risk rating needs the version resolved *before* the 
 install it is gone.
 
 If `present` is false the package is not currently in the lockfile, which is legitimate for a new
-direct dependency. Record that there is no baseline and continue; phase 7 handles it.
+direct dependency. Record that there is no baseline and continue; phase 5 handles it.
 
 If the script errors about parsing zero entries, the lockfile is unreadable. Stop and return a
 failure (phase `baseline`). Do not treat a failed parse as an empty result.
@@ -290,8 +279,8 @@ GitHub reports alerts as open for a window after the fix has merged. Discovery i
 them and you are right to find nothing to do. (Open-PR dedup does not catch it — that PR is
 **merged**, not open.)
 
-**Stop at this point.** Do not run phase 5's checks, do not score merge risk, do not commit, push,
-or open a PR: there is no change to verify, score, or review. Clean up and return
+**Stop at this point.** Do not score merge risk, do not commit, push, or open a PR: there is no
+change to score or review. Clean up and return
 `"status": "no-op"` with its required `no_op` object — the reason plus validate's own evidence
 (schema at the end). If you can identify the merged PR that landed the fix cheaply, name it in the
 reason; do not go hunting.
@@ -338,7 +327,7 @@ When `validate` fails, work through these in order:
    - **Adding only:** one entry appended to your result's `observations[]` (shape and required
      content under Result). The orchestrator aggregates unscoped overrides from that array, so a
      pin this run created and did not record there is debt no later audit can trace back.
-   - A section in the PR body (phase 7).
+   - A section in the PR body (phase 6).
 3. **A stale lockfile.** If validation still fails, the lockfile may hold pinned versions that
    resist overrides. Deleting a lockfile needs interactive confirmation you cannot obtain: stop,
    clean up, and return a failure (phase `validate`, detail noting that lockfile regeneration
@@ -363,82 +352,7 @@ a non-empty list:
 - Never widen your range, drop the major bound, or add an override outside your line to reach
   them.
 
-## Phase 5: Run the repository's own checks
-
-```bash
-cd "$WORK/fix" && $ADAPTER verification_commands
-```
-
-`commands` is a **candidate list**, not a running order. The script filters obvious long-running
-servers into `skipped` by name, but it cannot recognize every one. Review the list before running
-it and skip anything that is not a check: registry or preview servers, migration or codemod
-runners, release and publish scripts, and `postinstall` (already run by the install). Record what
-you skipped and why in your result's `scripts` array.
-
-Run each remaining candidate through the outcome runner, from the worktree:
-
-```bash
-cd "$WORK/fix" && <scripts_dir>/run-check.sh <pm_exec> <script-name>
-```
-
-`pm_exec` is the field of that name on `cd "$WORK/fix" && $ADAPTER detect` — this repository's
-package manager executable (`pnpm`, `yarn`, `npm`, or the absolutized vendored runner the repo
-pins). Call `detect` here if you have not already; never guess it from the lockfile name.
-
-It returns `{command, exit, log, lines, tail}` — the exit code and the last 60 lines are in the
-JSON, and the full output is in the named log (use Read if the tail is not enough). Never
-append exit markers or re-run a check to see its outcome; the outcome is the JSON.
-
-Run the rest — **one attempt each, then CI**. Local environments are not obligated to run a
-repository's whole check suite, and the scoring system treats "couldn't verify locally" as a
-first-class outcome, so never fight to avoid a skip:
-
-- A check that **cannot start** — missing environment, needs a deployed URL, a tool the machine
-  lacks — is recorded as `skipped` with the reason after **one** attempt. No second strategy,
-  no environment engineering, no alternative invocation hunting. CI on the PR is the verifier;
-  F5 says so; the mark-ready flow knows what to do with that.
-- A **declined permission** on a check command is an answer, not an obstacle: record the check
-  as `skipped` ("declined by user"), and never seek another route to run the same check.
-- A check that **runs and fails** is the case the attribution discipline below exists for —
-  judge it: caused by this update, or pre-existing?
-
-**Never attribute a failure to pre-existing breakage without running the same check against the
-default branch.** Not "if unsure": always. This is the easiest call in the whole flow to get
-wrong while sounding certain, and being confident is not the same as having checked. A dependency
-bump routinely activates a latent defect that has sat green in the default branch for months: a
-weak test that never awaited an async render, a stricter runner that now reports what it
-previously ignored, a peer range that only now conflicts. Every one of those reads exactly like
-pre-existing breakage right up until you run both trees. **Verify by running, not by reasoning
-about what the update changed.**
-
-Your worktree cannot switch branches to do this (the default branch is checked out in the user's
-tree). Create a second, detached worktree the first time a failure needs attribution — it costs a
-full install, so create it lazily, only when needed:
-
-```bash
-git -C <repo_root> worktree add --detach "$WORK/base" "origin/<default_branch>"
-cd "$WORK/base" && $ADAPTER install
-cd "$WORK/base" && <scripts_dir>/run-check.sh <the failing command>   # same command, same environment
-```
-
-Nothing switches you back afterwards; the next phase's commands carry `$WORK/fix` themselves.
-
-**A failed base install voids the comparison.** Check the install's exit status before running the
-check: a registry blip or a secret-gated hook leaves `$WORK/base` without dependencies, the check
-then fails for that reason instead of the repository's, and a failure read off that run looks
-exactly like pre-existing breakage. The baseline is unusable, so the comparison is inconclusive:
-classify the fix-tree failure as `fail-caused` (the conservative default, because it must then be
-fixed or the fix abandoned) or return a failure result (phase `verify`) saying the baseline could
-not be established. **Never `fail-preexisting` off a base tree that did not install** — that is
-the one classification the missing baseline cannot support, and it does not block the PR.
-
-Report both results explicitly, including in the PR body.
-
-Pre-existing failures are noted and do not block. Failures this update causes must be fixed here,
-or the fix abandoned with a failure result (phase `verify`): landing one puts a red suite on the
-default branch.
-
-## Phase 6: Score merge risk
+## Phase 5: Score merge risk
 
 Capture the post-fix version with `cd "$WORK/fix" && $ADAPTER resolved_versions <package>`, then:
 
@@ -475,7 +389,6 @@ cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --after <resolved version now> \
   --adapter $ADAPTER \
   --why-json "$WORK/why.json" \
-  --f4 <0|1|2> --f5 <0|1|2> \
   --override-scope <none|scoped|bare-tightened|bare-added> \
   --declared-range <range> [--declared-range <range>]...
 ```
@@ -497,13 +410,10 @@ the two ways of arriving there are different facts and the PR body must say whic
 Omitting the flag is a usage error, because its silent absence made the multi-major escalation
 unreachable no matter how far the fix actually jumped.
 
-The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface), and F7
-(distance from the declared ranges). You supply the three factors only you know:
+The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface), F4 (test
+coverage of the affected surface), F5 (CI presence) and F7 (distance from the declared ranges),
+all of them from the worktree it runs in. You supply the one factor only you know:
 
-- **F4 test signal** (phase 5): `0` tests pass and exercise the affected modules; `1` tests pass
-  but nothing clearly exercises them; `2` no test script, or tests could not run.
-- **F5 verification** (phase 5): `0` every script ran clean; `1` scripts ran with pre-existing
-  failures; `2` one or more scripts skipped or partially run.
 - **F6 override blast radius** (phase 4), via `--override-scope`: `none` you updated the direct
   dependency and added no override; `scoped` parent-scoped entries only; `bare-tightened` you
   tightened a pre-existing unscoped override; `bare-added` you introduced one. It scores 0, 0, 1,
@@ -512,15 +422,21 @@ The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface
   scoped entries plus an escalation to a bare override is `bare-tightened` or `bare-added`, never
   `scoped`.
 
-Be honest about all three. F4 and F5 gate whether the orchestrator may even offer to promote your
-PR out of draft, a `bare-added` fix never rates Low, and a fix crossing two or more major lines on
-a runtime dependency with `--f4 2` rates High outright; scoring them generously defeats the
-signals that say "nobody has verified this", "this pins the whole tree", and "nothing here has
-ever run against the version we just landed on".
+Be honest about it: a `bare-added` fix never rates Low, and a fix crossing two or more major lines
+on a runtime dependency that nothing tests rates High outright. Reporting a narrower shape than
+you applied defeats the signal that says "this pins the whole tree".
 
-Use the returned `markdown` verbatim in the PR body.
+**The score is static analysis, and CI on the draft PR is the verifier. Do not run the
+repository's scripts.** Not its tests, not its build, not its linters. F4 reads whether anything
+tests the modules that import this package, F5 reads whether a workflow will run on the pull
+request, and both come out of the files in your worktree. At this flow's volume, running every
+repository's suite per fix is CI's job, not yours; a High that CI later contradicts is the tests
+working, not a scoring defect (ADR 006).
 
-## Phase 7: Commit, push, open the draft PR
+Use the returned `markdown` verbatim in the PR body. Its `coverage` and `ci` objects carry the
+counts and the workflow the score rests on, if the PR body needs to cite them.
+
+## Phase 6: Commit, push, open the draft PR
 
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
 first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
@@ -591,7 +507,7 @@ PR body:
 |---|---|---|---|---|
 | [#N](https://github.com/<nwo>/security/dependabot/N) | CVE-XXXX-XXXXX | severity | 84.2% | summary |
 
-<merge-risk markdown from phase 6, verbatim>
+<merge-risk markdown from phase 5, verbatim>
 
 ## Dependency chain
 
@@ -617,8 +533,7 @@ PR body:
 
 - [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
       `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
-- [x] `<command>` passes (one entry per command actually run; note skips and pre-existing
-      failures, including the default-branch comparison results from phase 5)
+- CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
 
@@ -650,18 +565,17 @@ Before returning — on success **and** on every failure path:
 
 ```bash
 git -C <repo_root> worktree remove --force "$WORK/fix"     # --force: installs dirty the tree
-git -C <repo_root> worktree remove --force "$WORK/base" 2>/dev/null || true
 rm -rf "$WORK"
 ```
 
-`worktree remove` names your own paths and already drops their administrative entries: that is the
+`worktree remove` names your own path and already drops its administrative entry: that is the
 entire cleanup you are entitled to. **Never add `git worktree prune`.** It is repository-wide, and
 sibling agents very likely share this `repo_root` right now; a prune timed against a sibling's
 `worktree add` or `remove` can delete its live registration, and the breakage then surfaces in the
 victim with no cause it can observe.
 
-The fix branch itself remains (it is pushed, or irrelevant on failure); the worktrees never
-survive you. If cleanup itself fails, say so in `detail` and leave it — an orphaned worktree under
+The fix branch itself remains (it is pushed, or irrelevant on failure); the worktree never
+survives you. If cleanup itself fails, say so in `detail` and leave it — an orphaned worktree under
 `.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
 flight, but only if the report says it happened.
 
@@ -680,10 +594,6 @@ End your final message with exactly one fenced JSON block:
   "action": "direct-update | scoped-override | bare-override",
   "resolved_version": "<post-fix resolved version>",
   "risk": {"band": "Low", "score": 3, "f4": 0, "f5": 0},
-  "scripts": [
-    {"command": "pnpm test", "result": "pass", "detail": null},
-    {"command": "pnpm e2e", "result": "skipped", "detail": "needs deployed preview URL; CI is the signal"}
-  ],
   "observations": [],
   "requires_major_bump": [],
   "bare_override": "none",
@@ -700,8 +610,8 @@ End your final message with exactly one fenced JSON block:
   other than `none` means `action` is `bare-override`, and `bare-override` never pairs with
   `none`. `tightened` requires a matching pre-fix observation (`targets_this_package` true);
   without one, what you did was `added`.
-- `scripts[].result` is `pass`, `fail-preexisting`, `fail-caused`, or `skipped`; `detail` carries
-  the judgment (for `fail-preexisting`, what the default-branch run showed).
+- `risk` is the scorer's own output: `band` and `score` verbatim, and `f4`/`f5` read off its
+  `factors[]`. You compute none of them.
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can
   reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
   the orchestrator reports it.
@@ -726,10 +636,10 @@ End your final message with exactly one fenced JSON block:
 - `status` is `success`, `no-op`, or `failure`. Exactly one of `no_op` and `failure` is non-null,
   and both are `null` on success.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
-  `null`, and `failure` is `{"phase": "input | worktree | baseline | install | validate | verify | push | pr", "detail": "..."}`.
-  Everything you completed before stopping still gets reported (`scripts`, `observations`).
+  `null`, and `failure` is `{"phase": "input | worktree | baseline | install | validate | push | pr", "detail": "..."}`.
+  Everything you completed before stopping still gets reported (`observations`).
 - On a no-op (phase 4's already-fixed case): `"status": "no-op"`, `pr_url`, `action` and `risk`
-  are `null`, `scripts` is `[]` (phase 5 never ran), `resolved_version` is what is installed, and
+  are `null`, `resolved_version` is what is installed, and
   `no_op` carries the reason and the evidence. Both fields are required; a reason without the
   evidence is an assertion, and the evidence is what a reader checks it against:
 
