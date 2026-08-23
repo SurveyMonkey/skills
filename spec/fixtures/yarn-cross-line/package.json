@@ -1,0 +1,11 @@
+{
+  "name": "demo-cross-line",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "@ts-morph/common": "^0.11.1",
+    "glob": "^13.0.6"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

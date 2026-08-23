@@ -26,7 +26,13 @@
 # a GitHub notice is grounds enough to offer the skill directly regardless
 # of what else the output also contains.
 #
-# Local grep/jq only: no network calls, no gh invocations. Exits 0 with no
+# A match is suppressed entirely when the branch in hand is one the plugin
+# itself creates (`fix/dependabot-*`, `chore/dependabot-remove-pins`): that
+# output is the plugin's own dispatched work reporting back, not a repository
+# whose alerts nobody has looked at. See the block guarding the emit below.
+#
+# Local grep/jq and one `git branch --show-current` after a match: no network
+# calls, no gh invocations. Exits 0 with no
 # stdout on malformed or non-object input, an unrecognized tool, or no
 # match, so it stays silent on the overwhelming majority of calls and never
 # breaks the session.
@@ -141,6 +147,57 @@ fi
 
 if [ "$github_match" = false ] && [ "$pm_match" = false ]; then
   exit 0
+fi
+
+# The plugin's own dispatched work is not a reason to offer the plugin.
+#
+# Every fix-dependency and audit-pins run pushes from inside its own worktree,
+# and GitHub answers that push with the very notice this hook scans for. The
+# nudge then landed in a subagent that resolve-alerts had *already* dispatched,
+# telling it to offer resolve-alerts and ask whether to start
+# ([#77](https://github.com/SurveyMonkey/skills/issues/77)).
+#
+# The notice itself cannot be the discriminator: GitHub's text names the
+# repository and its *default* branch ("GitHub found 24 vulnerabilities on
+# <owner>/<repo>'s default branch"), never the branch that was pushed. So the
+# branch is read from the two places that do carry it, in the order they are
+# trustworthy:
+#
+#   1. The pushed branch named in the command itself (`.tool_input.command`),
+#      which is right even when the hook's own cwd is the orchestrator's
+#      checkout rather than the subagent's worktree.
+#   2. Failing that, the branch checked out in the payload's `cwd`, which is
+#      the worktree the command ran in. This covers `git push -u origin HEAD`
+#      and every non-push command (an audit run mid-fix) that trips the scan.
+#
+# Deliberately not a documented "ignore this nudge" line in the two agent
+# definitions: that burns a turn on every push, depends on the agent following
+# an instruction about something it was never told to expect, and would have to
+# be copied into any future caller of these branches.
+#
+# Checked only after a match, so the `git` call costs nothing on the
+# overwhelming majority of Bash calls, which match nothing at all.
+PLUGIN_BRANCH_RE='(fix/dependabot-|chore/dependabot-remove-pins)'
+
+command_text=$(printf '%s' "$input" | jq -r '
+  if (.tool_input | type) == "object" then (.tool_input.command // "") else "" end
+')
+
+if printf '%s' "$command_text" | grep -Eq "$PLUGIN_BRANCH_RE"; then
+  exit 0
+fi
+
+payload_cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+if [ -n "$payload_cwd" ] && [ -d "$payload_cwd" ] && command -v git >/dev/null 2>&1; then
+  # `|| true` because every failure here is a normal situation, not an error:
+  # a cwd outside any repository, a detached HEAD (empty output), or a git
+  # that refuses the directory. None of them may break a hook that fires on
+  # every Bash call.
+  current_branch=$(git -C "$payload_cwd" branch --show-current 2>/dev/null || true)
+  if [ -n "$current_branch" ] \
+    && printf '%s' "$current_branch" | grep -Eq "^$PLUGIN_BRANCH_RE"; then
+    exit 0
+  fi
 fi
 
 if [ "$github_match" = true ]; then

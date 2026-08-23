@@ -225,6 +225,116 @@ Describe 'the rules that gate the removal PR'
     The output should equal '0'
   End
 
+  # The field-test gaps (#78, #79, #81). Each of these was read two ways, or
+  # not at all, by a live run: the failure mode is a plausible-looking result
+  # produced by an agent following the doc as written, which no adapter output
+  # can catch. The sentence is the mechanism, so its absence is the regression.
+  Describe 'the rules the live runs found missing'
+    It 'forbids bypassing a repository hook on commit or push (#78)'
+      When call phrase_in "$AGENT" 'Never bypass one'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'makes a hook failure a failure result rather than something to edit around (#78)'
+      When call phrase_in "$AGENT" 'Never edit code, tests or configuration to satisfy a hook'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # `--before` had a documented rule for the several-versions case and
+    # `--after` had none, so prusa-connect-auto-ready#40 chose one on its own.
+    It 'defines --after when a removal admits several versions (#79a)'
+      When call phrase_in "$AGENT" '--after. is the \*\*highest\*\* of them'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # 26 @esbuild/* packages moved as collateral and one was sampled with no
+    # rule permitting it; the honest verdict is the whole point.
+    It 'rules on a platform-binary collateral fan-out (#79b)'
+      When call phrase_in "$AGENT" 'checked, not sampled, unless it is a platform-binary family'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'requires the sampled verdict to say it sampled (#79b)'
+      When call rule_in "$AGENT" 'sampled-family'
+      The status should be success
+      The output should equal '3'
+    End
+
+    # A trailing comma left by removing the last entry in an override block
+    # produced an invalid manifest that only `jq` would have caught cleanly.
+    It 'validates the manifest after the edit, before list_pins (#79c)'
+      When call rule_in "$AGENT" 'jq \. package\.json'
+      The status should be success
+      The output should equal '2'
+    End
+
+    It 'templates a direct-commit provenance ref (#79d)'
+      When call rule_in "$AGENT" 'Refs: https://github\.com/<nwo>/commit/<sha>'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Read both ways across two runs: app#303 put still-required findings in
+    # left_behind, tacoma.fyi#77 left the section empty with findings present.
+    It 'keeps still-required findings out of left_behind, in the schema (#81)'
+      When call phrase_in "$AGENT" 'never appears in .left_behind.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says the same in the PR body template (#81)'
+      When call phrase_in "$AGENT" 'only\* for candidates an attempt excluded'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'states the element type of fixed_alerts (#81)'
+      When call phrase_in "$AGENT" 'array of alert numbers as bare'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # A live run created the git worktree at $WORK itself, on top of the
+    # scratch area, reading the shorthand as naming the worktree.
+    It 'says no worktree is created at the workspace root (#79)'
+      When call phrase_in "$AGENT" 'no git worktree is ever created at'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # The same hook rule, in the other agent definition it governs. Both flows
+  # commit and push into repositories carrying lefthook or husky.
+  Describe 'the repository hook rule in fix-dependency (#78)'
+    FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+
+    Parameters
+      "forbids bypassing one"    'Never bypass one'
+      "forbids editing around it" 'Never edit code, tests or configuration to satisfy a hook'
+      "says the hooks run"       "own commit and push hooks are the repository's, and they run"
+    End
+
+    It "$1"
+      When call phrase_in "$FIX_AGENT" "$2"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # ADR 006 decided only that no agent *chooses* to run the repository's
+  # checks. A hook the repository attached runs automatically, which the
+  # Consequences section did not distinguish and nothing else covered.
+  It 'records the hook distinction in ADR 006 (#78)'
+    When call phrase_in "$SHELLSPEC_PROJECT_ROOT/docs/adr/006-merge-risk-is-static-analysis.md" \
+      "A repository's own git hooks still run"
+    The status should be success
+    The output should equal '1'
+  End
+
   # PR mode first at every dispatch point, because the audit already did the
   # work a removal PR needs; a report-first default makes a human re-derive the
   # diff by hand, which is the step most likely to be skipped entirely.

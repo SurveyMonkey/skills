@@ -10,6 +10,14 @@ JSON contract; interpreting failures and writing prose stays with the agent.
 `python`. Semver comparison is implemented in jq rather than shelling out to `npx semver`, which
 would mean a cold-cache network fetch in the middle of a security fix.
 
+**Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
+Homebrew, so anything the two versions read differently goes green locally and red only in CI.
+**Parenthesize a `//` default before binding it**: `(A // B) as $x`, never `A // B as $x`. `as`
+takes its whole right-hand side, so the unparenthesized form parses as `A // (B as $x | body)`
+and short-circuits to `A` whenever `A` is present — 1.8 reads it as intended, 1.7 does not
+([#82](https://github.com/SurveyMonkey/skills/pull/82)). `spec/jq_binding_spec.sh` gates the
+shape on every platform.
+
 **Target bash 3.2** (the macOS default). Not every engineer has Homebrew bash on PATH. That rules
 out associative arrays, `mapfile`/`readarray`, `${var,,}`, and `**`. jq carries the data
 structures instead.
@@ -83,6 +91,13 @@ an assumption. Every write it makes runs **from inside the worktree**, so
 `push -u --force-with-lease=<ref>:<sha> origin <ref>`. Its `gh pr list --repo <nwo> --head ...`
 guards, `gh label` and `gh pr create` are byte-identical in shape to the fix agent's and were
 already in the catalog.
+
+The fix agent's leftover-branch cleanup is the mirror image, and the one *writing* git shape either
+definition prescribes at `<repo_root>`: git refuses to delete a branch that is checked out in a
+worktree, so `branch -D <branch_name>` runs **after** `worktree remove`, when no worktree is left to
+run it from. `Bash(git -C *$REPO_ROOT* branch --list *)` is read-only and does not match it, so the
+catalog carries `Bash(git -C *$REPO_ROOT* branch -D *)`
+([#84](https://github.com/SurveyMonkey/skills/issues/84)).
 
 The one addition is `Bash(git -C *$REPO_ROOT* ls-remote --heads origin *)`, for the remnant guard.
 `rev-parse`, `branch --list` and `fetch origin` were already there and `ls-remote` was not, which
@@ -159,6 +174,41 @@ non-security pin, a misspelled package name, and the wrong ecosystem all produce
 When the adapter itself fails on a range, its stderr is kept in `adapter_errors[]` rather than
 discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
 broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
+
+## An override's key is scoped; its effect is not, and only a baseline sees the difference
+
+The pin audit already knows this on the removal side. The fix side learned it the hard way: a
+scoped entry can move a copy of the package on a major line the group does not own, and every
+check in the fix flow was scoped to `--line` and structurally unable to notice
+([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+The mechanism is per-manager, and Yarn's is the one that bites. Verified empirically against a
+throwaway worktree of a real repository, and against Yarn's `reduceDependency` hook:
+
+- **Yarn** compares the `from` half of a `resolutions` key by `locatorHash` equality against the
+  parent's **resolved locator**. A bare `minimatch/brace-expansion` falls back to the parent's own
+  reference, so it matches every copy of `minimatch` — that is the defect. Only the parent's exact
+  resolved version narrows (`minimatch@npm:10.2.5/...`, protocol optional). A **range** there
+  parses and then silently never matches: no warning, exit 0, nothing applied. That is a worse
+  failure than the collapse, and it is why "just narrow the key" is not a one-line fix.
+- **pnpm** matches `parent@^10>dep` with `semver.satisfies` against the parent's resolved version.
+- **npm** matches `{"parent@^10": {...}}` with `semver.intersects` on the edge's descriptor and
+  `semver.satisfies` on the node's resolved version, and its nesting is transitive rather than
+  direct-child-only.
+
+So `validate --baseline` detects rather than prevents, and that ordering is deliberate: detection
+is the guard that has to exist under any of the three narrowing schemes, including the one that
+fails open. `other_line_moves` is `null` when no baseline was passed and `[]` when one was and
+nothing moved — the same "not checked" versus "checked and clean" distinction the audit draws with
+`collateral_changes: null`, and for the same reason. Only majors **present in the baseline** are
+compared; a major that first appears after the install is the install adding a copy, not this fix
+moving one.
+
+The parent list is the second route to the same damage. `why` has no `--line` and answers about
+the package as a whole, so `agents/fix-dependency.md` narrows to `declared_ranges --line`'s
+`parents_read` before calling `apply_constraint`. A parent in `parents_other_lines` never receives
+a scoped entry: on a live run, passing all of `undici`'s parents for the 6.x group would have
+pinned `@vercel/sandbox` (7.28.0) and `vercel` (5.29.0) under `>=6.28.0 <7`.
 
 ## A removal is judged against the whole tree, not one package
 
@@ -240,6 +290,20 @@ Two rules travel with it, both of which the old lookup broke:
 - **The result states the key and value actually written**, in `written[]`, produced by the same jq
   pass that writes them. Two copies of that logic is how the report came to say `package`/`range`
   while an alias key had been written, putting an edit in the PR body that was never made.
+
+`declared_ranges` is the one verb that also reads the installed manifest, and it may: it runs
+**after** `install`, and the manifest on disk is the state actually installed, which is how a
+parent that declares nothing in the release the lockfile recorded is told apart from one nobody
+could read. But it is per parent *name*, and a parent in the tree at several versions has one
+declaration per copy, each resolving its own copy of the package. Asking one file for a
+multi-version parent attributes one copy's range to every line; asking it in a worktree that has
+no `node_modules` — Berry PnP, or any fix worktree before `install` — loses the range entirely and
+reports the parent as unreadable, which is what happened on a live `brace-expansion` fix
+([#85](https://github.com/SurveyMonkey/skills/issues/85)). So the lockfile answers **per parent
+copy** whenever the manifest cannot: more than one copy, or no manifest on disk. A manifest that
+is on disk and will not parse is a damaged install and stays `parents_unreadable` +
+`parents_malformed` rather than falling back — the reviewer needs that fact, not a substitute for
+it. pnpm has no rows here at all, for the same reason `alias_lookup` reports `unsupported` for it.
 
 `spec/fixtures/npm-alias` has **no committed `node_modules`** for this reason, and
 `spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`

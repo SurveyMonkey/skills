@@ -649,6 +649,18 @@ Describe 'score-merge-risk.sh'
     The output should equal '"new unscoped override pins lodash for every consumer, including copies that were never vulnerable"'
   End
 
+  # `--override-scope none` is what the audit-pins agent passes for a pin
+  # *removal*, where nothing was updated: the evidence claimed "the direct
+  # dependency was updated" and shipped that claim into the Merge-risk table of
+  # a PR body whose whole diff was three deleted `resolutions` entries
+  # (issue #80). The evidence must state only what the scope value attests to.
+  It 'claims no version move for a change that applies no override'
+    use_fixture tooling-only
+    When call score transitive false '["express"]' 1.0.0 1.0.0 '.factors[5].evidence' none
+    The status should be success
+    The output should equal '"no override applied by this change"'
+  End
+
   # The thresholds are absolute risk points, not proportions of the maximum,
   # so neither the sixth nor the seventh factor may reband a fix, and neither
   # may the redefinition of F4 and F5: the factor count never moved.

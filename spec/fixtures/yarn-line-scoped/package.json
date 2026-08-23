@@ -1,0 +1,16 @@
+{
+  "name": "demo-line-scoped",
+  "packageManager": "yarn@4.13.0",
+  "dependencies": {
+    "@vercel/blob": "2.8.0",
+    "@vercel/sandbox": "2.4.0"
+  },
+  "devDependencies": {
+    "@sentry/cli": "^3.6.2",
+    "@vercel/node": "5.10.1",
+    "vercel": "^48.4.0"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

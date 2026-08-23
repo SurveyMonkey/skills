@@ -2,6 +2,12 @@ node_modules/
 # Except the hand-authored ones under spec/fixtures: declared_ranges reads a
 # parent's installed manifest, so a fixture has to carry one.
 !spec/fixtures/*/node_modules/
+# And the nested copies inside them, which the single-level negation above does
+# not reach. `declared_ranges --line` resolves a parent's own copy of the
+# package by node resolution, a nested copy before the hoisted one, so a fixture
+# that proves the line filter has to carry both
+# ([#76](https://github.com/SurveyMonkey/skills/issues/76)).
+!spec/fixtures/*/node_modules/**/node_modules/
 .DS_Store
 *.log
 .env

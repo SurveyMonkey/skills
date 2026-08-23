@@ -150,36 +150,43 @@ End
 Describe 'node.sh declared_ranges'
   After 'cleanup_fixture'
 
-  # The npm fixture installs express and not test-exclude, which is the normal
-  # partial read: pnpm links only direct dependencies into node_modules.
-  It 'unions the parent and root manifests'
+  # The npm fixture installs express and not test-exclude. The installed
+  # manifest answers for express; test-exclude has none, so its declaration is
+  # read from the lockfile rather than lost (issue #85).
+  It 'unions the parent declarations and the root manifest'
     use_fixture npm-v3
     When call adapter_jq '{ranges, root_range}' declared_ranges lodash
     The status should be success
-    The output should equal '{"ranges":["^4.17.20","^4.17.21"],"root_range":"^4.17.21"}'
+    The output should equal '{"ranges":["^3.0.0","^4.17.20","^4.17.21"],"root_range":"^4.17.21"}'
   End
 
-  It 'names the parents it could not read rather than dropping them'
+  # `parents_unreadable` is now what it says: nobody could read the
+  # declaration, from either source. A parent with no installed manifest is not
+  # that, as long as the lockfile records what it declares — reporting it as
+  # unreadable is what put the field test's only parent in that list and left
+  # the fix with no range at all (issue #85).
+  It 'reads a parent with no installed manifest out of the lockfile'
     use_fixture npm-v3
     When call adapter_jq '{parents_read, parents_unreadable}' declared_ranges lodash
     The status should be success
-    The output should equal '{"parents_read":["express"],"parents_unreadable":["test-exclude"]}'
+    The output should equal '{"parents_read":["express","test-exclude"],"parents_unreadable":[]}'
   End
 
-  # The lockfile records sha.js only under express's optionalDependencies, so
-  # this reads a range that the `.dependencies`-only parent query never reached
-  # the manifest to find.
-  It 'reads optionalDependencies, which the loop it replaced did not'
+  # The lockfile records sha.js under express's optionalDependencies and under
+  # serve-static's peerDependencies, so this reads two ranges the
+  # `.dependencies`-only parent query never reached the manifest to find.
+  It 'reads optionalDependencies and peerDependencies, which the loop it replaced did not'
     use_fixture npm-v3
     When call adapter_jq '.ranges' declared_ranges 'sha.js'
     The status should be success
-    The output should equal '["^2.4.11"]'
+    The output should equal '["^2.4.0","^2.4.11"]'
   End
 
   # A parent whose installed manifest declares the package in no block at all
   # is legitimate under version skew, and it is not the same fact as a parent
   # nobody could read. `express` is a lockfile parent of @babel/core; its
-  # installed manifest never mentions it.
+  # installed manifest never mentions it, and the installed manifest is what
+  # answers for a parent that has one.
   It 'separates a parent that declared nothing from one it could not read'
     use_fixture npm-v3
     When call adapter_jq '{ranges, parents_read, parents_without_range, parents_unreadable}' declared_ranges '@babel/core'
@@ -189,12 +196,14 @@ Describe 'node.sh declared_ranges'
 
   # A manifest on disk that will not parse dropped its range and still counted
   # as read, so the partial-view disclosure in the PR body never fired for it.
+  # It stays unreadable rather than falling back to the lockfile: a corrupt
+  # install is a fact the reviewer needs, not one to paper over.
   It 'files a parent with an unparseable manifest as unreadable, not read'
     use_fixture npm-v3
     printf 'not json at all\n' > node_modules/express/package.json
     When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_malformed}' declared_ranges lodash
     The status should be success
-    The output should equal '{"ranges":["^4.17.21"],"parents_read":[],"parents_unreadable":["express","test-exclude"],"parents_malformed":["express"]}'
+    The output should equal '{"ranges":["^3.0.0","^4.17.21"],"parents_read":["test-exclude"],"parents_unreadable":["express"],"parents_malformed":["express"]}'
   End
 
   # `npm_parents` and `yarn_parents` count a parent that declares the package
@@ -203,14 +212,13 @@ Describe 'node.sh declared_ranges'
   # declaring nothing, with node.sh's own comment rationalizing the label as
   # version skew. It in fact declares `npm:lodash@^4.18.0`, a live range that
   # keeps readmitting vulnerable versions and never reaches the PR body
-  # (issue #48). The fixture is the installed state this verb reads, which is
-  # why it is a separate one from `npm-alias`: that fixture models the
-  # pre-install state `apply_constraint` runs in and has no node_modules at all.
+  # (issue #48). The alias is read under either source: `alias-parent` from its
+  # installed manifest, `dupe-parent` from the lockfile.
   It 'reads the range out of a parent alias declaration'
     use_fixture npm-alias-installed
     When call adapter_jq '{ranges, parents_read, parents_without_range, parents_unreadable}' declared_ranges lodash
     The status should be success
-    The output should equal '{"ranges":["^4.17.21","^4.18.0"],"parents_read":["alias-parent"],"parents_without_range":[],"parents_unreadable":["dupe-parent"]}'
+    The output should equal '{"ranges":["^4.17.21","^4.18.0"],"parents_read":["alias-parent","dupe-parent"],"parents_without_range":[],"parents_unreadable":[]}'
   End
 
   # The root is a dependent like any other, and this one declares lodash only
@@ -224,13 +232,15 @@ Describe 'node.sh declared_ranges'
     The output should equal '{"ranges":["4.17.21"],"root_range":"4.17.21"}'
   End
 
-  # Yarn PnP installs no node_modules at all: every parent is unreadable and
-  # the root manifest is all there is. Partial, and visibly so.
-  It 'still reports the root range when no parent manifest is installed'
+  # Yarn PnP installs no node_modules at all. Every parent range used to
+  # vanish with it, leaving the root manifest as the whole answer; the lockfile
+  # has them, and a fix worktree before `install` is in exactly this state
+  # (issue #85).
+  It 'reads every parent from the lockfile when no manifest is installed'
     use_fixture yarn-berry
-    When call adapter_jq '{ranges, parents_unreadable}' declared_ranges lodash
+    When call adapter_jq '{ranges, parents_read, parents_unreadable}' declared_ranges lodash
     The status should be success
-    The output should equal '{"ranges":["^4.17.21"],"parents_unreadable":["express"]}'
+    The output should equal '{"ranges":["^4.17.20","^4.17.21"],"parents_read":["express"],"parents_unreadable":[]}'
   End
 
   It 'requires a package name'
@@ -238,6 +248,163 @@ Describe 'node.sh declared_ranges'
     When run script "$ADAPTER" declared_ranges
     The status should not equal 0
     The stderr should include 'requires a package name'
+  End
+End
+
+# --line, the F7 scoping fix (issue #76).
+#
+# The fixture is trimmed from arsenalamerica/app at the commit that opened its
+# PR #300: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously, five
+# parents declaring across all three lines, and a fix scoped to line 7 moving
+# 7.28.0 -> 7.29.0. Collecting every declaration of the name regardless of
+# which copy the parent resolves to scored that minor bump as two major lines
+# crossed plus a crossed pin, on the strength of 5.x and 6.x parents a
+# line-bounded override never touches.
+Describe 'node.sh declared_ranges --line'
+  After 'cleanup_fixture'
+
+  It 'collects every line without --line, the shape that mis-scored #300'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{ranges, line, parents_other_lines}' declared_ranges undici
+    The status should be success
+    The output should equal '{"ranges":["5.28.4","5.29.0","^6.22.0","^6.23.0","^7.27.1"],"line":null,"parents_other_lines":[]}'
+  End
+
+  It 'keeps only the ranges of parents resolved on the fix line'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{ranges, line}' declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"ranges":["^7.27.1"],"line":7}'
+  End
+
+  # The excluded parents must not be laundered through a list that means
+  # something else: they were read fine and they declare a range, it is simply
+  # a range for a copy this fix does not move.
+  It 'files the excluded parents under their own field, not as unread or rangeless'
+    use_fixture yarn-line-scoped
+    When call adapter_jq '{parents_read, parents_other_lines, parents_without_range, parents_unreadable, parents_malformed}' \
+      declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"parents_read":["@vercel/sandbox"],"parents_other_lines":["@sentry/cli","@vercel/blob","@vercel/node","vercel"],"parents_without_range":[],"parents_unreadable":[],"parents_malformed":[]}'
+  End
+
+  # Dropping a range on a guess lowers a risk score silently, so a parent whose
+  # own copy cannot be found on disk is kept rather than excluded.
+  It 'keeps a parent whose resolved copy cannot be determined'
+    use_fixture yarn-line-scoped
+    rm -rf node_modules/undici node_modules/vercel/node_modules node_modules/@vercel/sandbox/node_modules
+    When call adapter_jq '{ranges, parents_other_lines}' declared_ranges --line 7 undici
+    The status should be success
+    The output should equal '{"ranges":["5.28.4","5.29.0","^6.22.0","^6.23.0","^7.27.1"],"parents_other_lines":[]}'
+  End
+
+  It 'rejects a --line that is not a major number'
+    use_fixture yarn-line-scoped
+    When run script "$ADAPTER" declared_ranges --line 7.x undici
+    The status should not equal 0
+    The stderr should include 'must be a major number'
+  End
+
+  # A parent in the tree at two versions is the shape the installed manifest
+  # cannot describe: one file, one range, and `resolved_major_for_parent`
+  # answering about the hoisted copy or (under PnP, and in the pre-install
+  # worktree a fix runs in) about nothing at all. On arsenalamerica/app the
+  # live run returned `parents_read: []`, `parents_unreadable: ["minimatch"]`
+  # and no ranges, while the lockfile recorded both copies and both
+  # declarations ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+  Describe 'a parent resolved at more than one version'
+    It 'takes the range from the copy that resolves on the fix line'
+      use_fixture yarn-cross-line
+      When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines}' \
+        declared_ranges --line 5 brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^5.0.5"],"parents_read":["minimatch"],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}'
+    End
+
+    # The same parent, the other line: neither copy is the parent's "real" one,
+    # so the version is what makes the two legible in the two lists.
+    It 'takes the other copy for the other line'
+      use_fixture yarn-cross-line
+      When call adapter_jq '{ranges, parents_read, parents_other_lines}' \
+        declared_ranges --line 1 brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^1.1.7"],"parents_read":["minimatch"],"parents_other_lines":["minimatch@10.2.5"]}'
+    End
+
+    It 'unions both copies when no line is given'
+      use_fixture yarn-cross-line
+      When call adapter_jq '{ranges, parents_other_lines}' declared_ranges brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^1.1.7","^5.0.5"],"parents_other_lines":[]}'
+    End
+
+    # npm nests the second copy instead of listing it twice at the top level,
+    # and the walk up `node_modules` is what says which copy `test-exclude`
+    # reaches. `express` has an installed manifest and one copy, so its range
+    # still comes from disk; its own lodash copy is not on disk at all, which
+    # keeps it in the over-reporting direction rather than dropping its range.
+    It 'walks up node_modules for an npm parent with a nested copy'
+      use_fixture npm-v3
+      When call adapter_jq '{ranges, parents_read, parents_other_lines}' declared_ranges --line 4 lodash
+      The status should be success
+      The output should equal '{"ranges":["^4.17.20","^4.17.21"],"parents_read":["express"],"parents_other_lines":["test-exclude@6.0.0"]}'
+    End
+
+    # The verdict: the range that reaches the PR body is what the scorer turns
+    # into a merge-risk number, and collecting the 1.x parent's declaration for
+    # a 5.x fix scores a patch bump as four major lines crossed.
+    Describe 'the score those ranges produce'
+      score_brace() {
+        "$ADAPTER" why brace-expansion > why.json 2>/dev/null || true
+        set -- --package brace-expansion --before 5.0.6 --after 5.0.9 \
+               --adapter "$ADAPTER" --why-json why.json --override-scope scoped "$@"
+        "$COMMON/score-merge-risk.sh" "$@" \
+          | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
+      }
+
+      It 'scores the fix on the ranges --line 5 returns'
+        use_fixture yarn-cross-line
+        When call score_brace --declared-range '^5.0.5'
+        The status should be success
+        The output should equal '{"f7":0,"evidence":"no major line crossed; dependents declare ^5.0.5"}'
+      End
+
+      It 'reproduces the score the unfiltered collection would have produced'
+        use_fixture yarn-cross-line
+        When call score_brace --declared-range '^1.1.7' --declared-range '^5.0.5'
+        The status should be success
+        The output should equal '{"f7":2,"evidence":"4 major lines crossed; dependents declare ^1.1.7, ^5.0.5"}'
+      End
+    End
+  End
+
+  # The verdict, not the parse: what mattered on #300 is the number that
+  # reached the PR body, so both halves are scored through score-merge-risk.sh.
+  Describe 'the score those ranges produce'
+    score_undici() {
+      "$ADAPTER" why undici > why.json 2>/dev/null || true
+      _scope=$1
+      shift
+      set -- --package undici --before 7.28.0 --after 7.29.0 \
+             --adapter "$ADAPTER" --why-json why.json --override-scope "$_scope" "$@"
+      "$COMMON/score-merge-risk.sh" "$@" \
+        | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
+    }
+
+    It 'reproduces the F7 of 2 the unscoped collection produced on #300'
+      use_fixture yarn-line-scoped
+      When call score_undici scoped --declared-range 5.28.4 --declared-range 5.29.0 \
+        --declared-range '^6.22.0' --declared-range '^6.23.0' --declared-range '^7.27.1'
+      The status should be success
+      The output should equal '{"f7":2,"evidence":"2 major lines crossed; dependents declare 5.28.4, 5.29.0, ^6.22.0, ^6.23.0, ^7.27.1; crosses the pinned range 5.28.4"}'
+    End
+
+    It 'scores the same fix 0 on the ranges --line 7 returns'
+      use_fixture yarn-line-scoped
+      When call score_undici scoped --declared-range '^7.27.1'
+      The status should be success
+      The output should equal '{"f7":0,"evidence":"no major line crossed; dependents declare ^7.27.1"}'
+    End
   End
 End
 

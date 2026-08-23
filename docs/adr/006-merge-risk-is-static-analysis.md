@@ -90,5 +90,18 @@ attribution, which no longer exists in this flow. The `sonnet` pin stands on the
 remains: interpreting install failures, choosing the override shape, and writing the pull request
 prose.
 
+**A repository's own git hooks still run, and this decision does not touch them.** What is decided
+here is that no agent *chooses* to run a repository's checks in order to score them. A hook the
+repository has attached to `git commit` or `git push` — lefthook, husky, `core.hooksPath` — is a
+different mechanism: it fires automatically on the agent's own commit and push, on the
+repository's terms, and it feeds no factor. `arsenalamerica/app` and `brianespinosa/tacoma.fyi`
+both ran their full pre-commit and pre-push suites on agent commits under this ADR, and that is
+the intended behavior. Those hooks are never bypassed (no `--no-verify`), a hook that fails the
+commit or push is a failure result at that phase quoting the hook's output, and nothing in the
+repository is edited to make one pass. The agent definitions carry the rule at their commit/push
+phases ([#78](https://github.com/SurveyMonkey/skills/issues/78)); it is recorded here because the
+gap that let it go unstated was this section reading as though ADR 006 had settled every question
+about the repository's checks running.
+
 **The score is reproducible from the repository alone.** Two runs on the same commit produce the
 same band, where previously the band depended on what happened to be runnable on the machine.

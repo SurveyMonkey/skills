@@ -188,6 +188,88 @@ Severity: 1 low | 2 moderate"
     End
   End
 
+  # The plugin's own dispatched work. Every fix-dependency and audit-pins run
+  # pushes from its worktree, GitHub answers with this exact notice, and the
+  # hook nudged the already-dispatched subagent to offer resolve-alerts and ask
+  # whether to start (issue #77). The specimen is the notice block from the
+  # push that opened arsenalamerica/app#300: it names the repository and its
+  # *default* branch, never the branch pushed, which is why the branch has to
+  # come from the command or the cwd rather than from the text.
+  Describe 'pushes from the plugin own branches'
+    NOTICE=$(cat "$FIXTURES/notice-scan/push-vulnerability-notice.txt")
+
+    payload_cmd() {
+      jq -n --arg out "$1" --arg cmd "$2" --arg cwd "${3:-}" \
+        '{tool_name: "Bash", cwd: (if $cwd == "" then null else $cwd end),
+          tool_input: {command: $cmd}, tool_response: $out}'
+    }
+
+    notice_cmd_jq() {
+      _filter=$1; _cmd=$2; _cwd=${3:-}
+      _st=0
+      _raw=$(payload_cmd "$NOTICE" "$_cmd" "$_cwd" | "$COMMON/notice-scan.sh") || _st=$?
+      if [ -n "$_raw" ]; then
+        printf '%s' "$_raw" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    Parameters
+      "a fix-dependency push" "git push -u origin fix/dependabot-undici-7x"
+      "an audit-pins push"    "git push -u origin chore/dependabot-remove-pins"
+    End
+
+    It "stays silent on $1"
+      When call notice_cmd_jq '.' "$2"
+      The status should be success
+      The output should equal ''
+    End
+
+    It 'still nudges on the identical notice from an unrelated branch'
+      When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+        "git push -u origin feat/new-checkout"
+      The status should be success
+      The output should equal '{"offers_directly":true}'
+    End
+
+    # `git push -u origin HEAD` names no branch, so the only record of which
+    # branch produced the notice is the worktree the command ran in.
+    Describe 'a push that names no branch'
+      After 'cleanup_fixture'
+
+      on_branch() {
+        TEST_DIR=$(mktemp -d)
+        git -c init.defaultBranch=main -C "$TEST_DIR" init --quiet
+        git -C "$TEST_DIR" checkout -q -b "$1"
+      }
+
+      It 'reads the branch from the payload cwd and stays silent'
+        on_branch fix/dependabot-undici-7x
+        When call notice_cmd_jq '.' "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal ''
+      End
+
+      It 'nudges from a cwd on an unrelated branch'
+        on_branch feat/new-checkout
+        When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+          "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal '{"offers_directly":true}'
+      End
+
+      # A cwd outside any repository must degrade to nudging, not to an error:
+      # this hook fires on every Bash call.
+      It 'nudges when the cwd is outside any repository'
+        TEST_DIR=$(mktemp -d)
+        When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+          "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal '{"offers_directly":true}'
+      End
+    End
+  End
+
   Describe 'non-matching output stays silent'
     ordinary_output="ok
 nothing interesting here"

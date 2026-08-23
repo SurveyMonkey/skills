@@ -14,7 +14,7 @@
 #   apply_constraint <pkg> <range> [parent...] -> {mode, parents[], written[],
 #                                                  alias_lookup, observations[]}
 #   install                                    -> pass-through, exit code is the signal
-#   validate [--line <major>] [--vulnerable <range>]... <pkg> <range>
+#   validate [--line <major>] [--vulnerable <range>]... [--baseline <json>] <pkg> <range>
 #                                              -> {ok, line_present, checked,
 #                                                  violations[],
 #                                                  unresolved_alerts[],
@@ -24,11 +24,12 @@
 #   range_facts <range> <version>              -> {parseable, satisfied, pinned,
 #                                                  floor_major, majors_ahead}
 #                                                 (all null when not parseable)
-#   declared_ranges <pkg>                      -> {ranges[], root_range,
+#   declared_ranges [--line <major>] <pkg>     -> {ranges[], root_range,
 #                                                  parents_read[],
 #                                                  parents_without_range[],
 #                                                  parents_unreadable[],
-#                                                  parents_malformed[]}
+#                                                  parents_malformed[],
+#                                                  parents_other_lines[], line}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
 #   list_pins                                  -> {pm, override_location, block_present,
 #                                                  count, bare_count, pins[]}
@@ -1151,10 +1152,11 @@ verb_why() {
 # ---------------------------------------------------------------------------
 # validate — composes resolved_versions and applies the constraint
 #
-# Usage: validate [--line <major>] [--vulnerable <range>]... <pkg> <constraint>
+# Usage: validate [--line <major>] [--vulnerable <range>]... [--baseline <json>]
+#                 <pkg> <constraint>
 #
-# Two independent questions, because passing the first is not passing the
-# second (issue #19):
+# Three independent questions, because passing one is not passing the others
+# (issues #19 and #83):
 #
 #   1. Constraint. Does every resolved copy satisfy the range the fix applied?
 #      `--line` narrows this to the major line the group targets: a package
@@ -1164,6 +1166,35 @@ verb_why() {
 #      from the group's alerts? Meeting the constraint on the copy you fixed
 #      says nothing about the copies you did not, which is how a partial fix
 #      used to report success.
+#   3. Collateral. Did the install move a copy on a major line this group does
+#      not own? `--baseline` takes the pre-fix `resolved_versions` output and
+#      answers it in `other_line_moves[]`.
+#
+# The third question exists because the first two are *both* scoped to `--line`
+# and therefore cannot see an out-of-line copy at all. A Yarn `resolutions` key
+# is not: `minimatch/brace-expansion` carries no version on its parent half, and
+# Yarn applies it to every resolved copy of `minimatch`. On a live run that
+# dragged `minimatch@3.1.5`'s `brace-expansion` from `1.1.18` to `5.0.9` — a
+# different major than the `^1.1.7` that parent `require()`s — while
+# `validate --line 5` returned `ok: true`, because 1.x was never in its window
+# ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+#
+# Narrowing the key instead is a separate change with three different
+# semantics behind it, and Yarn's is the one that fails open: its `from` half is
+# compared by `locatorHash` equality against the parent's *resolved* locator, so
+# only the exact resolved version narrows and a **range there parses and then
+# silently never matches**. pnpm (`parent@^10>dep`, `semver.satisfies` on the
+# resolved version) and npm (`{"parent@^10": {...}}`) can express what Yarn
+# cannot. Detection is the guard that has to exist either way.
+#
+# `other_line_moves` is `null` when no baseline was passed and `[]` when one was
+# and nothing moved. Never `[]` for both: "not checked" collapsing into "checked
+# and clean" is the same failure as the pin audit's `collateral_changes` (#48),
+# and here it would launder the very defect this answers.
+#
+# Only lines *present in the baseline* are compared. A major that appears for
+# the first time after the install is the install adding a copy, not this fix
+# moving one, and reporting it would fire on every legitimate new resolution.
 #
 # A still-vulnerable copy *below* the target line is separated out as
 # `requires_major_bump`: no advisory in this group offers a fix within that
@@ -1185,14 +1216,25 @@ verb_why() {
 #     satisfaction answers false for a token it cannot read, which on this side
 #     of the check means "no copy is vulnerable", the unsafe direction. A typo
 #     or an advisory form the tokenizer does not know is an error, not a pass.
+#
+# A third joins them for the same reason: `--baseline` is checked against the
+# contract it is supposed to satisfy before it is used. A truncated payload, or
+# one captured for a different package, would compare the current tree against
+# nothing and report no cross-line moves at all — a clean answer produced by
+# having checked nothing, which is the unsafe direction here.
 # ---------------------------------------------------------------------------
 verb_validate() {
   line=""
   vuln_ranges=""
+  baseline=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --line)
         line="${2:?--line requires a major}"
+        shift 2
+        ;;
+      --baseline)
+        baseline="${2:?--baseline requires the pre-fix resolved_versions JSON}"
         shift 2
         ;;
       --vulnerable)
@@ -1217,6 +1259,28 @@ verb_validate() {
 
   if [ -n "$line" ] && [ -z "$vuln_ranges" ]; then
     die "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19)."
+  fi
+
+  if [ -n "$baseline" ] && [ -z "$line" ]; then
+    die "validate: --baseline requires --line. A cross-line move is defined against the line this group owns; with no line to exclude, every move looks like collateral (issue #83)."
+  fi
+
+  # The baseline is checked against the shape `resolved_versions` promises, and
+  # for the package actually being validated. `[]` is a legitimate `.versions`
+  # (a package absent before the fix), so emptiness is not the test: presence
+  # and type are, exactly as ADR 001 requires of every contract field.
+  baseline_json=null
+  if [ -n "$baseline" ]; then
+    baseline_json=$(printf '%s' "$baseline" | jq -c --arg pkg "$pkg" '
+      select(type == "object"
+             and has("package") and .package == $pkg
+             and has("versions") and (.versions | type) == "array"
+             and (.versions | all(type == "object" and has("version")
+                                  and (.version | type) == "string")))' 2>/dev/null) \
+      || baseline_json=""
+    if [ -z "$baseline_json" ]; then
+      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 2 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
+    fi
   fi
 
   vuln_json=$(printf '%s' "$vuln_ranges" \
@@ -1256,6 +1320,7 @@ verb_validate() {
 
   result=$(printf '%s' "$resolved" \
     | jq --arg range "$range" --arg line "$line" --argjson vulnerable "$vuln_json" \
+      --argjson baseline "$baseline_json" \
       "$SEMVER_JQ"'
     def major_of: semver_parse | (.core[0] // 0);
 
@@ -1272,9 +1337,25 @@ verb_validate() {
             below_line: ($lineno != null and (($v.version | major_of) < $lineno))} ]) as $still
     | ([ $still[] | select(.below_line     ) | del(.below_line) ]) as $bump
     | ([ $still[] | select(.below_line|not) | del(.below_line) ]) as $unresolved
+    # Every baseline major other than the one this group owns, listed only when
+    # the set of versions on it changed. `vanished` is the shape the live defect
+    # took: the 1.x copy was not moved within its line, it stopped existing.
+    | (if $baseline == null then null
+       else [ $baseline.versions
+              | map(select((.version | major_of) != $lineno))
+              | group_by(.version | major_of)[]
+              | (.[0].version | major_of) as $m
+              | {major: $m,
+                 before: ([ .[].version ] | unique),
+                 after: ([ $r.versions[]
+                           | select((.version | major_of) == $m) | .version ] | unique)}
+              | select(.before != .after)
+              | . + {status: (if (.after | length) == 0 then "vanished" else "moved" end)} ]
+       end) as $other_moves
     | {ok: (($bad | length) == 0
             and ($unresolved | length) == 0
-            and ($lineno == null or ($inline | length) > 0)),
+            and ($lineno == null or ($inline | length) > 0)
+            and ($other_moves == null or ($other_moves | length) == 0)),
        package: $r.package, range: $range,
        line: (if $line == "" then null else $line end),
        line_present: ($lineno == null or ($inline | length) > 0),
@@ -1283,6 +1364,7 @@ verb_validate() {
        violations: $bad,
        unresolved_alerts: $unresolved,
        requires_major_bump: $bump,
+       other_line_moves: $other_moves,
        resolved_versions: ([$r.versions[].version] | unique)}')
 
   printf '%s\n' "$result"
@@ -1672,10 +1754,26 @@ verb_range_facts() {
 # dev-only direct dependency still declares a range this fix can leave behind.
 #
 # A parent whose manifest is not on disk is not an error: Yarn PnP installs no
-# node_modules at all, and pnpm only links direct dependencies there. Those
-# parents are listed in `parents_unreadable` so the caller can say in the PR
-# body which ranges nobody could read; a parent whose manifest is on disk but
-# will not parse joins them, and is additionally named in `parents_malformed`.
+# node_modules at all, and pnpm only links direct dependencies there. Its
+# declaration comes from the lockfile instead (see `parent_copy_rows`), and
+# only a parent no source could answer for is listed in `parents_unreadable`;
+# a parent whose manifest is on disk but will not parse joins them — a damaged
+# install, reported rather than substituted for — and is additionally named in
+# `parents_malformed`.
+#
+# `--line <major>` narrows the collection to the parents this fix actually
+# moves, mirroring `validate --line`. A package resolved at 5.x, 6.x and 7.x
+# concurrently has parents on each of those lines, and a major-bounded fix
+# touches exactly one of them: on arsenalamerica/app#300 a 7.28.0 -> 7.29.0
+# bump scoped to line 7 was scored "2 major lines crossed" against the 5.x and
+# 6.x parents' declarations, because every declaration of the name anywhere in
+# the lockfile was collected regardless of which copy the parent resolves to
+# ([#76](https://github.com/SurveyMonkey/skills/issues/76)). Those parents are
+# a different, untouched consumer: not something the change could regress, and
+# distance measured against them is measured from dependents the override does
+# not move. They come back in `parents_other_lines[]`, which is deliberately
+# none of the four existing lists — a parent excluded by the line is neither
+# unreadable nor declaring nothing.
 #
 # A range is read from an `npm:` alias declaration as well as from a plain one.
 # `npm_parents` and `yarn_parents` count an aliasing parent as a parent, so
@@ -1694,8 +1792,220 @@ def declared_ranges_of($pkg):
 JQLIB
 )
 
+# The major line a parent's own copy of the package resolves to, printed on
+# stdout, or nothing with a non-zero status when it cannot be determined.
+#
+# Node resolution, read off the installed tree: a parent's nested copy wins,
+# and a parent with no nested copy reaches the hoisted one. That is exactly
+# what `--line` needs to know and it is the same tree `declared_ranges`
+# already reads its manifests out of, so it introduces no new dependency on
+# the install being present than the verb already had.
+#
+# A version that is not `<digits>.<...>` yields nothing rather than a guess.
+# Callers treat "undeterminable" as "keep the parent", the direction that can
+# only over-report distance.
+resolved_major_for_parent() {
+  _rmp_parent=$1
+  _rmp_pkg=$2
+  for _rmp_manifest in \
+    "node_modules/$_rmp_parent/node_modules/$_rmp_pkg/package.json" \
+    "node_modules/$_rmp_pkg/package.json"; do
+    [ -f "$_rmp_manifest" ] || continue
+    _rmp_major=$(jq -r '
+      (.version // "") | ltrimstr("v") | split(".")[0]
+      | if type == "string" and test("^[0-9]+$") then . else empty end
+    ' "$_rmp_manifest" 2>/dev/null) || _rmp_major=""
+    if [ -n "$_rmp_major" ]; then
+      printf '%s' "$_rmp_major"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Per-parent-*copy* declarations, read out of the lockfile
+#
+# `node_modules/<parent>/package.json` answers for one copy of a parent, and a
+# parent in the tree at several versions has several — each declaring its own
+# range and each resolving its own copy of the package. Asking the installed
+# manifest for a multi-version parent therefore attributes one copy's range to
+# every line the parent sits on, and asking `resolved_major_for_parent` for its
+# line answers about the hoisted copy or about nothing at all. On
+# arsenalamerica/app (Yarn Berry, no `node_modules` in the pre-install
+# worktree) `declared_ranges --line 5 brace-expansion` returned
+# `parents_read: []`, `parents_unreadable: ["minimatch"]` and `ranges: []`,
+# while the lockfile plainly recorded minimatch@3.1.5 -> brace-expansion@^1.1.7
+# and minimatch@10.2.5 -> brace-expansion@^5.0.5
+# ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+#
+# The lockfile has all of it per copy, and it is the source scripts/CLAUDE.md
+# already names for what a parent declares. These rows carry the parent's own
+# resolved version, the range that copy declares, and the version of the
+# package *that copy* resolves to — which is what `--line` has to filter on.
+#
+# npm resolves a declaration by walking `node_modules` upward from the
+# declaring path, so the candidate list is that walk against the lockfile's own
+# `packages` keys. Berry resolves a descriptor (`<key>@<value>`) through the
+# entry whose key list contains it, so the rows are joined against a descriptor
+# -> version map built from the same file.
+#
+# pnpm has no rows here for the same reason `apply_constraint`'s `alias_lookup`
+# reports `unsupported` for it: its `snapshots:` blocks record what a dependency
+# resolved to, never the specifier it was declared with. A pnpm parent keeps the
+# installed-manifest path below rather than getting a guessed declaration.
+#
+# The parentheses around `.packages // {}` are load-bearing, not style. `as`
+# binds its whole right-hand side, so `A // B as $x | body` parses as
+# `A // (B as $x | body)`: with a `packages` map present the alternative
+# short-circuits and the program returns that map instead of the rows. jq 1.8
+# happens to give the intended reading, jq 1.7 (ubuntu-latest, and the floor
+# these scripts support) gives the other one, so on Linux every lockfile-read
+# parent came back `parents_unreadable` while macOS was green. Bind first,
+# always: every other `//`-defaulted binding in these scripts is parenthesized.
+NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
+def prefixes:
+  if . == "" then [""]
+  else [.] + ((sub("/?node_modules/[^/]+$"; "")) | prefixes) end;
+def candidates($dk):
+  prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
+(.packages // {}) as $pkgs
+| [ $pkgs | to_entries[]
+    | .key as $path
+    | .value as $v
+    | (if $path == "" then "__root__"
+       else ($path | split("node_modules/") | last) end) as $parent
+    | ([ ($v.dependencies         // {}),
+         ($v.optionalDependencies // {}),
+         ($v.peerDependencies     // {}) ] | add // {})
+    | to_entries[]
+    | select(.value | type == "string")
+    | select(.key == $pkg or (.value | startswith("npm:" + $pkg + "@")))
+    | .key as $dk
+    | { parent: $parent,
+        parent_version: ($v.version // null),
+        range: (if $dk == $pkg then .value
+                else (.value | .[(($pkg | length) + 5):]) end),
+        resolved: ([ $path | candidates($dk)[] as $c
+                     | select($pkgs | has($c)) | $pkgs[$c].version // empty ]
+                   | first // null) } ]
+JQLIB
+)
+
+npm_copy_rows() {
+  jq -c --arg pkg "$1" "$NPM_COPY_ROWS_JQ" package-lock.json
+}
+
+# Berry's rows, plus the descriptor -> version map its resolution needs.
+#
+# `D` rows are one per descriptor in an entry's key list; `P` rows are one per
+# declaration in a `dependencies:`, `peerDependencies:` or
+# `optionalDependencies:` block, carrying the declaring entry's own name and
+# version. Workspace entries are dropped exactly as `yarn_declaration_rows`
+# drops them.
+#
+# The double-quote character comes from `sprintf` for the bash 3.2 reason
+# `YARN_DECLARATION_AWK` documents: an unpaired `"` in a heredoc body cuts the
+# command substitution short.
+YARN_COPY_AWK=$(cat <<'AWKLIB'
+    BEGIN { q = sprintf("%c", 34) }
+    /^[^[:space:]#]/ {
+      ndesc = 0; cur = ""; ver = ""; indeps = 0
+      keyline = $0
+      if (substr(keyline, length(keyline), 1) == ":") {
+        keys = substr(keyline, 1, length(keyline) - 1)
+        gsub(q, "", keys)
+        ndesc = split(keys, desc, ", ")
+      }
+      next
+    }
+    /^  version: / {
+      ver = substr($0, 12)
+      gsub(q, "", ver)
+      sub(/^[[:space:]]+/, "", ver)
+      sub(/[[:space:]]+$/, "", ver)
+      for (i = 1; i <= ndesc; i++) printf "D\t%s\t%s\n", desc[i], ver
+      next
+    }
+    /resolution: / {
+      i = index($0, "resolution: ")
+      rest = substr($0, i + 13)
+      j = index(rest, q)
+      res = substr(rest, 1, j - 1)
+      if (index(res, "@workspace:") > 0) { cur = ""; next }
+      at = 0
+      for (k = length(res); k > 1; k--) {
+        if (substr(res, k, 1) == "@") { at = k; break }
+      }
+      cur = (at > 1) ? substr(res, 1, at - 1) : res
+      next
+    }
+    /^  (dependencies|peerDependencies|optionalDependencies):/ { indeps = 1; next }
+    /^  [a-zA-Z]/ { indeps = 0 }
+    indeps && /^    / {
+      dep = $0
+      sub(/^    /, "", dep)
+      c = index(dep, ":")
+      if (c == 0) next
+      name = substr(dep, 1, c - 1)
+      val  = substr(dep, c + 1)
+      gsub(q, "", name)
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      gsub(q, "", val)
+      if (cur != "") printf "P\t%s\t%s\t%s\t%s\n", cur, ver, name, val
+    }
+AWKLIB
+)
+
+YARN_COPY_ROWS_JQ=$(cat <<'JQLIB'
+split("\n") | map(select(length > 0) | split("\t")) as $rows
+| ([ $rows[] | select(.[0] == "D") | {key: .[1], value: .[2]} ] | from_entries) as $dmap
+| [ $rows[]
+    | select(.[0] == "P")
+    | {parent: .[1], parent_version: .[2], key: .[3], value: .[4]}
+    | select(.key == $pkg or (.value | startswith("npm:" + $pkg + "@")))
+    | {parent: .parent,
+       parent_version: .parent_version,
+       range: (if .key == $pkg then (.value | ltrimstr("npm:"))
+               else (.value | .[(($pkg | length) + 5):]) end),
+       resolved: ($dmap[.key + "@" + .value] // null)} ]
+JQLIB
+)
+
+yarn_copy_rows() {
+  awk "$YARN_COPY_AWK" yarn.lock | jq -Rs -c --arg pkg "$1" "$YARN_COPY_ROWS_JQ"
+}
+
+parent_copy_rows() {
+  case "$1" in
+    npm)  npm_copy_rows "$2"  ;;
+    yarn) yarn_copy_rows "$2" ;;
+    *)    printf '[]'         ;;
+  esac
+}
+
 verb_declared_ranges() {
+  line=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --line)
+        line="${2:?--line requires a major}"
+        shift 2
+        ;;
+      --) shift; break ;;
+      -*) die "declared_ranges: unknown option '$1'" ;;
+      *)  break ;;
+    esac
+  done
+
   pkg="${1:?declared_ranges requires a package name}"
+
+  case "$line" in
+    ''|*[!0-9]*)
+      [ -z "$line" ] || die "declared_ranges: --line must be a major number, got '$line'"
+      ;;
+  esac
+
   pm=$(pm_of)
   case "$pm" in
     npm)  parents=$(npm_parents "$pkg")  ;;
@@ -1716,9 +2026,102 @@ verb_declared_ranges() {
   no_range=""
   unreadable=""
   malformed=""
+  other_lines=""
+
+  # The root is a dependent like any other, so `--line` filters it on the same
+  # rule: it has no nested copy of its own, and reaches the hoisted one.
+  if [ -n "$root_range" ] && [ -n "$line" ] \
+    && root_major=$(resolved_major_for_parent __root__ "$pkg") \
+    && [ "$root_major" != "$line" ]; then
+    other_lines="__root__
+"
+    root_range=""
+  fi
+
+  copy_rows=$(parent_copy_rows "$pm" "$pkg")
+  tab=$(printf '\t')
+
   while IFS= read -r parent; do
     [ -n "$parent" ] || continue
     [ "$parent" != "__root__" ] || continue
+
+    # A parent the installed tree cannot answer for goes to the lockfile rows,
+    # which carry one declaration per copy of the parent. Two cases reach here:
+    # the parent is in the tree at several versions, where a single installed
+    # manifest describes at most one of them and attributing its range to every
+    # line is the defect; and the parent has no installed manifest at all,
+    # where the range was simply lost — the pre-install worktree a fix runs in,
+    # Yarn PnP, and every pnpm parent that is not a direct dependency
+    # ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+    #
+    # A manifest that is on disk stays the answer for a single-copy parent: it
+    # is the state actually installed, version skew against the lockfile is
+    # real, and a manifest on disk that will not parse is a damaged install
+    # that must keep saying so rather than being papered over.
+    parent_rows=$(printf '%s' "$copy_rows" | jq -c --arg p "$parent" '[ .[] | select(.parent == $p) ]')
+    copy_count=$(printf '%s' "$parent_rows" | jq '[ .[].parent_version ] | unique | length')
+    if [ "$copy_count" -gt 1 ] \
+      || { [ "$copy_count" -ge 1 ] && [ ! -f "node_modules/$parent/package.json" ]; }; then
+      row_read=""
+      row_no_range=""
+      while IFS="$tab" read -r copy_version copy_range copy_major; do
+        [ -n "$copy_version$copy_range$copy_major" ] || continue
+        if [ -n "$line" ] && [ -n "$copy_major" ] && [ "$copy_major" != "$line" ]; then
+          # Named with the parent's own version: a parent on two lines appears
+          # in `parents_read` and here, and only the version says which copy is
+          # which.
+          if [ "$copy_version" = "-" ]; then
+            other_lines="$other_lines$parent
+"
+          else
+            other_lines="$other_lines$parent@$copy_version
+"
+          fi
+          continue
+        fi
+        if [ -n "$copy_range" ] && [ "$copy_range" != "-" ]; then
+          ranges="$ranges$copy_range
+"
+          row_read=y
+        else
+          row_no_range=y
+        fi
+      done <<EOF
+$(printf '%s' "$parent_rows" | jq -r '
+        .[] | [ (.parent_version // "-"),
+                (.range // "-"),
+                ((.resolved // "") | ltrimstr("v") | split(".")[0]
+                 | if type == "string" and test("^[0-9]+$") then . else "" end) ]
+        | @tsv')
+EOF
+      if [ -n "$row_read" ]; then
+        read_parents="$read_parents$parent
+"
+      elif [ -n "$row_no_range" ]; then
+        read_parents="$read_parents$parent
+"
+        no_range="$no_range$parent
+"
+      fi
+      continue
+    fi
+
+    # The line filter comes first, and files the parent in none of the four
+    # existing lists. A parent whose own copy sits on another major line was
+    # not read-and-declaring-nothing and was not unreadable; it is simply not
+    # a dependent this fix moves, and saying so under its own field keeps
+    # `parents_read` / `parents_without_range` / `parents_unreadable` honest
+    # ([#76](https://github.com/SurveyMonkey/skills/issues/76)).
+    #
+    # An undeterminable line keeps the parent, because the alternative is
+    # dropping a range on a guess: over-reporting distance is the recoverable
+    # direction, and every dropped range lowers a risk score silently.
+    if [ -n "$line" ] && parent_major=$(resolved_major_for_parent "$parent" "$pkg") \
+      && [ "$parent_major" != "$line" ]; then
+      other_lines="$other_lines$parent
+"
+      continue
+    fi
     manifest="node_modules/$parent/package.json"
     if [ ! -f "$manifest" ]; then
       unreadable="$unreadable$parent
@@ -1771,20 +2174,23 @@ EOF
 "
 
   printf '%s' "$ranges" | jq -Rs \
-    --arg pkg "$pkg" --arg pm "$pm" --arg root "$root_range" \
+    --arg pkg "$pkg" --arg pm "$pm" --arg root "$root_range" --arg line "$line" \
     --argjson read_parents "$(printf '%s' "$read_parents" | jq -Rs 'split("\n") | map(select(length > 0))')" \
     --argjson no_range "$(printf '%s' "$no_range" | jq -Rs 'split("\n") | map(select(length > 0))')" \
     --argjson unreadable "$(printf '%s' "$unreadable" | jq -Rs 'split("\n") | map(select(length > 0))')" \
-    --argjson malformed "$(printf '%s' "$malformed" | jq -Rs 'split("\n") | map(select(length > 0))')" '
+    --argjson malformed "$(printf '%s' "$malformed" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+    --argjson other_lines "$(printf '%s' "$other_lines" | jq -Rs 'split("\n") | map(select(length > 0))')" '
     {
       pm: $pm,
       package: $pkg,
+      line: (if $line == "" then null else ($line | tonumber) end),
       ranges: (split("\n") | map(select(length > 0)) | unique),
       root_range: (if $root == "" then null else $root end),
       parents_read: $read_parents,
       parents_without_range: $no_range,
       parents_unreadable: $unreadable,
-      parents_malformed: $malformed
+      parents_malformed: $malformed,
+      parents_other_lines: $other_lines
     }'
 }
 

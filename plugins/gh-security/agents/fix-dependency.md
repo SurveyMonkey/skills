@@ -139,13 +139,51 @@ Setup, as separate simple steps, not one compound block:
    directory so the user can inspect and remove it
    (`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse
    or silently delete it.
-2. **Stale-branch guard**: if the fix branch already exists locally, stop and return a failure
-   (phase `worktree`): discovery only checked for open PRs, so a stale local branch may hold
-   someone's unpushed work.
+2. **Stale-branch guard, and it verifies rather than stops on sight**: discovery only checked for
+   open PRs, so a local branch of your name *may* hold someone's unpushed work — but the common
+   case is a leftover of a previous run of this very flow, and the two are told apart by the tip,
+   never by existence.
 
 ```bash
 git -C <repo_root> fetch origin <default_branch>
-git -C <repo_root> branch --list "<branch_name>"   # any output => branch exists => stop
+git -C <repo_root> fetch origin <branch_name>      # no remote branch of that name is fine
+git -C <repo_root> branch --list "<branch_name>"   # empty => no local branch => nothing to check
+git -C <repo_root> rev-parse "<branch_name>"       # only when branch --list reported one
+git -C <repo_root> rev-parse "origin/<default_branch>"
+git -C <repo_root> rev-parse "origin/<branch_name>"   # only when the fetch found one
+```
+
+**The local tip equal to `origin/<default_branch>` or to `origin/<branch_name>` is this plugin's
+own leftover**, and you may delete and recreate it:
+
+```bash
+git -C <repo_root> branch -D <branch_name>
+```
+
+Equal to `origin/<default_branch>` means a previous run created the branch and committed nothing to
+it — there is no work on it to lose. Equal to `origin/<branch_name>` means a previous run pushed
+it and the remote still carries the same commits, so the local ref is a duplicate of something that
+survives its deletion. Fetch the remote branch first and read a failure there as *no such remote
+branch*, which is the ordinary case and not an error; a fetch that does find one updates the
+remote-tracking ref `origin/<branch_name>`, which is what the `rev-parse` above reads. Only a
+`fetch origin <default_branch>`, a
+`branch --list`, or a `rev-parse` on a ref the previous command reported as existing may fail the
+run (phase `worktree`, quoting git).
+
+**A local tip that is neither is someone's unpushed work.** Stop and return a failure (phase
+`worktree`) naming the branch and quoting the three shas, so the user can inspect it. Never delete
+that one, and never reuse it: your commit would land on top of theirs and your push would carry it.
+
+The guard used to stop on any local branch at all, which deadlocked the flow against its own
+leftovers: cleanup left a branch behind on every run, so the next run of the same group always
+found one and always stopped. `brianespinosa/bork` is the specimen —
+`fix/dependabot-react-router-6x` at `d1e0b48`, this plugin's own pushed commit from the since-closed
+PR #377, and `fix/dependabot-vite-6x` at `a24f38c`, which was `origin/main` at the time, i.e. a run
+that created the branch and committed nothing. Neither held a human's commit, and both blocked a
+rerun until a human deleted them by hand
+([#84](https://github.com/SurveyMonkey/skills/issues/84)).
+
+```bash
 mkdir -p <repo_root>/.claude/worktrees
 git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_branch>"
 ```
@@ -167,11 +205,15 @@ covered too; only git needs the `-C` form.
 cd "$WORK/fix" && $ADAPTER resolved_versions <package>
 ```
 
-Keep this output. The merge-risk rating needs the version resolved *before* the fix, and once you
-install it is gone.
+**Keep this output verbatim; you pass it back to `validate` in phase 4.** It has two consumers,
+and once you install it is gone: the merge-risk rating needs the version resolved *before* the fix,
+and validate's cross-line collateral check needs every copy that existed before it — including the
+copies on major lines your group does not own, which no other check in this flow ever looks at.
 
 If `present` is false the package is not currently in the lockfile, which is legitimate for a new
-direct dependency. Record that there is no baseline and continue; phase 5 handles it.
+direct dependency. Record that there is no baseline and continue; phase 5 handles it. Pass the
+`present: false` output to phase 4's `--baseline` anyway: nothing existed to be moved, so the
+collateral check answers `[]` honestly rather than going unasked.
 
 If the script errors about parsing zero entries, the lockfile is unreadable. Stop and return a
 failure (phase `baseline`). Do not treat a failed parse as an empty result.
@@ -182,8 +224,42 @@ failure (phase `baseline`). Do not treat a failed parse as an empty result.
 cd "$WORK/fix" && $ADAPTER why <package>
 ```
 
-`relationship` is `direct` or `transitive`, and `parents` lists the direct parents a scoped
-override must target. Keep `raw` for the PR body.
+`relationship` is `direct` or `transitive`, and `parents` lists the direct parents of the package.
+Keep `raw` for the PR body.
+
+**`parents` spans every major line, and only the parents on yours may receive a scoped entry.**
+`why` has no `--line`, so it answers about the package as a whole: on a real run its `undici`
+parents included `@vercel/sandbox` (resolving 7.28.0) and `vercel` (resolving 5.29.0) alongside the
+line-6 parents. Passing all of them to `apply_constraint` for the 6.x group would have written
+`>=6.28.0 <7` over two lines the group does not own — the same cross-line damage as
+[#83](https://github.com/SurveyMonkey/skills/issues/83), arriving through the parent list instead
+of through the key. Narrow it before phase 4:
+
+```bash
+cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
+```
+
+**The eligible set is `parents_read` plus `parents_unreadable` plus `parents_without_range`, minus
+nothing else.** The only parents excluded are those in `parents_other_lines`, which **never**
+receive a scoped entry: their copy of the package is on another major, a sibling agent owns it, and
+there is no argument for touching it here. The other three stay eligible, including when
+`parents_read` is empty and every parent is unreadable — an undeterminable line is not evidence of a
+different one, and dropping those parents abandons the fix on exactly the repositories where the
+copy is hardest to find. A live run reached that state (`parents_read: []`, the only parent in
+`parents_unreadable`) and had to guess, because these two sentences said "exactly `parents_read`"
+and "they stay eligible" ([#76](https://github.com/SurveyMonkey/skills/issues/76),
+[#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+Two consequences travel with it:
+
+- **Scope by parent name.** `parents_other_lines` entries may carry the parent's resolved version
+  (`minimatch@3.1.5`), because a parent in the tree at several versions is excluded per copy. Such
+  a parent appears in **both** lists and is eligible — one of its copies is on your line. Pass the
+  bare name.
+- **Name every unreadable parent you scoped to in the PR body**, marking any that are also in
+  `parents_malformed` as a damaged install, and say that its entry rests on a declaration no source
+  could be read for. Same disclosure phase 5 requires for the risk score, and for the same reason:
+  a reviewer must be able to see which entries were written against a partial view.
 
 ## Phase 4: Apply the fix, install, validate
 
@@ -196,7 +272,7 @@ is your `major_line` and the one above it.
 # direct dependency
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>'
 
-# transitive: pass every parent from phase 3
+# transitive: pass the parents_read set from phase 3, and only those
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
 ```
 
@@ -240,7 +316,7 @@ what tells a bare override you *tightened* from one you *added*.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
-cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 2 resolved_versions JSON>' <package> '>=<version> <<next_major>'
 ```
 
 Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
@@ -250,7 +326,13 @@ hard error, because without the ranges validate cannot tell a finished fix from 
 Copy each range exactly: a range validate cannot parse is also a hard error naming it, since an
 unreadable range would otherwise mark every resolved copy not vulnerable.
 
-`validate` answers two separate questions and fails if either does:
+**`--baseline` takes phase 2's `resolved_versions` output verbatim, single-quoted.** It is JSON
+from the adapter and never contains a quote character. It is checked, not trusted: a payload that
+is truncated, or captured for a different package, is a hard error naming itself, because a
+baseline nobody could read would report no collateral at all — the clean-looking answer produced by
+checking nothing. `--baseline` also requires `--line`.
+
+`validate` answers three separate questions and fails if any of them does:
 
 - **Constraint**, in `violations[]`: copies **in your line** that do not satisfy the range. Copies
   in other lines are out of scope; a sibling agent owns them.
@@ -258,6 +340,29 @@ unreadable range would otherwise mark every resolved copy not vulnerable.
   ranges. A satisfied constraint with a non-empty `unresolved_alerts` is exactly the silent
   partial fix this check exists to catch. `checked` is how many copies were in your line; if
   `line_present` is false, nothing in your line is installed and you validated nothing.
+- **Collateral**, in `other_line_moves[]`: copies on the *other* major lines that the install
+  moved or removed. `null` means you passed no baseline and the question went unasked; `[]` means
+  it was asked and nothing moved. Never read `null` as `[]`.
+
+**A non-empty `other_line_moves` stops the run.** Do not commit, do not push, do not open a PR.
+Return `"status": "failure"` with `failure.phase` = `"validate"`, and quote the array verbatim in
+`detail` along with the entries `apply_constraint` wrote. This is a fail-closed condition and not a
+judgement call: the constraint and completeness checks are both scoped to `--line` and are
+structurally incapable of seeing an out-of-line copy, so `ok: true` from them is not evidence about
+any line but yours.
+
+What it means: your override reached a copy of the package under a parent on another major line.
+A live run wrote the Yarn resolutions key `minimatch/brace-expansion` for the 5.x group, and
+because a Yarn key's parent half carries no version, Yarn applied it to **every** copy of
+`minimatch`. `minimatch@3.1.5`, which `require()`s `brace-expansion` at `^1.1.7`, had its copy
+dragged from `1.1.18` to `5.0.9`: a different major, and a plausible runtime break. `validate
+--line 5` returned `ok: true` throughout, and the PR shipped with the damage described in prose
+only ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
+Narrowing the key yourself is not the remedy and you must not try it. Yarn's parent half matches
+the parent's **exact resolved version** and a range there parses and then silently never matches;
+pnpm and npm accept a range but with two further different semantics. Escalate the repository
+instead: say which line moved, from what to what, and which parent carries it.
 
 Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout
 worth one retry, a version that does not exist.
@@ -269,7 +374,8 @@ git -C "$WORK/fix" status --porcelain
 ```
 
 **Empty output after `apply_constraint` and `install`, with `validate` returning `ok: true`,
-`violations: []` and `unresolved_alerts: []`, means the fix is already on the default branch.**
+`violations: []`, `unresolved_alerts: []` and `other_line_moves: []`, means the fix is already on
+the default branch.**
 `apply_constraint` merged into entries that already carried the right range, the install changed no
 lockfile entry, and validate confirms every alert in your group is already cleared by what is
 installed. Nothing is wrong and nothing needs doing.
@@ -365,8 +471,19 @@ has been tested against `9.x` and never saw `10.x`, so how far past that a fix l
 number that predicts breakage, and it is not visible in the before/after delta:
 
 ```bash
-cd "$WORK/fix" && $ADAPTER declared_ranges <package>
+cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
 ```
+
+**Always pass `--line <major_line>`**, the same major line you passed to `validate --line` in phase
+4. Without it the verb collects every declaration of the package name anywhere in the lockfile,
+including parents whose own resolved copy sits on a major line your override never touches, and
+their ranges then score as distance this fix crossed. On `arsenalamerica/app#300` a 7.28.0 ->
+7.29.0 bump scoped to line 7 scored F7 = 2, "2 major lines crossed ... crosses the pinned range
+5.28.4", entirely on the strength of 5.x and 6.x parents that a line-bounded override leaves
+exactly where they were ([#76](https://github.com/SurveyMonkey/skills/issues/76)). Distance is
+measured from the dependents the override actually moves ([ADR
+006](../../../docs/adr/006-merge-risk-is-static-analysis.md); RFC 001 F7), and those are the
+parents resolved on your line.
 
 It returns `ranges[]` (every distinct range its parents declare across `dependencies`,
 `optionalDependencies` and `peerDependencies`, plus the root manifest's own declaration, which is
@@ -376,8 +493,18 @@ but the installed manifest declares the package in no block, which happens under
 `parents_unreadable[]`, and `parents_malformed[]`, the subset of unreadable whose manifest is on
 disk but does not parse.
 
-Unreadable parents are usually normal rather than a failure: Yarn PnP installs no `node_modules` at
-all and pnpm links only direct dependencies there. A **malformed** one is not normal, and says the
+`parents_other_lines[]` is the parents `--line` excluded, and it is none of those things: they were
+read, they declare a range, and that range governs a copy on another major line. They are not a
+partial view and need no disclosure in the PR body; a parent whose resolved copy could not be
+determined at all is **kept** rather than excluded, so an unreadable install over-reports distance
+rather than silently lowering the score. An entry carries the parent's resolved version
+(`minimatch@3.1.5`) when the exclusion was decided per copy, which is how a parent in the tree at
+several versions can appear both here and in `parents_read`
+([#85](https://github.com/SurveyMonkey/skills/issues/85)).
+
+An unreadable parent is now rarer than it was and means more: the adapter falls back to the
+lockfile for a parent with no installed manifest, so Yarn PnP and pnpm's partly-linked
+`node_modules` no longer produce one on their own. A **malformed** one is not normal, and says the
 install is damaged. **Name every unreadable parent in the PR body**, marking any malformed ones as
 such, so a reviewer knows the distance was measured against a partial view; `why.json`'s `raw`
 field often carries the ranges the package manager printed for them.
@@ -441,6 +568,24 @@ counts and the workflow the score rests on, if the PR body needs to cite them.
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
 first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
 until a human says so.
+
+**The repository's own commit and push hooks are the repository's, and they run.** A repo with
+lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
+and *your* push, and that is correct: you are committing to that repository on its terms.
+`arsenalamerica/app` ran biome and knip on commit and its test and typecheck suite on push through
+every fix run. Three rules follow, and none of them is a judgment call:
+
+- **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
+  `core.hooksPath`. This is the user-level git convention as well as this flow's.
+- **A hook that fails the commit or push is a failure result** (phase `commit` or `push`
+  respectively), quoting the hook's own output. Report it and stop; do not retry the command.
+- **Never edit code, tests or configuration to satisfy a hook.** Your diff is the dependency fix.
+  A hook failing on it is a fact about this change meeting the repository's standards, which is
+  exactly what a reviewer needs to see, and editing until it passes destroys that signal.
+
+This is a different mechanism from [ADR 006](../../../docs/adr/006-merge-risk-is-static-analysis.md),
+which says you never *choose* to run a repository's checks for scoring. A hook the repository
+attached to `git commit` runs automatically, is not yours to run or skip, and feeds no factor.
 
 ```bash
 git -C "$WORK/fix" add package.json <lockfile>
@@ -533,6 +678,8 @@ PR body:
 
 - [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
       `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
+- [x] No collateral: every copy of `<package>` on the other major lines resolves exactly as it did
+      before this change (`other_line_moves: []`, against the pre-fix baseline)
 - CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
@@ -542,6 +689,31 @@ PR body:
 
 EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
+
+**Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
+`## Collateral` section placed immediately before `## Verification`.** Two situations reach it, and
+neither may be left to the reader to infer from a missing tick:
+
+- **`null`** — no usable baseline existed, so the check was never run. Say that, and say the PR
+  makes no claim about the other major lines. A verdict states what it covers; silence here reads
+  as "clean".
+- **non-empty** — the install moved a copy on a line this group does not own. Phase 4 stops on
+  this, so a PR only exists if a human re-dispatched you with that move explicitly accepted. Name
+  who accepted it and why, and give the table below. Never write this section from your own
+  judgement that a move looks harmless.
+
+> ## Collateral
+>
+> This change also moved a copy of `brace-expansion` on a major line this PR does not own. The
+> Yarn resolutions key `minimatch/brace-expansion` carries no version on its parent half, so Yarn
+> applies it to every resolved copy of `minimatch`.
+>
+> | Line | Before | After | Parent | Declared |
+> |---|---|---|---|---|
+> | 1.x | 1.1.18 | (gone) | `minimatch@npm:3.1.5` | `brace-expansion: "npm:^1.1.7"` |
+>
+> `minimatch@3.1.5` requires `^1.1.7` and now resolves 5.0.9, a different major. Review this
+> before merging.
 
 If you tightened **or added** a bare override in phase 4, the body gets a `## Global override`
 section after `## Changes`. It is required, not a nicety: a reviewer seeing a new unscoped entry
@@ -574,8 +746,40 @@ sibling agents very likely share this `repo_root` right now; a prune timed again
 `worktree add` or `remove` can delete its live registration, and the breakage then surfaces in the
 victim with no cause it can observe.
 
-The fix branch itself remains (it is pushed, or irrelevant on failure); the worktree never
-survives you. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
+**Then delete the local branch, but only when deleting it is provably safe:**
+
+```bash
+git -C <repo_root> branch -D <branch_name>
+```
+
+Two cases are safe, and nothing else is:
+
+- **You pushed.** The push succeeded with that tip, so the remote carries the same commits and the
+  local ref is a duplicate. Confirm it rather than assume it if you have any doubt about which of
+  your commits reached the remote:
+  `git -C <repo_root> rev-parse <branch_name>` equal to
+  `git -C <repo_root> rev-parse origin/<branch_name>`. The PR is open on the remote ref and does not
+  need a local branch to exist.
+- **You committed nothing.** On any failure path whose branch tip still equals
+  `origin/<default_branch>`, there is nothing on the branch to lose.
+
+**Otherwise leave the branch and say so in `detail`** (in your prose, when the result is a success
+and `failure` is `null`), naming it and its tip: a branch carrying a
+commit that never reached the remote is the one thing here that cannot be recreated, and the same
+judgment that phase 1's guard refuses to make from a distance is not yours to make on the way out
+either.
+
+**Order matters: the worktree comes off first.** Git refuses to delete a branch that is checked out
+in a worktree, so a `branch -D` issued before `worktree remove` fails on exactly the branch it was
+meant to clean up. Any error from `branch -D` goes in `detail` verbatim — never silence it — and
+leaves the branch in place; it is not a failure result on its own, because by this point the work
+either shipped or already failed for its own reason.
+
+Deleting the branch is what keeps the next run of this group from meeting phase 1's guard at all.
+The old rule left it behind on every run ("it is pushed, or irrelevant on failure"), which made the
+flow's own leftovers the guard's most common input
+([#84](https://github.com/SurveyMonkey/skills/issues/84)). The worktree never survives you either
+way. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
 `.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
 flight, but only if the report says it happened.
 
@@ -615,6 +819,9 @@ End your final message with exactly one fenced JSON block:
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can
   reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
   the orchestrator reports it.
+- A non-empty `other_line_moves` never reaches a `success` result. It is a `failure` with
+  `failure.phase` = `"validate"`, whose `detail` quotes the array verbatim
+  ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
 - `observations` is the adapter's `apply_constraint` observations array, passed through
   **verbatim** so the orchestrator can deduplicate across agents, plus **one entry of your own
   appended to it when, and only when, `bare_override` is `added`**:
@@ -649,7 +856,7 @@ End your final message with exactly one fenced JSON block:
     "evidence": {
       "diff": "",
       "resolved_version": "6.28.0",
-      "validate": {"ok": true, "violations": [], "unresolved_alerts": [], "checked": 2},
+      "validate": {"ok": true, "violations": [], "unresolved_alerts": [], "other_line_moves": [], "checked": 2},
       "merged_pr_url": "https://github.com/<nwo>/pull/597"
     }
   }

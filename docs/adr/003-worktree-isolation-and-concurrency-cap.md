@@ -4,7 +4,7 @@ description: Fix agents work in per-major-line worktrees under .claude/worktrees
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5, 35]
+related_issues: [5, 35, 84]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
@@ -118,3 +118,36 @@ Worktree *paths* are isolated; repository state is not.
 
 Everything else above holds. The general rule the two share: an agent may name its own paths, and
 nothing repository-wide.
+
+## Amendment: the fix branch is cleaned up, and the guard on it is verified
+
+[Issue #84](https://github.com/SurveyMonkey/skills/issues/84) found the Decision's "**A
+pre-existing local fix branch stops the agent**" and the Cleanup rule that leaves the branch behind
+to be a deadlock when read together: cleanup left a branch on every exit path, so the next run of
+the same group always found one and always stopped. The guard's stated subject — someone's unpushed
+work — was in practice never what it caught. `brianespinosa/bork` carried
+`fix/dependabot-react-router-6x` at this plugin's own pushed commit and `fix/dependabot-vite-6x` at
+what was then `origin/main`, and both blocked a rerun until a human deleted them.
+
+- **Cleanup deletes the branch when the delete is provably safe**, after the worktree comes off (git
+  refuses to delete a branch checked out in a worktree): the push succeeded with that tip, so the
+  remote carries the same commits, or the tip still equals `origin/<default_branch>`, so nothing was
+  committed. Anything else is left in place and named in the report.
+- **The guard compares tips instead of stopping on existence.** A local tip equal to
+  `origin/<default_branch>` or to `origin/<branch_name>` is this plugin's leftover and is deleted
+  and recreated; only a tip that is neither is unpushed work, and only that stops the run. This is
+  the shape `agents/audit-pins.md` already uses for `chore/dependabot-remove-pins`, which proves a
+  remnant against a closed PR's `headRefOid` rather than refusing on sight.
+
+The Consequences claim that "stale local fix branches surface as agent failures" now holds only for
+a branch whose tip nobody can account for; the orchestrator's summary still hands that judgment to
+the human.
+
+## Amendment: there is no `$WORK/base`
+
+[ADR 006](006-merge-risk-is-static-analysis.md) retired the `fail-preexisting` / `fail-caused`
+attribution discipline along with the F5 it fed, and with it the second worktree the Decision
+describes. No agent runs the repository's checks, so nothing needs a default-branch comparison
+tree: the fix flow installs one tree, `$WORK/fix`, and cleanup removes that one. Read the
+Decision's "second, lazy, detached worktree" paragraph, its "for both worktrees", and the
+Consequences' "pays twice" as history.
