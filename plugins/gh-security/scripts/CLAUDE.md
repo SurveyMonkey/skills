@@ -74,40 +74,23 @@ constraint check alone passes a partial fix, so the guarantee is enforced rather
 (range satisfaction answers false for a token it cannot read, which on this side means "nothing is
 vulnerable").
 
-## Prescribed shapes and the preflight catalog move together
+## Where the prescribed git shapes run, and why
 
-`preflight-permissions.sh` pre-approves exactly the command shapes the agent definitions
-prescribe. Changing a prescribed shape in `agents/fix-dependency.md` or `agents/audit-pins.md`
-without updating the catalog in the same commit reintroduces a permission prompt for spec'd
-behavior — caught live once already (the `rev-parse` → `branch --list` guard change). Keep them in
-lockstep: the audit's `git log -S`, `gh pr list` and fixed-alert lookup are in the catalog because
-its definition prescribes them.
+Both agent definitions prescribe exact `git` shapes, and where each one runs is a constraint rather
+than a style choice.
 
-The audit's `pr` mode added **one** rule, and which shapes needed one is a checked fact rather than
-an assumption. Every write it makes runs **from inside the worktree**, so
-`Bash(git -C *$REPO_ROOT/.claude/worktrees/*)` covers all of those:
-`ls-files -- .yarn/cache`, `checkout HEAD -- .yarn/cache`, `status --porcelain`, `diff --quiet`,
-`add`, `branch -D`, `switch -c`, `commit`, and
-`push -u --force-with-lease=<ref>:<sha> origin <ref>`. Its `gh pr list --repo <nwo> --head ...`
-guards, `gh label` and `gh pr create` are byte-identical in shape to the fix agent's and were
-already in the catalog.
+**Every write the audit's `pr` mode makes runs from inside the worktree**: `ls-files -- .yarn/cache`,
+`checkout HEAD -- .yarn/cache`, `status --porcelain`, `diff --quiet`, `add`, `branch -D`,
+`switch -c`, `commit`, and `push -u --force-with-lease=<ref>:<sha> origin <ref>`.
 
-The fix agent's leftover-branch cleanup is the mirror image, and the one *writing* git shape either
-definition prescribes at `<repo_root>`: git refuses to delete a branch that is checked out in a
-worktree, so `branch -D <branch_name>` runs **after** `worktree remove`, when no worktree is left to
-run it from. `Bash(git -C *$REPO_ROOT* branch --list *)` is read-only and does not match it, so the
-catalog carries `Bash(git -C *$REPO_ROOT* branch -D *)`
+**That the branch is created from inside the worktree rather than at `worktree add` time is
+deliberate.** It keeps every branch-manipulating shape in one place, and it means a run that opens
+no PR leaves no branch behind.
+
+**The fix agent's leftover-branch cleanup is the one exception, and has to be.** Git refuses to
+delete a branch that is checked out in a worktree, so `branch -D <branch_name>` runs **after**
+`worktree remove`, when no worktree is left to run it from
 ([#84](https://github.com/SurveyMonkey/skills/issues/84)).
-
-The one addition is `Bash(git -C *$REPO_ROOT* ls-remote --heads origin *)`, for the remnant guard.
-`rev-parse`, `branch --list` and `fetch origin` were already there and `ls-remote` was not, which
-is exactly the lockstep failure this section is about: the guard's other three shapes would have
-run silently while the one that reads the remote prompted.
-
-That the branch is created from inside the worktree rather than at `worktree add` time is a
-deliberate consequence of the same rule: it keeps every branch-manipulating shape under the one
-worktree rule, and it means a run that opens no PR leaves no branch behind. A shape that drifts
-from the fix agent's, or that starts naming `repo_root`, is a catalog change in the same commit.
 
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 

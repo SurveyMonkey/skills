@@ -28,18 +28,7 @@ report that and stop — the audit worktree is created from it.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`.
 
-## 2. Permissions preflight
-
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh check <repo_root> <nwo>
-```
-
-Same handling as the `resolve-alerts` skill's phase 2: on error, say so and continue without it;
-if nothing is missing, continue silently; otherwise ask once, **enumerating every missing rule in
-the question text itself**, and on consent run `apply` with the same arguments. Never block the
-audit on permissions housekeeping.
-
-## 3. Check there is something to audit, then resolve the adapter
+## 2. Check there is something to audit, then resolve the adapter
 
 Two separate questions, in this order.
 
@@ -60,7 +49,7 @@ empty directory. It cannot stand in for the check above. Python arrives with its
 ([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the choice will be
 made once more than one exists.
 
-## 4. Keep the audit worktree out of `git status`
+## 3. Keep the audit worktree out of `git status`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
@@ -71,7 +60,7 @@ is repo-global state, and an agent may share a `repo_root` with a concurrent sib
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)). A failure here is not fatal — report it
 and dispatch anyway.
 
-## 5. Ask which mode, then dispatch
+## 4. Ask which mode, then dispatch
 
 The agent cannot ask anything, so the mode is decided here and passed in. AskUserQuestion, once,
 with two options. **PR mode is the first option and the recommended one**, because the audit
@@ -86,7 +75,7 @@ re-derive the diff by hand:
   as it is.
 
 Then one Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
-`default_branch`, `adapter_path` (from step 3), `scripts_dir`
+`default_branch`, `adapter_path` (from step 2), `scripts_dir`
 (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and `mode`, plus the instruction to follow its agent
 definition and end with its JSON result block.
 
@@ -97,7 +86,7 @@ opened against a real repository.
 The audit runs an install per pin it tests. PR mode adds up to two more for the combined test. It
 is not instant; say so before dispatching.
 
-## 6. Report
+## 5. Report
 
 Parse the agent's fenced JSON result. **An unparseable or missing result block is a failure
 report** — say so; never guess fields. Present its findings **grouped by package, one table per
@@ -126,7 +115,7 @@ Then, in order:
 
 In `report` mode that is the whole result: nothing was changed, and the user acts on the findings.
 
-## 7. Report the PR, then offer promotion
+## 6. Report the PR, then offer promotion
 
 In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
 passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the
@@ -163,7 +152,7 @@ Otherwise gather the promotion evidence:
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr.url>
 ```
 
-Then apply the `resolve-alerts` skill's phase 9 table to that one PR, unchanged. In particular:
+Then apply the `resolve-alerts` skill's phase 8 table to that one PR, unchanged. In particular:
 
 - **`pr.risk` is not an input.** The band and its factors rate the change; the gate reads the
   check rollup and auto-merge state alone (ADR 006). A `null` band, where no removed package had a

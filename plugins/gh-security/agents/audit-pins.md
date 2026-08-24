@@ -803,7 +803,7 @@ moved"**, saying which of the two it was.
 `pr.risk.f5` are that package's factors, read off the scorer's `factors[]`. If none were scored,
 `pr.risk` is `{"band": null, "score": null, "f4": null, "f5": null}`. That is not a gap: the
 dispatcher's promotion gate reads the check rollup and auto-merge state alone, never the band or
-its factors (ADR 006, and the `resolve-alerts` phase 9 table), so a PR that removes only packages
+its factors (ADR 006, and the `resolve-alerts` phase 8 table), so a PR that removes only packages
 with no version move carries everything the gate needs, which is the PR itself.
 
 ```bash

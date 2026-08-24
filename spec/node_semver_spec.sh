@@ -145,8 +145,8 @@ Describe 'node.sh range_facts'
 End
 
 # declared_ranges replaces a shell loop in the agent definition that the
-# preflight catalog could not pre-approve, discarded every per-parent error,
-# and never looked at optionalDependencies.
+# permissions preflight then in place could not pre-approve, discarded every
+# per-parent error, and never looked at optionalDependencies.
 Describe 'node.sh declared_ranges'
   After 'cleanup_fixture'
 

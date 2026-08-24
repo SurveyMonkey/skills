@@ -9,7 +9,7 @@ description: >
   carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*preflight-permissions.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -22,8 +22,8 @@ do not reimplement them. Every script emits JSON on stdout and exits non-zero wi
 on failure; if one fails, report its error and stop.
 
 You are the control point the user approves. Subagents run unattended through PR creation, so
-**nothing dispatches before the user approves the plan in phase 5**, and **no PR leaves draft
-without the decision flow in phase 9**.
+**nothing dispatches before the user approves the plan in phase 4**, and **no PR leaves draft
+without the decision flow in phase 8**.
 
 ## Phase 1: Detect scope
 
@@ -42,53 +42,16 @@ asked for instead of the detected one, and say so.
   Carry `default_branch` from the same output into dispatch. If it is null, the script could not
   resolve origin's default branch; report that and stop.
 - **org scope**: use `owner` as the org. `nwo` and `default_branch` are null here; they are
-  resolved per repo in phase 6, once discovery says which repos are actually in play.
+  resolved per repo in phase 5, once discovery says which repos are actually in play.
 - **user scope**: use `owner` (the authenticated login) for display only; `discover-alerts.sh
   --scope user` always operates on the authenticated user's own repos regardless of what `owner`
-  resolves to. `nwo` and `default_branch` are again resolved per repo in phase 6.
+  resolves to. `nwo` and `default_branch` are again resolved per repo in phase 5.
 
 EMU orgs are out of scope (RFC 001 Non-Goals). This skill does not detect or special-case them; an
 EMU org simply has no alerts visible to a personal-account session and discovery reports it as
 such through the ordinary org-scope path.
 
-## Phase 2: Permissions preflight (repo scope only)
-
-Claude Code does not currently honor this skill's `allowed-tools` grants for plugin skills, so
-every prescribed command would otherwise prompt once per shape, per repo. At **repo scope**, with
-`nwo` and `repo_root` (the current checkout) known from phase 1, run:
-
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh check <repo_root> <nwo>
-```
-
-- If it errors (for example, an unparseable settings file), say so, **skip the preflight, and
-  continue** — the run proceeds with ordinary prompts; never block alert resolution on
-  permissions housekeeping. This is the one scripted step whose failure is not fatal.
-- If `missing_count` is 0 and `additional_directories_missing` is empty, continue silently.
-- Otherwise ask for consent with **every missing rule enumerated inside the AskUserQuestion's
-  question text itself** — one rule per line, followed by the plugin directory to be granted
-  read access and the destination path (`<repo_root>/.claude/settings.local.json`, gitignored,
-  revocable line by line). The tool-output JSON is collapsed in the UI, so a list that appears
-  only there is invisible; a bare count ("add these 9 rules?") is uninformed consent and is a
-  failure of this step. Options: add them now, or continue without (every rule then prompts
-  individually as it comes up). On consent:
-
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh apply <repo_root> <nwo>
-```
-
-Report what was added. The catalog is the plugin's prescribed surface only — its own scripts,
-the fix agent's mandated git shapes, and the push/PR tail that the phase 5 batch approval
-authorizes. Commands agents improvise are deliberately not covered: the spec'd path runs
-smooth, deviation still gets scrutiny.
-
-**At org or user scope, skip this phase entirely.** No single `repo_root` exists yet — discovery
-has not run, so which repos are even in play is unknown — and running a full consent flow per
-candidate repo before the user has approved anything to fix would be premature housekeeping ahead
-of the real decision point. The equivalent preflight runs per repo in phase 6, once the approved
-batch names exactly the repos that will be touched.
-
-## Phase 3: Discover and route
+## Phase 2: Discover and route
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target> \
@@ -133,7 +96,7 @@ will see:
 empty. A repo silently left out of the batch is exactly the failure mode the RFC's push-access
 filtering requirement exists to prevent.
 
-## Phase 4: Ask how much to fix
+## Phase 3: Ask how much to fix
 
 Present the ranked table:
 
@@ -156,7 +119,7 @@ Note skipped groups and skipped repos briefly. Then AskUserQuestion with three o
   exist, that means all high; if none, all medium, and so on), across every repo in scope.
 - **Everything** — fix all actionable groups, across every repo in scope.
 
-## Phase 5: Present the dispatch plan and get one approval
+## Phase 4: Present the dispatch plan and get one approval
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-capacity.sh
@@ -170,13 +133,13 @@ repos at once still saturates the same laptop. Show the plan for the chosen batc
 >
 > N group(s) across M repo(s), concurrency cap C → ceil(N/C) wave(s).
 
-Omit the `Repo` column at repo scope, as in phase 4. "Likely action" comes from the alerts'
+Omit the `Repo` column at repo scope, as in phase 3. "Likely action" comes from the alerts'
 `relationship` field (direct → version bump, transitive → scoped override) and is best-effort: the
 subagent's own `why` classification is authoritative.
 
 At org or user scope, name every distinct repo the plan touches and say plainly that a repo not
 yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
-(phase 6) — this is part of what the approval covers, not a separate consent step.
+(phase 5) — this is part of what the approval covers, not a separate consent step.
 
 **Spare slot → the pin audit rides along.** If the approved batch has **fewer groups than `cap`**,
 one `audit-pins` agent joins the first wave and the plan says so, in the same approval:
@@ -195,23 +158,23 @@ makes a human re-derive the diff by hand. Carry it as an option on the batch app
 - Decline
 
 One approval covers the batch and the audit's mode together. Splitting them into two prompts is
-what the one-approval principle exists to prevent, and the audit's PR is a draft that phase 9 gates
+what the one-approval principle exists to prevent, and the audit's PR is a draft that phase 8 gates
 like any other.
 
 Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
 are free — its own removability tests run installs, and a second copy of it would audit the same
-repository twice. When the batch fills every slot, the audit is not dispatched here; phase 11
+repository twice. When the batch fills every slot, the audit is not dispatched here; phase 10
 offers it instead, because spending a slot on housekeeping in a full dispatch trades away a fix.
 
 **The audit is repo-scoped, at every scope of this skill.** At org or user scope the batch may span
 repos while the audit covers exactly one, so the plan **names the repo it will audit**: the repo of
 the top-ranked group, which is the one the user is most likely to be thinking about. It is not a
-cross-repo audit, and the remaining repos are offered in phase 11 like any other.
+cross-repo audit, and the remaining repos are offered in phase 10 like any other.
 
 Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
 from here through draft-PR creation. Nothing dispatches without it.
 
-## Phase 6: Resolve local checkouts and preflight (org and user scope only)
+## Phase 5: Resolve local checkouts (org and user scope only)
 
 Skip this phase entirely at repo scope — `repo_root`, `nwo`, and `default_branch` are already
 known from phase 1.
@@ -237,19 +200,11 @@ For each **distinct repo** named in the approved batch:
    ```
    Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
    dispatch rather than guessing a branch name.
-3. **Run the same preflight as phase 2**, scoped to this repo:
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/scripts/common/preflight-permissions.sh check <repo_root> <repo>
-   ```
-   Ask for consent the same way phase 2 does (every missing rule enumerated in the question text,
-   not just the count) if anything is missing, then `apply` on consent. A failure here is not
-   fatal, exactly as in phase 2: report it, skip the preflight for that repo, and continue — the
-   run proceeds with ordinary prompts for that repo's commands.
 
-Carry the resolved `{repo, repo_root, default_branch}` triples into phase 7; every group dispatched
+Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
 for a given repo shares its triple.
 
-## Phase 7: Dispatch in waves
+## Phase 6: Dispatch in waves
 
 **Before the first wave, once per distinct repo in the approved batch:**
 
@@ -270,7 +225,7 @@ message with one Task tool call per group** so they run in parallel:
 
 - `subagent_type`: `fix-dependency`
 - prompt: the group JSON verbatim, plus `adapter_path`, the group's own `nwo` (its `repo` field),
-  `default_branch` and `repo_root` for that group's repo (from phase 1 at repo scope, or phase 6's
+  `default_branch` and `repo_root` for that group's repo (from phase 1 at repo scope, or phase 5's
   resolved triples at org/user scope), and `scripts_dir`
   (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
   and end with its JSON result block.
@@ -279,14 +234,14 @@ Two lines of the same package may run in the same wave, whether in the same repo
 ones: they carry different `branch_name`s and different worktree paths (worktree paths are always
 under that group's own `repo_root`), so they cannot collide.
 
-When phase 5's approved plan included the pin audit, its Task call goes in that **same first
+When phase 4's approved plan included the pin audit, its Task call goes in that **same first
 message**, counting against `cap` like any other agent:
 
 - `subagent_type`: `audit-pins`
 - prompt: the `{repo, repo_root, default_branch}` triple of the repo named in the plan (phase 1 at
-  repo scope, that repo's phase 6 triple at org or user scope), its `adapter_path` (any of that
+  repo scope, that repo's phase 5 triple at org or user scope), its `adapter_path` (any of that
   repo's actionable groups — one repository, one toolchain), `scripts_dir`, and **`mode`, exactly
-  as phase 5's approval settled it**, plus the instruction to follow its agent definition and end
+  as phase 4's approval settled it**, plus the instruction to follow its agent definition and end
   with its JSON result block.
 
 **Never omit `mode` and never guess it.** The agent treats a missing or unrecognized value as an
@@ -311,7 +266,7 @@ The cap is a **wave barrier**, machine-wide across every repo in the batch: neve
 one has returned. There is no slot-freed signal, so the barrier is the honest implementation of the
 cap (ADR 003). Repeat until the approved batch is exhausted.
 
-## Phase 8: Summarize the batch
+## Phase 7: Summarize the batch
 
 Parse each agent's fenced JSON result. **An unparseable or missing result block is a failure
 report** — record it as such; never guess fields.
@@ -353,7 +308,7 @@ scope), before anything else in the summary:
 These are alerts that stay open after the PRs merge. Reporting a batch as done without them is the
 failure mode issue #19 is about, and it is worse coming from the summary than from an agent.
 
-**Then re-report every skipped repo from phase 3's `skipped_repos`, by name, if any remain
+**Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
 unaddressed.** These are repos with alerts the batch never touched at all, and belong in the same
 summary as the batches that did run — never a detail left only in the earlier discovery report.
 
@@ -380,7 +335,7 @@ count and call it pre-existing debt: this batch is the record of where it came f
 
 ### Audit findings, when the audit rode along
 
-If an `audit-pins` agent ran in phase 7, report its result **after** the fix table and separately
+If an `audit-pins` agent ran in phase 6, report its result **after** the fix table and separately
 from it: its findings are judgments about pins, not changes, and mixing them into the PR table
 invites reading a finding as a change. That holds in `pr` mode too, where the audit does open a PR:
 the findings stay findings, and the PR gets its own report below them. Name the repo it audited,
@@ -403,7 +358,7 @@ will appear in the audit as `still-required`; that is expected, not a contradict
 **Then, beneath the findings and still separate from the fix table, report the audit's own PR.**
 When `pr` is non-null: its URL, the attempt that passed (`pr.attempt`), `pr.removed_keys`,
 `pr.left_behind` with each reason, and the `pr.risk` band. It is a draft, like every other PR in
-this batch, and phase 9 decides whether it leaves draft. Keep it out of the fix table anyway: the
+this batch, and phase 8 decides whether it leaves draft. Keep it out of the fix table anyway: the
 fixes add and tighten pins and this one removes them, and one table implying they are the same kind
 of change is what that separation exists to prevent.
 
@@ -434,7 +389,7 @@ reader turns four tested operations into one untested one.
 An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
 audit are independent work that happened to share a wave.
 
-## Phase 9: Decide what may leave draft
+## Phase 8: Decide what may leave draft
 
 Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
 work — but promotion is a decision, not a default. This phase covers the `success` results only:
@@ -478,7 +433,7 @@ Two more signals qualify the offer:
 Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
 The user can decline any subset and handle those by hand.
 
-## Phase 10: Promote
+## Phase 9: Promote
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <approved-urls-only>
@@ -492,25 +447,25 @@ deleting its branch, and re-running this skill for that package rebuilds the fix
 new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
 remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
 
-## Phase 11: Offer the next batch, then the pin audit
+## Phase 10: Offer the next batch, then the pin audit
 
 If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
-back to phase 4 with the remaining groups.
+back to phase 3 with the remaining groups.
 
-Then, **unless an `audit-pins` agent already ran in phase 7**, recommend the pin audit once:
+Then, **unless an `audit-pins` agent already ran in phase 6**, recommend the pin audit once:
 
 > Every fix in this run added or tightened a pin. The pin audit is the other direction: it finds
 > overrides and resolutions a repository no longer needs, testing each removal in an isolated
 > worktree against every published advisory for the package. It runs one install per pin it tests,
 > so it takes a few minutes. Run it now?
 
-Ask the mode with the same question, **PR mode first and recommended**, on the same terms phase 5
+Ask the mode with the same question, **PR mode first and recommended**, on the same terms phase 4
 sets out: open a draft removal PR for the pins it confirms (`mode: pr`, recommended), or report
 only (`mode: report`). One question, two options plus declining; never a second prompt after the
 answer.
 
-On acceptance, dispatch `audit-pins` with the phase 7 payload including `mode`, report its findings
-and its PR as phase 8 describes, and put that PR through phase 9 like any other draft.
+On acceptance, dispatch `audit-pins` with the phase 6 payload including `mode`, report its findings
+and its PR as phase 7 describes, and put that PR through phase 8 like any other draft.
 
 The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
 the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
