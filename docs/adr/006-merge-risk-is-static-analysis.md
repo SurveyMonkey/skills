@@ -1,6 +1,6 @@
 ---
 type: ADR
-description: Merge risk is computed from the repository's files rather than from checks an agent runs, and CI on the draft pull request is the verifier.
+description: Merge risk is computed from the repository's files rather than from checks an agent runs, and CI on the pull request is the verifier.
 status: stable
 created: 2026-08-21
 owner: brianespinosa
@@ -57,11 +57,12 @@ or lint step, 1 when such a workflow exists with no visible step, 2 when nothing
 pull request. `pull_request_target` counts alongside `pull_request`, because it also runs on pull
 requests, which is the only thing the factor asks.
 
-**CI on the draft pull request is the verifier.** The agent analyzes, scores, opens the draft, and
-moves on. A band that CI later contradicts is the repository's tests doing their job, not a defect
-in the score: the score rates what could be known before the pull request existed, and the check
-rollup rates what happened after. The mark-ready flow already reads that rollup and is where the
-two meet.
+**CI on the pull request is the verifier.** The agent analyzes, scores, opens the pull request,
+and moves on. A band that CI later contradicts is the repository's tests doing their job, not a
+defect in the score: the score rates what could be known before the pull request existed, and the
+check rollup rates what happened after. The two meet on the PR page, where the reviewer reads both
+([ADR 008](008-prs-open-ready-for-review.md); before v0.8.3 they met in the orchestrator's
+promotion phases, since deleted).
 
 The factor count, the maximum of 14, the band thresholds and the three escalation rules are
 unchanged. `verification_commands` is retired from the adapter contract ([ADR
@@ -70,16 +71,15 @@ unchanged. `verification_commands` is retired from the adapter contract ([ADR
 
 ## Consequences
 
-**A fix that breaks the build now ships as a draft pull request, and CI reports it.** Previously a
+**A fix that breaks the build now ships as a pull request, and CI reports it.** Previously a
 `fail-caused` classification aborted the run before a pull request existed. This is the deliberate
-trade: the failure is now visible in the place a human already looks, on a draft nobody has
-promoted, instead of in an agent's failure report.
+trade: the failure is now visible in the place a human already looks, on a PR nobody has merged,
+instead of in an agent's failure report.
 
 **Repositories on another CI vendor score 2 on F5.** CircleCI, Buildkite, Jenkins and self-hosted
-runners are not read. This flow opens GitHub pull requests and the mark-ready decision reads the
-GitHub check rollup, so a GitHub Actions workflow is the one verifier the score can see before the
-pull request exists. The honest reading of a 2 is "nothing here proves CI runs", which is what the
-score says.
+runners are not read. This flow opens GitHub pull requests and reads the GitHub check rollup, so a
+GitHub Actions workflow is the one verifier the score can see before the pull request exists. The
+honest reading of a 2 is "nothing here proves CI runs", which is what the score says.
 
 **F4's specifier match is a basename heuristic.** Two modules sharing a basename in different
 directories are not told apart, which overstates coverage rather than understating it. Resolving

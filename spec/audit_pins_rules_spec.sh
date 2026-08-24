@@ -162,21 +162,31 @@ Describe 'the rules that gate the removal PR'
     The output should equal '1'
   End
 
-  # Promotion is the dispatcher's call with check state and auto-merge state in
-  # front of the user (ADR 002). An agent that promotes its own PR removes the
-  # checkpoint entirely, and where auto-merge is armed it merges it.
-  It 'never lets the agent mark its own PR ready'
-    When call rule_in "$AGENT" 'Never mark the PR ready'
+  # PRs open ready for review, so the checkpoint is the dispatch approval and
+  # the review itself (ADR 008), and the agent's work ends at `gh pr create`.
+  # Merging is a human decision on GitHub; arming auto-merge is that same
+  # decision made in advance, which is the chain that merged
+  # arsenalamerica/app#233 unread when the flow still had a promote step.
+  It 'forbids the agent from merging its own PR or arming auto-merge'
+    When call rule_in "$AGENT" 'Never merge the PR, never enable auto-merge on it'
     The status should be success
     The output should equal '1'
   End
 
-  # The PR is created on the plugin-owned head and as a draft. Losing --draft
-  # is the one flag change that turns the checkpoint into a merged change.
-  It 'creates the PR as a draft on the plugin-owned head'
-    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --draft'
+  It 'creates the PR on the plugin-owned head'
+    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --label security'
     The status should be success
     The output should equal '1'
+  End
+
+  # The inverse of the assertion this replaced, and the reason it is asserted
+  # on the whole file rather than on the create line: `--draft` reintroduced
+  # anywhere here restores a flow nothing else in the plugin implements any
+  # more, so the PR would sit as a draft with no phase left to promote it.
+  It 'passes no --draft, anywhere'
+    When call count_in "$AGENT" '--draft'
+    The status should be success
+    The output should equal '0'
   End
 
   # The agent cannot ask which mode was meant, and the two differ by whether a
@@ -302,6 +312,41 @@ Describe 'the rules that gate the removal PR'
     # scratch area, reading the shorthand as naming the worktree.
     It 'says no worktree is created at the workspace root (#79)'
       When call phrase_in "$AGENT" 'no git worktree is ever created at'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # The PR-state rules, in the other agent definition they govern. Both agents
+  # open pull requests; the fix agent opens far more of them, since every alert
+  # group dispatches one while the audit rides a spare slot. Asserting these on
+  # audit-pins.md alone left the higher-traffic path unguarded, and a mutation
+  # run proved it: `--draft` restored to fix-dependency.md's `gh pr create`, and
+  # `gh pr ready` plus `gh pr merge --auto` added to pr-status.sh, passed the
+  # full suite green (#87).
+  Describe 'the PR-state rules in fix-dependency (#87)'
+    FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+
+    # Paired deliberately with the presence assertion below. An absent-string
+    # assertion alone passes when the line it guards is gone entirely, so on its
+    # own it cannot tell "no --draft" from "no gh pr create".
+    It 'passes no --draft, anywhere'
+      When call count_in "$FIX_AGENT" '--draft'
+      The status should be success
+      The output should equal '0'
+    End
+
+    It 'still creates the PR, so the absence above is about the flag'
+      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # arsenalamerica/app#233 came out of THIS flow: a draft somebody armed
+    # auto-merge on, which the deleted promote step then merged unread. The
+    # sentence is the only thing standing where the draft flag used to.
+    It 'forbids merging its own PR or arming auto-merge'
+      When call phrase_in "$FIX_AGENT" 'Never merge the PR, never enable auto-merge on it'
       The status should be success
       The output should equal '1'
     End

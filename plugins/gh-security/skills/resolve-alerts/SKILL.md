@@ -5,25 +5,26 @@ description: >
   entire org or the user's own repos. Discovers open alerts, ranks them by
   severity and EPSS exploitability, and fixes one package, the highest
   severity tier, or everything — one subagent per group (one major line of
-  one package, in one repo) in an isolated worktree through to a draft PR
-  carrying a computed merge-risk rating. Use when asked to fix security
+  one package, in one repo) in an isolated worktree through to a pull request,
+  open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*mark-ready.sh status*), Bash(*mark-ready.sh promote*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
 and rank, ask how much to fix, dispatch one `fix-dependency` subagent per group (one major line of
-one package, in one repo) in parallel, and walk the resulting draft PRs through an evidence-based
-mark-ready decision.
+one package, in one repo) in parallel, and report the pull requests they open.
 
 The deterministic work lives in scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/common/`. Call them;
 do not reimplement them. Every script emits JSON on stdout and exits non-zero with an `error` key
 on failure; if one fails, report its error and stop.
 
 You are the control point the user approves. Subagents run unattended through PR creation, so
-**nothing dispatches before the user approves the plan in phase 4**, and **no PR leaves draft
-without the decision flow in phase 8**.
+**nothing dispatches before the user approves the plan in phase 4**, and that approval is the
+whole of it: PRs open **ready for review** and **nothing here acts on a pull request after it is
+created** (ADR 008). The decision to merge one is the reviewer's, on GitHub, with the diff in
+front of them.
 
 ## Phase 1: Detect scope
 
@@ -146,33 +147,34 @@ one `audit-pins` agent joins the first wave and the plan says so, in the same ap
 
 > 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
 > one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
-> are no longer needed and, in PR mode, opens a **draft** PR removing the ones it confirms.
+> are no longer needed and, in PR mode, opens a PR removing the ones it confirms.
 
 **The audit's mode is part of this same approval, never a second prompt.** The agent cannot ask, so
 `mode` is decided here and passed at dispatch. **PR mode is the first option and the recommended
 one**: the audit already does every bit of the work a removal PR needs, so stopping at a report
 makes a human re-derive the diff by hand. Carry it as an option on the batch approval itself:
 
-- **Approve, and let the audit open a draft removal PR** (`mode: pr`, recommended)
+- **Approve, and let the audit open a removal PR** (`mode: pr`, recommended)
 - **Approve, audit report-only** (`mode: report`)
 - Decline
 
 One approval covers the batch and the audit's mode together. Splitting them into two prompts is
-what the one-approval principle exists to prevent, and the audit's PR is a draft that phase 8 gates
-like any other.
+what the one-approval principle exists to prevent, and the audit's PR is reviewed on GitHub like
+any other.
 
 Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
 are free — its own removability tests run installs, and a second copy of it would audit the same
-repository twice. When the batch fills every slot, the audit is not dispatched here; phase 10
+repository twice. When the batch fills every slot, the audit is not dispatched here; phase 8
 offers it instead, because spending a slot on housekeeping in a full dispatch trades away a fix.
 
 **The audit is repo-scoped, at every scope of this skill.** At org or user scope the batch may span
 repos while the audit covers exactly one, so the plan **names the repo it will audit**: the repo of
 the top-ranked group, which is the one the user is most likely to be thinking about. It is not a
-cross-repo audit, and the remaining repos are offered in phase 10 like any other.
+cross-repo audit, and the remaining repos are offered in phase 8 like any other.
 
-Ask for **one** approval of the whole batch. This is the control point: subagents run unattended
-from here through draft-PR creation. Nothing dispatches without it.
+Ask for **one** approval of the whole batch. This is **the last checkpoint before pull requests
+exist**: subagents run unattended from here through PR creation, and no phase after this one asks
+the user to approve anything about a PR. Nothing dispatches without it.
 
 ## Phase 5: Resolve local checkouts (org and user scope only)
 
@@ -357,10 +359,9 @@ will appear in the audit as `still-required`; that is expected, not a contradict
 
 **Then, beneath the findings and still separate from the fix table, report the audit's own PR.**
 When `pr` is non-null: its URL, the attempt that passed (`pr.attempt`), `pr.removed_keys`,
-`pr.left_behind` with each reason, and the `pr.risk` band. It is a draft, like every other PR in
-this batch, and phase 8 decides whether it leaves draft. Keep it out of the fix table anyway: the
-fixes add and tighten pins and this one removes them, and one table implying they are the same kind
-of change is what that separation exists to prevent.
+`pr.left_behind` with each reason, and the `pr.risk` band. Keep it out of the fix table: the fixes
+add and tighten pins and this one removes them, and one table implying they are the same kind of
+change is what that separation exists to prevent.
 
 When `mode` was `pr` and `pr` is `null`, say which of the five reasons `pr_skipped_reason` gave:
 `open PR already exists` (link `existing_pr_url`), `no pins` (the repository declares none at all),
@@ -389,65 +390,7 @@ reader turns four tested operations into one untested one.
 An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
 audit are independent work that happened to share a wave.
 
-## Phase 8: Decide what may leave draft
-
-Drafts do not request reviewers or notify CODEOWNERS, so a batch nobody marks ready is invisible
-work — but promotion is a decision, not a default. This phase covers the `success` results only:
-`no-op` and `failure` results carry a null `pr_url` and there is nothing to promote. **The audit's
-own PR joins this phase on the same terms**, when one was opened: pass `pr.url` alongside the fix
-PRs below. It is a draft carrying a computed band, and that band is no more an input here than a
-fix agent's is (ADR 006), so nothing about it wants a separate flow. Gather the evidence:
-
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr-url>...
-```
-
-`mark-ready.sh` operates on PR URLs directly and needs no `repo_root`, so this step is unchanged at
-every scope — a batch's PR URLs can span repos and are handled identically either way.
-
-Group by the rollup and `auto_merge` alone. The merge-risk band is not an input here: it rates the
-fix, and this phase is about what the repository's own checks say (ADR 006).
-
-| Group | Condition | Offer promotion? |
-|---|---|---|
-| Checks failing | `checks` = `failed` | No. List `failing_checks`. |
-| No checks ran or still running | `checks` = `none` or `pending` | Offerable, flagged honestly: for `none`, no checks have reported, so promoting is what starts whatever CI exists; for `pending`, cite `check_counts` (for example "3 of 5 finished, 2 still running"). Either way the reviewer should let CI finish before merging. The user decides. |
-| Ready | `checks` = `passed` | Offerable. |
-
-Two more signals qualify the offer:
-
-- **Auto-merge armed** (`auto_merge.armed` true): promoting this PR **merges it** once checks
-  pass. Confirm it **per PR**, stating exactly that, never as part of a batch offer. "Mark 6 PRs
-  ready for review" and "merge 6 PRs once CI passes" are different decisions and must not share
-  a confirmation prompt. Merely `permitted` changes nothing.
-- **`merge_state` = `UNKNOWN`**: GitHub has not computed mergeability yet (common right after
-  push). Say so; do not bucket it as clean or behind.
-- **Rollups populate as workflows spawn**, and jobs that have not been reported yet are
-  invisible — absent is not pending. This caution applies to `passed` only: `none` and `pending`
-  already say CI is incomplete. On a PR created minutes ago, or one reporting materially fewer
-  checks than its batch siblings, treat `checks: passed` as provisional: do not present the set
-  as CI-complete, and re-run `status` before treating it that way. For a PR with
-  `auto_merge.armed`, re-run `status` before its per-PR confirmation regardless of how recent the
-  PR is: a false green there merges.
-
-Then ask: one batch confirmation for the offerable, non-armed PRs; one confirmation per armed PR.
-The user can decline any subset and handle those by hand.
-
-## Phase 9: Promote
-
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <approved-urls-only>
-```
-
-The script rebases first (two fix PRs edit the same overrides block, so once one merges the next
-is behind — and Dependabot's own merges race long batches the same way), marks ready only after a
-successful rebase, and **reports conflicts without resolving them**. For a conflicted PR,
-recommend regeneration over hand-resolution: these PRs are machine-generated, so closing the PR,
-deleting its branch, and re-running this skill for that package rebuilds the fix cleanly on the
-new default branch — hand-merging a conflicted lockfile is strictly worse. Manual resolution
-remains the user's fallback. Report the per-PR outcomes, conflicts and errors included.
-
-## Phase 10: Offer the next batch, then the pin audit
+## Phase 8: Offer the next batch, then the pin audit
 
 If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
 back to phase 3 with the remaining groups.
@@ -460,12 +403,11 @@ Then, **unless an `audit-pins` agent already ran in phase 6**, recommend the pin
 > so it takes a few minutes. Run it now?
 
 Ask the mode with the same question, **PR mode first and recommended**, on the same terms phase 4
-sets out: open a draft removal PR for the pins it confirms (`mode: pr`, recommended), or report
-only (`mode: report`). One question, two options plus declining; never a second prompt after the
-answer.
+sets out: open a removal PR for the pins it confirms (`mode: pr`, recommended), or report only
+(`mode: report`). One question, two options plus declining; never a second prompt after the answer.
 
-On acceptance, dispatch `audit-pins` with the phase 6 payload including `mode`, report its findings
-and its PR as phase 7 describes, and put that PR through phase 8 like any other draft.
+On acceptance, dispatch `audit-pins` with the phase 6 payload including `mode`, and report its
+findings and its PR as phase 7 describes.
 
 The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
 the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
@@ -476,5 +418,53 @@ without going through alert resolution at all.
 Recommend it even when this run fixed nothing that touched an override: a repository accumulates
 pins from every past run and from hand edits, and the audit is about all of them.
 
-Otherwise report done, including anything left in the not-promoted groups, any repos still in
-`skipped_repos`, and what would unblock each.
+Otherwise report done, including any repos still in `skipped_repos` and what would unblock each.
+
+**The closing report lists every PR this run opened, once, as information.** Read the current
+state of them together:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr-url>...
+```
+
+Pass every `success` PR URL plus the audit's `pr.url` when one exists; `no-op` and `failure`
+results carry a null `pr_url` and there is nothing to read. The script operates on PR URLs
+directly and needs no `repo_root`, so a batch's URLs can span repos and are handled identically at
+every scope.
+
+Report each PR with its URL, its merge-risk band, and its check state — and **state what that
+check state is worth**, because most of these PRs are minutes old:
+
+- `none` means no check has reported yet, which on a repository with CI usually means the
+  workflows have not started, not that there are none.
+- `pending` cites `check_counts` ("3 of 5 finished").
+- `passed` on a very fresh PR, or on one reporting materially fewer checks than its siblings, is
+  provisional: rollups populate as workflows spawn, and a job that has not been reported yet is
+  invisible. Absent is not pending. Do not present the set as CI-complete.
+- `failed` names `failing_checks`. This is the one worth saying loudly, since it tells the user
+  which PR to open first.
+- `merge_state: UNKNOWN` means GitHub has not computed mergeability yet, which is ordinary right
+  after a push. Say so rather than reading it as clean or behind.
+- `auto_merge.armed` on a PR means somebody enabled auto-merge on it and it will merge itself once
+  checks pass. Nothing in this skill or its agents arms it, so say plainly that it is armed and by
+  whom (`enabled_by`). Merely `permitted` is a repository setting and means nothing about this PR.
+- `behind: true` or `conflict: true` means GitHub has computed mergeability and the PR needs a
+  rebase or has a conflicting change. Report either when true. Both are derived from
+  `merge_state`, so on a PR created moments ago they are `false` because nothing was computed
+  yet — `false` here is "not established", not "clean", and must not be reported as clean.
+- `is_draft: true` likewise means a human converted it, since these open ready.
+- **Non-zero exit still carries a full report.** `pr-status.sh` reports and fails, like the
+  adapter's `validate`: if one URL could not be read, the other entries are still present and
+  correct. Read the report, name the entries carrying `error`, and do not discard the batch.
+
+**When this batch opened more than one PR against the same repo, say so, unconditionally.** Name
+them together and state plainly that they edit the same overrides block, so merging one leaves the
+rest behind and the second to merge may conflict. You know this from the dispatch plan, not from
+any check: `behind` and `conflict` are almost always unset this early (above), so waiting to
+observe the collision means never reporting it. GitHub's "Update branch" resolves the ordinary
+case; a conflicted machine-generated fix is better regenerated than hand-resolved — close it and
+re-run this skill for that package.
+
+**This is a report, not a prompt.** Do not ask whether to mark anything ready, merge anything, arm
+auto-merge, or re-check later: there is nothing left for this skill to do to a PR that exists
+(ADR 008). Point the user at the URLs and stop.

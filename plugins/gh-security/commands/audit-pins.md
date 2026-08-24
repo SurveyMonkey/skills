@@ -4,8 +4,8 @@ description: >
   hold transitive dependencies at safe versions — and report which are no
   longer needed. Each removal is tested in an isolated worktree against every
   published advisory for the package, and the removable set is tested once more
-  together before a draft removal PR is opened. Report-only is offered as the
-  alternative.
+  together before a removal PR is opened for review. Report-only is offered as
+  the alternative.
 ---
 
 The user explicitly invoked `/gh-security:audit-pins`. Run the pin audit on the current
@@ -67,10 +67,10 @@ with two options. **PR mode is the first option and the recommended one**, becau
 already does every bit of the work a removal PR needs and stopping at a report makes a human
 re-derive the diff by hand:
 
-- **Open a draft PR** (`mode: pr`, recommended): audit as usual, then remove the pins the audit
+- **Open a PR** (`mode: pr`, recommended): audit as usual, then remove the pins the audit
   confirms, install once with all of them gone, re-check every version that newly resolves against
-  every published advisory, and open a **draft** PR with that evidence. Nothing is merged and
-  nothing leaves draft without your say-so.
+  every published advisory, and open a PR with that evidence. It opens **ready for review**, which
+  is not merging it: you review the diff and merge it on GitHub, or close it (ADR 008).
 - **Report only** (`mode: report`): the findings and nothing else; the repository is left exactly
   as it is.
 
@@ -115,7 +115,7 @@ Then, in order:
 
 In `report` mode that is the whole result: nothing was changed, and the user acts on the findings.
 
-## 6. Report the PR, then offer promotion
+## 6. Report the PR
 
 In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
 passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the
@@ -146,30 +146,30 @@ ordinary outcomes.
 five values is a contract violation.** Report it as a failure of the agent, quoting what came back,
 exactly as an unparseable result block is reported. Never guess which reason was meant.
 
-Otherwise gather the promotion evidence:
+Otherwise read the PR's current state once and report it as information:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh status <pr.url>
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr.url>
 ```
 
-Then apply the `resolve-alerts` skill's phase 8 table to that one PR, unchanged. In particular:
+Nothing here acts on a pull request after `gh pr create` (ADR 008): do not offer to merge it, do
+not enable auto-merge, and do not ask whether it may be marked ready for review, because it already
+is. Report what follows, then stop.
 
-- **`pr.risk` is not an input.** The band and its factors rate the change; the gate reads the
-  check rollup and auto-merge state alone (ADR 006). A `null` band, where no removed package had a
-  version move to rate, changes nothing here.
-- **Auto-merge armed** (`auto_merge.armed`) means promoting **merges** this PR once checks pass.
-  Confirm it saying exactly that, per PR, never folded into any other question.
-- Failing checks, pending checks, an empty rollup and `merge_state: UNKNOWN` are all read as that
-  table reads them.
+- **`pr.risk` rates the change for the reviewer**, and nothing gates on it (ADR 006). A `null`
+  band, where no removed package had a version move to rate, is not a gap.
+- **The check state is minutes old.** `none` usually means the workflows have not started rather
+  than that there are none; `pending` cites `check_counts`; `passed` on a PR this fresh is
+  provisional, since rollups populate as workflows spawn and an unreported job is invisible;
+  `failed` names `failing_checks`, which is the one worth saying loudly. `merge_state: UNKNOWN` is
+  ordinary right after a push and is neither clean nor behind.
+- **`auto_merge.armed`** means somebody enabled auto-merge and the PR will merge itself once
+  checks pass. Nothing here arms it, so say that it is armed and by whom (`enabled_by`). Merely
+  `permitted` is a repository setting and says nothing about this PR.
 
-On consent:
+**That is the end of the command.** There is no further step and nothing to offer.
 
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/mark-ready.sh promote <pr.url>
-```
-
-Report the outcome, conflicts included. A conflicted removal PR is better regenerated than
-hand-resolved: close it and re-run this command. There is no branch to clean up by hand. The audit
-owns `chore/dependabot-remove-pins`, creates it only at commit time, deletes any local remnant and
-force-pushes over a remote one that carries no open PR, so the next run rebuilds it from the
-current default branch on its own.
+A conflicted removal PR is better regenerated than hand-resolved: close it and re-run this
+command. There is no branch to clean up by hand. The audit owns `chore/dependabot-remove-pins`,
+creates it only at commit time, deletes any local remnant and force-pushes over a remote one that
+carries no open PR, so the next run rebuilds it from the current default branch on its own.
