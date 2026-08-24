@@ -47,7 +47,7 @@ because a package missing from both snapshots shows no change and `[]` is the st
 **The audit gains a `mode` input, `report` or `pr`, set before dispatch and never defaulted.** The
 agent cannot ask, and the two modes differ by whether a pull request is opened against a real
 repository, so a missing or unrecognized value is an `input` failure. At every dispatch point (the
-`/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and the phase 10
+`/gh-security:audit-pins` command, the `resolve-alerts` skill's phase 4 batch approval, and its phase 10
 recommendation) **PR mode is the first and recommended option** and report-only is the alternative.
 In the orchestrator the mode is an option on the single batch approval, not a second prompt: one
 approval covers the batch and the audit's mode together.
@@ -110,7 +110,7 @@ and never the band. No repository check is run: the combined install is the PR's
 CI on the draft is the verifier, so a removal that breaks the build ships as a draft and CI says so
 there. The agent never edits source or tests at all. It is a
 **draft** and the agent never marks it ready; promotion stays the dispatcher's decision under
-[ADR 002](002-pr-draft-state-and-approval-flow.md), with the audit's PR joining the same phase 8
+[ADR 002](002-pr-draft-state-and-approval-flow.md), with the audit's PR joining the skill's same phase 8
 evidence table on the same terms as a fix PR. An open PR already on the head branch means the audit
 still runs and reports, opens nothing, and returns the existing URL.
 

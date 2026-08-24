@@ -79,18 +79,35 @@ vulnerable").
 Both agent definitions prescribe exact `git` shapes, and where each one runs is a constraint rather
 than a style choice.
 
-**Every write the audit's `pr` mode makes runs from inside the worktree**: `ls-files -- .yarn/cache`,
-`checkout HEAD -- .yarn/cache`, `status --porcelain`, `diff --quiet`, `add`, `branch -D`,
-`switch -c`, `commit`, and `push -u --force-with-lease=<ref>:<sha> origin <ref>`.
+**Every write the audit's `pr` mode makes runs from inside the worktree**, because a write that
+names `repo_root` instead lands in the user's own tree (Hard rules, `agents/fix-dependency.md`).
+`agents/audit-pins.md` phases 7 and 8 are the authority on which those are; as of this writing they
+are `ls-files -- .yarn/cache`, `checkout HEAD -- .yarn/cache`, `status --porcelain`, `diff --quiet`,
+`add`, `branch -D`, `switch -c`, `commit`, and
+`push -u --force-with-lease=<ref>:<sha> origin <ref>`. **A prescribed shape that starts naming
+`repo_root` is a bug, not a style change.**
 
 **That the branch is created from inside the worktree rather than at `worktree add` time is
-deliberate.** It keeps every branch-manipulating shape in one place, and it means a run that opens
-no PR leaves no branch behind.
+deliberate.** A run that opens no PR leaves no branch behind.
 
-**The fix agent's leftover-branch cleanup is the one exception, and has to be.** Git refuses to
-delete a branch that is checked out in a worktree, so `branch -D <branch_name>` runs **after**
-`worktree remove`, when no worktree is left to run it from
-([#84](https://github.com/SurveyMonkey/skills/issues/84)).
+**The fix agent's leftover-branch cleanup is the one write either definition prescribes at
+`<repo_root>`, and it has to be.** Git refuses to delete a branch that is checked out in a
+worktree, so `branch -D <branch_name>` runs **after** `worktree remove`, when no worktree is left
+to run it from ([#84](https://github.com/SurveyMonkey/skills/issues/84)). The audit's own
+`branch -D` above is not the same case: it deletes a *remnant* of the branch name before
+`switch -c` creates it, so nothing has it checked out.
+
+## `allowed-tools` in a plugin skill's frontmatter is not honored
+
+Claude Code does not currently apply a plugin skill's `allowed-tools` grants
+([anthropics/claude-code#80696](https://github.com/anthropics/claude-code/issues/80696),
+[#80802](https://github.com/anthropics/claude-code/issues/80802), both open as of v0.8.2). The list
+in `skills/resolve-alerts/SKILL.md` documents the intended surface; it does not suppress prompts.
+That is why prescribed shapes are written to be pre-approvable on their own (literal paths, no
+variables, no conditionals, no redirections) rather than relying on the frontmatter. The plugin
+carried a permissions preflight that pre-approved its whole surface in one decision until v0.8.2,
+when `auto` became the recommended default mode and the workaround was removed
+([#86](https://github.com/SurveyMonkey/skills/issues/86)).
 
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 

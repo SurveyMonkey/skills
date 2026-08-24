@@ -278,7 +278,7 @@ Present one table for the batch:
 `F4/F5` is `risk.f4` and `risk.f5` from the agent's result, which is the whole of the coverage and
 CI signal an agent reports; the scorer's fuller `coverage` and `ci` objects stay in the PR body.
 
-Omit the `Repo` column at repo scope, as in phases 4 and 5.
+Omit the `Repo` column at repo scope, as in phases 3 and 4.
 
 **A `no-op` result is neither a success nor a failure, and gets its own line, never the failure
 list.** The group's fix was already on the default branch when the agent got there: it made no

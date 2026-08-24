@@ -90,7 +90,7 @@ and only then lifts the draft flag (`gh pr ready`, mark-ready.sh:226); it merges
 pushes a new head, which restarts CI, and a PR that was already current keeps whatever checks were
 already running. Either way, waiting for pending checks before offering promotion bought nothing:
 the orchestrator still had to re-run `status` and promote the stragglers separately once checks
-caught up. Phase 8 now offers `pending` alongside `none`, stating plainly what stage the checks
+caught up. The skill's phase 8 now offers `pending` alongside `none`, stating plainly what stage the checks
 are in and that promoting is what starts or surfaces whatever CI exists. What still blocks or
 qualifies the offer is unchanged: failing checks block outright, armed auto-merge still needs a
 per-PR confirmation because promoting it merges on green, and a rebase conflict is still reported

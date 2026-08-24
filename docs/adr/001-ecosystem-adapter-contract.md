@@ -247,8 +247,10 @@ under `parents_without_range`, which reads as "declared nothing" for a parent th
 a live range ([#48](https://github.com/SurveyMonkey/skills/issues/48)). The verb
 belongs behind the contract because finding a parent's manifest is an ecosystem question
 (`node_modules/<parent>/package.json` here, `site-packages` metadata for Python), and because the
-shell loop it replaced in the agent definition could not be pre-approved by the preflight catalog,
-discarded every per-parent error, and missed optional dependencies. A parent whose manifest is not
+shell loop it replaced in the agent definition could not be pre-approved by the preflight catalog
+(removed in v0.8.2, [#86](https://github.com/SurveyMonkey/skills/issues/86); the loop's command
+substitution cannot be pre-approved by any permission rule either), discarded every per-parent
+error, and missed optional dependencies. A parent whose manifest is not
 installed is reported, never guessed at: Yarn PnP has no `node_modules`, and pnpm links only direct
 dependencies into one.
 
