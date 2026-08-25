@@ -64,7 +64,7 @@ plugins/gh-security/
     audit-pins.md           # override/resolution audit subagent
   commands/
     resolve-alerts.md       # thin wrapper: invokes the skill explicitly
-    fix-alert.md            # compatibility shim: "one" path, no scope prompt
+    fix-alert.md            # compatibility shim: "one" path, no scope prompt (removed in v0.8.4, #95)
     audit-pins.md           # direct entry: run the pin audit on demand
   scripts/
     common/
@@ -239,7 +239,7 @@ If experience shows the fix subagent is more mechanical than expected, dropping 
 
 Two changes:
 
-1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent, which is behaviorally what the command does today; with two slots spare, the pin audit runs automatically alongside *(from Phase 4, when the audit agent exists)*, and the shim offers the next batch when the fix completes. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points. The shim is short-lived by design: it is removed in the first release cut at least two months after it ships.
+1. **Command to skill.** The orchestrator ships as `skills/resolve-alerts/SKILL.md` with a description written for model-triggered invocation ("resolve Dependabot security alerts", "fix security vulnerabilities in dependencies", "clean up npm audit findings"). A thin `commands/resolve-alerts.md` remains for explicit `/gh-security:resolve-alerts` invocation. `commands/fix-alert.md` is preserved as a compatibility shim: it invokes the orchestrator with the scope question pre-answered as "one" (fix only the top-ranked group), spawning a single `fix-dependency` subagent, which is behaviorally what the command does today; with two slots spare, the pin audit runs automatically alongside *(from Phase 4, when the audit agent exists)*, and the shim offers the next batch when the fix completes. On each run the shim prints a short notice: the command is deprecated and will be removed in a future release, and the same result is available by asking Claude to fix the repo's security alerts or by running `/gh-security:resolve-alerts`. Anyone with the old command in muscle memory keeps working; the notice steers them to the canonical entry points. The shim is short-lived by design: ~~it is removed in the first release cut at least two months after it ships.~~ **Removed early, in v0.8.4** ([#95](https://github.com/SurveyMonkey/skills/issues/95)): the window existed for users with fix-alert in muscle memory from v0.1.0-v0.2.1; the user set is small enough that nobody relies on it, so the condition is shortened here, where it was published, and `commands/fix-alert.md` is gone.
 2. **Proactive notice hook.** The plugin ships a PostToolUse hook on Bash that scans tool output for GitHub's push-time vulnerability notice (`GitHub found N vulnerabilities on ...`) and Dependabot URLs in `gh` output. On match, it emits additional context telling Claude to offer the `resolve-alerts` skill and ask whether to start. The hook also matches package manager audit output (`npm audit` / `pnpm audit` summaries and install-time vulnerability warnings), with a deliberate asymmetry: PM audit findings may not correspond to any GitHub alert, and every prompt in this system is written against GitHub alert data, so a subagent handed raw audit output would be working outside its contract. A PM-audit match therefore only nudges: it suggests checking GitHub security alerts via the skill, discovery proceeds from GitHub as the sole source of truth, and if GitHub shows no open alerts the orchestrator reports that and stops rather than attempting to reconcile the package manager's findings. The hook is a fast grep (exit 0 on no match, no network calls), so per-Bash-call overhead is negligible. It suggests; it never auto-runs.
 
 ## Alternatives Considered
@@ -289,7 +289,7 @@ Settled during RFC review and incorporated above:
 - `check-advisories.sh` and the `list_pins` implementation moved from Phase 1 to Phase 4, where their only consumer lives. A bash unit test harness became its own issue ([#10](https://github.com/SurveyMonkey/skills/issues/10)), and `mark-ready.sh` moved to Phase 2.
 - At org scope, repos skipped for lack of push access are listed by name in the summary, never silently dropped.
 - The notice hook matches package manager audit output, but only as a nudge to check GitHub security alerts; GitHub remains the sole data source for the fix pipeline, and the orchestrator stops cleanly when GitHub shows no open alerts.
-- The `fix-alert` shim is removed in the first release cut at least two months after it ships.
+- ~~The `fix-alert` shim is removed in the first release cut at least two months after it ships.~~ **Removed early, in v0.8.4** ([#95](https://github.com/SurveyMonkey/skills/issues/95)): the window existed for users with fix-alert in muscle memory from v0.1.0-v0.2.1; the user set is small enough that nobody relies on it, so the condition is shortened here, where it was published.
 - The merge-risk rubric ships as-is as the starting baseline, adjusted from team feedback via the calibration ADR.
 - EMU support is explicitly out of scope (moved to Non-Goals); a scheduled EMU-wide run is a possible future initiative.
 - The concurrency cap is derived per machine at dispatch time (`detect-capacity.sh`, unprivileged core and RAM reads), clamped to 3-6 with 3 as the detection-failure fallback, instead of a fixed baseline.
@@ -339,7 +339,7 @@ To be spawned as this RFC executes:
 
 ## Related
 
-- Current implementation: `plugins/gh-security/commands/fix-alert.md`, `plugins/gh-security/scripts/`
+- Current implementation: `plugins/gh-security/skills/resolve-alerts/SKILL.md`, `plugins/gh-security/scripts/` (`commands/fix-alert.md` removed in v0.8.4, [#95](https://github.com/SurveyMonkey/skills/issues/95))
 - [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
 - [ADR 006: Merge risk is static analysis, and CI is the verifier](../adr/006-merge-risk-is-static-analysis.md)
 - [ADR 007: Pin-removal PRs](../adr/007-pin-removal-prs.md)

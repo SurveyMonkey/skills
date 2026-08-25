@@ -3,7 +3,7 @@ type: Reference
 description: State and branch map of the resolve-alerts skill and its fix-dependency and audit-pins subagents, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's findings, guards, and the ways a completed audit opens no PR.
 owner: brianespinosa
 created: 2026-08-22
-stale_after: 2027-02-22
+stale_after: 2027-02-24
 ---
 
 # resolve-alerts state flow
@@ -18,7 +18,6 @@ Sources, in the order the flow reads them:
 | File | Role here |
 |---|---|
 | [`plugins/gh-security/commands/resolve-alerts.md`](../../plugins/gh-security/commands/resolve-alerts.md) | Entry point; runs the skill from phase 1. |
-| [`plugins/gh-security/commands/fix-alert.md`](../../plugins/gh-security/commands/fix-alert.md) | Deprecation shim, scheduled for removal; same flow with phase 3's *question* skipped and its answer pre-supplied as **One**. The ranked table is still presented. Delete its node from diagram 1 when the shim goes. |
 | [`plugins/gh-security/skills/resolve-alerts/SKILL.md`](../../plugins/gh-security/skills/resolve-alerts/SKILL.md) | The orchestrator's phases, diagram 1. |
 | [`plugins/gh-security/agents/fix-dependency.md`](../../plugins/gh-security/agents/fix-dependency.md) | One group's fix, diagram 2. |
 | [`plugins/gh-security/agents/audit-pins.md`](../../plugins/gh-security/agents/audit-pins.md) | The pin audit that rides along, diagram 3. |
@@ -47,8 +46,6 @@ that reason.
 ```mermaid
 flowchart TD
     START["/gh-security:resolve-alerts, or a natural-language ask"] --> P1
-    SHIM["/gh-security:fix-alert (deprecated shim):<br/>print notice, pre-supply phase 3 = One,<br/>still present the ranked table"] --> P1
-
     P1["Phase 1: detect-scope.sh"] --> P1Q{"scope, or the user's own<br/>if the request names a different one"}
     P1Q -->|repo| P1R{"git_remote agrees with nwo?"}
     P1Q -->|"org / user"| P2
@@ -62,7 +59,7 @@ flowchart TD
     P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
     P2Q -->|"one or more"| P3
 
-    P3["Phase 3: ranked table<br/>(Repo column at org/user scope only)"] --> P3ASK{"ask: how much to fix?<br/>(pre-supplied as One on the shim path)"}
+    P3["Phase 3: ranked table<br/>(Repo column at org/user scope only)"] --> P3ASK{"ask: how much to fix?"}
     P3ASK -->|One| P4
     P3ASK -->|"Highest tier"| P4
     P3ASK -->|Everything| P4
