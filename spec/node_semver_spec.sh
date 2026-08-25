@@ -472,6 +472,77 @@ Describe 'node.sh declared_ranges --line (pnpm, lockfile snapshots)'
     The status should be success
     The output should equal '{"ranges":["^5.0.1"],"parents_read":["filelist"],"parents_unreadable":[],"parents_other_lines":["__root__","@ts-morph/common@0.26.1","glob@7.2.3"]}'
   End
+
+  # The root, with NO node_modules at all — the state every pre-install
+  # worktree is in. `resolved_major_for_parent __root__` probes the installed
+  # tree, so root_major came back empty and the root's range was silently
+  # kept on EVERY queried line: issue #100's third signature, js-yaml "5.2.3"
+  # reported as root_range for a line the root does not serve. The lockfile's
+  # `importers:` section records what the root resolves, exactly as the
+  # snapshots do for the parents.
+  It 'files an off-line root under parents_other_lines with no node_modules'
+    use_fixture pnpm-cross-line
+    When call adapter_jq '{root_range, parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 5 minimatch
+    The status should be success
+    The output should equal '{"root_range":null,"parents_unreadable":["filelist"],"parents_other_lines":["__root__","@ts-morph/common@0.26.1","glob@7.2.3"]}'
+  End
+
+  It 'keeps root_range on the line the root importer resolves'
+    use_fixture pnpm-cross-line
+    When call adapter_jq '{root_range, parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 10 minimatch
+    The status should be success
+    The output should equal '{"root_range":"^10.2.5","parents_unreadable":["@ts-morph/common"],"parents_other_lines":["filelist@1.0.4","glob@7.2.3"]}'
+  End
+End
+
+# Peer-variant snapshot keys: one parent VERSION, several edges. pnpm keys
+# `react-redux@8.1.3(react@17.0.2)` and `react-redux@8.1.3(react@18.2.0)`
+# collapse to a single `parent_version`, while each variant resolves the
+# child at its own major. With the parent's manifest on disk the single-copy
+# path classified from the FIRST edge row: a parent genuinely serving the
+# queried line was filed in `parents_other_lines` — which the fix flow
+# promises never receives a scoped entry — so its child copy stayed
+# vulnerable while the group reported fixed. ANY edge on the line keeps the
+# parent; the fixture orders the 17.x variant first so a first-row shortcut
+# cannot pass.
+Describe 'node.sh declared_ranges --line (pnpm, peer-variant edges)'
+  After 'cleanup_fixture'
+
+  install_parent_manifest() {
+    mkdir -p node_modules/react-redux
+    printf '{"name":"react-redux","version":"8.1.3","peerDependencies":{"react":"^16.8 || ^17.0 || ^18.0"}}' \
+      > node_modules/react-redux/package.json
+  }
+
+  It 'keeps the parent eligible on the line its later edge serves'
+    use_fixture pnpm-peer-variant
+    install_parent_manifest
+    When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 18 react
+    The status should be success
+    The output should equal '{"ranges":["^16.8 || ^17.0 || ^18.0","^18.2.0"],"parents_read":["react-redux"],"parents_unreadable":[],"parents_other_lines":[]}'
+  End
+
+  It 'keeps the same single parent version eligible on the 17 line too'
+    use_fixture pnpm-peer-variant
+    install_parent_manifest
+    When call adapter_jq '{ranges, parents_read, parents_other_lines}' \
+      declared_ranges --line 17 react
+    The status should be success
+    The output should equal '{"ranges":["^16.8 || ^17.0 || ^18.0"],"parents_read":["react-redux"],"parents_other_lines":["__root__"]}'
+  End
+
+  # A line NO edge serves still classifies the parent away, from the rows.
+  It 'files the parent under parents_other_lines for a line no edge serves'
+    use_fixture pnpm-peer-variant
+    install_parent_manifest
+    When call adapter_jq '{ranges, parents_read, parents_other_lines}' \
+      declared_ranges --line 16 react
+    The status should be success
+    The output should equal '{"ranges":[],"parents_read":[],"parents_other_lines":["__root__","react-redux"]}'
+  End
 End
 
 # `satisfies` is internal, so it is exercised through validate against a fixture

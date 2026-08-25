@@ -220,6 +220,41 @@ Describe 'node.sh apply_constraint'
       The status should be success
       The output should equal '{"minimatch@10.0.3>brace-expansion":">=5.0.9 <6","minimatch@10.2.5>brace-expansion":">=5.0.9 <6"}'
     End
+
+    # The multiplicity gate reads the snapshots edges, not the `packages:`
+    # section: with `packages:` unreadable the old `pnpm_rows` gate saw zero
+    # versions, skipped qualification, and failed OPEN into the bare
+    # collapse-causing key. The edges already prove the parent resolves at
+    # more than one version.
+    It 'still writes qualified keys when the packages section is unreadable'
+      use_fixture pnpm-cross-line
+      awk '/^packages:/ {skip = 1; next} /^[a-zA-Z]/ {skip = 0} !skip' \
+        pnpm-lock.yaml > lock.tmp && mv lock.tmp pnpm-lock.yaml
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+    End
+
+    # Zero qualifying versions falls back to the bare key, never to writing
+    # NOTHING: an unqualified entry over-covers, a missing one leaves every
+    # copy vulnerable. No minimatch copy resolves a 9.x brace-expansion.
+    It 'falls back to the bare key when no parent version qualifies'
+      use_fixture pnpm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=9.0.0 <10' minimatch >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]]'
+      The output should equal '["minimatch>brace-expansion"]'
+    End
+
+    # A child resolution no major can be read from — here the codeload
+    # tarball URL pnpm records for a git dependency — KEEPS its parent
+    # version in the qualified set: covering a copy twice is harmless,
+    # silently skipping one is not.
+    It 'keeps a parent version whose child resolution has no readable major'
+      use_fixture pnpm-peer-variant
+      "$ADAPTER" apply_constraint minimist '>=0.0.9 <0.1' optimist >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]] | sort'
+      The output should equal '["optimist@0.5.2>minimist","optimist@0.6.1>minimist"]'
+    End
   End
 
   # An aliased dependency, which `validate` now counts and which nothing could

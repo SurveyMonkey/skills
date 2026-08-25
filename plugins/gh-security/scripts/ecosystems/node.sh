@@ -1089,7 +1089,7 @@ pnpm_edge_rows() {
         p = index(cur, "(")
         if (p > 0) cur = substr(cur, 1, p - 1)
         # The parent locator splits on its LAST `@`: a scoped name owns the
-        # one at position 1, exactly as `pnpm_key` in PINS_JQ splits.
+        # one at position 1, exactly as `strip_selector` in PINS_JQ splits.
         curname = cur
         curver = "-"
         at = 0
@@ -1131,6 +1131,62 @@ pnpm_edge_rows() {
 pnpm_parents() {
   pnpm_edge_rows "$1" | cut -f1 | sort -u \
     | jq -Rs 'split("\n") | map(select(length > 0))'
+}
+
+# The major of $1 the ROOT importer resolves, read from pnpm-lock.yaml's
+# `importers:` section (`.` importer -> dependencies/devDependencies/
+# optionalDependencies -> `version:`). The root is a dependent like any
+# other, and its line has to come from the lockfile for the same reason the
+# parents' do: `resolved_major_for_parent __root__` probes the installed
+# tree, which is absent in the pre-install worktree the verbs run in, so an
+# off-line root's range was silently kept on every queried line — the bogus
+# `root_range` field of issue #100 (js-yaml "5.2.3" reported on a line the
+# root does not serve). A version the reader cannot turn into a major fails
+# rather than guessing, and callers keep the root — the over-cover direction.
+pnpm_root_child_major() {
+  _prcm_ver=$(awk -v pkg="$1" '
+    /^importers:/ { inimp = 1; next }
+    /^[a-zA-Z]/   { inimp = 0 }
+    inimp {
+      if ($0 ~ /^  [^ ]/) {
+        imp = $0
+        sub(/^  /, "", imp)
+        sub(/:[[:space:]]*$/, "", imp)
+        gsub(/\x27/, "", imp)
+        isroot = (imp == ".")
+        insec = 0; isdep = 0
+        next
+      }
+      if (!isroot) next
+      if ($0 ~ /^    (dependencies|devDependencies|optionalDependencies):[[:space:]]*$/) {
+        insec = 1; isdep = 0; next
+      }
+      if ($0 ~ /^    [^ ]/) { insec = 0; next }
+      if (insec && $0 ~ /^      [^ ]/) {
+        dep = $0
+        sub(/^      /, "", dep)
+        sub(/:[[:space:]]*$/, "", dep)
+        gsub(/\x27/, "", dep)
+        isdep = (dep == pkg)
+        next
+      }
+      if (insec && isdep && $0 ~ /^        version:/) {
+        v = $0
+        sub(/^        version:[[:space:]]*/, "", v)
+        gsub(/\x27/, "", v)
+        # A peer-dependency suffix is not part of the resolved version.
+        p = index(v, "(")
+        if (p > 0) v = substr(v, 1, p - 1)
+        print v
+        exit
+      }
+    }
+  ' pnpm-lock.yaml)
+  _prcm_major=${_prcm_ver%%.*}
+  case "$_prcm_major" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$_prcm_major"
 }
 
 # Berry parents, matched on either name, exactly as npm's are.
@@ -1587,17 +1643,20 @@ verb_apply_constraint() {
     && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
     target_major=$(jq -rn --arg range "$range" \
       "$SEMVER_JQ"'($range | range_floor_major) // empty')
-    all_versions=$(pnpm_rows | jq -Rs -c '
-      split("\n") | map(select(length > 0) | split("\t"))
-      | map({name: .[0], ver: .[1]})')
     edges=$(pnpm_edge_rows "$pkg" | jq -Rs -c '
       split("\n") | map(select(length > 0) | split("\t"))
       | map({parent: .[0], pver: .[1], cver: .[2]})')
+    # The multiplicity gate reads the same edges the values do, not the
+    # `packages:` section: the edges already prove how many versions of the
+    # parent resolve the child, and a `packages:` section this parser cannot
+    # read must not fail OPEN into the bare key whose collapse the
+    # qualification exists to prevent.
     qualified_parent_versions=$(jq -nc \
-      --argjson vers "$all_versions" --argjson edges "$edges" \
+      --argjson edges "$edges" \
       --argjson parents "$parents_json" --arg target "$target_major" '
       [ $parents[] | . as $p
-        | ([ $vers[] | select(.name == $p) | .ver ] | unique) as $pv
+        | ([ $edges[] | select(.parent == $p and .pver != "-") | .pver ]
+           | unique) as $pv
         | select(($pv | length) > 1)
         | { key: $p,
             value: ([ $edges[]
@@ -2224,13 +2283,24 @@ verb_declared_ranges() {
   other_lines=""
 
   # The root is a dependent like any other, so `--line` filters it on the same
-  # rule: it has no nested copy of its own, and reaches the hoisted one.
-  if [ -n "$root_range" ] && [ -n "$line" ] \
-    && root_major=$(resolved_major_for_parent __root__ "$pkg") \
-    && [ "$root_major" != "$line" ]; then
-    other_lines="__root__
+  # rule. npm and yarn answer from the installed tree: the root has no nested
+  # copy of its own, and reaches the hoisted one. pnpm answers from the
+  # lockfile's `importers:` section, because the hoisted probe requires an
+  # install this verb runs without — with no `node_modules`, root_major came
+  # back empty and an off-line root's range was silently kept on the queried
+  # line, the bogus `root_range` of issue #100's third signature
+  # ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+  if [ -n "$root_range" ] && [ -n "$line" ]; then
+    if [ "$pm" = "pnpm" ]; then
+      root_major=$(pnpm_root_child_major "$pkg") || root_major=""
+    else
+      root_major=$(resolved_major_for_parent __root__ "$pkg") || root_major=""
+    fi
+    if [ -n "$root_major" ] && [ "$root_major" != "$line" ]; then
+      other_lines="__root__
 "
-    root_range=""
+      root_range=""
+    fi
   fi
 
   copy_rows=$(parent_copy_rows "$pm" "$pkg")
@@ -2292,7 +2362,13 @@ verb_declared_ranges() {
       done <<EOF
 $(printf '%s' "$parent_rows" | jq -r '
         .[] | [ (.parent_version // "-"),
-                (.range // "-"),
+                ((.range // "-")
+                 # `-` is the whole-field sentinel, including for the EMPTY
+                 # string: an npm row can carry `range: ""` (a bare `""`
+                 # specifier is legal in a manifest), and an empty field
+                 # inside the tab-separated line would shift its neighbors
+                 # under the `IFS=tab read` below.
+                 | if . == "" then "-" else . end),
                 ((.resolved // "") | ltrimstr("v") | split(".")[0]
                  | if type == "string" and test("^[0-9]+$") then . else "" end) ]
         | @tsv')
@@ -2327,9 +2403,21 @@ EOF
     # `parents_unreadable` ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
     if [ -n "$line" ]; then
       if [ "$pm" = "pnpm" ]; then
-        parent_major=$(printf '%s' "$parent_rows" | jq -r '
-          (first // {}) | ((.resolved // "") | ltrimstr("v") | split(".")[0]
-          | if type == "string" and test("^[0-9]+$") then . else empty end)')
+        # ANY edge decides membership, not the first one. A parent at ONE
+        # resolved version can still hold several snapshot edges — peer-variant
+        # keys like `react-redux@8.1.3(react@17.0.2)` and `(react@18.2.0)`
+        # collapse to one `parent_version`, each variant resolving the child
+        # at its own major. Classifying from the first row filed a parent in
+        # `parents_other_lines` while one of its edges genuinely served the
+        # queried line: the child copy stayed vulnerable while the group
+        # reported fixed — under-cover, the one direction every rule here
+        # forbids: covering a copy twice is harmless, missing one is not.
+        # Only when NO edge is on the line does the first readable major
+        # classify it away, as before.
+        parent_major=$(printf '%s' "$parent_rows" | jq -r --arg line "$line" '
+          [ .[] | ((.resolved // "") | ltrimstr("v") | split(".")[0])
+            | select(type == "string" and test("^[0-9]+$")) ]
+          | if index($line) then $line else (first // empty) end')
       else
         parent_major=$(resolved_major_for_parent "$parent" "$pkg") \
           || parent_major=""

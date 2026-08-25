@@ -200,7 +200,16 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   `brace-expansion` 1.x each collapsed their sibling lines on the field run; the qualified form is
   the one five shipped field PRs validated with `other_line_moves: []`
   ([#100](https://github.com/SurveyMonkey/skills/issues/100)). A single-version parent keeps the
-  bare key — nothing else exists for it to leak onto. pnpm only: yarn's narrowing needs the full
+  bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
+  the bare key on two fallback paths — no parent version qualifies for the target line, or none
+  of its snapshot keys carries a readable version — because an entry that over-covers beats
+  writing nothing. The exact-version form is a deliberate staleness tradeoff: it is the shape the
+  field PRs validated, and a later bump of a parent copy inertly un-matches its key rather than
+  dragging the new copy onto the wrong line; re-running the fix refreshes it. The same snapshots
+  record only what each copy *resolved*, never the specifier it was declared with, so a
+  multi-copy pnpm parent keeps its per-copy line while its declared ranges stay unread
+  (`parents_unreadable`) — under pnpm the risk score sees fewer declared ranges than under npm or
+  yarn. pnpm only: yarn's narrowing needs the full
   resolved locator (above) and npm's nesting has its own semantics, so neither is qualified.
 - **npm** matches `{"parent@^10": {...}}` with `semver.intersects` on the edge's descriptor and
   `semver.satisfies` on the node's resolved version, and its nesting is transitive rather than
