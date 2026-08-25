@@ -2414,11 +2414,16 @@ resolved_major_for_parent() {
 # parent copy declared under a `node_modules/@scope/name/node_modules/<parent>`
 # key ([#121](https://github.com/SurveyMonkey/skills/issues/121)). The strip
 # is scoped-segment-aware now, and the recursion carries a progress check
-# besides: a path the strip cannot shorten (a workspace key like
-# `packages/tool`, or any shape not anticipated here) degrades to the short
-# list of itself plus the root rather than recursing forever. Both entries in
-# that list are legal resolution targets, so the degrade over-reports nothing;
-# it only stops walking.
+# besides, with two degrades for a path the strip cannot shorten. A workspace
+# key (no `node_modules/` segment, e.g. `packages/tool`) degrades to itself
+# plus the root: for such a key that two-entry list is the complete upward
+# walk, so nothing is guessed. A path that still contains `node_modules/` yet
+# would not shorten is a shape this strip does not understand, and offering
+# the root there would let a root copy at another version become `resolved` —
+# a confident wrong answer that misfiles the parent into
+# `parents_other_lines` and drops its range. That degrade is the path alone:
+# no candidate resolves, `resolved` stays null, and the consumer's rule that
+# an undeterminable line keeps the parent conservatively keeps the range.
 #
 # pnpm has no DECLARED range in these rows, for the same reason
 # `apply_constraint`'s `alias_lookup` reports `unsupported` for it: its
@@ -2445,8 +2450,9 @@ def prefixes:
   if . == "" then [""]
   else . as $path
   | (sub("/?node_modules/(@[^/]+/)?[^/]+$"; "")) as $rest
-  | if $rest == $path then [$path, ""]
-    else [$path] + ($rest | prefixes) end
+  | if $rest != $path then [$path] + ($rest | prefixes)
+    elif ($path | contains("node_modules/")) then [$path]
+    else [$path, ""] end
   end;
 def candidates($dk):
   prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);

@@ -396,9 +396,15 @@ Describe 'node.sh declared_ranges --line'
   # regression fails in seconds instead of hanging the suite.
   Describe 'parents declared under scoped package paths'
     # Portable wall-clock guard. `timeout` is not part of stock macOS, so
-    # where it is absent the adapter is backgrounded and killed by a watcher;
-    # either way a hang becomes a fast non-zero exit. The orphaned `sleep` a
-    # finished example leaves behind expires on its own and holds nothing.
+    # where it is absent the adapter is backgrounded and polled; either way a
+    # hang becomes a fast non-zero exit. The poll is deliberate: an earlier
+    # version used a backgrounded `( sleep; kill )` watcher, and killing the
+    # watcher does not kill its `sleep` child, so a finished example left an
+    # orphaned sleep holding every pipe it inherited — the command
+    # substitution in `deadline_adapter_jq` and shellspec's own capture fds —
+    # and each passing example idled the full deadline. Polling leaves no
+    # background process behind, at the cost of up to one second of
+    # granularity on a kill that only fires on a regression.
     run_with_deadline() {
       _secs=$1
       shift
@@ -408,13 +414,17 @@ Describe 'node.sh declared_ranges --line'
       fi
       "$@" &
       _cmd=$!
-      ( sleep "$_secs"; kill -9 "$_cmd" 2>/dev/null ) &
-      _watch=$!
+      _i=0
+      while kill -0 "$_cmd" 2>/dev/null; do
+        if [ "$_i" -ge "$_secs" ]; then
+          kill -9 "$_cmd" 2>/dev/null
+          break
+        fi
+        sleep 1
+        _i=$((_i + 1))
+      done
       wait "$_cmd"
-      _st=$?
-      kill "$_watch" 2>/dev/null
-      wait "$_watch" 2>/dev/null
-      return "$_st"
+      return $?
     }
 
     # `adapter_jq`, under the deadline.
@@ -425,6 +435,11 @@ Describe 'node.sh declared_ranges --line'
       _out=$(run_with_deadline 30 "$ADAPTER" "$@") || _st=$?
       if [ -n "$_out" ]; then
         printf '%s' "$_out" | jq -c "$_filter"
+        _jq=$?
+        # A jq failure must not vanish behind the adapter's success: the
+        # adapter's own failure stays the reported status, as in adapter_jq,
+        # and jq's status fills in only when the adapter succeeded.
+        [ "$_st" -ne 0 ] || _st=$_jq
       fi
       return "$_st"
     }
@@ -460,18 +475,58 @@ Describe 'node.sh declared_ranges --line'
       The output should equal '{"ranges":["10.2.5","^10.0.3","^7.4.9"],"root_range":"^7.4.9","parents_read":["@npmcli/arborist","@nx/devkit"],"parents_unreadable":[]}'
     End
 
+    # Scoped under scoped: the field-test lockfile carries
+    # `node_modules/@npmcli/arborist/node_modules/@npmcli/fs/node_modules/semver`,
+    # trimmed into the fixture verbatim (all public names). The child copy's
+    # walk peels two consecutive scoped segments, and the declaring path is
+    # itself a scoped key nested under another scoped key.
+    It 'walks a scoped parent nested under another scoped parent'
+      use_fixture npm-scoped-parents
+      When call deadline_adapter_jq '{ranges, parents_read, parents_unreadable}' \
+        declared_ranges semver
+      The status should be success
+      The output should equal '{"ranges":["^7.3.5"],"parents_read":["@npmcli/fs"],"parents_unreadable":[]}'
+    End
+
     # The progress guard, through the verb. `packages/tool` is a workspace key
     # the strip cannot shorten at all, having no `node_modules/` segment to remove,
     # so without the guard `prefixes` recurses on it forever, scoped or not.
-    # With it the walk degrades to the path plus the root, both legal
-    # resolution targets, and the workspace parent's declaration is read and
-    # classified like any other.
+    # With it the walk degrades to the path plus the root — for a workspace
+    # key that two-entry list is the complete upward walk — and the workspace
+    # parent's declaration is read and classified like any other.
     It 'degrades a path the strip cannot shorten to a finite prefix list'
       use_fixture npm-scoped-parents
       When call deadline_adapter_jq '{ranges, parents_read, parents_unreadable}' \
         declared_ranges brace-expansion
       The status should be success
       The output should equal '{"ranges":["^2.0.2","^5.0.5"],"parents_read":["minimatch","packages/tool"],"parents_unreadable":[]}'
+    End
+
+    # The guard's other branch: an unshrinkable path that still CONTAINS
+    # `node_modules/` degrades to the path alone, WITHOUT the root. Offering
+    # the root would let a root copy at another version become `resolved` and
+    # misfile the parent into `parents_other_lines`, dropping its range; with
+    # no candidates the copy resolves nowhere and the undeterminable-line rule
+    # keeps the range. This branch is pinned with bare jq against the def
+    # extracted from the adapter source, not through the verb: every
+    # `packages` key npm actually writes ends in a package-name segment, which
+    # the scoped-aware strip always shortens, so no realistic v3 lockfile
+    # reaches this branch — it exists precisely for shapes not anticipated.
+    prefixes_of() {
+      _def=$(sed -n '/^def prefixes:/,/^  end;/p' "$ADAPTER")
+      jq -cn --arg p "$1" "$_def"' ($p | prefixes)'
+    }
+
+    It 'degrades a workspace key to itself plus the root'
+      When call prefixes_of 'packages/tool'
+      The status should be success
+      The output should equal '["packages/tool",""]'
+    End
+
+    It 'degrades an unshrinkable node_modules path to itself alone'
+      When call prefixes_of 'node_modules/foo/'
+      The status should be success
+      The output should equal '["node_modules/foo/"]'
     End
   End
 
