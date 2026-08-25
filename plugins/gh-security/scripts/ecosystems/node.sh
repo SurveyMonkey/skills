@@ -2405,6 +2405,21 @@ resolved_major_for_parent() {
 # entry whose key list contains it, so the rows are joined against a descriptor
 # -> version map built from the same file.
 #
+# A scoped package occupies TWO path segments (`@scope/name`), so the strip
+# that walks upward has to take the `@`-prefixed segment together with its
+# tail; a single-segment strip cannot match a scoped tail at all, `sub()`
+# returns its input unchanged, and `prefixes` recurses on the same path until
+# jq's allocator fails. On the field-test repository that OOMed
+# `declared_ranges --line` for 10 of 12 dispatched groups, every one with a
+# parent copy declared under a `node_modules/@scope/name/node_modules/<parent>`
+# key ([#121](https://github.com/SurveyMonkey/skills/issues/121)). The strip
+# is scoped-segment-aware now, and the recursion carries a progress check
+# besides: a path the strip cannot shorten (a workspace key like
+# `packages/tool`, or any shape not anticipated here) degrades to the short
+# list of itself plus the root rather than recursing forever. Both entries in
+# that list are legal resolution targets, so the degrade over-reports nothing;
+# it only stops walking.
+#
 # pnpm has no DECLARED range in these rows, for the same reason
 # `apply_constraint`'s `alias_lookup` reports `unsupported` for it: its
 # `snapshots:` blocks record what a dependency resolved to, never the
@@ -2428,7 +2443,11 @@ resolved_major_for_parent() {
 NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
 def prefixes:
   if . == "" then [""]
-  else [.] + ((sub("/?node_modules/[^/]+$"; "")) | prefixes) end;
+  else . as $path
+  | (sub("/?node_modules/(@[^/]+/)?[^/]+$"; "")) as $rest
+  | if $rest == $path then [$path, ""]
+    else [$path] + ($rest | prefixes) end
+  end;
 def candidates($dk):
   prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
 (.packages // {}) as $pkgs

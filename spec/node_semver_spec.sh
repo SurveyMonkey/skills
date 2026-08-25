@@ -378,6 +378,103 @@ Describe 'node.sh declared_ranges --line'
     End
   End
 
+  # A scoped package occupies two path segments, so `NPM_COPY_ROWS_JQ`'s
+  # single-segment strip could not shorten a lockfile key ending in
+  # `@scope/name`: `sub()` returned its input unchanged and `prefixes` recursed
+  # on the same path until jq's allocator failed. On the npm field-test monorepo
+  # that OOMed `declared_ranges --line` for 10 of 12 dispatched groups: every
+  # group with a parent copy declared under a
+  # `node_modules/@scope/name/node_modules/<parent>` key
+  # ([#121](https://github.com/SurveyMonkey/skills/issues/121)).
+  #
+  # The fixture is that run's shape, trimmed to public names: `minimatch`
+  # copies declared under `@npmcli/arborist` and `@nx/devkit`, each resolving
+  # its own `brace-expansion`, and no installed manifest for the multi-copy
+  # parent, so classification runs on the lockfile rows whose `resolved:`
+  # candidate walk is where the recursion lived. Every example here ran
+  # forever before the fix, so each runs under `deadline_adapter_jq`: a
+  # regression fails in seconds instead of hanging the suite.
+  Describe 'parents declared under scoped package paths'
+    # Portable wall-clock guard. `timeout` is not part of stock macOS, so
+    # where it is absent the adapter is backgrounded and killed by a watcher;
+    # either way a hang becomes a fast non-zero exit. The orphaned `sleep` a
+    # finished example leaves behind expires on its own and holds nothing.
+    run_with_deadline() {
+      _secs=$1
+      shift
+      if command -v timeout >/dev/null 2>&1; then
+        timeout "$_secs" "$@"
+        return $?
+      fi
+      "$@" &
+      _cmd=$!
+      ( sleep "$_secs"; kill -9 "$_cmd" 2>/dev/null ) &
+      _watch=$!
+      wait "$_cmd"
+      _st=$?
+      kill "$_watch" 2>/dev/null
+      wait "$_watch" 2>/dev/null
+      return "$_st"
+    }
+
+    # `adapter_jq`, under the deadline.
+    deadline_adapter_jq() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(run_with_deadline 30 "$ADAPTER" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    # The verdict the field run never reached: the on-line copies sit under
+    # scoped packages, their range is collected, and the off-line copies are
+    # named away, exactly as the unscoped multi-copy examples above.
+    It 'terminates and classifies parent copies declared under scoped packages'
+      use_fixture npm-scoped-parents
+      When call deadline_adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines}' \
+        declared_ranges --line 5 brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^5.0.5"],"parents_read":["minimatch"],"parents_unreadable":[],"parents_other_lines":["minimatch@7.4.9","packages/tool@1.0.0"]}'
+    End
+
+    It 'takes the unscoped copy for the 2.x line and names the scoped ones away'
+      use_fixture npm-scoped-parents
+      When call deadline_adapter_jq '{ranges, parents_read, parents_other_lines}' \
+        declared_ranges --line 2 brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^2.0.2"],"parents_read":["minimatch","packages/tool"],"parents_other_lines":["minimatch@10.0.3","minimatch@10.2.5"]}'
+    End
+
+    # The second trigger shape from the field run: the declaring path ITSELF
+    # ends in a scoped segment (`node_modules/@nx/devkit`), so the very first
+    # strip failed to match, so a scoped parent's own declaration could never be
+    # read at all.
+    It 'walks a path ending in a scoped segment for a scoped parent'
+      use_fixture npm-scoped-parents
+      When call deadline_adapter_jq '{ranges, root_range, parents_read, parents_unreadable}' \
+        declared_ranges minimatch
+      The status should be success
+      The output should equal '{"ranges":["10.2.5","^10.0.3","^7.4.9"],"root_range":"^7.4.9","parents_read":["@npmcli/arborist","@nx/devkit"],"parents_unreadable":[]}'
+    End
+
+    # The progress guard, through the verb. `packages/tool` is a workspace key
+    # the strip cannot shorten at all, having no `node_modules/` segment to remove,
+    # so without the guard `prefixes` recurses on it forever, scoped or not.
+    # With it the walk degrades to the path plus the root, both legal
+    # resolution targets, and the workspace parent's declaration is read and
+    # classified like any other.
+    It 'degrades a path the strip cannot shorten to a finite prefix list'
+      use_fixture npm-scoped-parents
+      When call deadline_adapter_jq '{ranges, parents_read, parents_unreadable}' \
+        declared_ranges brace-expansion
+      The status should be success
+      The output should equal '{"ranges":["^2.0.2","^5.0.5"],"parents_read":["minimatch","packages/tool"],"parents_unreadable":[]}'
+    End
+  End
+
   # The verdict, not the parse: what mattered on the field-test fix PR is the number that
   # reached the PR body, so both halves are scored through score-merge-risk.sh.
   Describe 'the score those ranges produce'
