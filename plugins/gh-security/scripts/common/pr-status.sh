@@ -5,12 +5,12 @@
 #
 # Output: {"prs": [...]} — one entry per URL, in argument order.
 #
-# **Read-only, and the whole script.** It runs `gh pr view` and `gh api` and
-# nothing that changes a pull request. There is deliberately no verb for
-# marking one ready: PRs open ready for review (ADR 008), so nothing in this
-# plugin acts on a PR after `gh pr create`. The mutating half this script
-# used to carry — rebase, then `gh pr ready` — is gone with the promotion
-# phases it served.
+# **Read-only, and the whole script.** It runs `gh pr view` and nothing that
+# changes a pull request. There is deliberately no verb for marking one
+# ready: PRs open ready for review (ADR 008), so nothing in this plugin acts
+# on a PR after `gh pr create`. The mutating half this script used to carry
+# — rebase, then `gh pr ready` — is gone with the promotion phases it
+# served.
 #
 # Its callers are the orchestrator's closing report and the standalone
 # /gh-security:audit-pins command, both of which print this as information.
@@ -20,7 +20,7 @@
 # Entry:
 #   { url, number, repo, state, is_draft, head, base, merge_state, behind,
 #     conflict, checks, check_counts: {total, passed, failed, pending},
-#     failing_checks, auto_merge: {permitted, armed, enabled_by, method} }
+#     failing_checks }
 #
 #   A URL that could not be read is `{url, error}` instead, with none of the
 #   fields above: either it is not a GitHub pull request URL, or `gh pr view`
@@ -38,10 +38,6 @@
 #     is a real transient right after a push; the caller must not read it as
 #     clean or behind. Most PRs read UNKNOWN when the final report runs,
 #     seconds after they were created.
-#   - `auto_merge.armed` means auto-merge is enabled on this PR: it merges
-#     itself once checks pass, and nothing here or in any agent arms it.
-#     `permitted` is the repository setting; null when the token cannot see
-#     it.
 #
 # Exit: 1 if any URL produced an error entry — a malformed URL, which is never
 # viewed at all, a failed `gh pr view`, and a `gh pr view` whose output could
@@ -67,35 +63,9 @@ parse_repo() {
     | sed -nE 's#^https://github\.com/([^/]+)/([^/]+)/pull/[0-9]+$#\1/\2#p'
 }
 
-# One repo-settings call per unique repository. bash 3.2 has no associative
-# arrays, so the memo is newline-delimited "repo value" lines. The result
-# lands in ALLOW_VALUE rather than on stdout: a $(...) caller would run this
-# in a subshell and the memo write would be lost with it.
-REPO_MEMO=""
-ALLOW_VALUE=""
-
-allow_auto_merge() {
-  repo="$1"
-  while IFS=' ' read -r r v; do
-    if [ "$r" = "$repo" ]; then
-      ALLOW_VALUE="$v"
-      return 0
-    fi
-  done <<< "$REPO_MEMO"
-
-  value=$(gh api "repos/$repo" --jq '.allow_auto_merge' 2>/dev/null || printf '')
-  case "$value" in
-    true|false) ;;
-    *) value="null" ;;  # setting invisible to this token, or the call failed
-  esac
-  REPO_MEMO="$REPO_MEMO$repo $value
-"
-  ALLOW_VALUE="$value"
-}
-
 status_entry() {
-  # stdin: the gh pr view JSON. Args: url, repo, permitted.
-  jq -c --arg url "$1" --arg repo "$2" --argjson permitted "$3" '
+  # stdin: the gh pr view JSON. Args: url, repo.
+  jq -c --arg url "$1" --arg repo "$2" '
   def entry_state:
     if (.state? // null) != null then
       # StatusContext: legacy commit status, only a state field
@@ -141,16 +111,7 @@ status_entry() {
       },
       failing_checks: [
         $roll[] | select(entry_state == "failed") | (.name // .context // "unknown")
-      ],
-      auto_merge: {
-        permitted: $permitted,
-        armed: (.autoMergeRequest != null),
-        enabled_by: (
-          .autoMergeRequest.enabledBy
-          | if type == "object" then (.login // null) else . end
-        ),
-        method: (.autoMergeRequest.mergeMethod // null)
-      }
+      ]
     }
   '
 }
@@ -173,13 +134,12 @@ run_status() {
         '{url: $url, error: "not a GitHub pull request URL"}')
       failed=true
     elif view=$(gh pr view "$url" \
-        --json number,state,isDraft,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,autoMergeRequest \
+        --json number,state,isDraft,headRefName,baseRefName,mergeStateStatus,statusCheckRollup \
         2>"$ERR_FILE"); then
-      allow_auto_merge "$repo"
       # Guarded, not bare: a parse failure is this PR's entry, never the end of
       # the report. `|| entry=""` keeps set -e out of it, and the empty test
       # also catches a jq that exits 0 on empty input.
-      entry=$(printf '%s' "$view" | status_entry "$url" "$repo" "$ALLOW_VALUE" 2>/dev/null) \
+      entry=$(printf '%s' "$view" | status_entry "$url" "$repo" 2>/dev/null) \
         || entry=""
       if [ -z "$entry" ]; then
         entry=$(jq -nc --arg url "$url" \

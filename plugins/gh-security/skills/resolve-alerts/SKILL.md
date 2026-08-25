@@ -445,9 +445,6 @@ check state is worth**, because most of these PRs are minutes old:
   which PR to open first.
 - `merge_state: UNKNOWN` means GitHub has not computed mergeability yet, which is ordinary right
   after a push. Say so rather than reading it as clean or behind.
-- `auto_merge.armed` on a PR means somebody enabled auto-merge on it and it will merge itself once
-  checks pass. Nothing in this skill or its agents arms it, so say plainly that it is armed and by
-  whom (`enabled_by`). Merely `permitted` is a repository setting and means nothing about this PR.
 - `behind: true` or `conflict: true` means GitHub has computed mergeability and the PR needs a
   rebase or has a conflicting change. Report either when true. Both are derived from
   `merge_state`, so on a PR created moments ago they are `false` because nothing was computed
