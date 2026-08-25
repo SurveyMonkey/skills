@@ -46,12 +46,13 @@ because a package missing from both snapshots shows no change and `[]` is the st
 
 **The audit gains a `mode` input, `report` or `pr`, set before dispatch and never defaulted.** The
 agent cannot ask, and the two modes differ by whether a pull request is opened against a real
-repository, so a missing or unrecognized value is an `input` failure. At every dispatch point (the
-`/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and its final
+repository, so a missing or unrecognized value is an `input` failure. ~~At every dispatch point
+(the `/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and its final
 phase's recommendation) **PR mode is the first and recommended option** and report-only is the
-alternative.
-In the orchestrator the mode is an option on the single batch approval, not a second prompt: one
-approval covers the batch and the audit's mode together.
+alternative. In the orchestrator the mode is an option on the single batch approval, not a second
+prompt: one approval covers the batch and the audit's mode together.~~ **Amended in
+[ADR 009](009-decouple-pin-audit.md):** `/gh-security:audit-pins` is now the only dispatch point;
+PR mode is still the first and recommended option there.
 
 **One PR per repository, on a fixed `chore/dependabot-remove-pins` branch, built in two bounded
 attempts, each a full combined test.**

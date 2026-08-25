@@ -423,19 +423,70 @@ Describe 'the rules that gate the removal PR'
     The output should equal '1'
   End
 
-  # PR mode first at every dispatch point, because the audit already did the
-  # work a removal PR needs; a report-first default makes a human re-derive the
-  # diff by hand, which is the step most likely to be skipped entirely.
+  # PR mode first at the one remaining dispatch point, because the audit
+  # already did the work a removal PR needs; a report-first default makes a
+  # human re-derive the diff by hand, which is the step most likely to be
+  # skipped entirely. The SKILL.md row of this Parameters block is retired
+  # (#108): resolve-alerts no longer asks a mode question at all, since it no
+  # longer dispatches the audit.
   Describe 'PR mode leads the choice wherever the mode is asked'
     Parameters
       "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
-      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
     End
 
     It "offers it first in $1"
       When call phrase_in "$1" 'first option and the recommended one'
       The status should be success
       The output should equal '1'
+    End
+  End
+
+  # #108: resolve-alerts and the audit no longer run together, because both
+  # edit the same overrides block on different branches against the same
+  # base — the field case is the field test's audit PR, which
+  # removed 8 keys that four of the batch's own unmerged fix PRs tightened or
+  # widened. The audit is entered only via /gh-security:audit-pins now, and it
+  # preflights for open security-labeled PRs before running.
+  Describe 'the audit preflights for open security PRs, and resolve-alerts no longer dispatches it (#108)'
+    COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+    SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+
+    It 'checks for open security-labeled PRs before asking the mode question'
+      When call rule_in "$COMMAND" 'gh pr list --repo <nwo> --label security --state open'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'stops rather than proceeding when open security PRs exist'
+      When call phrase_in "$COMMAND" 'report each PR by number and title'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The skill carries no proceed-anyway branch: a user who wants to run the
+    # audit regardless says so in conversation, and no skill machinery is
+    # needed for that. Pinned against the bold-bullet option convention this
+    # file already uses for its real options ("**Open a PR**", "**Report
+    # only**"), not against the negation sentence above, which itself contains
+    # the words "proceed-anyway" and would otherwise make this pin
+    # self-defeating.
+    It 'offers no proceed-anyway option'
+      When call count_in "$COMMAND" '\*\*Proceed anyway\*\*'
+      The status should be success
+      The output should equal '0'
+    End
+
+    # The tightest honest re-coupling pin: this exact dispatch line was the
+    # audit's Task payload inside phase 6 of resolve-alerts before #108. Its
+    # absence here means resolve-alerts no longer constructs an audit-pins
+    # dispatch. The pointer sentence phase 8 carries instead ("separate
+    # follow-up work, run via /gh-security:audit-pins") names the command by
+    # its slash form and never uses the bare subagent_type literal, so this
+    # assertion cannot false-positive on that pointer.
+    It 'no longer builds an audit-pins Task dispatch in resolve-alerts'
+      When call count_in "$SKILL" 'subagent_type.: .audit-pins.'
+      The status should be success
+      The output should equal '0'
     End
   End
 End

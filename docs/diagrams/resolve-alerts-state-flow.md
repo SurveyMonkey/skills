@@ -1,6 +1,6 @@
 ---
 type: Reference
-description: State and branch map of the resolve-alerts skill and its fix-dependency and audit-pins subagents, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's findings, guards, and the ways a completed audit opens no PR.
+description: State and branch map of the resolve-alerts skill (fix pooling only) and its fix-dependency subagent, plus the standalone /gh-security:audit-pins command and its audit-pins agent, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's own security-PR preflight, findings, guards, and the ways a completed audit opens no PR.
 owner: brianespinosa
 created: 2026-08-22
 stale_after: 2027-02-24
@@ -20,7 +20,8 @@ Sources, in the order the flow reads them:
 | [`plugins/gh-security/commands/resolve-alerts.md`](../../plugins/gh-security/commands/resolve-alerts.md) | Entry point; runs the skill from phase 1. |
 | [`plugins/gh-security/skills/resolve-alerts/SKILL.md`](../../plugins/gh-security/skills/resolve-alerts/SKILL.md) | The orchestrator's phases, diagram 1. |
 | [`plugins/gh-security/agents/fix-dependency.md`](../../plugins/gh-security/agents/fix-dependency.md) | One group's fix, diagram 2. |
-| [`plugins/gh-security/agents/audit-pins.md`](../../plugins/gh-security/agents/audit-pins.md) | The pin audit that rides along, diagram 3. |
+| [`plugins/gh-security/commands/audit-pins.md`](../../plugins/gh-security/commands/audit-pins.md) | The standalone audit entry point, including its open-security-PR preflight; diagram 3. |
+| [`plugins/gh-security/agents/audit-pins.md`](../../plugins/gh-security/agents/audit-pins.md) | The pin audit itself, dispatched only from that command, diagram 3. |
 
 Three diagrams rather than one: the orchestrator and the two agents are separate control flows that
 meet only at a dispatch payload and a JSON result block, and the agents cannot ask the user
@@ -30,15 +31,15 @@ anything, so where they stop is a different question from where the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
 decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
-approval, and both of phase 8's offers: the groups declined at phase 3, and the pin audit on any
-repo this run did not already audit.
+approval, and phase 8's offer of the groups declined at phase 3.
 
 **No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
-into being, and phase 8's two offers dispatch further work, the groups declined at phase 3 or an
-audit that may open a removal PR of its own, rather than deciding anything about a PR already on
-the page. PRs
+into being, and phase 8's offer dispatches further work, the groups declined at phase 3, rather
+than deciding anything about a PR already on the page. PRs
 open ready for review and no phase acts on one afterwards ([ADR
-008](../adr/008-prs-open-ready-for-review.md)).
+008](../adr/008-prs-open-ready-for-review.md)). The pin audit is no longer part of this flow at
+all ([issue #108](https://github.com/SurveyMonkey/skills/issues/108)): it is entered only via
+`/gh-security:audit-pins`, diagram 3.
 
 Two branches exclude one repo's groups without ending the run; they are drawn as plain nodes for
 that reason.
@@ -64,9 +65,8 @@ flowchart TD
     P3ASK -->|"Highest tier"| P4
     P3ASK -->|Everything| P4
 
-    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve batch + audit mode"}
-    P4ASK1 -->|"approve, audit mode: pr"| P4OK
-    P4ASK1 -->|"approve, audit mode: report"| P4OK
+    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve the batch?"}
+    P4ASK1 -->|approve| P4OK
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
     P4OK["Batch approved"] --> P5Q{"scope"}
 
@@ -85,7 +85,7 @@ flowchart TD
     P5X --> P6
     P5Y --> P6
 
-    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6Q["Work queue: every approved group across every repo,<br/>in ranked order, with audit-pins last when phase 4<br/>approved one (mode passed verbatim, one repo)"]
+    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6Q["Work queue: every approved group across every repo,<br/>in ranked order"]
     P6Q --> P6D["Rolling pool, machine-wide: dispatch queued items until cap<br/>are in flight, one message, one Task call per item;<br/>on each completion refill to cap the same way"]
     P6D --> P6DQ{"queue empty and every agent returned?"}
     P6DQ -->|"no: refill while the queue holds work<br/>(a failure or unparseable result frees a slot too)"| P6D
@@ -100,22 +100,13 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos,<br/>then deduplicated observations split by type"] --> P7AU{"audit ran in phase 6?"}
-    P7AU -->|no| P8
-    P7AU -->|yes| P7AR["Findings grouped per package, below and separate from<br/>the fix table; then the audit's own PR or its<br/>pr_skipped_reason; failure reported with the others"]
-    P7AR --> P8
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos,<br/>then deduplicated observations split by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
     P8ASK0 -->|yes| P3
-    P8ASK0 -->|no| P8A
-    P8 -->|no| P8A{"repos this run touched but did not audit?<br/>(phase 6 audits one; repo scope leaves none)"}
-    P8A -->|none| P8REP
-    P8A -->|"one or more"| P8ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
-    P8ASK -->|"pr / report"| P8D["Dispatch audit-pins, one per accepted repo,<br/>through a queue drained by the same rolling<br/>pool under cap; report per phase 7"]
-    P8D --> P8REP
-    P8ASK -->|decline| P8REP
-    P8REP["pr-status.sh on every success PR plus the audit's<br/>when one exists: checks, merge_state.<br/>Reported as information, never as a prompt"]
+    P8ASK0 -->|no| P8REP
+    P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); pr-status.sh on every success PR:<br/>checks, merge_state, reported as information"]
     P8REP --> DONE
     DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
 ```
@@ -126,15 +117,15 @@ per barrier. Nothing waits for a slower sibling, and a failed or unparseable res
 like a success. The declined-groups loop (phase 8 to phase 3) is reached only when groups
 remain *and* the user accepts the offer, and it re-enters the how-much question with what is left;
 those groups were never approved at phase 4, so it is a scope question rather than a resumption of
-approved work. There is no third: phase 8's audit dispatch used to loop back into the promotion
-phase, and with that phase gone the audit's PR is reported like any other and the flow runs straight
-to the end.
+approved work. There is no third: this flow dispatches no other agent kind and asks no other
+question.
 
-The audit offer is not conditional on the batch being finished. Phase 8 offers the declined groups
-and *then* recommends the audit for any repo this run did not audit, so declining those groups still
-reaches the recommendation. At repo scope phase 6 has already audited the only repo there is, which
-is why that branch normally ends at the closing report with nothing to ask. Both offers precede the closing report, which is the last thing the run
-does and asks nothing.
+Phase 8 has one offer, not two: the groups declined at phase 3. The pin audit is not part of this
+run at all ([#108](https://github.com/SurveyMonkey/skills/issues/108)) — the closing report points
+at `/gh-security:audit-pins` as separate follow-up work instead, run once this run's fix PRs have
+landed, because the two flows edit the same overrides block and running them together produces
+exactly the conflict a field case demonstrated
+(the field test's audit PR).
 
 ## Diagram 2: fix-dependency, one group
 
@@ -225,14 +216,31 @@ above it contradicts.
 
 ## Diagram 3: audit-pins
 
-Dispatched with the repo (`nwo` in the agent's own input contract, `repo` in the orchestrator's
-payload and in the result), `repo_root`, `default_branch`, an `adapter_path`, `scripts_dir`, and a
-`mode` that the user decides in phase 4 or 8 and that is never defaulted. In `pr` mode the
-distinction that matters is between a *failure* and one of the five ways a completed audit declines
-to open a PR: both leave `pr` null, and only the first is a broken run.
+Reached only through `/gh-security:audit-pins`, never through `resolve-alerts` ([#108](https://github.com/SurveyMonkey/skills/issues/108)).
+The command's own preflight — an open-PR check for the `security` label this plugin's own fix PRs
+carry — runs before the mode question and before the agent is ever dispatched: an unmerged fix PR
+may be adding or tightening an override the audit is about to judge removable, and the command
+stops rather than risk the inversion the field test's audit PR demonstrated. There is no
+proceed-anyway path; a user who wants the audit to run anyway says so in conversation.
+
+Once dispatched, the agent carries the repo (`nwo` in the agent's own input contract, `repo` in the
+command's payload and in the result), `repo_root`, `default_branch`, an `adapter_path`,
+`scripts_dir`, and a `mode` that the user decides at the command's step 5 and that is never
+defaulted. In `pr` mode the distinction that matters is between a *failure* and one of the five
+ways a completed audit declines to open a PR: both leave `pr` null, and only the first is a broken
+run.
 
 ```mermaid
 flowchart TD
+    CMD1["/gh-security:audit-pins: detect-scope.sh"] --> CMD2{"manifest present?"}
+    CMD2 -->|no| CSTOP1(["Stop: nothing this command can audit"])
+    CMD2 -->|yes| CMD3["select-adapter.sh"]
+    CMD3 --> CMD4{"open security-labeled PRs?<br/>gh pr list --label security --state open"}
+    CMD4 -->|"one or more"| CSTOP2(["Stop: report each PR by number and title;<br/>merge or close first, no proceed-anyway (#108)"])
+    CMD4 -->|none| CMD5["ensure-worktree-exclude.sh"]
+    CMD5 --> CMD6{"ask: mode?"}
+    CMD6 -->|"pr / report"| A0
+
     A0["Dispatch payload incl. mode"] --> A0Q{"mode present and recognized?"}
     A0Q -->|no| AFIN["failure: phase input"]
     A0Q -->|"report / pr"| A1{"$WORK exists?"}

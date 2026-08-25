@@ -49,7 +49,26 @@ empty directory. It cannot stand in for the check above. Python arrives with its
 ([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the choice will be
 made once more than one exists.
 
-## 3. Keep the audit worktree out of `git status`
+## 3. Check for open security fix PRs, and stop if any exist
+
+```bash
+gh pr list --repo <nwo> --label security --state open --json number,title,url
+```
+
+The audit's verdicts are computed against the default branch. An open PR carrying the `security`
+label is an unmerged fix from `resolve-alerts` or `fix-dependency` that may be adding or tightening
+an override the audit is about to judge removable; removing a pin one of these PRs still needs
+produces exactly the inversion the field test's audit PR demonstrated, where an audit PR
+removed 8 keys that four of the batch's own unmerged fix PRs tightened or widened.
+
+If the list is non-empty, report each PR by number and title, say that these open security fixes
+should be merged or closed before the audit runs, and **stop**. Do not dispatch the agent. There is
+no proceed-anyway option here: a user who wants to run the audit regardless says so in conversation,
+and no skill machinery is needed for that.
+
+If the list is empty, continue.
+
+## 4. Keep the audit worktree out of `git status`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
@@ -60,7 +79,7 @@ is repo-global state, and an agent may share a `repo_root` with a concurrent sib
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)). A failure here is not fatal — report it
 and dispatch anyway.
 
-## 4. Ask which mode, then dispatch
+## 5. Ask which mode, then dispatch
 
 The agent cannot ask anything, so the mode is decided here and passed in. AskUserQuestion, once,
 with two options. **PR mode is the first option and the recommended one**, because the audit
@@ -86,7 +105,7 @@ opened against a real repository.
 The audit runs an install per pin it tests. PR mode adds up to two more for the combined test. It
 is not instant; say so before dispatching.
 
-## 5. Report
+## 6. Report
 
 Parse the agent's fenced JSON result. **An unparseable or missing result block is a failure
 report** — say so; never guess fields. Present its findings **grouped by package, one table per
@@ -115,7 +134,7 @@ Then, in order:
 
 In `report` mode that is the whole result: nothing was changed, and the user acts on the findings.
 
-## 6. Report the PR
+## 7. Report the PR
 
 In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
 passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the
