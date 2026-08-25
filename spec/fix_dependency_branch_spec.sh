@@ -125,7 +125,9 @@ Describe 'the fix branch lifecycle in fix-dependency (#84)'
     End
 
     # A shape found in the wild is the specimen: both field-test branches are
-    # named so a future reader can check the claim rather than take it.
+    # named so the claim stays concrete rather than vague, even though the
+    # repository they came from is scrubbed (see issue #84 for the
+    # verification path).
     It 'cites the field-test specimens'
       When call phrase_in "$AGENT" 'fix/dependabot-react-router-6x'
       The status should be success

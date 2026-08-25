@@ -25,8 +25,8 @@
 # analysis (issue #71, ADR 006): that redefinition changed what the two factors
 # measure, not how many there are, so the maximum stays 14 and every threshold
 # stays where it was. What changes a band is a fix that scores on a factor or
-# trips an escalation, which is the point of having them: the multi-major
-# sweep case rates High on exactly that route. A fix that scores 0 on F6 and F7,
+# trips an escalation, which is the point of having them: the no-scripts
+# multi-major sweep case rates High on exactly that route. A fix that scores 0 on F6 and F7,
 # as every direct update or scoped override crossing at most one major line and
 # no pin does, keeps the band it had. The "no pin" half is not decoration: a
 # single-major bump past a dependent's `~1.2.3` scores 1 on F7 and can move
@@ -457,7 +457,7 @@ fi
 # `.claude` is excluded alongside the build outputs: fix worktrees live at
 # `.claude/worktrees/<name>` inside the repository being fixed (ADR 003), so a
 # tree with one checked out counts every module in it a second time. Observed
-# on a field-test repository, where two source files became eight affected
+# on the Astro field-test repository, where two source files became eight affected
 # modules and the same file appeared twice in the uncovered list.
 #
 # Build one ERE alternation over every target, matching ESM, CJS, and dynamic

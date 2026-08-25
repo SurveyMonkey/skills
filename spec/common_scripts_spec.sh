@@ -372,8 +372,8 @@ Describe 'score-merge-risk.sh'
   # Fix worktrees live at `.claude/worktrees/<name>` inside the repository
   # being fixed (ADR 003), so a tree with one checked out held a second copy of
   # every source file. Counted, they inflate the usage surface and list the
-  # same module twice as uncovered; observed on a field-test repository, where
-  # two source files scored as eight affected modules.
+  # same module twice as uncovered; observed on the Astro field-test repository,
+  # where two source files scored as eight affected modules.
   It 'does not count a nested fix worktree as more of the usage surface'
     use_fixture nested-worktree
     When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, coverage}'
@@ -402,8 +402,8 @@ Describe 'score-merge-risk.sh'
 
   # A test that imports the *parent* says nothing about whether the transitive
   # package underneath it is exercised. Counting it switched the multi-major
-  # escalation off for exactly the shape it exists to catch: the multi-major
-  # sweep case came back Medium.
+  # escalation off for exactly the shape it exists to catch: the no-scripts
+  # multi-major sweep case came back Medium.
   It 'does not let a test importing the parent cover the package surface'
     use_fixture parent-tested
     When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band}' scoped '^9'
@@ -461,8 +461,9 @@ Describe 'score-merge-risk.sh'
   End
 
   # F4 1 for a tree nothing imports the package from: no build script to fail,
-  # but a test script that would at least run. The multi-major sweep shape
-  # lands Medium here rather than High, because the escalation asks for F4 2.
+  # but a test script that would at least run. The no-scripts multi-major
+  # sweep shape lands Medium here rather than High, because the escalation
+  # asks for F4 2.
   It 'leaves a multi-major jump at Medium when a test script is the only signal'
     use_fixture test-script-only
     When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band, escalated}' scoped '^9'

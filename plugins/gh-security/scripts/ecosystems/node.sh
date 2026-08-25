@@ -2387,7 +2387,7 @@ resolved_major_for_parent() {
 # manifest for a multi-version parent therefore attributes one copy's range to
 # every line the parent sits on, and asking `resolved_major_for_parent` for its
 # line answers about the hoisted copy or about nothing at all. On
-# the field-test repository (Yarn Berry, no `node_modules` in the pre-install
+# the Yarn Berry field-test repository (no `node_modules` in the pre-install
 # worktree) `declared_ranges --line 5 brace-expansion` returned
 # `parents_read: []`, `parents_unreadable: ["minimatch"]` and `ranges: []`,
 # while the lockfile plainly recorded minimatch@3.1.5 -> brace-expansion@^1.1.7
