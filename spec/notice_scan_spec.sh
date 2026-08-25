@@ -288,6 +288,20 @@ Severity: 1 low | 2 moderate"
         The output should equal '{"offers_directly":true}'
       End
 
+      # The cwd-derived branch site needs the same leading-boundary anchor as
+      # the command-text site (the two `still nudges on a ...-dependabot-`
+      # cases above): a user's own branch that merely contains the flat
+      # prefix as a substring, read from the payload cwd rather than the
+      # command text, must still nudge rather than be swallowed by an
+      # unanchored match.
+      It 'nudges from a cwd on a my-fix-dependabot- branch of the user own'
+        on_branch my-fix-dependabot-experiment
+        When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+          "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal '{"offers_directly":true}'
+      End
+
       # A cwd outside any repository must degrade to nudging, not to an error:
       # this hook fires on every Bash call.
       It 'nudges when the cwd is outside any repository'

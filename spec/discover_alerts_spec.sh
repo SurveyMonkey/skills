@@ -409,4 +409,30 @@ Describe 'discover-alerts.sh'
       The output should equal '{"ok":true,"other_line_moves":[{"major":2,"before":["2.3.1","2.3.2"],"after":["2.3.2"],"status":"moved","class":"benign_dedup"}]}'
     End
   End
+
+  # Branch naming does not sanitize the package name: a scoped package's `/`
+  # rides straight through into the ref. Pin what the code actually emits
+  # rather than assume a sanitizer exists. A residual `/` inside a flat-style
+  # name (`fix-dependabot-@babel/traverse-7x`) does not recreate the issue
+  # #123 collision, since that requires a pre-existing sibling ref at the
+  # exact `fix-dependabot-...` prefix, and the plugin only ever creates one
+  # such ref per package/line.
+  Describe 'a scoped package name (issue #123 follow-up)'
+    setup_scoped_mock() {
+      cp "$FIXTURES/alerts/scoped-package.json" "$MOCK_DIR/alerts.json"
+    }
+    Before 'setup_scoped_mock'
+
+    It 'emits the unsanitized scoped name under the slash default'
+      When call discover '[.actionable[].branch_name]'
+      The status should be success
+      The output should equal '["fix/dependabot-@babel/traverse-7x"]'
+    End
+
+    It 'emits the unsanitized scoped name under the flat fallback'
+      When call common_jq discover-alerts.sh '[.actionable[].branch_name]' --branch-style flat "$REPO"
+      The status should be success
+      The output should equal '["fix-dependabot-@babel/traverse-7x"]'
+    End
+  End
 End

@@ -708,8 +708,11 @@ branch named `fix` blocks every `fix/*` name, or, inversely, a pre-existing
 `<branch_name>/<anything>` branch blocks yours. That is a dispatcher preflight miss, never a
 transient push failure: do not retry, and **never rename the branch yourself** — naming belongs
 to the dispatcher, and an improvised name escapes stale-branch detection and PR deduplication on
-every later run. Fail the run (phase `push`) quoting the rejection line, and run Cleanup as
-always; its unpushed-commit rule already preserves the branch.
+every later run. Fail the run (phase `push`) with `detail` naming the collision explicitly — e.g.
+`branch-namespace collision (directory file conflict): <rejection line>` — not just the quoted
+rejection line by itself, so the orchestrator's phase 7 summary can key on the collision by name
+rather than parsing git's wording. Run Cleanup as always; its unpushed-commit rule already
+preserves the branch.
 
 The `gh`
 calls below are location-independent because every one of them carries `--repo`, so they take no

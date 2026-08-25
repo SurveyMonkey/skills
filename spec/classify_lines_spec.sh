@@ -41,6 +41,8 @@ case "$verb" in
         printf '{"pm":"npm","package":"path-to-regexp","present":true,"count":1,"versions":[{"version":"0.2.5","path":"node_modules/path-to-regexp"}],"lockfile_entries":10}\n' ;;
       lodash)
         printf '{"pm":"npm","package":"lodash","present":true,"count":1,"versions":[{"version":"4.17.21","path":"node_modules/lodash"}],"lockfile_entries":10}\n' ;;
+      @babel/traverse)
+        printf '{"pm":"npm","package":"@babel/traverse","present":true,"count":1,"versions":[{"version":"7.23.2","path":"node_modules/@babel/traverse"}],"lockfile_entries":10}\n' ;;
       express)
         printf '{"pm":"npm","package":"express","present":true,"count":1,"versions":[{"version":"5.1.0","path":"node_modules/express"}],"lockfile_entries":10}\n' ;;
       minimatch)
@@ -394,6 +396,42 @@ STUB_EOF
       When call classify_plugin '{a: [.actionable[].branch_name], s: [.skipped[].branch_name]}' --branch-style flat
       The status should be success
       The output should equal '{"a":["fix-dependabot-lodash-4x"],"s":["fix-dependabot-left-pad-unfixed"]}'
+    End
+
+    It 'accepts the --branch-style=flat equals-form, consistent with discover-alerts.sh'
+      When call classify_plugin '{a: [.actionable[].branch_name], s: [.skipped[].branch_name]}' --branch-style=flat
+      The status should be success
+      The output should equal '{"a":["fix-dependabot-lodash-4x"],"s":["fix-dependabot-left-pad-unfixed"]}'
+    End
+
+    # Scoped package names are not sanitized anywhere in the pipeline: the
+    # rewrite is a literal prefix substitution, so a scoped package's own `/`
+    # rides straight through in both styles. Pin what the code actually
+    # produces (discover-alerts.sh's slash-style output is the input here).
+    scoped_envelope() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [{package: "@babel/traverse", major_line: "7", ecosystem: "npm",
+                        adapter_path: $a,
+                        branch_name: "fix/dependabot-@babel/traverse-7x"}],
+          skipped: []}'
+    }
+
+    classify_scoped() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(scoped_envelope \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    It 'rewrites a scoped package name to the flat prefix without sanitizing the internal slash'
+      When call classify_scoped '[.actionable[].branch_name]' --branch-style flat
+      The status should be success
+      The output should equal '["fix-dependabot-@babel/traverse-7x"]'
     End
 
     # The regression pin: without the flag nothing is renamed, so the

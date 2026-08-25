@@ -92,6 +92,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="${2:?--repo-root requires a value}"; shift 2 ;;
     --branch-style) BRANCH_STYLE="${2:?--branch-style requires a value}"; shift 2 ;;
+    --branch-style=*) BRANCH_STYLE="${1#--branch-style=}"; shift ;;
     *)
       printf '{"error":"Unknown argument: %s"}\n' "$1" >&2
       exit 1

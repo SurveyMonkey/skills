@@ -30,8 +30,8 @@ Describe 'the branch-namespace preflight (issue #123)'
     # Once at repo scope (phase 1) and once per repo at org/user scope
     # (phase 5 step 4): exactly one probe per repo at every scope, resolved
     # alongside env_prefix and default_branch.
-    It 'prescribes one ls-remote probe at each scope resolution point'
-      When call phrase_in "$SKILL" 'git -C <repo_root> ls-remote --heads origin fix'
+    It 'prescribes one fully-qualified ls-remote probe at each scope resolution point'
+      When call phrase_in "$SKILL" 'git -C <repo_root> ls-remote --heads origin refs/heads/fix'
       The status should be success
       The output should equal '2'
     End
@@ -55,8 +55,8 @@ Describe 'the branch-namespace preflight (issue #123)'
     # A probe that fails twice means origin is unreachable for the fetch and
     # push every agent needs — the exclusion route, mirroring a null
     # default_branch, not the flip route.
-    It 'excludes a repo whose probe cannot reach origin at all'
-      When call phrase_in "$SKILL" 'groups from dispatch and report them in phase 7'
+    It 'excludes a repo whose probe fails twice, reporting the probe stderr rather than a diagnosis'
+      When call phrase_in "$SKILL" 'excluded from dispatch and reported in phase 7 with the probe.s stderr verbatim'
       The status should be success
       The output should equal '1'
     End
@@ -64,7 +64,7 @@ Describe 'the branch-namespace preflight (issue #123)'
     It 'names the unprobed inverse collision instead of claiming coverage'
       When call phrase_in "$SKILL" 'inverse collision'
       The status should be success
-      The output should equal '1'
+      The output should equal '2'
     End
 
     It 'reports every flat-scheme repo in the phase 7 summary'

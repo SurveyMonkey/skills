@@ -1,0 +1,23 @@
+[
+  [
+    {
+      "number": 210,
+      "dependency": {
+        "package": { "ecosystem": "npm", "name": "@babel/traverse" },
+        "manifest_path": "package.json",
+        "relationship": "transitive"
+      },
+      "security_advisory": {
+        "ghsa_id": "GHSA-babel-traverse",
+        "cve_id": "CVE-2023-45133",
+        "severity": "critical",
+        "summary": "Arbitrary code execution when compiling crafted code with a plugin using the .path.evaluate()/.evaluateTruthy() internal Babel methods",
+        "epss": { "percentile": 0.8 }
+      },
+      "security_vulnerability": {
+        "vulnerable_version_range": "< 7.23.2",
+        "first_patched_version": { "identifier": "7.23.2" }
+      }
+    }
+  ]
+]

@@ -483,6 +483,15 @@ group_repo_alerts() {
     # such a PR can still be open. The reverse check is never made — while
     # `refs/heads/fix` exists (the flat style's precondition), the remote
     # cannot also hold any `fix/*` ref, so no slash-named PR can be open.
+    # This candidate costs one extra `gh pr list --search` call (the Search
+    # API, rate-limited to 30 req/min) per group on the default slash path.
+    # That is accepted for correctness across a style flip: without it, a
+    # group whose PR predates a since-deleted `fix` branch would be
+    # rediscovered as unfixed and dispatched again. One edge stays
+    # unreachable regardless: an open PR headed from a fork could coexist
+    # under either style and go unseen by this check, since `head:` search
+    # does not qualify the fork owner here — but this plugin never opens a
+    # PR from a fork, so that PR, if it exists, was not opened by this tool.
     flat_twin=""
     if [ "$BRANCH_STYLE" = "slash" ]; then
       flat_twin=$(flat_branch_name "$pkg" "$line")

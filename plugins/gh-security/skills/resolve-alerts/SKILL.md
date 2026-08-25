@@ -73,16 +73,21 @@ this, every agent in the batch finished its whole fix and then failed at push (i
 read-only probe, under `env_prefix` when this repo has one:
 
 ```bash
-git -C <repo_root> ls-remote --heads origin fix
+git -C <repo_root> ls-remote --heads origin refs/heads/fix
 ```
 
-A line naming `refs/heads/fix` means the slash namespace is blocked: this repo's **branch style
-is `flat`**, phase 2 passes `--branch-style flat` to `discover-alerts.sh` so every emitted
-`branch_name` uses the collision-safe `fix-dependabot-<pkg>-<line>x` scheme, and the phase 4 plan
-says so. Empty output is the ordinary case: the style is `slash` (the default; pass no flag). A
-non-zero exit gets **one retry**, exactly like phase 6's registry probe; a second failure means
-`git` cannot reach `origin` at all — the same fetch and push every fix agent needs — so report it
-and stop, as with a null `default_branch`. The probe covers the shape seen in the wild; the
+The fully-qualified refname is load-bearing: git matches the whole ref, not the tail component, so
+a repo with `topic/fix` and no bare `fix` returns nothing here (verified empty). Non-empty output
+means the slash namespace is blocked: this repo's **branch style is `flat`**, phase 2 passes
+`--branch-style flat` to `discover-alerts.sh` so every emitted `branch_name` uses the
+collision-safe `fix-dependabot-<pkg>-<line>x` scheme, and the phase 4 plan says so. Empty output is
+the ordinary case: the style is `slash` (the default; pass no flag). A non-zero exit gets **one
+retry**, exactly like phase 6's registry probe; a second failure means report the probe's stderr
+verbatim and stop, as with a null `default_branch` — the same way phase 6 distinguishes causes by
+what the output says, rather than a pre-baked "origin unreachable" diagnosis: auth, a wrong
+`env_prefix`, and a non-git `repo_root` all fail here too, not only an unreachable `origin`. A
+failed probe also prints nothing on stdout; never read a failed probe's empty stdout as the slash
+verdict. The probe covers the shape seen in the wild; the
 inverse collision (a pre-existing `fix/dependabot-<pkg>-<line>x/<anything>` branch blocking one
 group's exact name) is not probed — a push it rejects fails that one group with the same
 `(directory file conflict)` rejection, which that agent reports as its own failure.
@@ -264,17 +269,21 @@ For each **distinct repo** named in the approved batch:
 4. **Probe that repo's branch namespace** — the same probe phase 1 makes at repo scope, with the
    same semantics, one per repo:
    ```bash
-   git -C <repo_root> ls-remote --heads origin fix
+   git -C <repo_root> ls-remote --heads origin refs/heads/fix
    ```
-   A line naming `refs/heads/fix` means the remote rejects every `fix/*` push (`(directory file
-   conflict)`, issue #123): this repo's branch style is `flat`, and the next step's
-   `classify-lines.sh` call takes `--branch-style flat`, which rewrites that repo's `branch_name`s
-   to the `fix-dependabot-<pkg>-<line>x` scheme before anything dispatches — the fix agents
-   consume the rewritten names verbatim and never decide naming themselves. Empty output keeps
-   the default slash scheme (no flag). A non-zero exit gets one retry; a second failure means
-   `git` cannot reach `origin` for the fetch and push every agent needs, so exclude that repo's
-   groups from dispatch and report them in phase 7, as with a null `default_branch`. Record every
-   repo that flipped to flat; phase 7 names them.
+   The fully-qualified refname matters here too: git matches the whole ref, not the tail
+   component, so a repo with `topic/fix` and no bare `fix` returns nothing. Non-empty output means
+   the remote rejects every `fix/*` push (`(directory file conflict)`, issue #123): this repo's
+   branch style is `flat`, and the next step's `classify-lines.sh` call takes
+   `--branch-style flat`, which rewrites that repo's `branch_name`s to the
+   `fix-dependabot-<pkg>-<line>x` scheme before anything dispatches — the fix agents consume the
+   rewritten names verbatim and never decide naming themselves. Empty output keeps the default
+   slash scheme (no flag). A non-zero exit gets one retry; a second failure gets that repo's groups
+   excluded from dispatch and reported in phase 7 with the probe's stderr verbatim, as with a null
+   `default_branch` — not a pre-baked "origin unreachable" diagnosis, since auth, a wrong
+   `env_prefix`, and a non-git `repo_root` all fail here too. A failed probe also prints nothing on
+   stdout; never read a failed probe's empty stdout as the slash verdict. Record every repo that
+   flipped to flat; phase 7 names them.
 5. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
    `{repo, repo_root, default_branch}` triple is resolved, run:
    ```bash
@@ -283,7 +292,7 @@ For each **distinct repo** named in the approved batch:
    (plus `--branch-style flat` when step 4 flipped this repo)
    with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
    (`{actionable: <that repo's approved groups>, skipped: []}`). This reads whatever tree is
-   checked out at `repo_root` right now — step 1 just fetched or cloned it, so it should be on
+   checked out at `repo_root` right now — step 2 just fetched or cloned it, so it should be on
    `default_branch` and current before this call, the same expectation phase 2 states at repo
    scope; a stale or feature-branch tree here can misclassify a group the same way. A group that reclassifies
    `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
@@ -449,6 +458,14 @@ A `phase: "classify"` failure whose `detail` names `peer_only_dependency` gets i
 through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the remedy is a major
 bump of one of the peer parents `detail` quotes, or a real dependency declaration. Both are
 lockfile regeneration, both human work ([#103](https://github.com/SurveyMonkey/skills/issues/103)).
+
+A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file
+conflict` push rejection) gets its own Notes label (`branch-namespace collision (preflight
+miss)`): the namespace probe in phase 1 or phase 5 said `slash`, but this group's exact `fix/*`
+push still landed on a blocking sibling ref — the inverse collision those phases document as
+unprobed. Re-running the skill hits the same wall for this group until the namespace is resolved
+on the remote or the whole batch is re-run with the flat style forced
+([#123](https://github.com/SurveyMonkey/skills/issues/123)).
 
 **Before anything else in the summary, report every alert that stays open after this batch because
 the only possible fix crosses a major** — two different senses of the same name, both belonging
