@@ -68,8 +68,10 @@ Both agent definitions state it: never merge the PR, never enable auto-merge on 
 either. This replaces ADR 002's per-PR confirmation for armed PRs with something stronger, because
 it removes the capability rather than gating it. Arming auto-merge on a PR is now a decision a
 human makes on GitHub, no different in kind from clicking Merge, and nothing this plugin does
-follows it. `pr-status.sh` still *reports* `auto_merge.armed`, and the closing report says so and
-names who armed it, because a PR that will merge itself is a fact the reader wants.
+follows it. ~~`pr-status.sh` still *reports* `auto_merge.armed`, and the closing report says so and
+names who armed it, because a PR that will merge itself is a fact the reader wants.~~ **Removed in
+v0.8.4** ([#91](https://github.com/SurveyMonkey/skills/issues/91)): see the amendment below — the
+prohibition above is unaffected.
 
 **No CI prescription**, carried forward from ADR 002 unchanged. Some repositories run every
 workflow on drafts, some gate expensive jobs until ready; both are the repository's business. This
@@ -79,9 +81,10 @@ now start when the PR is created rather than whenever somebody remembered to pro
 
 **`mark-ready.sh` becomes `pr-status.sh`, read-only.** `promote` is deleted; the read-only `status`
 verb survives as the whole script, verbless. Its callers are the orchestrator's closing report and
-the standalone `/gh-security:audit-pins` command, both of which print check state, merge state and
-auto-merge state as **information, not a prompt**. Naming the file for a flow that no longer exists
-would be worse than deleting it.
+the standalone `/gh-security:audit-pins` command, both of which print check state and merge state
+~~and auto-merge state~~ as **information, not a prompt**. Naming the file for a flow that no
+longer exists would be worse than deleting it. **Amended in v0.8.4**
+([#91](https://github.com/SurveyMonkey/skills/issues/91)): see the amendment below.
 
 **The rebase-before-ready goes with it, deliberately.** ADR 002 added it because two fix PRs in one
 repository edit the same overrides block, so once the first merges the second is behind. That
@@ -142,3 +145,26 @@ that made the argument.
 RFC 001's decision log now carries three entries for this question: PRs open ready, then drafts,
 then ready again. The history says so rather than being rewritten, because the middle entry is what
 produced the auto-merge finding.
+
+## Amendment: pr-status.sh no longer reports auto-merge state
+
+[Issue #91](https://github.com/SurveyMonkey/skills/issues/91) removed `auto_merge` reporting
+entirely. This ADR's Decision described `pr-status.sh` reporting `auto_merge.armed` as the
+successor to ADR 002's field data — a fact worth surfacing because a PR that merges itself is
+something the reader wants to know. That reasoning held only as long as the field cost nothing to
+produce. It did not: `allow_auto_merge()` added a per-repo `gh api repos/<nwo>` call — this
+script's only `gh api` use — plus a bash-3.2 memo built out of newline-delimited strings because
+there are no associative arrays, all to print a field nothing in this plugin acts on. With the
+promotion phases gone, `auto_merge` was read, printed, and dropped by every caller; it was load-
+bearing only when a `promote` step existed and promoting an armed PR *was* merging it.
+
+`pr-status.sh` now drops `autoMergeRequest` from its `gh pr view --json` fields and emits no
+`auto_merge` key at all. `status_entry` lost its `permitted` argument along with it. The only `gh`
+call the script makes is `gh pr view`.
+
+**Everything else in this ADR's Decision still holds.** PRs still open ready for review, phase 5's
+dispatch approval is still the only checkpoint, and no phase acts on a pull request after it is
+created. Most importantly, the prohibition is unchanged and was never in question: both agent
+definitions still forbid merging a PR or arming auto-merge on it, and that rule removes the
+capability rather than gating it — v0.8.4 removes only the *observation* of auto-merge state, never
+the ability to act on it, which this plugin never had.

@@ -163,9 +163,6 @@ is. Report what follows, then stop.
   provisional, since rollups populate as workflows spawn and an unreported job is invisible;
   `failed` names `failing_checks`, which is the one worth saying loudly. `merge_state: UNKNOWN` is
   ordinary right after a push and is neither clean nor behind.
-- **`auto_merge.armed`** means somebody enabled auto-merge and the PR will merge itself once
-  checks pass. Nothing here arms it, so say that it is armed and by whom (`enabled_by`). Merely
-  `permitted` is a repository setting and says nothing about this PR.
 
 **That is the end of the command.** There is no further step and nothing to offer.
 

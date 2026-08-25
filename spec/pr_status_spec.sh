@@ -19,15 +19,18 @@ Describe 'pr-status.sh'
 
   Before 'setup_mock'
 
-  # Only `pr view` and `api` are mocked, and that is the point: every other gh
-  # subcommand exits 1, so a script that reaches for `pr ready`,
-  # `pr update-branch`, `pr merge` or `pr edit` fails the suite outright. This
-  # script is read-only (ADR 008) and the mock is what holds it to that.
+  # Only `pr view` is mocked, and that is the point: every other gh
+  # subcommand exits 1, so an unguarded call to `pr ready`, `pr
+  # update-branch`, `pr merge`, `pr edit`, or `api` fails the suite outright.
+  # A guarded one (`|| printf ''`) would not; the call log below is what
+  # catches that case, since the catch-all logs what it refuses before
+  # exiting. This script is read-only (ADR 008) and the mock is what holds it
+  # to that.
   Mock gh
     case "$1 $2" in
       'pr view')
         num="${3##*/}"
-        printf 'view %s\n' "$num" >> "$MOCK_DIR/log"
+        printf 'view %s %s\n' "$num" "$5" >> "$MOCK_DIR/log"
         # Real gh writes its release-upgrade notice to stderr and still exits
         # 0. A stub file makes that shape reproducible per PR.
         if [ -f "$MOCK_DIR/stderr-$num" ]; then
@@ -35,16 +38,12 @@ Describe 'pr-status.sh'
         fi
         cat "$MOCK_DIR/view-$num.json"
         ;;
-      api*)
-        printf 'api %s\n' "$2" >> "$MOCK_DIR/log"
-        # No colon: an exported empty MOCK_ALLOW means "gh printed nothing".
-        printf '%s\n' "${MOCK_ALLOW-true}"
-        ;;
       # Logs before refusing, deliberately. `exit 1` alone makes a rejected
       # call invisible to the allowlist below, so a suppressed mutating call
       # (`gh pr merge --auto || true`) would leave a clean log and a green
       # suite — which is how the first version of that assertion passed under
-      # mutation (#87).
+      # mutation (#87). This also catches `gh api`: pr-status.sh no longer
+      # makes that call (#91), and a re-added one fails here.
       *)
         printf 'other %s %s\n' "$1" "$2" >> "$MOCK_DIR/log"
         exit 1
@@ -70,13 +69,15 @@ Describe 'pr-status.sh'
     }' > "$MOCK_DIR/view-$_num.json"
   }
 
-  # Every gh call the mock saw, minus the two read-only ones. The mock's
+  # Every gh call the mock saw, minus the one read-only one. The mock's
   # `*) exit 1` arm is not enough on its own: it only bites an UNGUARDED call
   # under `set -e`, so `gh pr merge --auto || true` slips straight past it —
   # proven by a mutation run that added exactly that and stayed green (#87).
   # This reads the call log instead, which holds under any error suppression,
-  # and depends on the catch-all above logging what it refuses.
-  mutating_calls() { grep -vc '^\(view\|api\) ' "$MOCK_DIR/log" || true; }
+  # and depends on the catch-all above logging what it refuses. `api` counts
+  # as mutating here too: pr-status.sh has no legitimate reason to call it
+  # (#91), so a re-added call must show up as one.
+  mutating_calls() { grep -vc '^view ' "$MOCK_DIR/log" || true; }
 
   # Trimmed from a live `gh pr view` run: the notice gh 2.98.0 prints to stderr
   # on every command once a newer release exists. It arrives WITH a zero exit,
@@ -153,13 +154,57 @@ Describe 'pr-status.sh'
   End
 
   # The read-only guarantee, asserted as a verdict rather than as a comment.
-  It 'calls nothing but gh pr view and gh api' 
+  # Both PRs are on the same repo (octo/app): this is the shape that used to
+  # exercise the per-repo `gh api repos/<nwo>` memo, so a re-added memoized
+  # call would fire only once, on the first PR — the log assertion catches
+  # even that single call.
+  It 'calls nothing but gh pr view'
     stub_view 12 "$(rollup success)" '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
     stub_view 34 "$(rollup failure)" null BEHIND
     When call common_jq pr-status.sh '.prs | length' "$URL12" "$URL34"
     The status should be success
     The output should equal '2'
     The value "$(mutating_calls)" should equal 0
+  End
+
+  # #91: pr-status.sh no longer reads or reports auto-merge state. A non-null
+  # autoMergeRequest in the gh pr view payload must not surface as an
+  # auto_merge key at all, and no gh api call is made to learn the repo's
+  # allow_auto_merge setting.
+  It 'reports no auto_merge key even when autoMergeRequest is present'
+    stub_view 12 "$(rollup success)" \
+      '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
+    When call common_jq pr-status.sh '.prs[0] | has("auto_merge")' "$URL12"
+    The status should be success
+    The output should equal 'false'
+  End
+
+  It 'makes no gh api call to learn the repository auto-merge setting'
+    stub_view 12 "$(rollup success)" \
+      '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
+    When call common_jq pr-status.sh '.prs[0].number' "$URL12"
+    The status should be success
+    The output should equal '12'
+    The value "$(grep -c '^other api ' "$MOCK_DIR/log" || true)" should equal 0
+  End
+
+  It 'does not request autoMergeRequest in the --json field list'
+    stub_view 12 "$(rollup success)" null
+    When call common_jq pr-status.sh '.prs[0].number' "$URL12"
+    The status should be success
+    The output should equal '12'
+    The value "$(grep '^view ' "$MOCK_DIR/log")" should not include 'autoMergeRequest'
+  End
+
+  # Any re-added field, however named, fails this exact-key-set assertion:
+  # it does not need to know the field's name to catch it, only that the
+  # entry grew one. Sorted, matching what jq's `keys` emits.
+  It 'has exactly the entry shape documented in the header contract'
+    stub_view 12 "$(rollup success)" \
+      '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
+    When call common_jq pr-status.sh '.prs[0] | keys' "$URL12"
+    The status should be success
+    The output should equal '["base","behind","check_counts","checks","conflict","failing_checks","head","is_draft","merge_state","number","repo","state","url"]'
   End
 
   # UNKNOWN is a real transient right after a push: not clean, not behind.
@@ -177,63 +222,6 @@ Describe 'pr-status.sh'
       When call common_jq pr-status.sh '.prs[0] | {merge_state, behind, conflict}' "$URL12"
       The status should be success
       The output should equal '{"merge_state":"'"$1"'","behind":'"$2"',"conflict":'"$3"'}'
-    End
-  End
-
-  # Armed means the PR merges itself once checks pass. Nothing in this plugin
-  # arms it, so the report must be able to say that a human did.
-  Describe 'auto-merge'
-    It 'distinguishes armed from merely permitted'
-      stub_view 12 "$(rollup success)" '{"enabledBy":{"login":"octocat"},"mergeMethod":"SQUASH"}'
-      export MOCK_ALLOW=true
-      When call common_jq pr-status.sh '.prs[0].auto_merge' "$URL12"
-      The status should be success
-      The output should equal '{"permitted":true,"armed":true,"enabled_by":"octocat","method":"SQUASH"}'
-    End
-
-    # GitHub has returned enabledBy as a bare login rather than an object; the
-    # jq handles both and this is the field the closing report uses to name who
-    # armed it.
-    It 'reads enabled_by when it arrives as a bare string'
-      stub_view 12 "$(rollup success)" '{"enabledBy":"octocat","mergeMethod":"MERGE"}'
-      export MOCK_ALLOW=true
-      When call common_jq pr-status.sh '.prs[0].auto_merge | {armed, enabled_by, method}' "$URL12"
-      The status should be success
-      The output should equal '{"armed":true,"enabled_by":"octocat","method":"MERGE"}'
-    End
-
-    It 'reports permitted-but-not-armed'
-      stub_view 12 "$(rollup success)" null
-      export MOCK_ALLOW=true
-      When call common_jq pr-status.sh '.prs[0].auto_merge' "$URL12"
-      The status should be success
-      The output should equal '{"permitted":true,"armed":false,"enabled_by":null,"method":null}'
-    End
-
-    It 'reports not permitted'
-      stub_view 12 "$(rollup success)" null
-      export MOCK_ALLOW=false
-      When call common_jq pr-status.sh '.prs[0].auto_merge.permitted' "$URL12"
-      The status should be success
-      The output should equal 'false'
-    End
-
-    It 'reports null when the setting is not visible to the token'
-      stub_view 12 "$(rollup success)" null
-      export MOCK_ALLOW=''
-      When call common_jq pr-status.sh '.prs[0].auto_merge.permitted' "$URL12"
-      The status should be success
-      The output should equal 'null'
-    End
-
-    It 'looks the repository setting up once per repo, not once per PR'
-      stub_view 12 "$(rollup success)" null
-      stub_view 34 "$(rollup success)" null
-      export MOCK_ALLOW=true
-      When call common_jq pr-status.sh '.prs | length' "$URL12" "$URL34"
-      The status should be success
-      The output should equal '2'
-      The value "$(grep -c '^api ' "$MOCK_DIR/log")" should equal 1
     End
   End
 
@@ -257,12 +245,14 @@ Describe 'pr-status.sh'
     When call common_jq pr-status.sh '[.prs[] | .number // .error[0:37]]' "$URL12" "$URL34"
     The status should equal 1
     The output should equal '[12,"gh pr view output could not be parsed"]'
+    The value "$(mutating_calls)" should equal 0
   End
 
   It 'rejects a non-PR URL with an error entry and a non-zero exit'
     When call common_jq pr-status.sh '.prs[0] | keys' 'https://example.com/nope'
     The status should equal 1
     The output should equal '["error","url"]'
+    The value "$(mutating_calls)" should equal 0
   End
 
   It 'reports a PR gh cannot view and still exits non-zero'

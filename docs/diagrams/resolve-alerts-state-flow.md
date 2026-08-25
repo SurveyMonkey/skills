@@ -120,7 +120,7 @@ flowchart TD
     P8ASK -->|"pr / report"| P8D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 7"]
     P8D --> P8REP
     P8ASK -->|decline| P8REP
-    P8REP["pr-status.sh on every success PR plus the audit's<br/>when one exists: checks, merge_state, auto_merge.<br/>Reported as information, never as a prompt"]
+    P8REP["pr-status.sh on every success PR plus the audit's<br/>when one exists: checks, merge_state.<br/>Reported as information, never as a prompt"]
     P8REP --> DONE
     DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
 ```
