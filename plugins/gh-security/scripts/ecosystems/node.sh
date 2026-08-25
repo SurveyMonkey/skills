@@ -1138,12 +1138,14 @@ verb_why() {
   # plus `--rawfile` keeps it off argv entirely; stdin is already carrying
   # `$parents`, so a file is the only clean channel left for `raw`.
   why_cmd=$(verb_detect | jq -r '.why_cmd')
-  raw=$($why_cmd "$pkg" 2>&1 || true)
 
   raw_file=$(mktemp)
-  trap 'rm -f "$raw_file"' EXIT
-  printf '%s' "$raw" > "$raw_file"
+  trap 'rm -f "$raw_file"' EXIT INT TERM
+  $why_cmd "$pkg" > "$raw_file" 2>&1 || true
 
+  # Command substitution (the old `raw=$($why_cmd ...)` form) stripped every
+  # trailing newline; streaming straight to the file keeps them, so the strip
+  # moves into jq's own program to keep the emitted `raw` field byte-identical.
   printf '%s' "$parents" \
     | jq --arg pkg "$pkg" --arg pm "$pm" --rawfile raw "$raw_file" \
          --argjson direct "$direct" --argjson dev_only "$dev_only" '
@@ -1155,10 +1157,8 @@ verb_why() {
           dev_only: $dev_only,
           parents: $pkgparents,
           parent_count: ($pkgparents | length),
-          raw: $raw
+          raw: ($raw | sub("\n+$"; ""))
         }'
-  rm -f "$raw_file"
-  trap - EXIT
 }
 
 # ---------------------------------------------------------------------------

@@ -763,13 +763,17 @@ Describe 'node.sh why'
   #
   # A large dependency tree can push real `pnpm why` output to megabytes, and
   # the field bug (issue #102) was `jq --arg raw "$raw"` overflowing the exec
-  # argv at that size. The argv ceiling itself is a few hundred KB to a few MB
-  # depending on the OS and environment, which is not something a portable
-  # suite can pin without flaking across machines and CI images; what these
-  # examples pin instead is (1) that content real `why` output can contain —
-  # a subshell substitution, quotes, braces, an embedded newline — survives the
-  # `--rawfile` channel byte for byte, and (2) that the script mechanically no
-  # longer has a path that could regress to the argv-overflowing form.
+  # argv at that size. A 5MB payload deterministically overflows the old
+  # `--arg` form on both platforms this suite runs on: Linux caps a single
+  # exec argument (`MAX_ARG_STRLEN`) at 128KB, and macOS caps the whole argv
+  # (`ARG_MAX`) around 1MB, so 5MB clears both ceilings without depending on
+  # the exact machine or CI image — see the regression example below. What
+  # the first two examples pin instead is (1) that content real `why` output
+  # can contain — a subshell substitution, quotes, braces, an embedded
+  # newline — survives the `--rawfile` channel byte for byte, and (2) that
+  # the script mechanically no longer has a path that could regress to the
+  # argv-overflowing form; the grep pins stay as belt-and-suspenders even
+  # though the payload example now exercises the failure directly.
   Describe 'the raw field, since #102 moved it off argv onto --rawfile'
     raw_content_via_mock() {
       mock_bin_dir=$(mktemp -d)
@@ -804,6 +808,33 @@ MOCK
       When call grep -c -- '--rawfile raw' "$ADAPTER"
       The status should be success
       The output should equal '1'
+    End
+
+    # POSIX sh in the fake pnpm (no bash-only builtins), so the 5MB payload
+    # is generated with dd + tr rather than a shell string-doubling loop.
+    # 5120 * 1024 = 5242880 bytes, safely above both the Linux MAX_ARG_STRLEN
+    # (128KB) and macOS ARG_MAX (~1MB) ceilings the old `--arg raw "$raw"`
+    # form was subject to.
+    large_raw_via_mock() {
+      mock_bin_dir=$(mktemp -d)
+      cat > "$mock_bin_dir/pnpm" <<'MOCK'
+#!/bin/sh
+dd if=/dev/zero bs=1024 count=5120 2>/dev/null | tr '\0' 'x'
+printf '\n'
+MOCK
+      chmod +x "$mock_bin_dir/pnpm"
+      PATH="$mock_bin_dir:$PATH"
+      adapter_jq '{len: (.raw | length)}' why lodash
+      _st=$?
+      rm -rf "$mock_bin_dir"
+      return "$_st"
+    }
+
+    It 'streams a 5MB why payload through --rawfile without overflowing argv'
+      use_fixture pnpm-v9
+      When call large_raw_via_mock
+      The status should be success
+      The output should equal '{"len":5242880}'
     End
   End
 End
