@@ -54,7 +54,7 @@ flowchart TD
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
     P1D -->|yes| P2
 
-    P2["Phase 2: discover-alerts.sh | select-adapter.sh"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
+    P2["Phase 2: discover-alerts.sh | select-adapter.sh<br/>| classify-lines.sh (repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
     P2REP --> P2Q{"actionable groups?"}
     P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
     P2Q -->|"one or more"| P3
@@ -78,7 +78,10 @@ flowchart TD
     P5A -->|"wrong remote / not a repo"| P5X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
     P5B{"detect-scope.sh default_branch?"}
     P5B -->|null| P5Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
-    P5B -->|yes| P6
+    P5B -->|yes| P5R["Reconcile: classify-lines.sh --repo-root<br/>on that repo's approved groups"]
+    P5R --> P5RQ{"any group reclassifies<br/>requires_major_bump?"}
+    P5RQ -->|yes| P5W["Withdraw from the phase 6 queue;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
+    P5RQ -->|"remaining groups"| P6
     P5X --> P6
     P5Y --> P6
 
