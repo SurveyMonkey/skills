@@ -62,6 +62,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target>
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
 ```
 
+`classify-lines.sh` reads `repo_root`'s current working tree, not the default branch by name — it
+runs whatever is actually checked out. At this point in the flow that is phase 1's checkout as the
+user left it, so it should be on `default_branch` and current; a stale or feature-branch tree can
+misclassify a group (a lockfile the fix agent will branch from `origin/<default_branch>` may
+resolve differently from one sitting on an unrelated branch).
+
 At org and user scope, stop after `select-adapter.sh`: there is no local checkout yet, so line
 reconciliation happens after checkout, in phase 5, per repo.
 
@@ -231,7 +237,10 @@ For each **distinct repo** named in the approved batch:
    ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
    ```
    with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
-   (`{actionable: <that repo's approved groups>, skipped: []}`). A group that reclassifies
+   (`{actionable: <that repo's approved groups>, skipped: []}`). This reads whatever tree is
+   checked out at `repo_root` right now — step 1 just fetched or cloned it, so it should be on
+   `default_branch` and current before this call, the same expectation phase 2 states at repo
+   scope; a stale or feature-branch tree here can misclassify a group the same way. A group that reclassifies
    `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
    approval covered fixing the group, and this discovers the fix does not exist — and reported in
    phase 7 as skipped with the same `requires major version bump` reason and its
@@ -372,19 +381,28 @@ through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the 
 bump of one of the peer parents `detail` quotes, or a real dependency declaration. Both are
 lockfile regeneration, both human work ([#103](https://github.com/SurveyMonkey/skills/issues/103)).
 
-Then report every non-empty `requires_major_bump[]`, per package line (and per repo at org/user
-scope), before anything else in the summary:
+**Before anything else in the summary, report every alert that stays open after this batch because
+the only possible fix crosses a major** — two different senses of the same name, both belonging
+here first because both mean the same thing to the user: a fix that did not happen.
 
-> Still vulnerable after this batch: `undici` 5.29.0 in `octo/app` (alerts patched only in the 6.x
-> line). No override bounded to 5.x can fix this; it needs a major bump of the parent that pins it,
-> or dropping that parent.
+- Post-fix, every non-empty `requires_major_bump[]` an agent's result carries, per package line
+  (and per repo at org/user scope). This is validate's own reconciliation: the group was dispatched
+  and its own line fixed, but the install moved another copy of the package across the fix
+  boundary, and validate proved that copy cannot be reached from where it landed.
 
-These are alerts that stay open after the PRs merge. Reporting a batch as done without them is the
-failure mode issue #19 is about, and it is worse coming from the summary than from an agent.
+  > Still vulnerable after this batch: `undici` 5.29.0 in `octo/app` (alerts patched only in the
+  > 6.x line). No override bounded to 5.x can fix this; it needs a major bump of the parent that
+  > pins it, or dropping that parent.
 
-Report any group phase 5 withdrew (`requires major version bump`) with the skipped groups, with
-its `resolved_majors` context — approved work the checkout proved impossible belongs in this
-summary, never a silent omission.
+- Pre-dispatch, every group classify-lines.sh moved to `skipped` under `requires major version
+  bump`, with its `resolved_majors` context — whether phase 2 found it at repo scope (still
+  reported here, not just phase 3's skip note, so it does not vanish once the batch runs) or phase
+  5 withdrew it after approval at org or user scope. Neither reached a fix agent: no override at
+  the resolved line could ever land the patched version, so there is nothing for validate to
+  reconcile.
+
+Reporting a batch as done without either kind is the failure mode issue #19 is about, and it is
+worse coming from the summary than from an agent.
 
 **Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
 unaddressed.** These are repos with alerts the batch never touched at all, and belong in the same

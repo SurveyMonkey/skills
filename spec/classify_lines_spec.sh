@@ -16,16 +16,24 @@
 # Zero network and zero installs: the adapter is a stub the spec writes,
 # answering `resolved_versions` and `compare_versions` with canned JSON per
 # package. Version ordering still goes through the adapter verb, exactly as
-# the script does against the real one.
+# the script does against the real one. Its contract anchors are the real
+# adapter's own specs: `spec/node_lockfiles_spec.sh` pins what `node.sh
+# resolved_versions` actually replies with, and `spec/node_semver_spec.sh`
+# pins what `node.sh compare_versions` actually replies with — this stub's
+# shapes are drawn from those, not invented independently.
 
 Describe 'classify-lines.sh'
   STUB="$SHELLSPEC_WORKDIR/classify-stub-adapter.sh"
   REPO_ROOT="$SHELLSPEC_WORKDIR"
+  CALL_LOG="$SHELLSPEC_WORKDIR/call-log"
+  export CALL_LOG
 
   stub_adapter() {
+    : > "$CALL_LOG"
     cat > "$STUB" <<'STUB_EOF'
 #!/bin/sh
 verb=$1; shift
+if [ -n "${CALL_LOG:-}" ]; then printf '%s %s\n' "$verb" "${1:-}" >> "$CALL_LOG"; fi
 case "$verb" in
   resolved_versions)
     case "$1" in
@@ -41,6 +49,19 @@ case "$verb" in
         printf '{"pm":"npm","package":"ghost","present":false,"count":0,"versions":[],"lockfile_entries":10}\n' ;;
       sparse)
         printf '{"pm":"npm","present":true}\n' ;;
+      hollow)
+        printf '{"pm":"npm","package":"hollow","present":true,"count":0,"versions":[],"lockfile_entries":10}\n' ;;
+      duplo)
+        printf '{"pm":"npm","package":"duplo","present":true,"count":1,"versions":[{"version":"1.0.0"}],"lockfile_entries":10}\n'
+        printf '{"pm":"npm","package":"duplo","present":true,"count":1,"versions":[{"version":"1.0.0"}],"lockfile_entries":10}\n' ;;
+      vbuild)
+        printf '{"pm":"npm","package":"vbuild","present":true,"count":1,"versions":[{"version":"v6.2.0+build.99"}],"lockfile_entries":10}\n' ;;
+      duped)
+        printf '{"pm":"npm","package":"duped","present":true,"count":2,"versions":[{"version":"1.5.0"},{"version":"2.5.0"}],"lockfile_entries":10}\n' ;;
+      partial-a)
+        printf '{"pm":"npm","package":"partial-a","present":true,"count":2,"versions":[{"version":"1.0.0"},{"version":"9.9.9-badcompare"}],"lockfile_entries":10}\n' ;;
+      partial-b)
+        printf '{"pm":"npm","package":"partial-b","present":true,"count":2,"versions":[{"version":"9.9.9-badcompare"},{"version":"10.0.0"}],"lockfile_entries":10}\n' ;;
       boom)
         printf '{"error":"resolved_versions: parser refused the lockfile"}\n' >&2
         exit 1 ;;
@@ -50,6 +71,11 @@ case "$verb" in
     esac ;;
   compare_versions)
     a=$1; b=$2
+    case "$a$b" in
+      *9.9.9-badcompare*)
+        printf '{"error":"compare_versions: unversionable input"}\n' >&2
+        exit 1 ;;
+    esac
     if [ "$a" = "$b" ]; then r=0
     else
       lo=$(printf '%s\n%s\n' "$a" "$b" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)
@@ -190,6 +216,149 @@ STUB_EOF
       The stdout should equal ''
       The stderr should include '"error":"Failed to read actionable groups'
     End
+
+    It 'reports an empty classify_errors[] when every adapter call succeeds'
+      When call multi '.classify_errors'
+      The status should be success
+      The output should equal '[]'
+    End
+  End
+
+  # A reply of two JSON documents on one exit-0 stdout is a broken read, not
+  # "the object we asked for, plus noise": unslurped, the second document
+  # made the cache-building jq call choke on a multi-value string and crash
+  # with raw jq noise and exit 2, never the {"error": ...} contract requires
+  # (ADR 001).
+  Describe 'a multi-document adapter reply'
+    It 'classifies the group unknown rather than crashing on raw jq noise'
+      When call classify '{status: .actionable[0].line_status, skipped_count: (.skipped | length)}' duplo 1
+      The status should be success
+      The output should equal '{"status":"unknown","skipped_count":1}'
+    End
+  End
+
+  # This script reads one lockfile at --repo-root; an envelope whose
+  # actionable groups span more than one repo would classify, and could
+  # withdraw, a second repo's groups off the first repo's lockfile.
+  Describe 'a multi-repo envelope'
+    two_repo_envelope() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [
+            {package: "lodash", major_line: "4", ecosystem: "npm", adapter_path: $a, repo: "octo/app"},
+            {package: "express", major_line: "4", ecosystem: "npm", adapter_path: $a, repo: "octo/other"}],
+          skipped: []}'
+    }
+
+    classify_two_repos() {
+      two_repo_envelope | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT"
+    }
+
+    It 'hard-errors rather than classifying two repos off one lockfile'
+      When call classify_two_repos
+      The status should not equal 0
+      The stderr should include '"error"'
+      The stderr should include 'more than one repo'
+    End
+  End
+
+  # "Zero resolved versions is an error, never a pass" (scripts/CLAUDE.md).
+  # present: true backed by versions: [] is the parser-failure shape that
+  # rule warns about, not a legitimate empty answer, and it must never reach
+  # the compare loop through a single-empty-string herestring iteration and
+  # land requires_major_bump on nothing.
+  Describe 'present true with zero resolved versions'
+    It 'classifies unknown rather than requires_major_bump'
+      When call classify '{statuses: [.actionable[].line_status], moved: [.skipped[] | select(.reason == "requires major version bump")]}' hollow 4
+      The status should be success
+      The output should equal '{"statuses":["unknown"],"moved":[]}'
+    End
+  End
+
+  # A broken adapter call otherwise turns every group unknown with nothing
+  # naming the cause (the check-advisories.sh adapter_errors[] precedent).
+  Describe 'classify_errors surfaces a broken adapter call'
+    It 'names the package and first stderr line for a failing resolved_versions call'
+      When call classify '{errs: [.classify_errors[] | {package, error}]}' boom 2
+      The status should be success
+      The output should equal '{"errs":[{"package":"boom","error":"{\"error\":\"resolved_versions: parser refused the lockfile\"}"}]}'
+    End
+  End
+
+  # Compare-failure partial reads: a version's copy establishes nothing on
+  # its own, and whichever order the copies arrive in, one broken compare
+  # must make the whole group unknown.
+  Describe 'a compare_versions failure mid-loop'
+    It 'classifies unknown when a below reading is followed by a compare error'
+      When call classify '{status: .actionable[0].line_status, errs: [.classify_errors[] | .package]}' partial-a 5
+      The status should be success
+      The output should equal '{"status":"unknown","errs":["partial-a"]}'
+    End
+
+    # Pins the `[ "$status" = "unknown" ] ||` guard: once a compare error has
+    # already set the group unknown, a later at-or-above reading must not
+    # revert it to line_absent.
+    It 'stays unknown when an at-or-above reading follows a compare error, never reverting to line_absent'
+      When call classify '{status: .actionable[0].line_status, errs: [.classify_errors[] | .package]}' partial-b 5
+      The status should be success
+      The output should equal '{"status":"unknown","errs":["partial-b"]}'
+    End
+  End
+
+  # Forces the stub's own compare/extraction path to stay honest about a
+  # version shape it has to handle correctly, and pins MAJOR_OF_JQ's trim
+  # rule against the same shape.
+  Describe 'a v-prefixed, build-metadata resolved version'
+    It 'trims to a plain major and classifies resolved'
+      When call classify '{status: .actionable[0].line_status, majors: .actionable[0].resolved_majors}' vbuild 6
+      The status should be success
+      The output should equal '{"status":"resolved","majors":["6"]}'
+    End
+  End
+
+  # One resolved_versions call per unique (adapter_path, package): two groups
+  # for the same package, on different lines, must not double the adapter
+  # call, and must still classify independently.
+  Describe 'a duplicate-package envelope'
+    duped_multi() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [
+            {package: "duped", major_line: "1", ecosystem: "npm", adapter_path: $a},
+            {package: "duped", major_line: "2", ecosystem: "npm", adapter_path: $a}],
+          skipped: []}' \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" | jq -c "$1"
+    }
+
+    duped_call_count() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [
+            {package: "duped", major_line: "1", ecosystem: "npm", adapter_path: $a},
+            {package: "duped", major_line: "2", ecosystem: "npm", adapter_path: $a}],
+          skipped: []}' \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" >/dev/null
+      grep -c '^resolved_versions duped$' "$CALL_LOG"
+    }
+
+    It 'classifies each line of the shared package independently'
+      When call duped_multi '[.actionable[] | {major_line, line_status}]'
+      The status should be success
+      The output should equal '[{"major_line":"1","line_status":"resolved"},{"major_line":"2","line_status":"resolved"}]'
+    End
+
+    It 'calls resolved_versions exactly once for the shared package, despite two groups'
+      When call duped_call_count
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # An unknown group is still annotated, not left bare: a caller building the
+  # skip report reads resolved_majors regardless of line_status.
+  Describe 'resolved_majors on an unknown group'
+    It 'is present as an empty array'
+      When call classify '.actionable[0].resolved_majors' boom 2
+      The status should be success
+      The output should equal '[]'
+    End
   End
 
   # The orchestration halves of the fix: the sentences SKILL.md acts on,
@@ -207,6 +376,18 @@ STUB_EOF
 
     It 'withdraws a post-approval requires_major_bump group in phase 5'
       When call phrase_in "$SKILL" 'withdrawn from the phase 6 queue'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never offers a requires-major-bump group as a rankable row in phase 3'
+      When call phrase_in "$SKILL" 'never as a rankable row'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reports both requires_major_bump senses together, first, in phase 7'
+      When call phrase_in "$SKILL" 'two different senses of the same name'
       The status should be success
       The output should equal '1'
     End
