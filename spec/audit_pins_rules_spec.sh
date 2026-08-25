@@ -517,4 +517,52 @@ Describe 'the rules that gate the removal PR'
       The output should equal '1'
     End
   End
+
+  # #106: field-tested against an EMU repo with directory-scoped credentials
+  # (direnv exporting GH_CONFIG_DIR, GIT_CONFIG_GLOBAL, a registry token). A
+  # tool-shell gh/git silently resolved the wrong identity until the
+  # orchestrator hand-injected an ad-hoc ENVIRONMENT paragraph into every
+  # dispatch; this makes that carriage contractual instead, as an optional
+  # `env_prefix` both agent definitions honor identically.
+  Describe 'the env_prefix rule in both agent definitions (#106)'
+    Parameters
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+    End
+
+    It "states the one env_prefix rule in $1"
+      When call phrase_in "$1" \
+        "one rule for carrying a repo's directory-scoped credentials"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # The dispatch-payload half of #106: the orchestrator carries env_prefix
+  # into the fix-agent Task call, optionally, alongside the fields phase 6
+  # already sends.
+  Describe 'the env_prefix payload field in the resolve-alerts dispatch (#106)'
+    SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+
+    It 'carries env_prefix into the fix-dependency Task payload'
+      When call rule_in "$SKILL" "that repo's .env_prefix. when it resolved one"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'runs a registry preflight probe once per repo before phase 6 dispatch'
+      When call rule_in "$SKILL" "Probe that repo's registry, once, before its first dispatch"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # The audit's own dispatch point, decoupled into commands/audit-pins.md by
+  # #108, carries the same optional field (#106).
+  It 'carries env_prefix into the audit-pins Task payload in commands/audit-pins.md (#106)'
+    COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+    When call rule_in "$COMMAND" "an OPTIONAL .env_prefix., plus the"
+    The status should be success
+    The output should equal '1'
+  End
 End

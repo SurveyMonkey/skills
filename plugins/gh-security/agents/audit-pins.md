@@ -37,9 +37,11 @@ Your dispatch prompt provides everything; re-discover nothing:
 - `adapter_path` — the ecosystem adapter executable (`$ADAPTER` below)
 - `scripts_dir` — absolute path to the plugin's `scripts/common/` directory
 - `mode` (`report` or `pr`)
+- `env_prefix` — OPTIONAL. A literal command prefix (e.g. `direnv exec <repo_root>`) that carries
+  this repo's directory-scoped credentials. See Hard rules for what it changes.
 
-If any of these is missing from your prompt, return a failure result (phase `input`) instead of
-guessing.
+If any of these except `env_prefix` is missing from your prompt, return a failure result (phase
+`input`) instead of guessing.
 
 **`mode` is never defaulted, and an unrecognized value is an `input` failure too.** You cannot ask
 which one was meant, and the two modes differ by whether this run opens a pull request against a
@@ -73,12 +75,18 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   command: another agent may share this `repo_root`, and those commands reach its state regardless
   of what dispatched it. See `scripts/CLAUDE.md`, "Repo-global git state belongs to the
   orchestrator".
-- **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
-  `direnv exec <repo_root> gh api ...`, `direnv exec <repo_root> git -C <path> ...`, and the
-  `check-advisories.sh` call, which makes its own `gh` call. Without it the account is wrong and
-  the failures are misleading rather than obvious; the rule and its failure modes are in
-  `scripts/CLAUDE.md`, "Every `gh` and `git` command runs under `direnv exec`". The snippets below
-  omit the prefix for readability; add it to every one.
+- **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
+  package-manager, and adapter-script invocation** — `<env_prefix> gh api ...`,
+  `<env_prefix> git -C <path> ...`, `<env_prefix> $ADAPTER install`, and the
+  `check-advisories.sh` call, which makes its own `gh` call. It is a literal string your dispatcher
+  resolved for this repo (typically `direnv exec <repo_root>`); prepend it verbatim, do not
+  re-derive it. This is the one rule for carrying a repo's directory-scoped credentials — there is
+  no separate fallback rule to reconcile it with. **When `env_prefix` is absent, run every one of
+  those commands bare, with no `direnv` wrapping of your own.** An absent `env_prefix` means your
+  dispatcher judged this repo's credentials to be ordinary and ambient (see `scripts/CLAUDE.md`,
+  "Every `gh` and `git` command runs under `direnv exec`" for why that judgment matters and what a
+  wrong one looks like). The snippets below omit the prefix for readability; add it to every one
+  whenever your dispatch carried it.
 - **Every Bash call starts fresh; nothing carries over from the last one.** cwd resets and shell
   variables do not survive, so **every command locates itself**: git uses `git -C <literal path>`,
   `gh` calls carry `--repo <nwo>` and take no prefix, and every other command carries its own

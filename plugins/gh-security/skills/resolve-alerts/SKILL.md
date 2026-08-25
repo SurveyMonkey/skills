@@ -48,9 +48,12 @@ asked for instead of the detected one, and say so.
   --scope user` always operates on the authenticated user's own repos regardless of what `owner`
   resolves to. `nwo` and `default_branch` are again resolved per repo in phase 5.
 
-EMU orgs are out of scope (RFC 001 Non-Goals). This skill does not detect or special-case them; an
-EMU org simply has no alerts visible to a personal-account session and discovery reports it as
-such through the ordinary org-scope path.
+EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
+org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
+ambient credential set a `gh`/`git` invocation resolves, not EMU-ness. A workspace with
+per-directory work credentials (see `env_prefix`, phase 6) can reach an EMU repo's alerts end to
+end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
+list, which RFC 001 never covers.
 
 ## Phase 2: Discover and route
 
@@ -234,6 +237,38 @@ read-then-append from each can duplicate the line or tear the file (issue #35). 
 set, so one call per repo removes the race by construction. A failure here is not fatal — report it
 and dispatch anyway; the worst case is worktree directories showing up in `git status`.
 
+**Resolve `env_prefix` for that repo, the same once-per-repo pass.** In a workspace where `gh`,
+`git`, and the package manager get their identity from `direnv` exporting per-directory config
+(`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single ambient login, a
+tool-shell invocation misses that: direnv does not auto-load in a non-interactive shell (root
+`CLAUDE.md`, Environment), so a bare `gh` or `git` silently resolves the wrong identity or a dead
+registry token. Check whether a `.envrc` is present at or above `repo_root`. If so, this repo's
+`env_prefix` is `direnv exec <repo_root>`, carried into every group dispatched for it (phase 6
+below) and into the registry preflight (next). If not, this repo has no `env_prefix`; omit the
+field from its dispatches.
+
+**Probe that repo's registry, once, before its first dispatch.** The field run this contract comes
+from began with a dead CodeArtifact token: all 33 agents would have failed at install, one at a
+time, each burning a slot before reporting a confusing failure. Resolve the package manager the
+same way `classify-lines.sh` and the fix agent do — `<adapter_path> detect` gives `pm` and
+`pm_exec` — and run one read-only probe at `repo_root`, under `env_prefix` when this repo has one,
+against the top-ranked queued group's `package` for this repo:
+
+- pnpm: `<env_prefix> <pm_exec> view <package> version`
+- npm: `<env_prefix> <pm_exec> view <package> version`
+- yarn (berry): `<env_prefix> <pm_exec> npm info <package> --fields version`
+
+This is modeled on how phase 1 and phase 5 resolve `default_branch` up front and stop or exclude
+on a null rather than letting every downstream dispatch discover the same failure independently. A
+non-zero exit is the same signal: report one actionable message naming the repo and the probable
+cause (dead registry auth — run your login flow for that registry), exclude every one of that
+repo's groups from the queue below, and report them in phase 7 alongside the run's other skipped
+work. **One probe per repo, not per group** — the top-ranked package stands in for that repo's
+registry reachability as a whole; a second dead package in the same repo is the same root cause; a
+green probe does not shield an actual `install` inside a fix agent from failing on that group's
+package specifically, but a probe failing here is worth stopping 30+ downstream failures for one
+report.
+
 Then hold the approved groups as a **work queue**: every group across every repo, in the ranked
 order phases 3 and 4 settled. Drain that queue as a **rolling pool**, in two motions:
 
@@ -250,8 +285,9 @@ Each queued group is **one Task tool call**:
 - `subagent_type`: `fix-dependency`
 - prompt: the group JSON verbatim, plus `adapter_path`, the group's own `nwo` (its `repo` field),
   `default_branch` and `repo_root` for that group's repo (from phase 1 at repo scope, or phase 5's
-  resolved triples at org/user scope), and `scripts_dir`
-  (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
+  resolved triples at org/user scope), `scripts_dir`
+  (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), that repo's `env_prefix` when it resolved one (above;
+  OPTIONAL — omit rather than send null), and the instruction to follow its agent definition
   and end with its JSON result block.
 
 Two lines of the same package may be in flight together, whether in the same repo or different

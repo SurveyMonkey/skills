@@ -108,8 +108,16 @@ re-derive the diff by hand:
 
 Then one Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
 `default_branch`, `adapter_path` (from step 2), `scripts_dir`
-(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and `mode`, plus the instruction to follow its agent
-definition and end with its JSON result block.
+(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), `mode`, and an OPTIONAL `env_prefix`, plus the
+instruction to follow its agent definition and end with its JSON result block.
+
+**Pass `env_prefix` when this repo's credentials are directory-scoped.** In a workspace where
+`gh`, `git`, and the package manager get their identity from `direnv` exporting per-directory
+config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single ambient login,
+a tool-shell invocation misses that: direnv does not auto-load in a non-interactive shell (root
+`CLAUDE.md`, Environment), so a bare `gh` or `git` silently resolves the wrong identity. Check
+whether a `.envrc` is present at or above `repo_root`; if so, pass `env_prefix: "direnv exec
+<repo_root>"`. If not, omit the field.
 
 **Never omit `mode` and never guess it.** The agent treats a missing or unrecognized value as an
 `input` failure rather than defaulting, because the two modes differ by whether a pull request is
