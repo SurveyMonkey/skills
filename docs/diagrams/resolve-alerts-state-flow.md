@@ -41,8 +41,9 @@ open ready for review and no phase acts on one afterwards ([ADR
 all ([issue #108](https://github.com/SurveyMonkey/skills/issues/108)): it is entered only via
 `/gh-security:audit-pins`, diagram 3.
 
-Two branches exclude one repo's groups without ending the run; they are drawn as plain nodes for
-that reason.
+Three branches exclude one repo's groups without ending the run — phase 5's checkout conflict and
+unresolvable default branch, and phase 6's failed registry probe; they are drawn as plain nodes
+for that reason.
 
 ```mermaid
 flowchart TD
@@ -53,7 +54,7 @@ flowchart TD
     P1R -->|no| P1RT["Trust git_remote, say so"] --> P1D
     P1R -->|yes| P1D{"default_branch resolved?"}
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
-    P1D -->|yes| P2
+    P1D -->|yes| P1E["Resolve env_prefix at repo scope: .envrc at or above<br/>repo_root? The orchestrator's own gh/git/script<br/>calls for the repo run under it from here on"] --> P2
 
     P2["Phase 2: discover-alerts.sh | select-adapter.sh<br/>| classify-lines.sh (repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
     P2REP --> P2Q{"actionable groups?"}
@@ -72,7 +73,8 @@ flowchart TD
 
     P5Q -->|repo| P6
     P5Q -->|"org / user"| P5["Phase 5: per distinct repo in the batch"]
-    P5 --> P5A{"checkout at the conventional path?"}
+    P5 --> P5E["Resolve env_prefix per repo from the conventional<br/>path's .envrc; clone, fetch and the calls below run under it"]
+    P5E --> P5A{"checkout at the conventional path?"}
     P5A -->|"git repo exists"| P5F["git -C fetch origin"] --> P5B
     P5A -->|"nothing there"| P5C["gh repo clone into the @owner convention"] --> P5B
     P5A -->|"wrong remote / not a repo"| P5X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
@@ -85,7 +87,9 @@ flowchart TD
     P5X --> P6
     P5Y --> P6
 
-    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6Q["Work queue: every approved group across every repo,<br/>in ranked order"]
+    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6P{"Registry probe per repo, from inside repo_root,<br/>under env_prefix: pm_exec view on a scoped dependency,<br/>or the top-ranked package; one retry"}
+    P6P -->|"fails twice: auth 401/403, not-found 404,<br/>or network"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
+    P6P -->|green| P6Q["Work queue: every approved group across every repo,<br/>in ranked order"]
     P6Q --> P6D["Rolling pool, machine-wide: dispatch queued items until cap<br/>are in flight, one message, one Task call per item;<br/>on each completion refill to cap the same way"]
     P6D --> P6DQ{"queue empty and every agent returned?"}
     P6DQ -->|"no: refill while the queue holds work<br/>(a failure or unparseable result frees a slot too)"| P6D
@@ -100,7 +104,7 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos,<br/>then deduplicated observations split by type"] --> P8
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then deduplicated observations split by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
@@ -136,7 +140,7 @@ rather than exits.
 
 ```mermaid
 flowchart TD
-    D0["Dispatch payload: group, adapter_path, nwo,<br/>default_branch, repo_root, scripts_dir"] --> D0Q{"anything missing?"}
+    D0["Dispatch payload: group, adapter_path, nwo,<br/>default_branch, repo_root, scripts_dir,<br/>env_prefix (optional)"] --> D0Q{"any required field missing?"}
     D0Q -->|yes| FIN["failure: phase input"]
     D0Q -->|no| D1
 
@@ -225,21 +229,21 @@ proceed-anyway path; a user who wants the audit to run anyway says so in convers
 
 Once dispatched, the agent carries the repo (`nwo` in both the command's dispatch payload and the
 agent's own input contract; only the result renames it to `repo`), `repo_root`, `default_branch`, an `adapter_path`,
-`scripts_dir`, and a `mode` that the user decides at the command's step 5 and that is never
-defaulted. In `pr` mode the distinction that matters is between a *failure* and one of the five
+`scripts_dir`, an optional `env_prefix` resolved at the command's step 1, and a `mode` that the
+user decides at the command's step 5 and that is never defaulted. In `pr` mode the distinction that matters is between a *failure* and one of the five
 ways a completed audit declines to open a PR: both leave `pr` null, and only the first is a broken
 run.
 
 ```mermaid
 flowchart TD
-    CMD1["/gh-security:audit-pins: detect-scope.sh"] --> CMD1Q{"scope?"}
+    CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from a .envrc<br/>at or above repo_root"] --> CMD1Q{"scope?"}
     CMD1Q -->|"org / user"| CMD1A["Ask which repo, or ask the user<br/>to run it from that repo's checkout"] --> CMD1D
     CMD1Q -->|repo| CMD1D{"default_branch resolved?"}
     CMD1D -->|null| CSTOP0(["Stop: default_branch<br/>could not be resolved"])
     CMD1D -->|yes| CMD2{"manifest present?"}
     CMD2 -->|no| CSTOP1(["Stop: nothing this command can audit"])
     CMD2 -->|yes| CMD3["select-adapter.sh"]
-    CMD3 --> CMD4{"open security-labeled PRs?<br/>gh pr list --label security --state open"}
+    CMD3 --> CMD4{"open security-labeled PRs?<br/>env_prefix gh pr list --label security --state open"}
     CMD4 -->|"one or more"| CSTOP2(["Stop: report each PR by number and title;<br/>merge or close first, no proceed-anyway (#108)"])
     CMD4 -->|none| CMD5["ensure-worktree-exclude.sh"]
     CMD5 --> CMD6{"ask: mode?"}
@@ -368,8 +372,9 @@ Run outcomes for the orchestrator:
 | Batch declined | Phase 4 | Nothing dispatched; no agent ever ran |
 | Done | Phase 8 | Every PR URL with its band and check state, remaining skipped repos, what unblocks each |
 
-Everything else is per repo, and the run continues past it: a phase 5 checkout conflict or
-unresolvable default branch excludes that repo's groups only. Nothing about a PR can withhold
+Everything else is per repo, and the run continues past it: a phase 5 checkout conflict, an
+unresolvable default branch, or a phase 6 registry probe that fails twice excludes that repo's
+groups only. Nothing about a PR can withhold
 anything any more — there is no offer left to withhold, so a red check is reported and the run ends
 normally.
 

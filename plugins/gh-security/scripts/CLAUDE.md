@@ -109,19 +109,25 @@ carried a permissions preflight that pre-approved its whole surface in one decis
 when `auto` became the recommended default mode and the workaround was removed
 ([#86](https://github.com/SurveyMonkey/skills/issues/86)).
 
-## Every `gh` and `git` command runs under `direnv exec <repo_root>`
+## Directory-scoped credentials travel as `env_prefix`
 
-`direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever
-account the shell defaults to. Both agent definitions prescribe `direnv exec <repo_root> gh ...`
-and `direnv exec <repo_root> git -C <path> ...` for that reason, and the `audit-pins` command's own
-open-security-PR preflight `gh pr list` call carries the same wrapping; `check-advisories.sh` makes
-its own `gh` call, so it takes the same wrapping too.
+`direnv` loads via a shell hook, which non-interactive tool shells do not run, so a bare `gh` or
+`git` uses whatever account the shell defaults to. The contract is one optional dispatch field:
+the dispatcher — `resolve-alerts` SKILL.md phase 1 (repo scope) or phase 5 (org and user scope),
+or the `audit-pins` command's step 1 — checks whether a `.envrc` sits at or above `repo_root` and,
+when one does, resolves `env_prefix` to `direnv exec <repo_root>`, runs its own `gh`/`git`/script
+invocations for that repo under it, and carries it in the dispatch payload. Each agent then
+prepends it verbatim to every `gh`, `git`, package-manager, and adapter-script invocation —
+composed **after** the command's own `cd` locator, because `direnv exec` injects environment
+without changing directory — and runs those commands bare when the field is absent.
+`check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
 
-The failure modes are misleading rather than obvious, which is why this is a rule and not a tip:
-bare `gh` reports "please run gh auth login" on a correctly configured machine, bare `git fetch`
-reports **`repository not found`** (reads as a renamed or deleted repo, not an auth context), and
-bare `git commit` fails on a missing author identity. Following an agent definition literally
-without the wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
+The failure modes are misleading rather than obvious, which is why this is a contract and not a
+tip: bare `gh` reports "please run gh auth login" on a correctly configured machine, bare
+`git fetch` reports **`repository not found`** (reads as a renamed or deleted repo, not an auth
+context), bare `git commit` fails on a missing author identity, and a bare package-manager install
+401s against the wrong registry token. Following an agent definition literally without the
+wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 

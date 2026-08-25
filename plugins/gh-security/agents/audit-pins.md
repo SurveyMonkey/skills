@@ -76,21 +76,27 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   of what dispatched it. See `scripts/CLAUDE.md`, "Repo-global git state belongs to the
   orchestrator".
 - **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
-  package-manager, and adapter-script invocation** — `<env_prefix> gh api ...`,
-  `<env_prefix> git -C <path> ...`, `<env_prefix> $ADAPTER install`, and the
-  `check-advisories.sh` call, which makes its own `gh` call. It is a literal string your dispatcher
+  package-manager, and adapter-script invocation** — and it composes with the locator each
+  command already carries, going **after** the `cd`: `direnv exec` injects environment without
+  changing directory, so the locator still does that work. The composed shapes are
+  `<env_prefix> gh api ...`, `<env_prefix> git -C <path> ...`,
+  `cd "$WORK/audit" && <env_prefix> $ADAPTER install`, and the same for the
+  `check-advisories.sh` call, which makes its own `gh` call. Never `<env_prefix> cd ...` —
+  `direnv exec` cannot exec a shell builtin — and never a bare `<env_prefix> $ADAPTER install`,
+  which runs in whatever directory the shell starts in. It is a literal string your dispatcher
   resolved for this repo (typically `direnv exec <repo_root>`); prepend it verbatim, do not
   re-derive it. This is the one rule for carrying a repo's directory-scoped credentials — there is
   no separate fallback rule to reconcile it with. **When `env_prefix` is absent, run every one of
   those commands bare, with no `direnv` wrapping of your own.** An absent `env_prefix` means your
   dispatcher judged this repo's credentials to be ordinary and ambient (see `scripts/CLAUDE.md`,
-  "Every `gh` and `git` command runs under `direnv exec`" for why that judgment matters and what a
-  wrong one looks like). The snippets below omit the prefix for readability; add it to every one
-  whenever your dispatch carried it.
+  "Directory-scoped credentials travel as `env_prefix`" for why that judgment matters and what a
+  wrong one looks like). The snippets below omit `env_prefix` for readability; compose it into
+  every one whenever your dispatch carried it.
 - **Every Bash call starts fresh; nothing carries over from the last one.** cwd resets and shell
   variables do not survive, so **every command locates itself**: git uses `git -C <literal path>`,
-  `gh` calls carry `--repo <nwo>` and take no prefix, and every other command carries its own
-  `cd "$WORK/audit" && ` prefix. Substitute the literal path for `$WORK` everywhere.
+  `gh` calls carry `--repo <nwo>` and take no `cd` locator (`env_prefix`, when your dispatch
+  carried one, still applies to them), and every other command carries its own
+  `cd "$WORK/audit" && ` locator. Substitute the literal path for `$WORK` everywhere.
 - **Never combine `cd` with `git` in one command.** The compound form trips a per-command security
   review no permission rule can silence; `git -C` is covered by the standing rules.
 - **Never modify machine-global state.** No `corepack enable`, no global installs. When a
