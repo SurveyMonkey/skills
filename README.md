@@ -62,7 +62,12 @@ parallel from a rolling pool, and `audit-pins` is dispatched alone, one reposito
   usage surface, test coverage of the affected surface, CI presence, override blast radius, and
   declared-range distance) band each fix Low, Medium, or High, and a major version delta or a
   newly added global pin never rates Low. The score is static analysis of the repository, so no
-  agent runs your test suite; CI on the pull request is the verifier.
+  agent runs your test suite; CI on the pull request is the verifier. Every PR that scored also
+  carries a `merge-risk:<band>` label matching its own PR body — `merge-risk:low` (green, `#2da44e`),
+  `merge-risk:medium` (yellow, `#d4a72c`), `merge-risk:high` (red, `#cf222e`) — so a repo's PR list
+  distinguishes low-risk fixes from ones that deserve a closer read without opening each one. It
+  names *merge* risk, not alert severity, which is why the prefix is `merge-risk:` and never a
+  bare `risk:`; the labels are created automatically the first time a repo needs one.
 - **Lockfile validation that refuses to bluff.** A fix claims completion only when the lockfile
   proves the vulnerable ranges are gone, and a parser finding nothing is an error, never a pass.
 - **PRs open ready for review, and nothing touches them after that.** One approval, before

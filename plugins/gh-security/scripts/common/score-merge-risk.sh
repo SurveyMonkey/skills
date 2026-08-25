@@ -993,7 +993,11 @@ jq -n \
       },
       factors: $factors,
       markdown: (
-        "## Merge risk: \($band) (\($score)/\($max))\n\n"
+        (if   $band == "Low"    then "🟢"
+         elif $band == "Medium" then "🟡"
+         elif $band == "High"   then "🔴"
+         else error("unknown band: \($band)") end) as $emoji
+        | "## Merge risk: \($emoji) \($band) (\($score)/\($max))\n\n"
         + (if $band != $raw_band
            then "> Escalated from \($raw_band): \($applied | join("; ")).\n\n"
            else "" end)

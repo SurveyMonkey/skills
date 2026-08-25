@@ -318,18 +318,24 @@ Describe 'the rules that gate the removal PR'
   End
 
   # The PR-state rules, in the other agent definition they govern. Both agents
-  # open pull requests; the fix agent opens far more of them, since every alert
-  # group dispatches one while the audit rides a spare slot. Asserting these on
-  # audit-pins.md alone left the higher-traffic path unguarded, and a mutation
-  # run proved it: `--draft` restored to fix-dependency.md's `gh pr create`, and
-  # `gh pr ready` plus `gh pr merge --auto` added to pr-status.sh, passed the
-  # full suite green (#87).
+  # open pull requests. Asserting these on audit-pins.md alone left the fix
+  # agent's own `gh pr create` unguarded, and a mutation run proved it:
+  # `--draft` restored to fix-dependency.md's `gh pr create`, and `gh pr ready`
+  # plus `gh pr merge --auto` added to pr-status.sh, passed the full suite
+  # green (#87). (The audit no longer rides along in a resolve-alerts batch at
+  # all; since ADR 009 it dispatches only through /gh-security:audit-pins.)
   Describe 'the PR-state rules in fix-dependency (#87)'
     FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
 
     # Paired deliberately with the presence assertion below. An absent-string
     # assertion alone passes when the line it guards is gone entirely, so on its
-    # own it cannot tell "no --draft" from "no gh pr create".
+    # own it cannot tell "no --draft" from "no gh pr create". The presence
+    # assertion's literal is intentionally pinned a second time, in
+    # merge_risk_labels_spec.sh (#109): that suite needs it as evidence
+    # `merge-risk:<band>` lands on the same `gh pr create` call as `security`,
+    # not appended later in a separate `gh pr edit --add-label`. Each suite
+    # asserts the shared literal for its own reason, not because one copied
+    # the other.
     It 'passes no --draft, anywhere'
       When call count_in "$FIX_AGENT" '--draft'
       The status should be success
@@ -337,7 +343,7 @@ Describe 'the rules that gate the removal PR'
     End
 
     It 'still creates the PR, so the absence above is about the flag'
-      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security'
+      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band>'
       The status should be success
       The output should equal '1'
     End

@@ -672,26 +672,74 @@ its own `--label` flag. This flow always requires `security` (lowercase, matchin
 additional required labels. No source overrides another; labels are additive.
 
 `gh pr create` fails outright if a label does not exist in the repository, so check first and
-create any that are missing rather than dropping them:
+create any that are missing rather than dropping them. `2>/dev/null || true` alone cannot tell a
+harmless duplicate from a real failure — both discard the exit status and the stderr that would
+distinguish them — so capture the output and branch on it instead:
 
 ```bash
 gh label list --repo <nwo> --json name --jq '.[].name'
-gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
+sec_out=$(gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>&1) || case "$sec_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
 ```
+
+A duplicate-label message is success — the label is there, which is what this step wanted. Any
+other message is a phase `pr` failure, quoting `$sec_out`.
 
 Label names are case-insensitive for uniqueness but case-preserving, so a repo where this flow
 already ran under the old capitalized convention holds a literal `Security` label. Verified on
 `gh` 2.98.0 against a live repo carrying that label: `gh label create security` reports it as an
-already-existing duplicate (caught by `|| true` above, so the pre-existing `Security` label is left
-untouched, never renamed), and `gh issue create --label security` (the same label-resolution path
-`gh pr create` uses) resolved it to the existing `Security` label rather than erroring, with the
-issue coming back tagged `Security` (original casing preserved). So passing lowercase `security`
-below is safe whether the repository's label is already `security` or still the older `Security`;
-no name lookup or casing fallback is needed.
+already-existing duplicate (caught by the case branch above, so the pre-existing `Security` label
+is left untouched, never renamed), and `gh issue create --label security` (the same
+label-resolution path `gh pr create` uses) resolved it to the existing `Security` label rather than
+erroring, with the issue coming back tagged `Security` (original casing preserved). So passing
+lowercase `security` below is safe whether the repository's label is already `security` or still
+the older `Security`; no name lookup or casing fallback is needed.
+
+**This PR also carries the merge-risk band phase 5 already computed**, one label named
+`merge-risk:<band>` with `<band>` the scorer's `band` field verbatim, lowercased — never a bare
+`risk:<band>`, which would read as alert severity rather than merge risk. The three bands are a
+closed set, each with its own color:
+
+| Label | Color |
+|---|---|
+| `merge-risk:low` | `#2da44e` |
+| `merge-risk:medium` | `#d4a72c` |
+| `merge-risk:high` | `#cf222e` |
+
+Create the one this PR's band needs the same way as `security`, capturing output and branching on
+it rather than a bare `2>/dev/null || true`, for the same reason: a duplicate label and a real
+failure (a token that can open a PR but cannot create labels, say) both discard silently under
+`|| true`, and only one of them is safe to continue past.
 
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --label security [--label ...] \
-  --title "..." --body "..."
+mr_out=$(gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+mr_out=$(gh label create merge-risk:medium --repo <nwo> --color d4a72c --description "Medium merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+mr_out=$(gh label create merge-risk:high --repo <nwo> --color cf222e --description "High merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+```
+
+Run only the one line matching this PR's band; the other two are listed for reference. **Creating
+a label is a deliberate write of repo metadata beyond the PR itself**, the same trade this flow
+already makes for `security`. If `gh pr create` below then fails because the merge-risk label is
+still missing, create it and retry `gh pr create` once. **A `gh label create` that fails because
+the label now exists is success, not an error**: sibling agents fixing other packages in the same
+batch race to create the same band label, and the loser's "already exists" failure means the label
+is there, which is what it wanted; only a failure for some other reason is a failure result
+(phase `pr`), quoting `$mr_out`.
+
+```bash
+gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band> \
+  [--label ...] --title "..." --body "..."
 ```
 
 PR body:

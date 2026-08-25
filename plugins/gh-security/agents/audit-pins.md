@@ -998,25 +998,72 @@ none.** A trailer naming the tool that wrote the commit tells a reader nothing t
 trailer pointing at the PR that added the pin is the other half of this one's story.
 
 Then create the PR. The `gh` calls carry `--repo`, so they are location-independent and take no
-`cd` prefix. `gh pr create` fails outright if a label does not exist, so check and create first:
+`cd` prefix. `gh pr create` fails outright if a label does not exist, so check and create first.
+`2>/dev/null || true` alone cannot tell a harmless duplicate from a real failure — both discard the
+exit status and the stderr that would distinguish them — so capture the output and branch on it
+instead:
 
 ```bash
 gh label list --repo <nwo> --json name --jq '.[].name'
-gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
-gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security \
-  --title "..." --body "..."
+sec_out=$(gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>&1) || case "$sec_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
 ```
+
+A duplicate-label message is success — the label is there, which is what this step wanted. Any
+other message is a phase `pr` failure, quoting `$sec_out`.
 
 Label names are case-insensitive for uniqueness and case-preserving, so passing lowercase
 `security` is safe whether the repository holds `security` or an older capitalized `Security`; the
-`|| true` absorbs the duplicate report and leaves the existing label untouched. Collect any
+case branch above absorbs the duplicate report and leaves the existing label untouched. Collect any
 additional labels every CLAUDE.md in your context requires and pass each via its own `--label`;
 labels are additive and no source overrides another.
 
-That `|| true` swallows every failure, not only the duplicate, so **if `gh pr create` then fails on
-an unknown label, suspect the creation rather than the name**: a token that can open a PR but
-cannot create labels leaves no trace anywhere else. Say so in the failure (phase `pr`) instead of
-retrying with the label dropped, which would open a PR that Dependabot tooling no longer finds.
+**Add `merge-risk:<band>` only when `pr.risk.band` is non-null.** A null band means an empty
+delta — nothing scored, because every removed package either left the tree entirely or resolved to
+the same version either way — and gets no risk label at all, never a fake one; the PR carries only
+`security` in that case. When `pr.risk.band` is set, lowercase it verbatim for the label name
+(`merge-risk:low`, `merge-risk:medium`, or `merge-risk:high` — never a bare `risk:<band>`, which
+would read as alert severity rather than merge risk), with the same closed-set colors
+`fix-dependency.md` uses (`#2da44e` low, `#d4a72c` medium, `#cf222e` high). Create it the same way
+as `security`, before `gh pr create`, running only the one line for this PR's band:
+
+```bash
+mr_out=$(gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+mr_out=$(gh label create merge-risk:medium --repo <nwo> --color d4a72c --description "Medium merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+mr_out=$(gh label create merge-risk:high --repo <nwo> --color cf222e --description "High merge risk" 2>&1) || case "$mr_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
+```
+
+Run only the one line matching this PR's band; the other two are listed for reference. **Creating
+a label is a deliberate write of repo metadata beyond the PR itself**, the same trade this flow
+already makes for `security`. **A `gh label create` that fails because
+the label now exists is success, not an error**: a sibling fix-dependency run in the same batch can
+race to create the same band label, and the loser's "already exists" failure means the label is
+there, which is what it wanted; only a failure for some other reason is a failure result
+(phase `pr`), quoting `$mr_out`.
+
+Both label-creation steps run **before** `gh pr create`, so its failure means something else went
+wrong:
+
+```bash
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security [--label merge-risk:<band>] \
+  --title "..." --body "..."
+```
+
+**If `gh pr create` fails on an unknown label anyway, suspect the creation rather than the
+name**: a token that can open a PR but cannot create labels leaves no trace anywhere else. Say so
+in the failure (phase `pr`) instead of retrying with the label dropped, which would open a PR that
+Dependabot tooling no longer finds.
 
 PR body:
 

@@ -184,7 +184,7 @@ flowchart TD
     D6["Phase 6: commit and push from the worktree"] --> D6Q{"repo hooks"}
     D6Q -->|"pre-commit fails"| FCOM["failure: phase commit,<br/>quoting the hook (never --no-verify)"]
     D6Q -->|"pre-push fails"| FPUSH["failure: phase push"]
-    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>(ready for review; the agent never merges it<br/>or arms auto-merge)"]
+    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>--label merge-risk:&lt;band&gt; (ready for review; the agent<br/>never merges it or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
     D6PRQ -->|no| FPR["failure: phase pr"]
     D6PRQ -->|yes| SUCC(["success: pr_url, action, risk band,<br/>requires_major_bump[], observations[]"])
