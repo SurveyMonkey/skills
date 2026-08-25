@@ -411,6 +411,57 @@ Describe 'node.sh apply_constraint'
       The status should be success
       The output should equal '{"mode":"tighten-bare","parents":[]}'
     End
+
+    # A pnpm.overrides block can carry more than one major-qualified bare key
+    # for the same package (a live repository pinned both `protobufjs@7` and
+    # `protobufjs@8`). Writing the plain `protobufjs` key unconditionally left
+    # the stale qualified key in place, competing with the new plain-key entry
+    # for the same resolution (issue #104).
+    It 'tightens the qualified key in place instead of adding a plain key'
+      use_fixture pnpm-major-qualified
+      "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
+      When call manifest '.pnpm.overrides."protobufjs@8"'
+      The output should equal '">=8.6.6 <9"'
+    End
+
+    It 'does not add a new plain key alongside the qualified one'
+      use_fixture pnpm-major-qualified
+      "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
+      When call manifest '.pnpm.overrides | has("protobufjs")'
+      The output should equal 'false'
+    End
+
+    It 'leaves the other major-qualified key untouched'
+      use_fixture pnpm-major-qualified
+      "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
+      When call manifest '.pnpm.overrides."protobufjs@7"'
+      The output should equal '"^7.5.5"'
+    End
+
+    It 'reports the qualified key as what it wrote'
+      use_fixture pnpm-major-qualified
+      When call adapter_jq '.written' apply_constraint --tighten-bare protobufjs '>=8.6.6 <9'
+      The status should be success
+      The output should equal '[{"parent":null,"path":["pnpm","overrides","protobufjs@8"],"value":">=8.6.6 <9"}]'
+    End
+
+    # The plain-key case must stay exactly as it was: no qualified key exists
+    # for lodash in pnpm-v9, so the write still lands on the plain key.
+    It 'still writes the plain key when no qualified key covers the range'
+      use_fixture pnpm-v9
+      When call adapter_jq '.written' apply_constraint --tighten-bare lodash '>=4.17.25 <5'
+      The status should be success
+      The output should equal '[{"parent":null,"path":["pnpm","overrides","lodash"],"value":">=4.17.25 <5"}]'
+    End
+
+    # pnpm-v9 also carries a single major-qualified key with no sibling
+    # (handlebars@4): tightening it in place must not spawn a second plain key.
+    It 'tightens a lone major-qualified key (handlebars@4) in place'
+      use_fixture pnpm-v9
+      "$ADAPTER" apply_constraint --tighten-bare handlebars '>=4.7.10 <5' >/dev/null
+      When call manifest '{qualified: .pnpm.overrides."handlebars@4", has_plain: (.pnpm.overrides | has("handlebars"))}'
+      The output should equal '{"qualified":">=4.7.10 <5","has_plain":false}'
+    End
   End
 
   # A direct update writes into dependencies, so it must not leave an empty

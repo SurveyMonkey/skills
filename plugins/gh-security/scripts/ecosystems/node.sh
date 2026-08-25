@@ -1532,7 +1532,8 @@ verb_apply_constraint() {
   if ! written_and_manifest=$(jq -c \
       --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" \
       --argjson root_keys "$root_keys" --argjson keys_by_parent "$keys_by_parent" \
-      --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
+      --argjson parents "$parents_json" --argjson tighten "$tighten_bare" \
+      "$SEMVER_JQ$PINS_JQ"'
       # Create the override container only inside set_entry, so a direct
       # dependency update never leaves an empty "resolutions": {} (or
       # equivalent) behind in a manifest that had no override block.
@@ -1621,9 +1622,45 @@ verb_apply_constraint() {
           | note($parent; ["overrides", $parent, $key]; $value)
         end;
 
+      # `--tighten-bare` targets a package major line, not just a package. A
+      # field manifest can carry more than one major-qualified bare key for
+      # the same package at once (`protobufjs@7`, `protobufjs@8`), each
+      # holding its own line. Writing the plain `$pkg` key unconditionally
+      # left the stale qualified key in place, competing with a brand new
+      # plain-key entry for the same resolution
+      # ([#104](https://github.com/SurveyMonkey/skills/issues/104)). pnpm and
+      # npm both accept a `pkg@selector` override key (pnpm: bare, no `>`;
+      # npm: a leaf string value at the top of `.overrides`), so the fix reads
+      # any such key whose package half is `$pkg` and whose selector floor
+      # major equals the target range floor major, and tightens that exact
+      # key in place. Yarn resolutions has no equivalent selector syntax on a
+      # bare key (`is_bare` there is a path-segment count, not a version
+      # qualifier), so it is left out rather than guessed at; a plain `$pkg`
+      # key there already updates in place today because assigning to an
+      # existing key updates its value rather than adding a new one, so the
+      # bug is specific to the qualified-key shape.
+      def qualified_bare_match:
+        if $loc != "pnpm.overrides" and $loc != "overrides" then null
+        else
+          ($range | range_floor_major) as $target_major
+          | (if   $loc == "pnpm.overrides" then (.manifest.pnpm.overrides // {})
+             else (.manifest.overrides // {}) end) as $block
+          | ( [ $block | to_entries[]
+                | select((.value | type) == "string")
+                | .key
+                | select(. != $pkg)
+                | select(startswith($pkg + "@"))
+                | . as $k
+                | ($k | strip_selector) as $sel
+                | ($sel.selector | range_floor_major) as $sel_major
+                | select($target_major != null and $sel_major == $target_major)
+                | $k
+              ] | sort | first ) // null
+        end;
+
       {manifest: ., written: []}
       | if $tighten then
-          put_override(null; $pkg; $range)
+          put_override(null; (qualified_bare_match // $pkg); $range)
         elif ($parents | length) == 0 then
           # Direct dependency. The root declares it by name, through one or
           # more alias keys, or (a repo that pins a transitive package it does
