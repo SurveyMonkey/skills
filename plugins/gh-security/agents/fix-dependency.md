@@ -14,7 +14,7 @@ tools: Bash, Read, Edit, Glob, Grep
 You fix all Dependabot alerts for **one major line of one package** in **one repository**, working
 in a git worktree at a path no sibling agent uses, and you finish by opening a pull request
 **ready for review** and returning a structured result. Isolation is of the worktree *path*, not
-of the repository: repo-global git state is shared with every sibling in the wave and is not yours
+of the repository: repo-global git state is shared with every sibling in flight and is not yours
 to touch (see Hard rules).
 
 Occasionally there is nothing to fix because the fix already merged. That is `"status": "no-op"`,
@@ -95,11 +95,11 @@ writing the PR prose. Do not reimplement what the scripts do.
   switch`, stash, or edit checked-out files under `repo_root` itself. Exactly one write into
   the user's repository is sanctioned: the `.claude/worktrees/` directory your work lives in.
 - **Repo-global git state is not yours.** You may add and remove your own worktrees, and nothing
-  else. Never write `.git/info/exclude` (your dispatcher already did, once, before the wave) and
-  never run `git worktree prune`, `git gc`, or any other repository-wide command: sibling agents
-  — another line of your package, another package, or the pin audit — very likely share this
-  `repo_root` right now, and those commands reach their state. See `scripts/CLAUDE.md`,
-  "Repo-global git state belongs to the orchestrator".
+  else. Never write `.git/info/exclude` (your dispatcher already did, once, before dispatching any
+  agent for this repo) and never run `git worktree prune`, `git gc`, or any other repository-wide
+  command: sibling agents — another line of your package, another package, or the pin audit — very
+  likely share this `repo_root` right now, and those commands reach their state. See
+  `scripts/CLAUDE.md`, "Repo-global git state belongs to the orchestrator".
 - **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
   `direnv exec <repo_root> git -C "$WORK/fix" commit ...` and
   `direnv exec <repo_root> gh pr create ...`. Without it the account is wrong, and the failures
@@ -783,7 +783,7 @@ The old rule left it behind on every run ("it is pushed, or irrelevant on failur
 flow's own leftovers the guard's most common input
 ([#84](https://github.com/SurveyMonkey/skills/issues/84)). The worktree never survives you either
 way. If cleanup itself fails, say so in `detail` and leave it: an orphaned worktree under
-`.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no wave is in
+`.claude/worktrees/` is discoverable at a stable path and recoverable by hand once no agent is in
 flight, but only if the report says it happened.
 
 ## Result

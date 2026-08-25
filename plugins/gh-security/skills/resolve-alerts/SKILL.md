@@ -127,12 +127,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-capacity.sh
 ```
 
 `cap` bounds how many subagents run at once; it is machine load, not a harness limit, and it
-applies **machine-wide across every repo in the batch**, not per repo — a wave that touches three
-repos at once still saturates the same laptop. Show the plan for the chosen batch:
+applies **machine-wide across every repo in the batch**, not per repo — agents that touch three
+repos at once still saturate the same laptop. Show the plan for the chosen batch:
 
 > | Repo | Package | Line | Severity | Likely action | Branch |
 >
-> N group(s) across M repo(s), concurrency cap C → ceil(N/C) wave(s).
+> N group(s) across M repo(s), concurrency cap C.
 
 Omit the `Repo` column at repo scope, as in phase 3. "Likely action" comes from the alerts'
 `relationship` field (direct → version bump, transitive → scoped override) and is best-effort: the
@@ -142,12 +142,14 @@ At org or user scope, name every distinct repo the plan touches and say plainly 
 yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
 (phase 5) — this is part of what the approval covers, not a separate consent step.
 
-**Spare slot → the pin audit rides along.** If the approved batch has **fewer groups than `cap`**,
-one `audit-pins` agent joins the first wave and the plan says so, in the same approval:
+**The pin audit is the last item in the queue.** One `audit-pins` agent joins the run behind every
+fix, dispatched as soon as a slot is available for it: immediately, in the first dispatch, when the
+fixes do not reach `cap`, and otherwise into the first slot a completion frees. The plan says so, in
+the same approval:
 
-> 2 group(s) across 1 repo, concurrency cap 4 → 1 wave, 2 slot(s) spare. The pin audit will run in
-> one of them against `octo/app`: it reports which of that repo's existing overrides/resolutions
-> are no longer needed and, in PR mode, opens a PR removing the ones it confirms.
+> 2 group(s) across 1 repo, concurrency cap 4. The pin audit is queued last, against `octo/app`: it
+> reports which of that repo's existing overrides/resolutions are no longer needed and, in PR mode,
+> opens a PR removing the ones it confirms.
 
 **The audit's mode is part of this same approval, never a second prompt.** The agent cannot ask, so
 `mode` is decided here and passed at dispatch. **PR mode is the first option and the recommended
@@ -162,10 +164,10 @@ One approval covers the batch and the audit's mode together. Splitting them into
 what the one-approval principle exists to prevent, and the audit's PR is reviewed on GitHub like
 any other.
 
-Fix agents always get the slots first, and the audit takes at most **one** spare slot however many
-are free — its own removability tests run installs, and a second copy of it would audit the same
-repository twice. When the batch fills every slot, the audit is not dispatched here; phase 8
-offers it instead, because spending a slot on housekeeping in a full dispatch trades away a fix.
+Fix agents always come first in the queue, and the audit is queued **once**: its own removability
+tests run installs, and a second copy of it would audit the same repository twice. It is queued
+whatever the size of the batch, because there is no slot to spare or not spare, only a queue
+position, and housekeeping that sits behind every fix costs a fix nothing.
 
 **The audit is repo-scoped, at every scope of this skill.** At org or user scope the batch may span
 repos while the audit covers exactly one, so the plan **names the repo it will audit**: the repo of
@@ -206,9 +208,10 @@ For each **distinct repo** named in the approved batch:
 Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
 for a given repo shares its triple.
 
-## Phase 6: Dispatch in waves
+## Phase 6: Dispatch from a rolling pool
 
-**Before the first wave, once per distinct repo in the approved batch:**
+**Once per distinct repo in the approved batch, before the first agent for that repo is
+dispatched:**
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
@@ -216,14 +219,24 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
 
 This writes the `.claude/worktrees/` line into that repo's `.git/info/exclude`, keeping the agents'
 worktrees out of `git status`. It is local-only and never committed, it is idempotent, and it is
-**yours to do, not the agents'**: two agents dispatched in the same message start milliseconds
-apart, and a read-then-append from each can duplicate the line or tear the file (issue #35). You
-know the repo set, so one call per repo removes the race by construction. A failure here is not
-fatal — report it and dispatch anyway; the worst case is worktree directories showing up in
-`git status`.
+**yours to do, not the agents'**: two agents working the same repo start milliseconds apart, and a
+read-then-append from each can duplicate the line or tear the file (issue #35). You know the repo
+set, so one call per repo removes the race by construction. A failure here is not fatal — report it
+and dispatch anyway; the worst case is worktree directories showing up in `git status`.
 
-Then take up to `cap` groups **across every repo in the current wave** and dispatch them **in a single
-message with one Task tool call per group** so they run in parallel:
+Then hold the approved groups as a **work queue**: every group across every repo, in the ranked
+order phases 3 and 4 settled, with the pin audit last when the plan included one. Drain that queue
+as a **rolling pool**, in two motions:
+
+- **Fill.** Dispatch queued items until `cap` agents are in flight, **in a single message with one
+  Task tool call per item**, so they start in parallel.
+- **Refill.** On each completion notification, dispatch queued items until `cap` are in flight
+  again, in one message whenever more than one slot is free. Concurrent completions can free
+  several at once, and dispatching a single item per notification would leave the rest idle.
+
+Keep going until the queue is empty and the last agent has returned. Nothing waits for a sibling.
+
+Each queued group is **one Task tool call**:
 
 - `subagent_type`: `fix-dependency`
 - prompt: the group JSON verbatim, plus `adapter_path`, the group's own `nwo` (its `repo` field),
@@ -232,12 +245,14 @@ message with one Task tool call per group** so they run in parallel:
   (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
   and end with its JSON result block.
 
-Two lines of the same package may run in the same wave, whether in the same repo or different
+Two lines of the same package may be in flight together, whether in the same repo or different
 ones: they carry different `branch_name`s and different worktree paths (worktree paths are always
 under that group's own `repo_root`), so they cannot collide.
 
-When phase 4's approved plan included the pin audit, its Task call goes in that **same first
-message**, counting against `cap` like any other agent:
+When phase 4's approved plan included the pin audit, it is the **last item in the queue**,
+dispatched as soon as a slot is available for it once every fix has one: in the first dispatch when
+the fixes do not reach `cap`, and otherwise into the first slot a completion frees. It counts
+against `cap` like any other agent:
 
 - `subagent_type`: `audit-pins`
 - prompt: the `{repo, repo_root, default_branch}` triple of the repo named in the plan (phase 1 at
@@ -252,28 +267,39 @@ opened against a real repository.
 
 It works in `.claude/worktrees/audit-pins` under that repo's own `repo_root`, which no fix agent
 uses, so their worktree **paths** cannot collide. That is a statement about directories only. The
-audit shares a repository with the fix agents it rides beside, and **repo-global git state is
-shared**, so while a wave is in flight no agent may touch it: no `.git/info/exclude` write (done
+audit shares a repository with the fix agents it runs beside, and **repo-global git state is
+shared**, so while any agent is in flight no agent may touch it: no `.git/info/exclude` write (done
 once above, before dispatch), no `git worktree prune` — repository-wide, and a badly timed one
 deletes a live sibling's registration — no `git gc`, no config writes, no branch or ref
 manipulation outside its own branch. Each agent adds and removes its own worktree by path and
 nothing else. Both agent definitions state this as a hard rule; the reason it is written here too
 is that the earlier absolute phrasing ("cannot collide") is what invited the two calls issue #35
-found.
+found. Under a rolling pool something is in flight from the first dispatch until the queue drains,
+so this is a rule for the whole run rather than for a window between dispatches.
 
-Dispatch the audit once per run, in the first wave only; later waves are fixes alone.
+Dispatch the audit once per run.
 
-The cap is a **wave barrier**, machine-wide across every repo in the batch: never issue more than
-`cap` Task calls in one message, and do not start the next wave until every agent in the current
-one has returned. There is no slot-freed signal, so the barrier is the honest implementation of the
-cap (ADR 003). Repeat until the approved batch is exhausted.
+**The cap is machine-wide across every repo in the batch, and the pool must never exceed it.**
+Refill up to `cap` rather than by one, and count from the agents *actually* in flight when a
+completion arrives; dispatching against a stale count overshoots the cap, which is the one way a
+pool can go wrong that a barrier could not. **A failed, crashed, or unparseable result frees its
+slot exactly like a successful one**: record the failure for phase 7 and refill, because a crash
+must never stall the pool. And **refilling a slot is not a new dispatch decision, so it never
+prompts**: phase 4's single approval
+covers the whole queue and remains the last checkpoint before pull requests exist. The harness
+re-invokes you with a task-completion notification when a subagent finishes, which is the
+slot-freed signal ADR 003 lacked; its amendment retires the barrier for this pool.
 
-## Phase 7: Summarize the batch
+## Phase 7: Summarize the run
 
-Parse each agent's fenced JSON result. **An unparseable or missing result block is a failure
-report** — record it as such; never guess fields.
+Results arrive **one at a time**, as each agent completes and its slot is refilled. Parse each
+agent's fenced JSON result as it lands, keep it with the others, and present the summary once the
+queue has drained and the last agent has returned. The summary describes the whole approved batch,
+not whichever results happened to arrive together. **An unparseable or missing result block is a
+failure report** — record it as such; never guess fields, and refill its slot like any other
+completion.
 
-Present one table for the batch:
+Present one table for the run:
 
 > | Repo | Package | Line | PR | Risk | F4/F5 | Notes |
 
@@ -312,7 +338,7 @@ failure mode issue #19 is about, and it is worse coming from the summary than fr
 
 **Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
 unaddressed.** These are repos with alerts the batch never touched at all, and belong in the same
-summary as the batches that did run — never a detail left only in the earlier discovery report.
+summary as the batch that did run — never a detail left only in the earlier discovery report.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.
@@ -388,14 +414,19 @@ siblings held those versions during each test. Naming them together without that
 reader turns four tested operations into one untested one.
 
 An audit failure is reported as a failure and never suppresses the fix summary: the fixes and the
-audit are independent work that happened to share a wave.
+audit are independent queue items, and nothing about the audit's outcome is coupled to a fix's.
 
-## Phase 8: Offer the next batch, then the pin audit
+## Phase 8: Offer the groups the user declined, then the pin audit
 
-If actionable groups remain (the user chose One or a tier), offer to dispatch the next batch:
-back to phase 3 with the remaining groups.
+If actionable groups remain because the user chose One or a tier, those groups were never approved
+and never queued: the approved batch drained completely. Offer them now as a **new scope
+question**, not as a resumption of work already approved: back to phase 3 with the remaining
+groups.
 
-Then, **unless an `audit-pins` agent already ran in phase 6**, recommend the pin audit once:
+Then recommend the pin audit once, **for the repos this run did not audit**. Phase 6 queues an audit
+on every run that dispatches at all, so at repo scope that repo has normally been audited already
+and there is nothing left to offer: say so in a line and skip the question. At org or user scope the
+audit covered exactly one repo, so what remains to offer is every other repo this run touched:
 
 > Every fix in this run added or tightened a pin. The pin audit is the other direction: it finds
 > overrides and resolutions a repository no longer needs, testing each removal in an isolated
@@ -409,11 +440,12 @@ sets out: open a removal PR for the pins it confirms (`mode: pr`, recommended), 
 On acceptance, dispatch `audit-pins` with the phase 6 payload including `mode`, and report its
 findings and its PR as phase 7 describes.
 
-The audit is **per repo**: at repo scope that is one agent; at org or user scope, name
-the repos the batch touched and dispatch one agent per repo the user accepts, in waves under the
-same `cap` — their removability tests run installs like any fix agent. Recommend it once and take
-the answer; declining is a complete answer, and `/gh-security:audit-pins` runs it later, per repo,
-without going through alert resolution at all.
+The audit is **per repo**: at repo scope that is one agent, and at org or user scope, name the repos
+the batch touched but did not audit and dispatch one agent per repo the user accepts, through a
+queue drained by the same rolling pool under the same `cap`, since their removability tests run
+installs like any fix agent. Recommend it once and take the answer; declining is a complete answer,
+and `/gh-security:audit-pins` runs it later, per repo, without going through alert resolution at
+all.
 
 Recommend it even when this run fixed nothing that touched an override: a repository accumulates
 pins from every past run and from hand edits, and the audit is about all of them.

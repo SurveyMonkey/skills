@@ -56,9 +56,9 @@ pass**. Conventions and their reasoning live in
   after it is created, and no agent may merge one or arm auto-merge on it.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
-  `.claude/worktrees/`, and waves are sized by a per-machine concurrency cap enforced as a
-  barrier. Repo-global git state (like `.git/info/exclude`) is written only by the orchestrator,
-  never by agents.
+  `.claude/worktrees/`, and a per-machine concurrency cap is enforced as a rolling pool: freed
+  slots are refilled from the work queue until that queue drains. Repo-global git state (like
+  `.git/info/exclude`) is written only by the orchestrator, never by agents.
 - **Subagent model tiering** ([ADR 004](adr/004-subagent-model-tiering.md)). The fix subagent is
   pinned to sonnet in its frontmatter; the orchestrator inherits the session model.
 - **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md)). Three gates (shellspec suite,
