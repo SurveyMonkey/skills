@@ -408,6 +408,72 @@ Describe 'node.sh declared_ranges --line'
   End
 End
 
+# pnpm's turn at the same defect family (issue #100, the field run's dominant
+# one: 3 of 6 failures). The isolated store never nests the child under
+# `node_modules/<parent>/` and links only direct dependencies into
+# `node_modules` at all, so both of `resolved_major_for_parent`'s probes miss:
+# every parent came back `parents_unreadable`, `parents_other_lines` stayed
+# empty while 11 of 15 parents sat on another line, and the hoisted fallback
+# attributed the ROOT's copy to whichever parent was asked about. The
+# lockfile's `snapshots:` blocks record the child version each copy of each
+# parent resolves — exactly what `--line` classifies on — while still
+# recording no declared specifier, so the range stays honestly unread.
+#
+# The fixture is the run's brace-expansion shape: one parent name at three
+# majors, each resolving its own major of the child, no node_modules on disk.
+Describe 'node.sh declared_ranges --line (pnpm, lockfile snapshots)'
+  After 'cleanup_fixture'
+
+  It 'files other-line pnpm parents under parents_other_lines, never unreadable'
+    use_fixture pnpm-cross-line
+    When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines, parents_without_range}' \
+      declared_ranges --line 5 brace-expansion
+    The status should be success
+    The output should equal '{"ranges":[],"parents_read":[],"parents_unreadable":["minimatch"],"parents_other_lines":["minimatch@3.1.5","minimatch@5.1.6"],"parents_without_range":[]}'
+  End
+
+  # The same parent, the oldest line: only the 1.x copy stays in scope, and
+  # the copies excluded are named with their own versions, exactly as the
+  # yarn rows above name theirs.
+  It 'classifies the same parent for the 1.x line'
+    use_fixture pnpm-cross-line
+    When call adapter_jq '{ranges, parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 1 brace-expansion
+    The status should be success
+    The output should equal '{"ranges":[],"parents_unreadable":["minimatch"],"parents_other_lines":["minimatch@10.0.3","minimatch@10.2.5","minimatch@5.1.6"]}'
+  End
+
+  # snapshots record what resolved, never the specifier it was declared with,
+  # so the parent's range is still a range nobody could read: unreadable, not
+  # `parents_without_range`, which claims a read that never happened.
+  It 'keeps the parent unreadable, not rangeless, when no line is given'
+    use_fixture pnpm-cross-line
+    When call adapter_jq '{ranges, parents_unreadable, parents_without_range, parents_other_lines}' \
+      declared_ranges brace-expansion
+    The status should be success
+    The output should equal '{"ranges":[],"parents_unreadable":["minimatch"],"parents_without_range":[],"parents_other_lines":[]}'
+  End
+
+  # The svgo shape from the run: a single-copy parent whose manifest IS on
+  # disk (a direct dependency, post-install) was filed on the HOISTED copy's
+  # line, because the probe's fallback reads `node_modules/<pkg>` — the
+  # root's copy, here 10.x — so the real 5.x parent landed in
+  # parents_other_lines and its range was lost. The lockfile edge answers for
+  # the parent's own copy; the manifest still supplies the range.
+  It 'derives a single-copy parent line from the lockfile, not the hoisted copy'
+    use_fixture pnpm-cross-line
+    mkdir -p node_modules/filelist node_modules/minimatch
+    printf '{"name":"filelist","version":"1.0.4","dependencies":{"minimatch":"^5.0.1"}}' \
+      > node_modules/filelist/package.json
+    printf '{"name":"minimatch","version":"10.2.5"}' \
+      > node_modules/minimatch/package.json
+    When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 5 minimatch
+    The status should be success
+    The output should equal '{"ranges":["^5.0.1"],"parents_read":["filelist"],"parents_unreadable":[],"parents_other_lines":["__root__","@ts-morph/common@0.26.1","glob@7.2.3"]}'
+  End
+End
+
 # `satisfies` is internal, so it is exercised through validate against a fixture
 # whose resolved versions are known: undici resolves to 5.28.4 and 6.19.8, and
 # lodash to 4.17.21.

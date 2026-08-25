@@ -154,6 +154,74 @@ Describe 'node.sh apply_constraint'
     End
   End
 
+  # A bare pnpm `parent>child` key matches EVERY resolved copy of the parent,
+  # so a parent in the tree at several versions — each copy resolving its own
+  # major of the child — had all of its copies dragged onto the group's line:
+  # on the field run behind issue #100, `ws` 7.x/8.x and `brace-expansion`
+  # 1.x each collapsed the sibling lines this way and fail-closed at
+  # validate. pnpm compares the parent half of `parent@<v>>child` with
+  # semver.satisfies against the copy's resolved version, so the fix —
+  # proven by five shipped field PRs — is one exact-version key per parent
+  # version whose resolution of the child is on the target line, read from
+  # the lockfile's snapshots. pnpm only: npm's nested overrides and yarn's
+  # `a/b` resolutions have different narrowing semantics (a version-qualified
+  # yarn key silently never matches), so neither is qualified here.
+  Describe 'pnpm parent keys are version-qualified across major lines'
+    It 'writes one qualified key per parent version on the target line'
+      use_fixture pnpm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+    End
+
+    It 'reports the qualified keys it wrote'
+      use_fixture pnpm-cross-line
+      When call adapter_jq '.written' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should be success
+      The output should equal '[{"parent":"minimatch","path":["pnpm","overrides","minimatch@10.0.3>brace-expansion"],"value":">=5.0.9 <6"},{"parent":"minimatch","path":["pnpm","overrides","minimatch@10.2.5>brace-expansion"],"value":">=5.0.9 <6"}]'
+    End
+
+    # The 1.x line has exactly one parent copy, so a fix scoped there covers
+    # that copy alone and leaves the 2.x and 5.x resolutions unnamed.
+    It 'covers a different target line with that line parent version only'
+      use_fixture pnpm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=1.1.12 <2' minimatch >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]] | sort'
+      The output should equal '["minimatch@3.1.5>brace-expansion"]'
+    End
+
+    # A single-version parent keeps today's bare key: nothing else exists for
+    # the key to leak onto, and qualifying it would churn every existing PR
+    # shape for no safety gain.
+    It 'keeps the bare key for a parent resolved at a single version'
+      use_fixture pnpm-cross-line
+      "$ADAPTER" apply_constraint minimatch '>=5.1.6 <6' filelist >/dev/null
+      When call manifest '[.pnpm.overrides | keys[]]'
+      The output should equal '["filelist>minimatch"]'
+    End
+
+    # The chain to the verdict: this override state is exactly the
+    # pnpm-cross-line-qualified specimen, whose post-install lockfile keeps
+    # the sibling lines and passes `validate --baseline` with
+    # `other_line_moves: []`, while the bare key the verb used to write is
+    # the pnpm-cross-line-collapsed specimen validate fails closed on
+    # (spec/node_validate_spec.sh).
+    overrides_matching_specimen() {
+      _mine=$(jq -cS '.pnpm.overrides' package.json)
+      _specimen=$(jq -cS '.pnpm.overrides' \
+        "$FIXTURES/pnpm-cross-line-qualified/package.json")
+      [ "$_mine" = "$_specimen" ] && printf '%s' "$_mine"
+    }
+
+    It 'writes the same override state the intact post-install specimen carries'
+      use_fixture pnpm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call overrides_matching_specimen
+      The status should be success
+      The output should equal '{"minimatch@10.0.3>brace-expansion":">=5.0.9 <6","minimatch@10.2.5>brace-expansion":">=5.0.9 <6"}'
+    End
+  End
+
   # An aliased dependency, which `validate` now counts and which nothing could
   # previously move: `overrides.lodash` does not reach a copy the parent
   # declared as `lodash-alias`, and a bare range under the alias key names a

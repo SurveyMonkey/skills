@@ -1061,7 +1061,22 @@ npm_parents() {
   npm_declaration_rows | parents_from_rows "$1"
 }
 
-pnpm_parents() {
+# Parent -> child resolution edges out of pnpm's `snapshots:` section:
+# `parent<TAB>parent_version<TAB>child_resolved_version`, one row per snapshot
+# whose `dependencies:` block names $1. A field either parser cannot split
+# out is `-`, never a guess.
+#
+# The snapshots record what each dependency *resolved to*, never the specifier
+# it was declared with — so this reader yields no declared range, and nothing
+# downstream pretends otherwise. What the resolved version does answer is LINE
+# MEMBERSHIP: which major of the child each copy of a parent actually pulls
+# in. Discarding the versions here is what left `declared_ranges --line` and
+# `apply_constraint` blind under pnpm's isolated-store layout, where no
+# `node_modules/<parent>` manifest exists to probe: parents landed in
+# `parents_unreadable` while sitting on another line, and the bare
+# `parent>child` override written for them collapsed the sibling lines
+# ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+pnpm_edge_rows() {
   awk -v pkg="$1" '
     /^snapshots:/ { insnap = 1; next }
     /^[a-zA-Z]/   { insnap = 0 }
@@ -1073,6 +1088,19 @@ pnpm_parents() {
         gsub(/\x27/, "", cur)
         p = index(cur, "(")
         if (p > 0) cur = substr(cur, 1, p - 1)
+        # The parent locator splits on its LAST `@`: a scoped name owns the
+        # one at position 1, exactly as `pnpm_key` in PINS_JQ splits.
+        curname = cur
+        curver = "-"
+        at = 0
+        for (k = length(cur); k > 1; k--) {
+          if (substr(cur, k, 1) == "@") { at = k; break }
+        }
+        if (at > 1) {
+          curname = substr(cur, 1, at - 1)
+          curver = substr(cur, at + 1)
+        }
+        if (curver == "") curver = "-"
         indeps = 0
         next
       }
@@ -1084,17 +1112,25 @@ pnpm_parents() {
         c = index(dep, ":")
         if (c == 0) next
         name = substr(dep, 1, c - 1)
+        val  = substr(dep, c + 1)
         gsub(/\x27/, "", name)
-        if (name == pkg && cur != "") {
-          at = 0
-          for (k = length(cur); k > 1; k--) {
-            if (substr(cur, k, 1) == "@") { at = k; break }
-          }
-          if (at > 1) print substr(cur, 1, at - 1); else print cur
-        }
+        sub(/^[[:space:]]+/, "", val)
+        sub(/[[:space:]]+$/, "", val)
+        gsub(/\x27/, "", val)
+        # A peer-dependency suffix is not part of the resolved version.
+        p = index(val, "(")
+        if (p > 0) val = substr(val, 1, p - 1)
+        if (val == "") val = "-"
+        if (name == pkg && curname != "")
+          printf "%s\t%s\t%s\n", curname, curver, val
       }
     }
-  ' pnpm-lock.yaml | sort -u | jq -Rs 'split("\n") | map(select(length > 0))'
+  ' pnpm-lock.yaml
+}
+
+pnpm_parents() {
+  pnpm_edge_rows "$1" | cut -f1 | sort -u \
+    | jq -Rs 'split("\n") | map(select(length > 0))'
 }
 
 # Berry parents, matched on either name, exactly as npm's are.
@@ -1520,6 +1556,60 @@ verb_apply_constraint() {
   keys_by_parent=$(printf '%s' "$lookup" | jq -c '.keys_by_parent')
   parents_unresolved=$(printf '%s' "$lookup" | jq -c '.unresolved')
 
+  # pnpm only: the parent versions each scoped key must be qualified with.
+  #
+  # A bare `parent>child` key matches EVERY resolved copy of the parent, so a
+  # parent in the tree at several versions — each copy resolving its own major
+  # of the child — has all of its copies dragged onto this group's line, which
+  # collapses the sibling lines and fails closed at `validate --baseline`
+  # (field run: `ws` 7.x/8.x and `brace-expansion` 1.x each overrode every
+  # copy of every parent; the sibling lines vanished). pnpm compares the
+  # parent half of `parent@<v>>child` with `semver.satisfies` against the
+  # parent's resolved version, so an exact version narrows the key to one
+  # copy. The map is parent -> the versions to qualify with: only parents the
+  # lockfile resolves at MORE than one version (a single-version parent keeps
+  # today's bare key — nothing else exists for the key to leak onto), and only
+  # the versions whose resolution of the child sits on the target line, read
+  # from the same `snapshots:` edges `declared_ranges --line` classifies with.
+  # A version whose child resolution cannot be read is kept — covering a copy
+  # twice is harmless, missing one is not. A parent with no qualifying
+  # version at all falls back to the bare key rather than writing nothing
+  # ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+  #
+  # pnpm only, deliberately: npm's nested `.overrides[$parent][$key]` matches
+  # transitively with its own semver rules, and a Yarn resolutions key narrows
+  # only through the parent's full resolved locator (`parent@npm:<v>/dep`) —
+  # a version-qualified form there parses and then silently never matches
+  # (see "An override's key is scoped" in scripts/CLAUDE.md). Neither gets a
+  # syntax guessed at here.
+  qualified_parent_versions='{}'
+  if [ "$loc" = "pnpm.overrides" ] \
+    && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
+    target_major=$(jq -rn --arg range "$range" \
+      "$SEMVER_JQ"'($range | range_floor_major) // empty')
+    all_versions=$(pnpm_rows | jq -Rs -c '
+      split("\n") | map(select(length > 0) | split("\t"))
+      | map({name: .[0], ver: .[1]})')
+    edges=$(pnpm_edge_rows "$pkg" | jq -Rs -c '
+      split("\n") | map(select(length > 0) | split("\t"))
+      | map({parent: .[0], pver: .[1], cver: .[2]})')
+    qualified_parent_versions=$(jq -nc \
+      --argjson vers "$all_versions" --argjson edges "$edges" \
+      --argjson parents "$parents_json" --arg target "$target_major" '
+      [ $parents[] | . as $p
+        | ([ $vers[] | select(.name == $p) | .ver ] | unique) as $pv
+        | select(($pv | length) > 1)
+        | { key: $p,
+            value: ([ $edges[]
+                      | select(.parent == $p and .pver != "-")
+                      | (.cver | ltrimstr("v") | split(".")[0]) as $m
+                      | (if ($m | test("^[0-9]+$")) then $m else null end) as $cm
+                      | select($target == "" or $cm == null or $cm == $target)
+                      | .pver ] | unique) }
+        | select((.value | length) > 0) ]
+      | from_entries')
+  fi
+
   set_indent_args
   tmp=$(mktemp)
 
@@ -1533,6 +1623,7 @@ verb_apply_constraint() {
       --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" \
       --argjson root_keys "$root_keys" --argjson keys_by_parent "$keys_by_parent" \
       --argjson parents "$parents_json" --argjson tighten "$tighten_bare" \
+      --argjson pverq "$qualified_parent_versions" \
       "$SEMVER_JQ$PINS_JQ"'
       # Create the override container only inside set_entry, so a direct
       # dependency update never leaves an empty "resolutions": {} (or
@@ -1608,9 +1699,21 @@ verb_apply_constraint() {
                          (if $key == $pkg then $range else alias_value end))
           end;
 
+      # pnpm keys carry the parent version whenever $pverq names versions for
+      # the parent — one key per version, so only the copies whose resolution
+      # of the child is on the target line are moved and the sibling lines
+      # keep their own copies (issue #100). $pverq is {} for npm and yarn:
+      # their narrowing syntaxes have different semantics and are not written
+      # here (see the comment where $pverq is computed).
       def put_scoped($parent; $key; $value):
         if   $loc == "pnpm.overrides" then
-          put_override($parent; $parent + ">" + $key; $value)
+          ($pverq[$parent] // []) as $qv
+          | if ($qv | length) > 0 then
+              reduce $qv[] as $v (.;
+                put_override($parent; $parent + "@" + $v + ">" + $key; $value))
+            else
+              put_override($parent; $parent + ">" + $key; $value)
+            end
         elif $loc == "resolutions" then
           put_override($parent; $parent + "/" + $key; $value)
         else
@@ -1923,10 +2026,17 @@ resolved_major_for_parent() {
 # entry whose key list contains it, so the rows are joined against a descriptor
 # -> version map built from the same file.
 #
-# pnpm has no rows here for the same reason `apply_constraint`'s `alias_lookup`
-# reports `unsupported` for it: its `snapshots:` blocks record what a dependency
-# resolved to, never the specifier it was declared with. A pnpm parent keeps the
-# installed-manifest path below rather than getting a guessed declaration.
+# pnpm has no DECLARED range in these rows, for the same reason
+# `apply_constraint`'s `alias_lookup` reports `unsupported` for it: its
+# `snapshots:` blocks record what a dependency resolved to, never the
+# specifier it was declared with. That is still true, and a pnpm parent keeps
+# the installed-manifest path for its range. What the snapshots do record —
+# per copy of the parent — is the child version that copy resolves, which is
+# exactly what `--line` classifies on. So pnpm's rows carry `parent_version`
+# and `resolved` with `range: null`: line membership is truthful even when no
+# installed manifest exists (the isolated store links only direct
+# dependencies into `node_modules`), and the range stays honestly unread
+# rather than guessed ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
 #
 # The parentheses around `.packages // {}` are load-bearing, not style. `as`
 # binds its whole right-hand side, so `A // B as $x | body` parses as
@@ -2050,10 +2160,21 @@ yarn_copy_rows() {
   awk "$YARN_COPY_AWK" yarn.lock | jq -Rs -c --arg pkg "$1" "$YARN_COPY_ROWS_JQ"
 }
 
+pnpm_copy_rows() {
+  pnpm_edge_rows "$1" | jq -Rs -c '
+    split("\n") | map(select(length > 0) | split("\t"))
+    | map({parent: .[0],
+           parent_version: (if .[1] == "-" then null else .[1] end),
+           range: null,
+           resolved: (if .[2] == "-" or (.[2] | test("^[0-9]") | not)
+                      then null else .[2] end)})'
+}
+
 parent_copy_rows() {
   case "$1" in
     npm)  npm_copy_rows "$2"  ;;
     yarn) yarn_copy_rows "$2" ;;
+    pnpm) pnpm_copy_rows "$2" ;;
     *)    printf '[]'         ;;
   esac
 }
@@ -2137,7 +2258,7 @@ verb_declared_ranges() {
     if [ "$copy_count" -gt 1 ] \
       || { [ "$copy_count" -ge 1 ] && [ ! -f "node_modules/$parent/package.json" ]; }; then
       row_read=""
-      row_no_range=""
+      row_unread=""
       while IFS="$tab" read -r copy_version copy_range copy_major; do
         [ -n "$copy_version$copy_range$copy_major" ] || continue
         if [ -n "$line" ] && [ -n "$copy_major" ] && [ "$copy_major" != "$line" ]; then
@@ -2158,7 +2279,15 @@ verb_declared_ranges() {
 "
           row_read=y
         else
-          row_no_range=y
+          # A row with no declared specifier is pnpm's: its snapshots record
+          # what resolved, never what was declared, so the copy's line above
+          # is truthful while its range is still a range nobody could read.
+          # The parent stays `parents_unreadable` rather than joining
+          # `parents_without_range`, which claims a read that never happened
+          # ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+          # npm and yarn rows always carry the declared specifier, so only
+          # pnpm reaches this branch.
+          row_unread=y
         fi
       done <<EOF
 $(printf '%s' "$parent_rows" | jq -r '
@@ -2171,10 +2300,8 @@ EOF
       if [ -n "$row_read" ]; then
         read_parents="$read_parents$parent
 "
-      elif [ -n "$row_no_range" ]; then
-        read_parents="$read_parents$parent
-"
-        no_range="$no_range$parent
+      elif [ -n "$row_unread" ]; then
+        unreadable="$unreadable$parent
 "
       fi
       continue
@@ -2190,11 +2317,28 @@ EOF
     # An undeterminable line keeps the parent, because the alternative is
     # dropping a range on a guess: over-reporting distance is the recoverable
     # direction, and every dropped range lowers a risk score silently.
-    if [ -n "$line" ] && parent_major=$(resolved_major_for_parent "$parent" "$pkg") \
-      && [ "$parent_major" != "$line" ]; then
-      other_lines="$other_lines$parent
+    #
+    # pnpm answers from its lockfile rows even here, where a manifest is on
+    # disk: the isolated store never nests the child under
+    # `node_modules/<parent>/`, so `resolved_major_for_parent`'s first probe
+    # always misses and its hoisted fallback describes the ROOT's copy, not
+    # this parent's. On the field run that attributed another parent's range
+    # to the queried line while the real on-line parent sat in
+    # `parents_unreadable` ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+    if [ -n "$line" ]; then
+      if [ "$pm" = "pnpm" ]; then
+        parent_major=$(printf '%s' "$parent_rows" | jq -r '
+          (first // {}) | ((.resolved // "") | ltrimstr("v") | split(".")[0]
+          | if type == "string" and test("^[0-9]+$") then . else empty end)')
+      else
+        parent_major=$(resolved_major_for_parent "$parent" "$pkg") \
+          || parent_major=""
+      fi
+      if [ -n "$parent_major" ] && [ "$parent_major" != "$line" ]; then
+        other_lines="$other_lines$parent
 "
-      continue
+        continue
+      fi
     fi
     manifest="node_modules/$parent/package.json"
     if [ ! -f "$manifest" ]; then
