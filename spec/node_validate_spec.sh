@@ -252,8 +252,8 @@ End
 # ---------------------------------------------------------------------------
 # --baseline: the cross-line collateral check (issue #83)
 #
-# The specimen is arsenalamerica/app at origin/main, trimmed: `minimatch@3.1.5`
-# declaring `brace-expansion: "npm:^1.1.7"` and `minimatch@10.2.5` declaring
+# The specimen is the field-test repository at origin/main, trimmed:
+# `minimatch@3.1.5` declaring `brace-expansion: "npm:^1.1.7"` and `minimatch@10.2.5` declaring
 # `"npm:^5.0.5"`, resolving to 1.1.18 and 5.0.6. The collapsed fixture is the
 # lockfile a real `yarn install` produced there after the resolutions key
 # `minimatch/brace-expansion` was written, which Yarn applies to every copy of

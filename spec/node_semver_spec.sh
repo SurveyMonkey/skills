@@ -253,9 +253,9 @@ End
 
 # --line, the F7 scoping fix (issue #76).
 #
-# The fixture is trimmed from arsenalamerica/app at the commit that opened its
-# PR #300: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously, five
-# parents declaring across all three lines, and a fix scoped to line 7 moving
+# The fixture is trimmed from the field-test repository at the commit that
+# opened its fix PR: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously,
+# five parents declaring across all three lines, and a fix scoped to line 7 moving
 # 7.28.0 -> 7.29.0. Collecting every declaration of the name regardless of
 # which copy the parent resolves to scored that minor bump as two major lines
 # crossed plus a crossed pin, on the strength of 5.x and 6.x parents a
@@ -308,8 +308,8 @@ Describe 'node.sh declared_ranges --line'
   # A parent in the tree at two versions is the shape the installed manifest
   # cannot describe: one file, one range, and `resolved_major_for_parent`
   # answering about the hoisted copy or (under PnP, and in the pre-install
-  # worktree a fix runs in) about nothing at all. On arsenalamerica/app the
-  # live run returned `parents_read: []`, `parents_unreadable: ["minimatch"]`
+  # worktree a fix runs in) about nothing at all. On the field-test repository
+  # the live run returned `parents_read: []`, `parents_unreadable: ["minimatch"]`
   # and no ranges, while the lockfile recorded both copies and both
   # declarations ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
   Describe 'a parent resolved at more than one version'

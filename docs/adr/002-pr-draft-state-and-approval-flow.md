@@ -89,7 +89,7 @@ another plugin, so the duplication is unavoidable; the expectation is that `gh:r
 eventually evolves toward the shape this RFC is driving.
 
 **Draft state is a checkpoint only where promotion and merge are distinct steps** (added during
-Phase 2, from field data). arsenalamerica/app#233 was opened as a draft by the v0.2.0 flow, had
+Phase 2, from field data). A field-test fix PR was opened as a draft by the v0.2.0 flow, had
 auto-merge enabled on it, and merged itself the moment checks went green; nobody read the diff
 between "promote" and "merged". Where auto-merge is armed on a PR, promoting *is* merging, the
 merge-risk rating calibrates nobody, and a batch promotion would merge N changes on one

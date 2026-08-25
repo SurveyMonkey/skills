@@ -3,7 +3,7 @@
 
 # The same tree after `apply_constraint brace-expansion '>=5.0.9 <6' minimatch`
 # and `install`, captured by running that install for real against
-# arsenalamerica/app at origin/main (issue #83). The resolutions key
+# the field-test repository at origin/main (issue #83). The resolutions key
 # `minimatch/brace-expansion` carries no version on its parent half, so Yarn
 # applied it to BOTH copies of minimatch: the two brace-expansion entries
 # collapsed into one, and `minimatch@npm:3.1.5` now resolves `brace-expansion`

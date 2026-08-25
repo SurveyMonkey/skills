@@ -8,11 +8,11 @@ Describe 'detect-scope.sh'
   # @-segment is the owner and the next non-@ segment is the repository.
   Describe 'path classification'
     Parameters
-      '/Code/@momentive_emu/@mntv-analysis/analysis-web'      repo mntv-analysis analysis-web
-      '/Code/@SurveyMonkey/skills'                            repo SurveyMonkey  skills
-      '/Code/@brianespinosa/career/src/components'            repo brianespinosa career
-      '/Code/@SurveyMonkey'                                   org  SurveyMonkey  null
-      '/Code/@momentive_emu/@mntv-analysis'                   org  mntv-analysis null
+      '/Code/@example-umbrella/@example-org/example-repo'     repo example-org   example-repo
+      '/Code/@SurveyMonkey/skills'                            repo SurveyMonkey   skills
+      '/Code/@example-owner/example-site/src/components'      repo example-owner  example-site
+      '/Code/@SurveyMonkey'                                   org  SurveyMonkey   null
+      '/Code/@example-umbrella/@example-org'                  org  example-org    null
     End
 
     It "maps $1"
@@ -372,8 +372,8 @@ Describe 'score-merge-risk.sh'
   # Fix worktrees live at `.claude/worktrees/<name>` inside the repository
   # being fixed (ADR 003), so a tree with one checked out held a second copy of
   # every source file. Counted, they inflate the usage surface and list the
-  # same module twice as uncovered; observed on tacoma.fyi, where two source
-  # files scored as eight affected modules.
+  # same module twice as uncovered; observed on a field-test repository, where
+  # two source files scored as eight affected modules.
   It 'does not count a nested fix worktree as more of the usage surface'
     use_fixture nested-worktree
     When call score direct false '[]' 1.0.0 1.0.1 '{f3: .factors[2].score, coverage}'
@@ -402,8 +402,8 @@ Describe 'score-merge-risk.sh'
 
   # A test that imports the *parent* says nothing about whether the transitive
   # package underneath it is exercised. Counting it switched the multi-major
-  # escalation off for exactly the shape it exists to catch: the bork#350 case
-  # came back Medium.
+  # escalation off for exactly the shape it exists to catch: the multi-major
+  # sweep case came back Medium.
   It 'does not let a test importing the parent cover the package surface'
     use_fixture parent-tested
     When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band}' scoped '^9'
@@ -461,8 +461,8 @@ Describe 'score-merge-risk.sh'
   End
 
   # F4 1 for a tree nothing imports the package from: no build script to fail,
-  # but a test script that would at least run. The bork#350 shape lands Medium
-  # here rather than High, because the escalation asks for F4 2.
+  # but a test script that would at least run. The multi-major sweep shape
+  # lands Medium here rather than High, because the escalation asks for F4 2.
   It 'leaves a multi-major jump at Medium when a test script is the only signal'
     use_fixture test-script-only
     When call score transitive false '["express"]' 9.0.1 11.1.1 '{f4: .factors[3].score, band, escalated}' scoped '^9'
@@ -585,11 +585,11 @@ Describe 'score-merge-risk.sh'
     End
   End
 
-  # tacoma.fyi#75, the regression issue #71 was filed for: a dev-only
-  # transitive pin under a build tool, nothing importing it, six checks green
-  # and one skipped for lack of a dev server. It rated High 7/14 and CI went
-  # green. Nothing about that repository is high risk, and the band has to say
-  # so without anyone running a check.
+  # The tooling-only field-test case, the regression issue #71 was filed for: a
+  # dev-only transitive pin under a build tool, nothing importing it, six
+  # checks green and one skipped for lack of a dev server. It rated High 7/14
+  # and CI went green. Nothing about that repository is high risk, and the band
+  # has to say so without anyone running a check.
   It 'does not rate a dev-only tooling pin as High'
     use_fixture tooling-only
     When call score transitive true '["astro"]' 1.3.0 1.4.2 '{score, band, escalated}'
@@ -1006,10 +1006,10 @@ STUB
   # under the old agent-supplied factors.
   Describe 'the sweep cases from issue #21'
     Parameters
-      # case       fixture           rel         before  after   scope   declared  was  expected
-      "bork#350"   no-scripts        transitive  9.0.1   11.1.1  scoped  '^9'      "High 7"    '{"score":6,"band":"High"}'
-      "gcal#63"    coverage-partial  transitive  9.0.1   11.1.1  scoped  '^9'      "Medium 5"  '{"score":6,"band":"Medium"}'
-      "bork#351"   coverage-partial  direct      2.4.2   3.0.6   none    ''        "Medium 6"  '{"score":6,"band":"Medium"}'
+      # case          fixture           rel         before  after   scope   declared  was  expected
+      "sweep case 1"  no-scripts        transitive  9.0.1   11.1.1  scoped  '^9'      "High 7"    '{"score":6,"band":"High"}'
+      "sweep case 2"  coverage-partial  transitive  9.0.1   11.1.1  scoped  '^9'      "Medium 5"  '{"score":6,"band":"Medium"}'
+      "sweep case 3"  coverage-partial  direct      2.4.2   3.0.6   none    ''        "Medium 6"  '{"score":6,"band":"Medium"}'
     End
 
     It "rescores $1 from $8"

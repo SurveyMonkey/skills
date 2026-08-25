@@ -39,7 +39,7 @@ comment acknowledged this gap and treated it as a transient one; it is not. It i
 having any phase after the PRs exist, because any such phase can be skipped by the session ending.
 
 **Draft-then-promote was itself the auto-merge exposure.** ADR 002's own field data:
-`arsenalamerica/app#233` opened as a draft, someone armed auto-merge on it while it sat, and the
+a field-test fix PR opened as a draft, someone armed auto-merge on it while it sat, and the
 skill's *promote* step marked it ready, which merged it unread the moment checks went green. ADR
 002 read that as a reason to confirm armed PRs one at a time. But the skill's own action was the
 last link in that chain, and the chain existed only because there was a promote step: this plugin

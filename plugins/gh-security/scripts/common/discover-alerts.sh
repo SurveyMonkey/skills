@@ -709,8 +709,8 @@ case "$SCOPE" in
         fi
         # No equivalent archived check belongs here: GitHub refuses Dependabot
         # alerts for archived repositories outright, verified live against
-        # arsenalamerica/source (the org's only archived repo) —
-        # `gh api repos/arsenalamerica/source/dependabot/alerts?state=open`
+        # an archived field-test repository —
+        # `gh api repos/<owner>/<archived-repo>/dependabot/alerts?state=open`
         # returns HTTP 403 "Dependabot alerts are not available for archived
         # repositories" — so the aggregate response can never name one
         # (issue #43).
