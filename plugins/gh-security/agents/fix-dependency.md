@@ -135,12 +135,28 @@ writing the PR prose. Do not reimplement what the scripts do.
   revert, checkout, stash, or clean them.** Attribution can be wrong and discards are
   unrecoverable; the user adjudicates and decides. Report what you found and, if you caused
   it, say exactly what you did.
-- **Adapter verbs are expected to terminate.** A verb that has not returned within a bounded
-  time is not still working; it has failed the phase that called it, and so has one that OOMs or
-  exits non-zero twice. Kill it and fail closed. Never background a hung verb, never attach a
+- **Run every adapter verb in the foreground with an explicit Bash timeout, never the tool's
+  default.** Pass `timeout: 600000` (10 minutes) on `install`, the only verb here that reaches a
+  registry or a package manager: a healthy install can run several minutes long (one field run's
+  four install cycles averaged roughly four minutes each, ~17 minutes total — see Phase 3), and
+  the Bash tool's 120-second default would fail it indistinguishably from a hang. Pass
+  `timeout: 120000` (2 minutes) on every other verb this flow calls — `why`, `resolved_versions`,
+  `declared_ranges`, `apply_constraint`, and `shim`, plus `validate`, which only reads the
+  installed lockfile and manifest and never installs — so two minutes is generous headroom, not a
+  guess. **Adapter verbs are expected to terminate.** A verb that has not returned within its
+  timeout is not still working; it has failed the phase that called it, and so has one that OOMs
+  or exits non-zero twice on the same inputs with no remediation in between. Neither loosens a
+  phase's own stop-on-first-failure instruction — the lockfile-parse stop (Phase 2) and the fatal
+  `other_line_moves` stop (Phase 4) still stop on the first failure — and neither authorizes any
+  retry beyond Phase 4's remediation ladder or the one sanctioned install retry on a registry
+  timeout, each of which follows an actual remediation step, never a bare repeat of the same
+  command. A verb that hit its timeout is presumed still running: kill it and fail closed. A verb
+  that already OOMed or exited non-zero is already dead; there is nothing left to kill, only the
+  failure to report. Never background a hung verb, never attach a
   monitor and wait for it to notify you, and never park the turn on output that may never
   arrive — each of those turns a bounded, reportable failure into an unbounded one that leaves
-  the process, the worktree, and the turn all still open. A field run backgrounded a hung `jq`
+  the process, the worktree, and the turn all still open. A field run against the npm + Lerna
+  monorepo backgrounded a hung `jq`
   this way and ended its turn saying it was waiting on the monitor, with the worktree, the
   branch, and the hung process all still live and no result block sent
   ([#122](https://github.com/SurveyMonkey/skills/issues/122)).

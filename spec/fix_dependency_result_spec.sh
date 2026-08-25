@@ -19,7 +19,7 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
 
-  # Two readers, as in spec/fix_dependency_branch_spec.sh: `rule_in` counts
+  # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts
   # lines and suits a prescribed command or a sentence that fits on one,
   # `phrase_in` flattens the file first and suits anything the 100-column
   # wrap may split. Phrases are distinctive fragments, not whole sentences,
@@ -37,6 +37,42 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
 
     It 'treats an unreturned or repeatedly-failing verb as a failed phase'
       When call phrase_in "$AGENT" 'is not still working; it has failed the phase'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'prescribes the 10-minute foreground timeout for install'
+      When call rule_in "$AGENT" 'timeout: 600000. (10 minutes) on .install.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'prescribes the 2-minute foreground timeout for the read-only verbs'
+      When call rule_in "$AGENT" 'timeout: 120000. (2 minutes) on every other verb'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'scopes the repeated-failure rule to no remediation in between attempts'
+      When call phrase_in "$AGENT" 'exits non-zero twice on the same inputs with no remediation in between'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says the failure rule never loosens a phase stop-on-first-failure instruction'
+      When call phrase_in "$AGENT" "phase's own stop-on-first-failure instruction"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'treats kill-it-and-fail-closed as applying only to a timed-out verb'
+      When call phrase_in "$AGENT" 'is presumed still running: kill it and fail closed'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says an already-OOMed or non-zero-exited verb is already dead'
+      When call phrase_in "$AGENT" 'is already dead; there is nothing left to kill'
       The status should be success
       The output should equal '1'
     End
