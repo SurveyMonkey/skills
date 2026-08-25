@@ -31,8 +31,11 @@ Your dispatch prompt provides everything; re-discover nothing:
 
 - `group` — one package major line from discovery: `package`, `ecosystem`, `major_line`,
   `max_severity`, `max_epss_percentile`, `alert_count`, `highest_fixed_version`, `branch_name`,
-  and `alerts[]` (`number`, `cve`, `ghsa`, `severity`, `summary`, `vulnerable_range`, `fixed_in`,
-  `epss_percentile`, `relationship`, `manifest`)
+  `alerts[]` (`number`, `cve`, `ghsa`, `severity`, `summary`, `vulnerable_range`, `fixed_in`,
+  `epss_percentile`, `relationship`, `manifest`), and `sibling_alerts[]` (`major`,
+  `vulnerable_ranges[]`: every other line of this package that carries open alerts, which phase 4
+  hands to validate; the field may be absent from a payload produced by older discovery, and
+  absence is handled there, never papered over)
 - `adapter_path` — the ecosystem adapter executable (`ADAPTER` below)
 - `nwo` — `owner/repo`
 - `default_branch` — the repository's default branch
@@ -339,7 +342,7 @@ what tells a bare override you *tightened* from one you *added*.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
-cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 2 resolved_versions JSON>' <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 2 resolved_versions JSON>' --sibling-alerts '<group sibling_alerts JSON>' <package> '>=<version> <<next_major>'
 ```
 
 Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
@@ -355,6 +358,13 @@ is truncated, or captured for a different package, is a hard error naming itself
 baseline nobody could read would report no collateral at all — the clean-looking answer produced by
 checking nothing. `--baseline` also requires `--line`.
 
+**`--sibling-alerts` is your group's `sibling_alerts` field, passed as compact JSON, single-quoted.**
+It is JSON from discovery and never contains a quote character. Pass it verbatim: `[]` is a real
+answer, asserting no other line of this package carries open alerts, and is passed as `[]`. When
+the field is absent from your group payload, omit the flag entirely; validate then classes every
+cross-line move fatal, which is the intended fail-safe default. Never build the list from your own
+reading of the alerts.
+
 `validate` answers three separate questions and fails if any of them does:
 
 - **Constraint**, in `violations[]`: copies **in your line** that do not satisfy the range. Copies
@@ -364,15 +374,24 @@ checking nothing. `--baseline` also requires `--line`.
   partial fix this check exists to catch. `checked` is how many copies were in your line; if
   `line_present` is false, nothing in your line is installed and you validated nothing.
 - **Collateral**, in `other_line_moves[]`: copies on the *other* major lines that the install
-  moved or removed. `null` means you passed no baseline and the question went unasked; `[]` means
-  it was asked and nothing moved. Never read `null` as `[]`.
+  moved or removed, each classed `"fatal"` or `"benign_dedup"`. `null` means you passed no
+  baseline and the question went unasked; `[]` means it was asked and nothing moved. Never read
+  `null` as `[]`.
 
-**A non-empty `other_line_moves` stops the run.** Do not commit, do not push, do not open a PR.
-Return `"status": "failure"` with `failure.phase` = `"validate"`, and quote the array verbatim in
-`detail` along with the entries `apply_constraint` wrote. This is a fail-closed condition and not a
-judgement call: the constraint and completeness checks are both scoped to `--line` and are
-structurally incapable of seeing an out-of-line copy, so `ok: true` from them is not evidence about
-any line but yours.
+**Any `other_line_moves` entry with `class: "fatal"` stops the run.** Do not commit, do not push,
+do not open a PR. Return `"status": "failure"` with `failure.phase` = `"validate"`, and quote the
+array verbatim in `detail` along with the entries `apply_constraint` wrote. This is a fail-closed
+condition and not a judgement call: the constraint and completeness checks are both scoped to
+`--line` and are structurally incapable of seeing an out-of-line copy, so `ok: true` from them is
+not evidence about any line but yours.
+
+**A result whose moves are all `benign_dedup` proceeds.** That class is the adapter's verdict, at
+the strictest policy, that the move is the package manager deduplicating a line the fix never
+touched onto a version that line already resolved: within its own major, one surviving version,
+already in the baseline and its max, on a line `--sibling-alerts` proves carries no open alerts
+(issue #105). You never make that judgement yourself; only the adapter's `class` field does, and
+only when you passed the flag. Each benign move still gets disclosed in the PR body's cross-line
+section (phase 6), never silently absorbed.
 
 What it means: your override reached a copy of the package under a parent on another major line.
 A live run wrote the Yarn resolutions key `minimatch/brace-expansion` for the 5.x group, and
@@ -714,16 +733,28 @@ EPSS percentile and merge risk are separate signals shown side by side: EPSS is 
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
 
 **Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
-`## Collateral` section placed immediately before `## Verification`.** Two situations reach it, and
-neither may be left to the reader to infer from a missing tick:
+`## Collateral` section placed immediately before `## Verification`.** Three situations reach it,
+and none may be left to the reader to infer from a missing tick:
 
 - **`null`** — no usable baseline existed, so the check was never run. Say that, and say the PR
   makes no claim about the other major lines. A verdict states what it covers; silence here reads
   as "clean".
-- **non-empty** — the install moved a copy on a line this group does not own. Phase 4 stops on
-  this, so a PR only exists if a human re-dispatched you with that move explicitly accepted. Name
-  who accepted it and why, and give the table below. Never write this section from your own
-  judgement that a move looks harmless.
+- **every entry `benign_dedup`** — the install deduplicated one or more untouched lines onto a
+  version each already resolved, and validate proved each moved line carries no open alerts. The
+  run proceeds (phase 4), and this section discloses each move as a small table, one row per
+  entry, followed by the sentence that each listed line carries no open Dependabot alerts:
+
+  > | Line | Before | After |
+  > |---|---|---|
+  > | 2.x | 2.3.1, 2.3.2 | 2.3.2 |
+  >
+  > These are within-major dedups by the package manager onto a version each line already
+  > resolved before this change, and none of these lines carries an open Dependabot alert.
+
+- **any entry `fatal`** — the install moved a copy on a line this group does not own. Phase 4
+  stops on this, so a PR only exists if a human re-dispatched you with that move explicitly
+  accepted. Name who accepted it and why, and give the table below. Never write this section from
+  your own judgement that a move looks harmless.
 
 > ## Collateral
 >
@@ -844,9 +875,11 @@ End your final message with exactly one fenced JSON block:
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can
   reach. Empty is the normal case; non-empty means alerts remain open after this PR merges, and
   the orchestrator reports it.
-- A non-empty `other_line_moves` never reaches a `success` result. It is a `failure` with
-  `failure.phase` = `"validate"`, whose `detail` quotes the array verbatim
-  ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+- An `other_line_moves` containing any `class: "fatal"` entry never reaches a `success` result.
+  It is a `failure` with `failure.phase` = `"validate"`, whose `detail` quotes the array verbatim
+  ([#83](https://github.com/SurveyMonkey/skills/issues/83)). Moves that are all `benign_dedup`
+  do reach `success`, disclosed in the PR body's Collateral section
+  ([#105](https://github.com/SurveyMonkey/skills/issues/105)).
 - `observations` is the adapter's `apply_constraint` observations array, passed through
   **verbatim** so the orchestrator can deduplicate across agents, plus **one entry of your own
   appended to it when, and only when, `bare_override` is `added`**:

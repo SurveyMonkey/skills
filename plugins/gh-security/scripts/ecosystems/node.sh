@@ -16,12 +16,17 @@
 #   apply_constraint <pkg> <range> [parent...] -> {mode, parents[], written[],
 #                                                  alias_lookup, observations[]}
 #   install                                    -> pass-through, exit code is the signal
-#   validate [--line <major>] [--vulnerable <range>]... [--baseline <json>] <pkg> <range>
+#   validate [--line <major>] [--vulnerable <range>]... [--baseline <json>]
+#            [--sibling-alerts <json>] <pkg> <range>
 #                                              -> {ok, line_present, checked,
 #                                                  violations[],
 #                                                  unresolved_alerts[],
-#                                                  requires_major_bump[]}
-#                                                 (--line requires --vulnerable)
+#                                                  requires_major_bump[],
+#                                                  other_line_moves[]}
+#                                                 (--line requires --vulnerable;
+#                                                  --baseline requires --line;
+#                                                  --sibling-alerts requires
+#                                                  --baseline)
 #   compare_versions <a> <b>                   -> {result, delta, major_distance}
 #   range_facts <range> <version>              -> {parseable, satisfied, pinned,
 #                                                  floor_major, majors_ahead}
@@ -127,6 +132,14 @@ def major_distance($a; $b):
   (($a | semver_parse).core[0] // 0) as $ma
   | (($b | semver_parse).core[0] // 0) as $mb
   | if $ma > $mb then $ma - $mb else $mb - $ma end;
+
+# The semver-largest element of an array of version strings, or null for [].
+# Ranking goes through semver_cmp, never lexicographic ordering: "2.3.10"
+# sorts below "2.3.2" as a string and above it as a version, and the callers
+# below use the answer to decide whether a dedup landed on a baseline max.
+def semver_max:
+  reduce .[] as $v (null;
+    if . == null or semver_cmp($v; .) > 0 then $v else . end);
 
 def semver_delta($a; $b):
   ($a | semver_parse) as $pa | ($b | semver_parse) as $pb
@@ -1436,7 +1449,7 @@ verb_why() {
 # validate — composes resolved_versions and applies the constraint
 #
 # Usage: validate [--line <major>] [--vulnerable <range>]... [--baseline <json>]
-#                 <pkg> <constraint>
+#                 [--sibling-alerts <json>] <pkg> <constraint>
 #
 # Three independent questions, because passing one is not passing the others
 # (issues #19 and #83):
@@ -1479,6 +1492,29 @@ verb_why() {
 # the first time after the install is the install adding a copy, not this fix
 # moving one, and reporting it would fire on every legitimate new resolution.
 #
+# Every entry in `other_line_moves` carries a `class`: `"fatal"`, or
+# `"benign_dedup"` for the one provably-benign shape the fail-close rule kept
+# stopping (issue #105): the package manager deduplicating an untouched line
+# onto a version it already resolved. On a live pnpm run, fixing picomatch 4.x
+# consolidated the untouched 2.x line from ["2.3.1","2.3.2"] to ["2.3.2"] and
+# the non-empty report fail-closed a correct fix, while the same rule caught
+# three real cross-major hazards in the same run, so the rule itself stays. A
+# move is `benign_dedup` only when ALL of these hold: the line moved but did
+# not vanish; exactly one version remains; that version was already in the
+# baseline for that line AND is the semver max of that baseline set; the
+# line's major is not any sibling-alert major; no version on either side of
+# the move satisfies any sibling vulnerable range; and the caller supplied
+# `--sibling-alerts`. Everything else is `fatal`, exactly as before.
+#
+# `--sibling-alerts` takes ONE JSON array of `{major, vulnerable_ranges[]}`
+# objects, each an other line of this package that carries open alerts, from
+# discovery's `sibling_alerts` field. A single array argument rather than a
+# repeatable flag, because "known and empty" must be expressible: `[]` asserts
+# no other line of this package carries open alerts. `major` may be null (a
+# "none"-line sibling: its ranges are still checked, its major matches
+# nothing). **No flag means no knowledge, and every move stays fatal**: the
+# carve-out reclassifies nothing by default, which is the fail-safe direction.
+#
 # A still-vulnerable copy *below* the target line is separated out as
 # `requires_major_bump`: no advisory in this group offers a fix within that
 # copy's major, so no scoped override bounded to it can help. The remediation is
@@ -1510,6 +1546,7 @@ verb_validate() {
   line=""
   vuln_ranges=""
   baseline=""
+  sibling_alerts=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --line)
@@ -1518,6 +1555,10 @@ verb_validate() {
         ;;
       --baseline)
         baseline="${2:?--baseline requires the pre-fix resolved_versions JSON}"
+        shift 2
+        ;;
+      --sibling-alerts)
+        sibling_alerts="${2:?--sibling-alerts requires a JSON array of sibling-alert objects}"
         shift 2
         ;;
       --vulnerable)
@@ -1548,6 +1589,10 @@ verb_validate() {
     die "validate: --baseline requires --line. A cross-line move is defined against the line this group owns; with no line to exclude, every move looks like collateral (issue #83)."
   fi
 
+  if [ -n "$sibling_alerts" ] && [ -z "$baseline" ]; then
+    die "validate: --sibling-alerts requires --baseline. Sibling-alert knowledge only reclassifies moves the baseline comparison found; with no baseline there are no moves to classify (issue #105)."
+  fi
+
   # The baseline is checked against the shape `resolved_versions` promises, and
   # for the package actually being validated. `[]` is a legitimate `.versions`
   # (a package absent before the fix), so emptiness is not the test: presence
@@ -1573,8 +1618,11 @@ verb_validate() {
   # which stays false-on-garbage: on the constraint side an unreadable range
   # failing every copy is the safe answer, and here it is the dangerous one.
   # A range is valid when every ||-alternative is non-empty and each of its
-  # comparators is a known operator applied to a parseable version.
-  bad_range=$(printf '%s' "$vuln_json" | jq -r '
+  # comparators is a known operator applied to a parseable version. The same
+  # defs check the sibling-alert ranges below, and for the same reason.
+  # No jq variables in here, and not only for SC2016: the defs stay
+  # behaviorally identical to the `$alts` form they were factored from.
+  strict_range_defs='
     def token_ok:
       sub("^(>=|<=|>|<|=)"; "") | sub("^[~^]"; "")
       | test("^[v=]*[0-9]+(\\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$");
@@ -1585,15 +1633,46 @@ verb_validate() {
       | map([splits("[[:space:],]+")] | map(select(length > 0)));
 
     def range_ok:
-      alternatives as $alts
-      | (($alts | length) > 0)
-        and ($alts | all(length > 0))
-        and ($alts | all(.[][]; token_ok));
+      alternatives
+      | (length > 0)
+        and all(.[]; length > 0)
+        and all(.[][]; token_ok);'
 
+  bad_range=$(printf '%s' "$vuln_json" | jq -r "$strict_range_defs"'
     [ .[] | select(range_ok | not) ] | first // empty')
 
   if [ -n "$bad_range" ]; then
     die "validate: --vulnerable range '$bad_range' is not a parseable version range. Copy the alert's vulnerable_range verbatim; an unreadable range would silently mark every resolved copy as not vulnerable."
+  fi
+
+  # The sibling-alert list gets the same treatment as --baseline: a promised
+  # field arrives present and correctly typed, or it is a hard error. `[]` is
+  # the legitimate "known and empty" assertion (no other line of this package
+  # carries open alerts), which is why the flag takes one JSON array rather
+  # than repeating: absence of the flag and emptiness of the list must stay
+  # distinguishable (issue #105). Sibling ranges pass the same strict parse as
+  # --vulnerable, because an unreadable range answering "not vulnerable" is
+  # the one direction the benign carve-out must never fail.
+  siblings_json=null
+  if [ -n "$sibling_alerts" ]; then
+    siblings_json=$(printf '%s' "$sibling_alerts" | jq -c '
+      select(type == "array"
+             and all(.[]; type == "object"
+                     and has("major")
+                     and (((.major | type) == "number")
+                          or ((.major | type) == "null"))
+                     and has("vulnerable_ranges")
+                     and (.vulnerable_ranges | type) == "array"
+                     and all(.vulnerable_ranges[]; type == "string")))' 2>/dev/null) \
+      || siblings_json=""
+    if [ -z "$siblings_json" ]; then
+      die "validate: --sibling-alerts is not a usable sibling-alert list. Pass one JSON array of {major, vulnerable_ranges[]} objects, major a number or null for a line with no usable major, from the group's sibling_alerts field. A list nobody could read must be an error, never a silent reclassification either way (issue #105)."
+    fi
+    bad_sibling=$(printf '%s' "$siblings_json" | jq -r "$strict_range_defs"'
+      [ .[].vulnerable_ranges[] | select(range_ok | not) ] | first // empty')
+    if [ -n "$bad_sibling" ]; then
+      die "validate: --sibling-alerts range '$bad_sibling' is not a parseable version range. Copy each sibling alert's vulnerable_range verbatim; an unreadable range would silently mark a moved version as not vulnerable, which is the direction the benign carve-out must never fail (issue #105)."
+    fi
   fi
 
   resolved=$(verb_resolved_versions "$pkg")
@@ -1603,7 +1682,7 @@ verb_validate() {
 
   result=$(printf '%s' "$resolved" \
     | jq --arg range "$range" --arg line "$line" --argjson vulnerable "$vuln_json" \
-      --argjson baseline "$baseline_json" \
+      --argjson baseline "$baseline_json" --argjson siblings "$siblings_json" \
       "$SEMVER_JQ"'
     def major_of: semver_parse | (.core[0] // 0);
 
@@ -1633,12 +1712,34 @@ verb_validate() {
                  after: ([ $r.versions[]
                            | select((.version | major_of) == $m) | .version ] | unique)}
               | select(.before != .after)
-              | . + {status: (if (.after | length) == 0 then "vanished" else "moved" end)} ]
+              | . + {status: (if (.after | length) == 0 then "vanished" else "moved" end)}
+              # Classification at the strictest policy (issue #105). Benign
+              # only when every conjunct holds; the first that fails makes the
+              # move fatal, and no --sibling-alerts makes every move fatal:
+              # the carve-out never applies by default. The max comparison
+              # goes through semver_max, never string ordering.
+              | . + {class:
+                  (. as $mv
+                   | if   $siblings == null                       then "fatal"
+                     elif $mv.status != "moved"                   then "fatal"
+                     elif ($mv.after | length) != 1               then "fatal"
+                     elif (any($mv.before[]; . == $mv.after[0]) | not)
+                                                                  then "fatal"
+                     elif $mv.after[0] != ($mv.before | semver_max)
+                                                                  then "fatal"
+                     elif any($siblings[]; .major == $mv.major)   then "fatal"
+                     elif any(($mv.before + $mv.after)[];
+                              . as $v
+                              | any($siblings[];
+                                    any(.vulnerable_ranges[];
+                                        satisfies($v; .))))       then "fatal"
+                     else "benign_dedup" end)} ]
        end) as $other_moves
     | {ok: (($bad | length) == 0
             and ($unresolved | length) == 0
             and ($lineno == null or ($inline | length) > 0)
-            and ($other_moves == null or ($other_moves | length) == 0)),
+            and ($other_moves == null
+                 or all($other_moves[]; .class != "fatal"))),
        package: $r.package, range: $range,
        line: (if $line == "" then null else $line end),
        line_present: ($lineno == null or ($inline | length) > 0),

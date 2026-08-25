@@ -91,6 +91,63 @@ Describe 'discover-alerts.sh'
     The output should equal '[41,60,93,145,148,151,152]'
   End
 
+  # `sibling_alerts` is what the fix agent hands validate --sibling-alerts:
+  # every OTHER line of the same package with its open alerts' unique ranges,
+  # so a within-major dedup move can be classed benign only when the moved
+  # line provably carries no open alerts (issue #105). Both directions of the
+  # two-line package are asserted, and [] is the positive claim a single-group
+  # package makes: no other line of it has open alerts.
+  Describe 'sibling alerts per group'
+    Parameters
+      undici-7x '[.actionable[] | select(.package == "undici" and .major_line == "7") | .sibling_alerts]' '[[{"major":6,"vulnerable_ranges":["< 6.24.0","< 6.28.0"]}]]'
+      undici-6x '[.actionable[] | select(.package == "undici" and .major_line == "6") | .sibling_alerts]' '[[{"major":7,"vulnerable_ranges":[">= 7.0.0, < 7.29.0"]}]]'
+      lodash-4x '[.actionable[] | select(.package == "lodash") | .sibling_alerts]' '[[]]'
+    End
+
+    It "names every other line of the package for $1"
+      When call discover "$2"
+      The status should be success
+      The output should equal "$3"
+    End
+  End
+
+  # A skipped group is still a line of its package: it carries the field too,
+  # because a no-fix-available line still holds open alerts that a sibling's
+  # dedup classification has to know about.
+  It 'gives skipped groups the field as well'
+    When call discover '[.skipped[] | select(.package == "left-pad") | .sibling_alerts]'
+    The status should be success
+    The output should equal '[[]]'
+  End
+
+  # The routing-independence half of the rule: a package with a fixable line
+  # AND a no-fix line. The skipped "none" group still surfaces in the fixable
+  # line's siblings, as major: null with its range intact, because pnpm dedups
+  # a line whether or not a fix for it exists.
+  It 'includes a no-fix sibling line as major null'
+    jq -n '[[
+      {number: 1,
+       dependency: {package: {ecosystem: "npm", name: "undici"},
+                    manifest_path: "package.json", relationship: "transitive"},
+       security_advisory: {ghsa_id: "GHSA-undici-a", cve_id: "CVE-2000-0001",
+                           severity: "high", summary: "s",
+                           epss: {percentile: 0.1}},
+       security_vulnerability: {vulnerable_version_range: "< 7.29.0",
+                                first_patched_version: {identifier: "7.29.0"}}},
+      {number: 2,
+       dependency: {package: {ecosystem: "npm", name: "undici"},
+                    manifest_path: "package.json", relationship: "transitive"},
+       security_advisory: {ghsa_id: "GHSA-undici-b", cve_id: "CVE-2000-0002",
+                           severity: "low", summary: "s",
+                           epss: {percentile: 0.1}},
+       security_vulnerability: {vulnerable_version_range: "<= 5.28.0",
+                                first_patched_version: null}}
+    ]]' > "$MOCK_DIR/alerts.json"
+    When call discover '{a: [.actionable[].sibling_alerts], s: [.skipped[].sibling_alerts]}'
+    The status should be success
+    The output should equal '{"a":[[{"major":null,"vulnerable_ranges":["<= 5.28.0"]}]],"s":[[{"major":7,"vulnerable_ranges":["< 7.29.0"]}]]}'
+  End
+
   # Every group now carries its own `repo`, the field cross-repo scopes key on
   # (issue #6). Repo scope pins it to the target passed on the command line.
   It 'tags every group with the repo scope target'

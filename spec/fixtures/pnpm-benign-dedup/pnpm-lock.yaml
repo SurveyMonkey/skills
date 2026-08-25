@@ -1,0 +1,65 @@
+# Trimmed from the picomatch field shape behind issue #105 (the field-test repo,
+# pnpm 10, isolated store, no node_modules committed), public
+# names only: the POST-fix tree of a picomatch 4.x fix. The direct 4.x copy
+# moved to 4.0.3 as intended, and pnpm's dedup consolidated the UNTOUCHED 2.x
+# line from ["2.3.1","2.3.2"] to ["2.3.2"] on its own, with zero overrides
+# touching that line: anymatch already resolved 2.3.2 and readdirp's 2.3.1
+# copy was folded into it. The pre-fix baseline the specs pass is
+# ["2.3.1","2.3.2","4.0.1"].
+#
+# This is the one provably-benign move shape: within-major, one surviving
+# version, already in the baseline for its line, and the baseline max.
+
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      anymatch:
+        specifier: ^3.1.3
+        version: 3.1.3
+      picomatch:
+        specifier: ^4.0.3
+        version: 4.0.3
+      readdirp:
+        specifier: ^3.6.0
+        version: 3.6.0
+
+packages:
+
+  anymatch@3.1.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  normalize-path@3.0.0:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  picomatch@2.3.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+  picomatch@4.0.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000DDD==}
+
+  readdirp@3.6.0:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000EEE==}
+
+snapshots:
+
+  anymatch@3.1.3:
+    dependencies:
+      normalize-path: 3.0.0
+      picomatch: 2.3.2
+
+  normalize-path@3.0.0: {}
+
+  picomatch@2.3.2: {}
+
+  picomatch@4.0.3: {}
+
+  readdirp@3.6.0:
+    dependencies:
+      picomatch: 2.3.2
