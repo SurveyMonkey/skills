@@ -31,7 +31,6 @@ request, open for review, that carries a computed merge-risk rating.
 | `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents from a rolling pool and reports the pull requests they open. |
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
 | `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. |
-| `/gh-security:fix-alert` | Command (deprecated) | Shim that fixes only the single top-ranked alert group, then offers the next batch. Use `resolve-alerts` instead. |
 
 The parallel work is done by two subagents, dispatched by the orchestrator rather than invoked
 directly:

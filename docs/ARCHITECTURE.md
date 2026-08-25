@@ -26,7 +26,7 @@ plugins/
       plugin.json   # the plugin's identity and version; the whole release is bumping it
     skills/         # orchestrators that run in the main session
     agents/         # subagents dispatched in parallel; each declares its model in frontmatter
-    commands/       # explicit entry points and deprecation shims
+    commands/       # explicit entry points
     scripts/
       common/       # ecosystem-agnostic: scope, discovery, adapter routing, risk scoring,
                     # capacity detection, PR state, advisory lookup
