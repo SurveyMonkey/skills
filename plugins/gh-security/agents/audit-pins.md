@@ -1046,8 +1046,7 @@ esac
 
 Run only the one line matching this PR's band; the other two are listed for reference. **Creating
 a label is a deliberate write of repo metadata beyond the PR itself**, the same trade this flow
-already makes for `security`. If `gh pr create` below then fails because the merge-risk label is
-still missing, create it and retry `gh pr create` once. **A `gh label create` that fails because
+already makes for `security`. **A `gh label create` that fails because
 the label now exists is success, not an error**: a sibling fix-dependency run in the same batch can
 race to create the same band label, and the loser's "already exists" failure means the label is
 there, which is what it wanted; only a failure for some other reason is a failure result
