@@ -1003,7 +1003,7 @@ Then create the PR. The `gh` calls carry `--repo`, so they are location-independ
 ```bash
 gh label list --repo <nwo> --json name --jq '.[].name'
 gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
-gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security \
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security [--label merge-risk:<band>] \
   --title "..." --body "..."
 ```
 
@@ -1012,6 +1012,29 @@ Label names are case-insensitive for uniqueness and case-preserving, so passing 
 `|| true` absorbs the duplicate report and leaves the existing label untouched. Collect any
 additional labels every CLAUDE.md in your context requires and pass each via its own `--label`;
 labels are additive and no source overrides another.
+
+**Add `merge-risk:<band>` only when `pr.risk.band` is non-null.** A null band means an empty
+delta — nothing scored, because every removed package either left the tree entirely or resolved to
+the same version either way — and gets no risk label at all, never a fake one; the PR carries only
+`security` in that case. When `pr.risk.band` is set, lowercase it verbatim for the label name
+(`merge-risk:low`, `merge-risk:medium`, or `merge-risk:high` — never a bare `risk:<band>`, which
+would read as alert severity rather than merge risk), with the same closed-set colors
+`fix-dependency.md` uses (`#2da44e` low, `#d4a72c` medium, `#cf222e` high). Create it the same way
+as `security`, before `gh pr create`, running only the one line for this PR's band:
+
+```bash
+gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>/dev/null || true
+gh label create merge-risk:medium --repo <nwo> --color d4a72c --description "Medium merge risk" 2>/dev/null || true
+gh label create merge-risk:high --repo <nwo> --color cf222e --description "High merge risk" 2>/dev/null || true
+```
+
+**Creating a label is a deliberate write of repo metadata beyond the PR itself**, the same trade
+this flow already makes for `security`. If `gh pr create` then fails because the merge-risk label
+is still missing, create it and retry `gh pr create` once. **A `gh label create` that fails because
+the label now exists is success, not an error**: a sibling fix-dependency run in the same batch can
+race to create the same band label, and the loser's "already exists" failure means the label is
+there, which is what it wanted; only a failure for some other reason is a failure result
+(phase `pr`).
 
 That `|| true` swallows every failure, not only the duplicate, so **if `gh pr create` then fails on
 an unknown label, suspect the creation rather than the name**: a token that can open a PR but

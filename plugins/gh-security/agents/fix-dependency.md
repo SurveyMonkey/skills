@@ -689,9 +689,37 @@ issue coming back tagged `Security` (original casing preserved). So passing lowe
 below is safe whether the repository's label is already `security` or still the older `Security`;
 no name lookup or casing fallback is needed.
 
+**This PR also carries the merge-risk band phase 5 already computed**, one label named
+`merge-risk:<band>` with `<band>` the scorer's `band` field verbatim, lowercased — never a bare
+`risk:<band>`, which would read as alert severity rather than merge risk. The three bands are a
+closed set, each with its own color:
+
+| Label | Color |
+|---|---|
+| `merge-risk:low` | `#2da44e` |
+| `merge-risk:medium` | `#d4a72c` |
+| `merge-risk:high` | `#cf222e` |
+
+Create the one this PR's band needs the same way as `security`:
+
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --label security [--label ...] \
-  --title "..." --body "..."
+gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>/dev/null || true
+gh label create merge-risk:medium --repo <nwo> --color d4a72c --description "Medium merge risk" 2>/dev/null || true
+gh label create merge-risk:high --repo <nwo> --color cf222e --description "High merge risk" 2>/dev/null || true
+```
+
+Run only the one line matching this PR's band; the other two are listed for reference. **Creating
+a label is a deliberate write of repo metadata beyond the PR itself**, the same trade this flow
+already makes for `security`. If `gh pr create` below then fails because the merge-risk label is
+still missing, create it and retry `gh pr create` once — the same recovery this file already
+expects for `security`. **A `gh label create` that fails because the label now exists is success,
+not an error**: sibling agents fixing other packages in the same batch race to create the same
+band label, and the loser's "already exists" failure means the label is there, which is what it
+wanted; only a failure for some other reason is a failure result (phase `pr`).
+
+```bash
+gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band> \
+  [--label ...] --title "..." --body "..."
 ```
 
 PR body:

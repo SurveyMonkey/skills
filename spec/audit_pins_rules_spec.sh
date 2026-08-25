@@ -337,7 +337,7 @@ Describe 'the rules that gate the removal PR'
     End
 
     It 'still creates the PR, so the absence above is about the flag'
-      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security'
+      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band>'
       The status should be success
       The output should equal '1'
     End
