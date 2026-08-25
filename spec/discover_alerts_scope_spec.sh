@@ -108,6 +108,36 @@ Describe 'discover-alerts.sh --scope'
     ]]' > "$MOCK_DIR/org-alerts.json"
   }
 
+  # Same package name, two different repos, each with its own set of major
+  # lines: octo/app carries picomatch at 2.x and 4.x, octo/other carries only
+  # picomatch at 3.x. `sibling_alerts` is scoped "every OTHER group of the
+  # same package in the same repo" (discover-alerts.sh's own contract
+  # comment) — this is the fixture that would catch a grouping keyed on
+  # package name alone, which would leak octo/other's 3.x alert into
+  # octo/app's sibling_alerts and vice versa.
+  write_org_agg_same_package_cross_repo() {
+    jq -n '[[
+      {
+        number: 1, repository: {full_name: "octo/app"},
+        dependency: {package: {ecosystem: "npm", name: "picomatch"}, manifest_path: "package.json", relationship: "direct"},
+        security_advisory: {ghsa_id: "GHSA-picomatch-2", cve_id: "CVE-2000-0010", severity: "low", summary: "s", epss: {percentile: 0.1}},
+        security_vulnerability: {vulnerable_version_range: "< 2.3.3", first_patched_version: {identifier: "2.3.3"}}
+      },
+      {
+        number: 2, repository: {full_name: "octo/app"},
+        dependency: {package: {ecosystem: "npm", name: "picomatch"}, manifest_path: "package.json", relationship: "direct"},
+        security_advisory: {ghsa_id: "GHSA-picomatch-4", cve_id: "CVE-2000-0011", severity: "medium", summary: "s", epss: {percentile: 0.2}},
+        security_vulnerability: {vulnerable_version_range: "< 4.0.3", first_patched_version: {identifier: "4.0.3"}}
+      },
+      {
+        number: 3, repository: {full_name: "octo/other"},
+        dependency: {package: {ecosystem: "npm", name: "picomatch"}, manifest_path: "package.json", relationship: "direct"},
+        security_advisory: {ghsa_id: "GHSA-picomatch-3", cve_id: "CVE-2000-0012", severity: "high", summary: "s", epss: {percentile: 0.3}},
+        security_vulnerability: {vulnerable_version_range: "< 3.0.0", first_patched_version: {identifier: "3.0.0"}}
+      }
+    ]]' > "$MOCK_DIR/org-alerts.json"
+  }
+
   # Repo listing response for an org- or user-repos call, in the same
   # page-array shape. Each remaining argument is "<full_name>:<push>:<fork>:<archived>".
   write_repo_listing() {
@@ -339,6 +369,19 @@ Describe 'discover-alerts.sh --scope'
       When call common_jq discover-alerts.sh '[.skipped[] | {repo, package, reason}] | sort_by(.repo)' --scope org octo
       The status should be success
       The output should equal '[{"repo":"octo/app","package":"left-pad","reason":"no fix available"},{"repo":"octo/other","package":"request","reason":"no fix available"}]'
+    End
+
+    # sibling_alerts is per-repo knowledge (issue #105): a repo whose only
+    # line of a package carries no other open line must report `[]`, never a
+    # same-named line discovered in a different repo.
+    It 'does not cross-pollinate sibling_alerts between repos sharing a package name'
+      write_org_agg_same_package_cross_repo
+
+      When call common_jq discover-alerts.sh \
+        '[.actionable[] | {repo, major_line, sibling_alerts}] | sort_by([.repo, .major_line])' \
+        --scope org octo
+      The status should be success
+      The output should equal '[{"repo":"octo/app","major_line":"2","sibling_alerts":[{"major":4,"vulnerable_ranges":["< 4.0.3"]}]},{"repo":"octo/app","major_line":"4","sibling_alerts":[{"major":2,"vulnerable_ranges":["< 2.3.3"]}]},{"repo":"octo/other","major_line":"3","sibling_alerts":[]}]'
     End
 
     It 'ranks the combined groups by severity then EPSS across repos'

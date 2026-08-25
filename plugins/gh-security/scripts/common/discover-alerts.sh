@@ -43,8 +43,18 @@
 #   { repo, package, ecosystem, major_line, max_severity, max_epss_percentile,
 #     alert_count, highest_fixed_version, branch_name, alerts: [{ number, cve,
 #     ghsa, severity, summary, vulnerable_range, fixed_in, epss_percentile,
-#     relationship, manifest }] }
+#     relationship, manifest }],
+#     sibling_alerts: [{ major, vulnerable_ranges[] }] }
 # Skipped groups also include: { reason, open_pr_url?, error? }
+#
+# `sibling_alerts` describes every OTHER group of the same package in the same
+# repo, skipped groups included (a no-fix-available line still carries open
+# alerts): its major as a number, or null for a "none" line, and the unique
+# vulnerable ranges of its alerts. It is what the fix agent hands the
+# adapter's `validate --sibling-alerts`, which classifies a within-major dedup
+# move as benign only when the moved line provably carries no open alerts
+# (issue #105). `[]` is a positive claim: no other line of this package has
+# open alerts.
 #
 # One group per package *major line*, not per package. A package resolved at
 # several majors at once (undici at 5.x, 6.x and 7.x is the case that exposed
@@ -335,6 +345,22 @@ group_repo_alerts() {
        | from_entries) as $newest |
       map(. + {is_newest_line: (.major_line != "none"
                                 and $newest[.package] == (.major_line | tonumber))}) |
+      # Every OTHER group of the same package in this repo, alerts and all,
+      # built before any routing so lines later skipped still count: a
+      # no-fix-available line still carries open alerts. A "none" line
+      # contributes major: null; its ranges stay checkable. This is the whole
+      # sibling knowledge validate --sibling-alerts needs, and [] genuinely
+      # means "no other line of this package has open alerts" (issue #105).
+      . as $all |
+      map(. as $g
+          | . + {sibling_alerts:
+              [ $all[]
+                | select(.package == $g.package
+                         and .major_line != $g.major_line)
+                | {major: (if .major_line == "none" then null
+                           else (.major_line | tonumber) end),
+                   vulnerable_ranges:
+                     ([.alerts[].vulnerable_range] | unique)} ]}) |
       # Package and line break ties so two lines of the same package always
       # come out in a stable order.
       sort_by([(.max_severity | sev_rank), -(.max_epss_percentile),

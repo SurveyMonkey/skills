@@ -221,7 +221,9 @@ fails open. `other_line_moves` is `null` when no baseline was passed and `[]` wh
 nothing moved — the same "not checked" versus "checked and clean" distinction the audit draws with
 `collateral_changes: null`, and for the same reason. Only majors **present in the baseline** are
 compared; a major that first appears after the install is the install adding a copy, not this fix
-moving one.
+moving one. Each entry also carries a `class`, `"fatal"` or `"benign_dedup"` (with
+`--sibling-alerts`, a within-major dedup no sibling alert can reach); `validate`'s own `ok` keys on
+whether any entry's `class` is `"fatal"`, not on the array being non-empty.
 
 The parent list is the second route to the same damage. `why` has no `--line` and answers about
 the package as a whole, so `agents/fix-dependency.md` narrows to `declared_ranges --line`'s

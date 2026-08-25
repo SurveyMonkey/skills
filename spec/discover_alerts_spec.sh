@@ -91,6 +91,63 @@ Describe 'discover-alerts.sh'
     The output should equal '[41,60,93,145,148,151,152]'
   End
 
+  # `sibling_alerts` is what the fix agent hands validate --sibling-alerts:
+  # every OTHER line of the same package with its open alerts' unique ranges,
+  # so a within-major dedup move can be classed benign only when the moved
+  # line provably carries no open alerts (issue #105). Both directions of the
+  # two-line package are asserted, and [] is the positive claim a single-group
+  # package makes: no other line of it has open alerts.
+  Describe 'sibling alerts per group'
+    Parameters
+      undici-7x '[.actionable[] | select(.package == "undici" and .major_line == "7") | .sibling_alerts]' '[[{"major":6,"vulnerable_ranges":["< 6.24.0","< 6.28.0"]}]]'
+      undici-6x '[.actionable[] | select(.package == "undici" and .major_line == "6") | .sibling_alerts]' '[[{"major":7,"vulnerable_ranges":[">= 7.0.0, < 7.29.0"]}]]'
+      lodash-4x '[.actionable[] | select(.package == "lodash") | .sibling_alerts]' '[[]]'
+    End
+
+    It "names every other line of the package for $1"
+      When call discover "$2"
+      The status should be success
+      The output should equal "$3"
+    End
+  End
+
+  # A skipped group is still a line of its package: it carries the field too,
+  # because a no-fix-available line still holds open alerts that a sibling's
+  # dedup classification has to know about.
+  It 'gives skipped groups the field as well'
+    When call discover '[.skipped[] | select(.package == "left-pad") | .sibling_alerts]'
+    The status should be success
+    The output should equal '[[]]'
+  End
+
+  # The routing-independence half of the rule: a package with a fixable line
+  # AND a no-fix line. The skipped "none" group still surfaces in the fixable
+  # line's siblings, as major: null with its range intact, because pnpm dedups
+  # a line whether or not a fix for it exists.
+  It 'includes a no-fix sibling line as major null'
+    jq -n '[[
+      {number: 1,
+       dependency: {package: {ecosystem: "npm", name: "undici"},
+                    manifest_path: "package.json", relationship: "transitive"},
+       security_advisory: {ghsa_id: "GHSA-undici-a", cve_id: "CVE-2000-0001",
+                           severity: "high", summary: "s",
+                           epss: {percentile: 0.1}},
+       security_vulnerability: {vulnerable_version_range: "< 7.29.0",
+                                first_patched_version: {identifier: "7.29.0"}}},
+      {number: 2,
+       dependency: {package: {ecosystem: "npm", name: "undici"},
+                    manifest_path: "package.json", relationship: "transitive"},
+       security_advisory: {ghsa_id: "GHSA-undici-b", cve_id: "CVE-2000-0002",
+                           severity: "low", summary: "s",
+                           epss: {percentile: 0.1}},
+       security_vulnerability: {vulnerable_version_range: "<= 5.28.0",
+                                first_patched_version: null}}
+    ]]' > "$MOCK_DIR/alerts.json"
+    When call discover '{a: [.actionable[].sibling_alerts], s: [.skipped[].sibling_alerts]}'
+    The status should be success
+    The output should equal '{"a":[[{"major":null,"vulnerable_ranges":["<= 5.28.0"]}]],"s":[[{"major":7,"vulnerable_ranges":["< 7.29.0"]}]]}'
+  End
+
   # Every group now carries its own `repo`, the field cross-repo scopes key on
   # (issue #6). Repo scope pins it to the target passed on the command line.
   It 'tags every group with the repo scope target'
@@ -246,5 +303,37 @@ Describe 'discover-alerts.sh'
     When run script "$COMMON/discover-alerts.sh" "$REPO"
     The status should not equal 0
     The stderr should include 'Not Found'
+  End
+
+  # The two shapes are typed and validated independently — discovery's
+  # `sibling_alerts` field and the adapter's `--sibling-alerts` parse — and a
+  # comment asserting they match is not a mechanism. This pins them together:
+  # discovery's actual output for the field-case dedup fixture (issue #105),
+  # taken verbatim, is accepted by validate and classifies the same move
+  # `node_validate_spec.sh` classifies benign_dedup by hand.
+  Describe 'sibling_alerts producer/consumer contract (issue #105)'
+    After 'cleanup_fixture'
+
+    It 'accepts discover-alerts.sh sibling_alerts verbatim and classifies the dedup as benign'
+      jq -n '[[
+        {number: 1,
+         dependency: {package: {ecosystem: "npm", name: "picomatch"},
+                      manifest_path: "package.json", relationship: "direct"},
+         security_advisory: {ghsa_id: "GHSA-picomatch-4", cve_id: "CVE-2000-0020",
+                             severity: "medium", summary: "s",
+                             epss: {percentile: 0.2}},
+         security_vulnerability: {vulnerable_version_range: "< 4.0.3",
+                                  first_patched_version: {identifier: "4.0.3"}}}
+      ]]' > "$MOCK_DIR/alerts.json"
+      siblings=$(discover '.actionable[] | select(.package == "picomatch") | .sibling_alerts')
+
+      DEDUP_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.1","path":"picomatch@2.3.1"},{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
+      use_fixture pnpm-benign-dedup
+      When call adapter_jq '{ok, other_line_moves}' \
+        validate --line 4 --vulnerable '< 4.0.3' --baseline "$DEDUP_BASELINE" \
+        --sibling-alerts "$siblings" picomatch '>=4.0.3 <5'
+      The status should be success
+      The output should equal '{"ok":true,"other_line_moves":[{"major":2,"before":["2.3.1","2.3.2"],"after":["2.3.2"],"status":"moved","class":"benign_dedup"}]}'
+    End
   End
 End

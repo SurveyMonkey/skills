@@ -326,6 +326,13 @@ Notes (`bare override added` or `bare override tightened`, from `bare_override`)
 action whose blast radius reaches past the alerts being fixed, and the table is where a user
 comparing PRs will see it.
 
+A `phase: "validate"` failure whose `detail` quotes `other_line_moves` means any fatal move: the
+install moved a copy of the package on a major line the group does not own, and the agent
+fail-closed before opening a PR. Moves classed `benign_dedup` (a within-major dedup onto a version
+the line already resolved, on a line validate proved carries no open alerts) are not failures at
+all: the agent proceeds, and each is disclosed in the PR body's Collateral section rather than
+reported here ([#105](https://github.com/SurveyMonkey/skills/issues/105)).
+
 A `phase: "classify"` failure whose `detail` names `peer_only_dependency` gets its own Notes label
 (`peer-only dependency`) rather than the generic `failure: classify`: the package resolves only
 through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the remedy is a major
