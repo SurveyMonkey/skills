@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -63,6 +63,8 @@ that `direnv exec <repo_root> <cmd>` runs `<cmd>` in the caller's current direct
 the environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
 locator a command already carries. At org and user scope there is no `repo_root` yet; resolution
 happens per repo in phase 5.
+The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
+definitions do; add it to every command you run for a repo that resolved one.
 
 EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
 org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
