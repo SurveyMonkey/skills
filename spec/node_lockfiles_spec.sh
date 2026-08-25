@@ -754,4 +754,56 @@ Describe 'node.sh why'
     The status should be success
     The output should equal '["express"]'
   End
+
+  # `verb_why` shells out to the real package manager for `raw` (`why_cmd`,
+  # `verb_detect`'s `.why_cmd`), so these two examples put a fake `pnpm` ahead
+  # of it on PATH rather than mocking a shell function: node.sh runs as its own
+  # process, and shellspec's `Mock` only replaces functions/commands inside the
+  # spec's own shell, not a subprocess a separate script execs.
+  #
+  # A large dependency tree can push real `pnpm why` output to megabytes, and
+  # the field bug (issue #102) was `jq --arg raw "$raw"` overflowing the exec
+  # argv at that size. The argv ceiling itself is a few hundred KB to a few MB
+  # depending on the OS and environment, which is not something a portable
+  # suite can pin without flaking across machines and CI images; what these
+  # examples pin instead is (1) that content real `why` output can contain —
+  # a subshell substitution, quotes, braces, an embedded newline — survives the
+  # `--rawfile` channel byte for byte, and (2) that the script mechanically no
+  # longer has a path that could regress to the argv-overflowing form.
+  Describe 'the raw field, since #102 moved it off argv onto --rawfile'
+    raw_content_via_mock() {
+      mock_bin_dir=$(mktemp -d)
+      cat > "$mock_bin_dir/pnpm" <<'MOCK'
+#!/bin/sh
+printf 'chain: %s\nsubshell $(rm -rf /tmp/x) here\nquote "value" and {brace} token\n' "$2"
+MOCK
+      chmod +x "$mock_bin_dir/pnpm"
+      PATH="$mock_bin_dir:$PATH"
+      adapter_jq '{raw}' why lodash
+      _st=$?
+      rm -rf "$mock_bin_dir"
+      return "$_st"
+    }
+
+    It 'round-trips shell-metacharacter and newline content through --rawfile intact'
+      use_fixture pnpm-v9
+      expected_raw=$(printf "chain: %s\\nsubshell \$(rm -rf /tmp/x) here\\nquote \"value\" and {brace} token\\n" lodash)
+      expected=$(jq -cn --arg raw "$expected_raw" '{raw:$raw}')
+      When call raw_content_via_mock
+      The status should be success
+      The output should equal "$expected"
+    End
+
+    It 'no longer passes raw to jq via --arg'
+      When call grep -c -- '--arg raw' "$ADAPTER"
+      The status should equal 1
+      The output should equal '0'
+    End
+
+    It 'passes raw to jq via --rawfile'
+      When call grep -c -- '--rawfile raw' "$ADAPTER"
+      The status should be success
+      The output should equal '1'
+    End
+  End
 End
