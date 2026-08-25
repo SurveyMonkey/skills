@@ -167,9 +167,10 @@ flowchart TD
     D4A -->|no| D4I["ADAPTER install"]
     D4I --> D4IQ{"install result"}
     D4IQ -->|"peer conflict, missing version,<br/>timeout past one retry"| FINST["failure: phase install"]
-    D4IQ -->|installed| D4VAL["validate --line --vulnerable... --baseline"]
+    D4IQ -->|installed| D4VAL["validate --line --vulnerable...<br/>--baseline --sibling-alerts"]
     D4VAL --> D4C{"other_line_moves"}
-    D4C -->|"non-empty"| FCOLL["failure: phase validate, fail-closed;<br/>quote the array (#83)"]
+    D4C -->|"any fatal"| FCOLL["failure: phase validate, fail-closed;<br/>quote the array (#83)"]
+    D4C -->|"all benign_dedup"| D4VBD["disclosed in the PR body's<br/>Collateral section"] --> D4V
     D4C -->|"null: no baseline passed,<br/>the question went unasked"| D4V
     D4C -->|"[]"| D4V
     D4V{"validate ok?"}

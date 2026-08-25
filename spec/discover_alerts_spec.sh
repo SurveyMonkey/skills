@@ -304,4 +304,36 @@ Describe 'discover-alerts.sh'
     The status should not equal 0
     The stderr should include 'Not Found'
   End
+
+  # The two shapes are typed and validated independently — discovery's
+  # `sibling_alerts` field and the adapter's `--sibling-alerts` parse — and a
+  # comment asserting they match is not a mechanism. This pins them together:
+  # discovery's actual output for the field-case dedup fixture (issue #105),
+  # taken verbatim, is accepted by validate and classifies the same move
+  # `node_validate_spec.sh` classifies benign_dedup by hand.
+  Describe 'sibling_alerts producer/consumer contract (issue #105)'
+    After 'cleanup_fixture'
+
+    It 'accepts discover-alerts.sh sibling_alerts verbatim and classifies the dedup as benign'
+      jq -n '[[
+        {number: 1,
+         dependency: {package: {ecosystem: "npm", name: "picomatch"},
+                      manifest_path: "package.json", relationship: "direct"},
+         security_advisory: {ghsa_id: "GHSA-picomatch-4", cve_id: "CVE-2000-0020",
+                             severity: "medium", summary: "s",
+                             epss: {percentile: 0.2}},
+         security_vulnerability: {vulnerable_version_range: "< 4.0.3",
+                                  first_patched_version: {identifier: "4.0.3"}}}
+      ]]' > "$MOCK_DIR/alerts.json"
+      siblings=$(discover '.actionable[] | select(.package == "picomatch") | .sibling_alerts')
+
+      DEDUP_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.1","path":"picomatch@2.3.1"},{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
+      use_fixture pnpm-benign-dedup
+      When call adapter_jq '{ok, other_line_moves}' \
+        validate --line 4 --vulnerable '< 4.0.3' --baseline "$DEDUP_BASELINE" \
+        --sibling-alerts "$siblings" picomatch '>=4.0.3 <5'
+      The status should be success
+      The output should equal '{"ok":true,"other_line_moves":[{"major":2,"before":["2.3.1","2.3.2"],"after":["2.3.2"],"status":"moved","class":"benign_dedup"}]}'
+    End
+  End
 End

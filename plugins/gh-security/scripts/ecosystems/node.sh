@@ -1504,7 +1504,11 @@ verb_why() {
 # baseline for that line AND is the semver max of that baseline set; the
 # line's major is not any sibling-alert major; no version on either side of
 # the move satisfies any sibling vulnerable range; and the caller supplied
-# `--sibling-alerts`. Everything else is `fatal`, exactly as before.
+# `--sibling-alerts`. Everything else is `fatal`, exactly as before. An
+# unreadable sibling range does not `die`: the failure is scoped to
+# classification, so it forces `fatal` on every move entry instead (a run
+# with zero moves still passes `ok: true`), and only a structurally malformed
+# `--sibling-alerts` payload still refuses the verb outright (issue #105).
 #
 # `--sibling-alerts` takes ONE JSON array of `{major, vulnerable_ranges[]}`
 # objects, each an other line of this package that carries open alerts, from
@@ -1599,12 +1603,19 @@ verb_validate() {
   # and type are, exactly as ADR 001 requires of every contract field.
   baseline_json=null
   if [ -n "$baseline" ]; then
-    baseline_json=$(printf '%s' "$baseline" | jq -c --arg pkg "$pkg" '
-      select(type == "object"
-             and has("package") and .package == $pkg
-             and has("versions") and (.versions | type) == "array"
-             and (.versions | all(type == "object" and has("version")
-                                  and (.version | type) == "string")))' 2>/dev/null) \
+    # Slurped (`-s`) so a multi-document payload (`'[] []'`) is caught here
+    # rather than reaching `--argjson` downstream: jq's own multi-value error
+    # there is a raw stderr message, exit 2, with no `{"error":...}` envelope
+    # — exit 2 is reserved by the adapter contract (ADR 001). `length == 1`
+    # is the guard; a single legitimate document still reads as one element.
+    baseline_json=$(printf '%s' "$baseline" | jq -c -s --arg pkg "$pkg" '
+      select(length == 1)
+      | .[0]
+      | select(type == "object"
+               and has("package") and .package == $pkg
+               and has("versions") and (.versions | type) == "array"
+               and (.versions | all(type == "object" and has("version")
+                                    and (.version | type) == "string")))' 2>/dev/null) \
       || baseline_json=""
     if [ -z "$baseline_json" ]; then
       die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 2 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
@@ -1654,13 +1665,26 @@ verb_validate() {
   # --vulnerable, because an unreadable range answering "not vulnerable" is
   # the one direction the benign carve-out must never fail.
   siblings_json=null
+  bad_sibling=""
   if [ -n "$sibling_alerts" ]; then
-    siblings_json=$(printf '%s' "$sibling_alerts" | jq -c '
-      select(type == "array"
+    # Slurped for the same reason the `--baseline` capture above is: a
+    # multi-document payload must not reach `--argjson` downstream and
+    # surface as an uncaught jq error (issue #105).
+    siblings_json=$(printf '%s' "$sibling_alerts" | jq -c -s '
+      select(length == 1)
+      | .[0]
+      | select(type == "array"
              and all(.[]; type == "object"
                      and has("major")
-                     and (((.major | type) == "number")
-                          or ((.major | type) == "null"))
+                     # A non-integer or negative major (2.5, -1) never equals
+                     # a real line major, so the equality check below silently
+                     # stops guarding that sibling line instead of erroring.
+                     # Only a whole number >= 0, or null for a line with no
+                     # usable major, is accepted.
+                     and ((.major == null)
+                          or ((.major | type) == "number"
+                              and (.major | floor) == .major
+                              and .major >= 0))
                      and has("vulnerable_ranges")
                      and (.vulnerable_ranges | type) == "array"
                      and all(.vulnerable_ranges[]; type == "string")))' 2>/dev/null) \
@@ -1670,9 +1694,19 @@ verb_validate() {
     fi
     bad_sibling=$(printf '%s' "$siblings_json" | jq -r "$strict_range_defs"'
       [ .[].vulnerable_ranges[] | select(range_ok | not) ] | first // empty')
-    if [ -n "$bad_sibling" ]; then
-      die "validate: --sibling-alerts range '$bad_sibling' is not a parseable version range. Copy each sibling alert's vulnerable_range verbatim; an unreadable range would silently mark a moved version as not vulnerable, which is the direction the benign carve-out must never fail (issue #105)."
-    fi
+  fi
+
+  # An unreadable sibling range is scoped to classification, not the verb: it
+  # used to `die` outright, which failed a clean run (`other_line_moves: []`,
+  # nothing moved) where nothing protective was even at stake. Instead the
+  # flag rides into the jq below and forces `class: "fatal"` on EVERY move
+  # entry — an unreadable range must never allow benign — while a run with
+  # zero moves still passes. Only a structurally malformed payload (non-array,
+  # bad element shape, checked above) still `die`s: that one is not a range
+  # the caller could have copied more carefully.
+  siblings_unreadable=false
+  if [ -n "$bad_sibling" ]; then
+    siblings_unreadable=true
   fi
 
   resolved=$(verb_resolved_versions "$pkg")
@@ -1683,6 +1717,7 @@ verb_validate() {
   result=$(printf '%s' "$resolved" \
     | jq --arg range "$range" --arg line "$line" --argjson vulnerable "$vuln_json" \
       --argjson baseline "$baseline_json" --argjson siblings "$siblings_json" \
+      --argjson siblings_unreadable "$siblings_unreadable" \
       "$SEMVER_JQ"'
     def major_of: semver_parse | (.core[0] // 0);
 
@@ -1720,7 +1755,12 @@ verb_validate() {
               # goes through semver_max, never string ordering.
               | . + {class:
                   (. as $mv
-                   | if   $siblings == null                       then "fatal"
+                   # An unreadable sibling range must never allow benign:
+                   # checked before every other conjunct, and unconditionally,
+                   # so it forces fatal on every move entry regardless of
+                   # what the rest of this line would otherwise decide.
+                   | if   $siblings_unreadable                    then "fatal"
+                     elif $siblings == null                       then "fatal"
                      elif $mv.status != "moved"                   then "fatal"
                      elif ($mv.after | length) != 1               then "fatal"
                      elif (any($mv.before[]; . == $mv.after[0]) | not)

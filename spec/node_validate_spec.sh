@@ -340,6 +340,20 @@ Describe 'node.sh validate --baseline'
     End
   End
 
+  # Same idiom hole as --sibling-alerts, in the pre-existing capture: a
+  # two-document --baseline payload must not reach --argjson downstream and
+  # surface as a raw jq crash on exit 2 (ADR 001 reserves that code). The
+  # slurp-and-count-one guard catches it here with the ordinary die exit code
+  # and the adapter error envelope instead.
+  It 'refuses a two-document --baseline payload with the adapter error envelope, not a raw jq crash'
+    use_fixture yarn-cross-line-collapsed
+    TWO_DOC_BASELINE='{"package":"brace-expansion","versions":[{"version":"1.1.18"}]} {"package":"brace-expansion","versions":[{"version":"1.1.18"}]}'
+    When run script "$ADAPTER" validate --line 5 --vulnerable '< 5.0.9' \
+      --baseline "$TWO_DOC_BASELINE" brace-expansion '>=5.0.9 <6'
+    The status should equal 1
+    The stderr should include 'baseline'
+  End
+
   # `present: false` is a legitimate baseline (a package not in the tree before
   # the fix). Nothing existed to be moved, so the answer is `[]` and not a
   # refusal — and not `null` either, because the question was asked.
@@ -499,17 +513,22 @@ Describe 'node.sh validate --sibling-alerts'
 
   # A promised field arrives correctly typed or it is a hard error, exactly as
   # --baseline is treated: a garbled list must never degrade into "every move
-  # fatal" or, worse, into a reclassification.
+  # fatal" or, worse, into a reclassification. `bad-major-fraction` and
+  # `negative-major` pin the integer guard: `2.5` and `-1` both pass a bare
+  # `type == "number"` check but never equal a real line's major, which would
+  # silently stop the sibling from guarding its line rather than erroring.
   Describe 'unusable sibling-alert lists'
     Parameters
-      not-json          'nope'
-      not-an-array      '{"major":2,"vulnerable_ranges":[]}'
-      missing-major     '[{"vulnerable_ranges":["< 2.3.3"]}]'
-      mistyped-major    '[{"major":"2","vulnerable_ranges":["< 2.3.3"]}]'
-      missing-ranges    '[{"major":2}]'
-      mistyped-ranges   '[{"major":2,"vulnerable_ranges":"< 2.3.3"}]'
-      untyped-range     '[{"major":2,"vulnerable_ranges":[233]}]'
-      empty             ''
+      not-json           'nope'
+      not-an-array       '{"major":2,"vulnerable_ranges":[]}'
+      missing-major      '[{"vulnerable_ranges":["< 2.3.3"]}]'
+      mistyped-major     '[{"major":"2","vulnerable_ranges":["< 2.3.3"]}]'
+      bad-major-fraction '[{"major":2.5,"vulnerable_ranges":["< 2.3.3"]}]'
+      negative-major     '[{"major":-1,"vulnerable_ranges":["< 2.3.3"]}]'
+      missing-ranges     '[{"major":2}]'
+      mistyped-ranges    '[{"major":2,"vulnerable_ranges":"< 2.3.3"}]'
+      untyped-range      '[{"major":2,"vulnerable_ranges":[233]}]'
+      empty              ''
     End
 
     It "refuses a $1 sibling-alert list"
@@ -522,8 +541,26 @@ Describe 'node.sh validate --sibling-alerts'
     End
   End
 
+  # A multi-document --sibling-alerts payload (`'[] []'`) must not reach
+  # `--argjson` downstream: jq's own multi-value error there is a raw stderr
+  # message, exit 2, with no `{"error":...}` envelope, which violates the
+  # adapter contract (ADR 001 reserves exit 2). The slurp-and-count-one guard
+  # catches it here instead, with the ordinary die exit code.
+  It 'refuses a multi-document --sibling-alerts payload with the adapter error envelope, not a raw jq crash'
+    use_fixture pnpm-benign-dedup
+    When run script "$ADAPTER" validate --line 4 --vulnerable '< 4.0.3' \
+      --baseline "$DEDUP_BASELINE" --sibling-alerts '[] []' \
+      picomatch '>=4.0.3 <5'
+    The status should equal 1
+    The stderr should include 'sibling-alerts'
+  End
+
   # Same strict parse as --vulnerable: an unreadable sibling range answering
-  # "not vulnerable" is the one direction the carve-out must never fail.
+  # "not vulnerable" is the one direction the carve-out must never fail. But
+  # unlike a structurally malformed list, an unreadable RANGE is scoped to
+  # classification rather than the verb (issue #105): it forces `fatal` on
+  # every move entry instead of `die`-ing outright, so a clean run with
+  # nothing to move still passes.
   Describe 'unparseable sibling ranges'
     Parameters
       typo     'foo'
@@ -531,14 +568,67 @@ Describe 'node.sh validate --sibling-alerts'
       words    'all versions before 2.3.3'
     End
 
-    It "refuses the sibling range $2"
+    It "forces every move fatal on a moved tree with sibling range $2"
       use_fixture pnpm-benign-dedup
-      When run script "$ADAPTER" validate --line 4 --vulnerable '< 4.0.3' \
+      When call adapter_jq '{ok, classes: [.other_line_moves[].class]}' \
+        validate --line 4 --vulnerable '< 4.0.3' \
         --baseline "$DEDUP_BASELINE" \
         --sibling-alerts "[{\"major\":2,\"vulnerable_ranges\":[\"$2\"]}]" \
         picomatch '>=4.0.3 <5'
       The status should not equal 0
-      The stderr should include 'is not a parseable version range'
+      The output should equal '{"ok":false,"classes":["fatal"]}'
     End
+  End
+
+  # A clean tree (nothing outside the target line moved) still passes with an
+  # unreadable sibling range: the flag has nothing to force fatal onto, and an
+  # unreadable range must never introduce new blast radius where nothing
+  # protective was even at stake.
+  It 'passes a clean tree even with an unreadable sibling range'
+    use_fixture pnpm-benign-dedup
+    CLEAN_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":2,"versions":[{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$CLEAN_BASELINE" \
+      --sibling-alerts '[{"major":2,"vulnerable_ranges":["foo"]}]' \
+      picomatch '>=4.0.3 <5'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
+  End
+
+  # Every conjunct of the benign rule isolated against its own trigger, so a
+  # future change that folds two conjuncts together (or drops one) is caught
+  # by the row it would silently pass.
+  Describe 'major and range conjuncts checked independently'
+    Parameters
+      # description                    sibling-alerts JSON
+      'major hits, range misses'       '[{"major":2,"vulnerable_ranges":["< 2.0.0"]}]'
+      'range hits, major differs'      '[{"major":3,"vulnerable_ranges":["< 2.3.3"]}]'
+      'range hits only the before-side, vanished-in-dedup version' \
+                                        '[{"major":3,"vulnerable_ranges":["<= 2.3.1"]}]'
+    End
+
+    It "stays fatal when $1"
+      use_fixture pnpm-benign-dedup
+      When call adapter_jq '{ok, classes: [.other_line_moves[].class]}' \
+        validate --line 4 --vulnerable '< 4.0.3' --baseline "$DEDUP_BASELINE" \
+        --sibling-alerts "$2" picomatch '>=4.0.3 <5'
+      The status should not equal 0
+      The output should equal '{"ok":false,"classes":["fatal"]}'
+    End
+  End
+
+  # Two versions surviving the dedup on the untouched line breaks the
+  # "exactly one version remains" conjunct even though every other conjunct
+  # would otherwise hold (the survivors are both in the baseline, and jq's
+  # `unique` string-sorts so "2.3.10" would pass a naive max comparison if the
+  # length check were dropped).
+  It 'stays fatal when two versions survive the dedup on the untouched line'
+    use_fixture pnpm-benign-dedup-two-survivors
+    TWO_SURVIVOR_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":4,"versions":[{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"2.3.9","path":"picomatch@2.3.9"},{"version":"2.3.10","path":"picomatch@2.3.10"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":6}'
+    When call adapter_jq '{ok, classes: [.other_line_moves[].class]}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$TWO_SURVIVOR_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should not equal 0
+    The output should equal '{"ok":false,"classes":["fatal"]}'
   End
 End
