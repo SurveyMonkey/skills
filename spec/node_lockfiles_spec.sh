@@ -755,6 +755,148 @@ Describe 'node.sh why'
     The output should equal '["express"]'
   End
 
+  # Regression on PR #103's predecessor (issue #100): `pnpm_edge_rows`'s
+  # output and every existing caller's reading of it (`parents`,
+  # `relationship`) must be byte-for-byte unchanged now that the same scan
+  # also feeds the peer_only conjuncts. lodash here has an ordinary
+  # non-suffixed dependencies: edge, so it is not peer-only.
+  It "does not regress PR 3's dependency-edge reader (#100)"
+    use_fixture pnpm-v9
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why lodash
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["express"],"peer_only":false,"peer_parents":[],"optional_peer_parents":[]}'
+  End
+
+  # The redesigned #103 rule, on real pnpm 9/10 emission: peer auto-install
+  # records the resolved peer as an edge INSIDE the consumer's suffixed
+  # snapshot, so `parents` is NEVER empty for a peer-auto-installed package —
+  # the old parents==[] conjunct could not fire on a real v9 lockfile. `vite`
+  # here is declared by no importer, and both of its edges come from parent
+  # keys that instantiate it: `@vitejs/plugin-react@4.3.4(vite@6.4.3)`
+  # (required peer, dependencies:) and `@vitest/mocker@3.0.5(vite@6.4.3)`
+  # (optional peer, optionalDependencies:). Required peers order first, and
+  # the optional one is repeated in optional_peer_parents so remedy prose
+  # never steers a human at a parent that merely tolerates the package.
+  It 'classifies a peer-auto-installed package from its suffixed-key edges'
+    use_fixture pnpm-peer-only
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why vite
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["@vitejs/plugin-react"],"peer_only":true,"peer_parents":["@vitejs/plugin-react","@vitest/mocker"],"optional_peer_parents":["@vitest/mocker"]}'
+  End
+
+  # Multi-peer and nested suffixes: next's key is
+  # `next@15.1.6(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)`,
+  # so `react` is instantiated both in the trailing suffix and inside the
+  # nested react-dom one, and its only edge lives in that snapshot. The
+  # suffix matcher has to read past the first `(` to see any of this — the
+  # shape the pre-redesign parser discarded outright.
+  It 'reads a peer instantiation out of a multi-peer nested suffix'
+    use_fixture pnpm-peer-only
+    When call adapter_jq '{parents, peer_only, peer_parents, optional_peer_parents}' why react
+    The status should be success
+    The output should equal '{"parents":["next"],"peer_only":true,"peer_parents":["next"],"optional_peer_parents":[]}'
+  End
+
+  # The non-suffixed-edge conjunct, deciding (the `next > sharp` control,
+  # a field-test PR): next's snapshot reaches sharp through
+  # an ordinary `optionalDependencies:` edge and next's key carries no
+  # `(sharp@`, so an override CAN reach the copy. One such edge defeats
+  # peer_only — this subsumes the old optional-edge veto.
+  It 'never classifies a package reached by a non-suffixed optionalDependencies edge'
+    use_fixture pnpm-peer-only
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents}' why sharp
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":[],"peer_only":false,"peer_parents":[]}'
+  End
+
+  # Same conjunct, scoped-name variant: `@babel/core` IS peer-instantiated by
+  # next's `(@babel/core@7.29.7)` suffix, but @vitejs/plugin-react also
+  # declares it as a plain dependency from a key with no `(@babel/core@`.
+  # The scoped `(@scope/x@` suffix must be read, and the plain edge decides.
+  It 'defeats peer_only on a plain edge even when a scoped suffix instantiates the package'
+    use_fixture pnpm-peer-only
+    When call adapter_jq '{parents, peer_only, peer_parents}' why @babel/core
+    The status should be success
+    The output should equal '{"parents":["@vitejs/plugin-react"],"peer_only":false,"peer_parents":["next"]}'
+  End
+
+  # The reachability conjunct, deciding: a package absent from the lockfile
+  # is not direct, not in importers, and every edge to it is vacuously
+  # suffixed — only "no edge and no instantiation reaches it" keeps it false.
+  It 'never classifies a package the lockfile does not reach'
+    use_fixture pnpm-peer-only
+    When call adapter_jq '{parents, peer_only, peer_parents}' why left-pad
+    The status should be success
+    The output should equal '{"parents":[],"peer_only":false,"peer_parents":[]}'
+  End
+
+  # The near-miss: vite is a peer of one parent AND a plain dependency of
+  # another (vite-node's key has no `(vite@`). peer_only is false and the
+  # parent list is complete — the plain-edge parent is exactly the one an
+  # override can scope to.
+  It 'reports complete parents when a peer of one parent is a plain dependency of another'
+    use_fixture pnpm-peer-near-miss
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents}' why vite
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["@vitejs/plugin-react","vite-node"],"peer_only":false,"peer_parents":["@vitejs/plugin-react"]}'
+  End
+
+  # The importers conjunct, deciding (the reviewer-verified false positive):
+  # vite here is declared ONLY by the workspace importer `packages/app`, so
+  # it is not in the root manifest and its one snapshot edge is suffixed —
+  # every other conjunct holds. Abandoning it as peer-only would walk away
+  # from a dependency a one-line manifest edit moves.
+  It 'never classifies a dependency declared by a workspace importer'
+    use_fixture pnpm-workspace-peer
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents}' why vite
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["@vitejs/plugin-react"],"peer_only":false,"peer_parents":["@vitejs/plugin-react"]}'
+  End
+
+  # The direct conjunct, deciding: same lockfile as pnpm-peer-only, but the
+  # manifest declares vite (the stale-lockfile moment right after a human
+  # adds the dependency, before the next install). Everything the lockfile
+  # says still matches the peer-only shape; the declaration alone flips it.
+  It 'never classifies a package the manifest declares directly'
+    use_fixture pnpm-peer-direct
+    When call adapter_jq '{relationship, peer_only, peer_parents, optional_peer_parents}' why vite
+    The status should be success
+    The output should equal '{"relationship":"direct","peer_only":false,"peer_parents":["@vitejs/plugin-react","@vitest/mocker"],"optional_peer_parents":["@vitest/mocker"]}'
+  End
+
+  # The lockfileVersion conjunct, deciding, and the v6 corruption regression
+  # (#103 review): a v6 lockfile has no `snapshots:` section — edges live in
+  # `packages:` under `/`-prefixed keys. Scanning them parsed garbage parents
+  # like `/@vitejs/plugin-react` that flowed through parents_unreadable into
+  # an unmatchable `/@vitejs/plugin-react>vite` override key written into a
+  # real PR. The parser must read nothing here: parents exactly empty (no
+  # `/`-prefixed entries), peer_only false — identical to the pre-#103
+  # snapshot reader's answer for v6.
+  It 'reads nothing from a v6 lockfile: no garbage parents, never peer_only'
+    use_fixture pnpm-v6
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why vite
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":[],"peer_only":false,"peer_parents":[],"optional_peer_parents":[]}'
+  End
+
+  # npm and Yarn Berry never auto-install a peer the way pnpm does: a
+  # required peer is always declared somewhere `parents` already reads
+  # (issue #49), so peer_only is unconditionally false and both peer lists
+  # unconditionally empty for them, regardless of relationship or parents.
+  Describe 'peer_only is a pnpm-only mechanic'
+    Parameters
+      "npm-v3"        "lodash"
+      "yarn-berry"    "lodash"
+    End
+
+    It "reports peer_only false and peer_parents empty for $1"
+      use_fixture "$1"
+      When call adapter_jq '{peer_only, peer_parents, optional_peer_parents}' why "$2"
+      The status should be success
+      The output should equal '{"peer_only":false,"peer_parents":[],"optional_peer_parents":[]}'
+    End
+  End
+
   # `verb_why` shells out to the real package manager for `raw` (`why_cmd`,
   # `verb_detect`'s `.why_cmd`), so these two examples put a fake `pnpm` ahead
   # of it on PATH rather than mocking a shell function: node.sh runs as its own

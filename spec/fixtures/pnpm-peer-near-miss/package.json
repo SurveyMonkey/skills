@@ -1,0 +1,8 @@
+{
+  "name": "demo-pnpm-peer-near-miss",
+  "packageManager": "pnpm@10.33.2",
+  "dependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite-node": "3.0.5"
+  }
+}

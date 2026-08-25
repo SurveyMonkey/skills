@@ -326,6 +326,12 @@ Notes (`bare override added` or `bare override tightened`, from `bare_override`)
 action whose blast radius reaches past the alerts being fixed, and the table is where a user
 comparing PRs will see it.
 
+A `phase: "classify"` failure whose `detail` names `peer_only_dependency` gets its own Notes label
+(`peer-only dependency`) rather than the generic `failure: classify`: the package resolves only
+through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the remedy is a major
+bump of one of the peer parents `detail` quotes, or a real dependency declaration. Both are
+lockfile regeneration, both human work ([#103](https://github.com/SurveyMonkey/skills/issues/103)).
+
 Then report every non-empty `requires_major_bump[]`, per package line (and per repo at org/user
 scope), before anything else in the summary:
 
