@@ -385,6 +385,14 @@ condition and not a judgement call: the constraint and completeness checks are b
 `--line` and are structurally incapable of seeing an out-of-line copy, so `ok: true` from them is
 not evidence about any line but yours.
 
+What a fatal move means: your override reached a copy of the package under a parent on another major line.
+A live run wrote the Yarn resolutions key `minimatch/brace-expansion` for the 5.x group, and
+because a Yarn key's parent half carries no version, Yarn applied it to **every** copy of
+`minimatch`. `minimatch@3.1.5`, which `require()`s `brace-expansion` at `^1.1.7`, had its copy
+dragged from `1.1.18` to `5.0.9`: a different major, and a plausible runtime break. `validate
+--line 5` returned `ok: true` throughout, and the PR shipped with the damage described in prose
+only ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+
 **A result whose moves are all `benign_dedup` proceeds.** That class is the adapter's verdict, at
 the strictest policy, that the move is the package manager deduplicating a line the fix never
 touched onto a version that line already resolved: within its own major, one surviving version,
@@ -392,14 +400,6 @@ already in the baseline and its max, on a line `--sibling-alerts` proves carries
 (issue #105). You never make that judgement yourself; only the adapter's `class` field does, and
 only when you passed the flag. Each benign move still gets disclosed in the PR body's cross-line
 section (phase 6), never silently absorbed.
-
-What it means: your override reached a copy of the package under a parent on another major line.
-A live run wrote the Yarn resolutions key `minimatch/brace-expansion` for the 5.x group, and
-because a Yarn key's parent half carries no version, Yarn applied it to **every** copy of
-`minimatch`. `minimatch@3.1.5`, which `require()`s `brace-expansion` at `^1.1.7`, had its copy
-dragged from `1.1.18` to `5.0.9`: a different major, and a plausible runtime break. `validate
---line 5` returned `ok: true` throughout, and the PR shipped with the damage described in prose
-only ([#83](https://github.com/SurveyMonkey/skills/issues/83)).
 
 Narrowing the key yourself is not the remedy and you must not try it. Yarn's parent half matches
 the parent's **exact resolved version** and a range there parses and then silently never matches;
