@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -54,10 +54,16 @@ such through the ordinary org-scope path.
 
 ## Phase 2: Discover and route
 
+At repo scope:
+
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target> \
-  | ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --from-discovery
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --from-discovery \
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
 ```
+
+At org and user scope, stop after `select-adapter.sh`: there is no local checkout yet, so line
+reconciliation happens after checkout, in phase 5, per repo.
 
 `target` is `nwo` at repo scope, `owner` at org scope, and omitted (or the authenticated login) at
 user scope. Returns `actionable` (ranked by severity then EPSS, each group annotated with its
@@ -83,6 +89,16 @@ will see:
 - `open PR exists` — a fix PR is already open (URL in `open_pr_url`)
 - `ecosystem not supported yet` — no adapter; see `.github/CONTRIBUTING.md`
 - `PR check failed` — the PR lookup itself errored (`error` field)
+- `requires major version bump` — every resolved copy of the package sits below the group's fix
+  line (`resolved_majors` names what is installed), so the only possible fix crosses a major and
+  no override bounded to the resolved line can reach the patched version. Report it with the
+  context sentence the annotations carry: "only 0.2.5 is installed; the fix line is 1.x". Human
+  work — a major bump of the parent that holds it, or dropping that parent.
+
+`classify-lines.sh` also annotates each still-actionable group with `resolved_majors` and a
+`line_status` (`resolved`, `line_absent`, or `unknown`); all three dispatch normally — `unknown`
+deliberately so, since validate fail-closes later and withholding a fixable group is the wrong
+direction.
 
 `skipped_repos` reasons:
 
@@ -112,7 +128,12 @@ a dimension that can differ between rows is how a collapsed report reads as norm
 more than one: a row that says `undici 6.x` and another that says `undici 7.x` is the difference
 between two fixes and one, and hiding it is how the collapsed-group bug read as normal.
 
-Note skipped groups and skipped repos briefly. Then AskUserQuestion with three options:
+Note skipped groups and skipped repos briefly. A `requires major version bump` group appears among
+those skip notes with its `resolved_majors` context ("only 0.2.5 is installed; the fix line is
+1.x"), never as a rankable row: it was moved to `skipped` in phase 2, and offering it for approval
+is asking the user to approve doomed work (issue #101). At org and user scope no group carries a
+`line_status` yet — line reconciliation happens after checkout, in phase 5 — so say a group may
+still be withdrawn there. Then AskUserQuestion with three options:
 
 - **One** — fix only the top-ranked group (one line of one package in one repo, not every line or
   every repo).
@@ -204,6 +225,18 @@ For each **distinct repo** named in the approved batch:
    ```
    Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
    dispatch rather than guessing a branch name.
+3. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
+   `{repo, repo_root, default_branch}` triple is resolved, run:
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
+   ```
+   with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
+   (`{actionable: <that repo's approved groups>, skipped: []}`). A group that reclassifies
+   `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
+   approval covered fixing the group, and this discovers the fix does not exist — and reported in
+   phase 7 as skipped with the same `requires major version bump` reason and its
+   `resolved_majors` context. Every other `line_status`, `unknown` included, dispatches as
+   approved.
 
 Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
 for a given repo shares its triple.
@@ -348,6 +381,10 @@ scope), before anything else in the summary:
 
 These are alerts that stay open after the PRs merge. Reporting a batch as done without them is the
 failure mode issue #19 is about, and it is worse coming from the summary than from an agent.
+
+Report any group phase 5 withdrew (`requires major version bump`) with the skipped groups, with
+its `resolved_majors` context — approved work the checkout proved impossible belongs in this
+summary, never a silent omission.
 
 **Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
 unaddressed.** These are repos with alerts the batch never touched at all, and belong in the same
