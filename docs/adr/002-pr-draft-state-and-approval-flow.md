@@ -1,13 +1,26 @@
 ---
 type: ADR
-description: Fix PRs open as drafts and the orchestrator batch-promotes them, with per-PR confirmation where auto-merge is armed.
-status: stable
+description: Superseded by ADR 008. Fix PRs opened as drafts and the orchestrator batch-promoted them, with per-PR confirmation where auto-merge is armed.
+status: deprecated
 created: 2026-07-26
 owner: brianespinosa
-related_issues: [4, 5, 70]
+related_issues: [4, 5, 70, 87]
 ---
 
 # ADR 002: PR draft state and the approval flow
+
+> **Superseded by [ADR 008](008-prs-open-ready-for-review.md)**
+> ([#87](https://github.com/SurveyMonkey/skills/issues/87)). PRs now open ready for review, the
+> phase 5 dispatch approval is the only checkpoint, and the promotion phases this ADR created are
+> deleted. Nothing below is edited: the decision is kept as written, and the auto-merge field data
+> in the consequences is the evidence ADR 008 had to answer, so rewriting it would erase the
+> argument. Read this as a record of what was decided in July, not as current behavior.
+>
+> Two things below therefore do not resolve against today's tree. **Phase numbers are the
+> pre-v0.8.3 orchestrator's**: phases 9 and 10 are deleted, and what is now phase 9 is the
+> next-batch and pin-audit offer, not a promotion gate. And **`mark-ready.sh` is now
+> `pr-status.sh`**, read-only, so the `mark-ready.sh:204` and `:226` line references point at
+> deleted code.
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Supersedes the RFC's original decision that
 fix PRs open ready for review. Adopted in Phase 1
@@ -90,7 +103,7 @@ and only then lifts the draft flag (`gh pr ready`, mark-ready.sh:226); it merges
 pushes a new head, which restarts CI, and a PR that was already current keeps whatever checks were
 already running. Either way, waiting for pending checks before offering promotion bought nothing:
 the orchestrator still had to re-run `status` and promote the stragglers separately once checks
-caught up. The skill's phase 8 now offers `pending` alongside `none`, stating plainly what stage the checks
+caught up. Phase 9 now offers `pending` alongside `none`, stating plainly what stage the checks
 are in and that promoting is what starts or surfaces whatever CI exists. What still blocks or
 qualifies the offer is unchanged: failing checks block outright, armed auto-merge still needs a
 per-PR confirmation because promoting it merges on green, and a rebase conflict is still reported

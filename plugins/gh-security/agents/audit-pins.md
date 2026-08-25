@@ -5,8 +5,8 @@ description: >
   report which of them are no longer needed, testing each removal in an
   isolated git worktree against the full advisory database. In `pr` mode it
   then removes the confirmed-removable set, tests that set together, and opens
-  a draft removal PR carrying its own evidence; in `report` mode it changes
-  nothing. Dispatched by the gh-security resolve-alerts orchestrator or by
+  a removal PR, ready for review, carrying its own evidence; in `report` mode
+  it changes nothing. Dispatched by the gh-security resolve-alerts orchestrator or by
   /gh-security:audit-pins.
 model: sonnet
 tools: Bash, Read, Edit, Glob, Grep
@@ -23,7 +23,8 @@ silently holds packages back. Nothing else in this plugin notices when that has 
 **What you do with the findings is `mode`'s decision, not yours.** In `report` mode you open no
 pull request, you commit nothing, and you leave the repository exactly as you found it. In `pr`
 mode you go one step further: after the findings are complete you remove the pins they confirm,
-test that set **as a set**, and open a **draft** pull request carrying the audit's own evidence.
+test that set **as a set**, and open a pull request **ready for review** carrying the audit's own
+evidence.
 Everything before that step is identical in both modes, and no finding changes because a PR is
 coming.
 
@@ -93,7 +94,7 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   you, so one agent's cleanup deletes another's files.
 - **Never run the repository's checks** (phase 8). Not its tests, not its build, not its linters,
   not to confirm a removal and not to attribute a failure: the merge-risk score is static analysis
-  of the worktree, and CI on the draft PR is the verifier (ADR 006).
+  of the worktree, and CI on the PR is the verifier (ADR 006).
 - **Clean up on every exit path.** The worktrees you created are removed before you return.
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
 
@@ -767,16 +768,16 @@ When an attempt is clean, **leave its removals in the tree**, which is the diff 
 and carry into phase 8: which attempt passed, the removed keys, the pins left behind with the
 attempt that excluded them, the collateral list, and the advisory verdicts.
 
-## Phase 8: Merge risk and the draft PR
+## Phase 8: Merge risk and the PR
 
 This mirrors `fix-dependency`'s phases 5 and 6. The pins are already out of the tree and installed;
 what remains is rating the change and putting it where a human reviews it.
 
 **You run none of the repository's checks.** Not its tests, not its build, not its linters: the
-merge-risk score is static analysis of the worktree, and CI on the draft PR is the verifier
+merge-risk score is static analysis of the worktree, and CI on the PR is the verifier
 (ADR 006). That also means there is no failure to attribute and no base worktree to build for a
-comparison. A removal that breaks the build ships as a draft and CI reports it there, on a PR
-nobody has promoted, which is the same trade the fix agent makes. What phase 7's combined test
+comparison. A removal that breaks the build ships as a PR and CI reports it there, on a PR nobody
+has merged, which is the same trade the fix agent makes. What phase 7's combined test
 established is narrower, and it is still the whole of this PR's own evidence: the set installs,
 and no newly admitted version matches a published advisory.
 
@@ -801,10 +802,10 @@ moved"**, saying which of the two it was.
 
 **The PR band is the highest band across the packages that were scored**, and `pr.risk.f4` and
 `pr.risk.f5` are that package's factors, read off the scorer's `factors[]`. If none were scored,
-`pr.risk` is `{"band": null, "score": null, "f4": null, "f5": null}`. That is not a gap: the
-dispatcher's promotion gate reads the check rollup and auto-merge state alone, never the band or
-its factors (ADR 006, and the `resolve-alerts` phase 8 table), so a PR that removes only packages
-with no version move carries everything the gate needs, which is the PR itself.
+`pr.risk` is `{"band": null, "score": null, "f4": null, "f5": null}`. That is not a gap: nothing
+gates on the band or its factors (ADR 006), because there is no gate — the PR opens ready and the
+reviewer decides it on GitHub. A PR that removes only packages with no version move therefore
+carries everything the decision needs, which is the PR itself.
 
 ```bash
 cd "$WORK/audit" && $ADAPTER why <package> > "$WORK/why-<package>.json"
@@ -862,7 +863,7 @@ Every scored package's returned `markdown` goes into the body verbatim, under it
 per-package rating averaged or collapsed into one number would hide the package that earned the
 band, which is the one a reviewer should read first.
 
-### Stage, create the branch, commit, push, open the draft PR
+### Stage, create the branch, commit, push, open the PR
 
 **Stage before creating the branch, in that order.** Staging needs no branch, and the check below
 can still end the run: doing it first means a `verify` failure never leaves a branch behind, which
@@ -988,7 +989,7 @@ Then create the PR. The `gh` calls carry `--repo`, so they are location-independ
 ```bash
 gh label list --repo <nwo> --json name --jq '.[].name'
 gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>/dev/null || true
-gh pr create --repo <nwo> --head chore/dependabot-remove-pins --draft --label security \
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security \
   --title "..." --body "..."
 ```
 
@@ -1066,8 +1067,10 @@ Every claim in that body is one this run made. **Never state that a pin is unnec
 provenance alone**: the fixed alerts say why the pin was probably added and nothing about whether
 it is still load-bearing (phase 3).
 
-**Never mark the PR ready**, and do not offer to. Promotion is the dispatcher's decision, made with
-check state and auto-merge state in front of the user (ADR 002).
+**Never merge the PR, never enable auto-merge on it, and do not offer to either.** Opening it is
+where your work ends: nothing in this plugin acts on a pull request after `gh pr create`, and the
+decision to merge is made by a human on GitHub, with the diff in front of them (ADR 008). Arming
+auto-merge is that same decision made in advance, so it is theirs too, never yours.
 
 ## Cleanup
 
@@ -1218,7 +1221,7 @@ End your final message with exactly one fenced JSON block:
   successful PR is the one whose combined install the body describes; `risk` is the **highest**
   band across the packages that were scored, with that package's `f4` and `f5` read off the
   scorer's `factors[]`, and all four fields are `null` when no package was scorable. Nothing
-  reads them as a gate: promotion groups on the check rollup and auto-merge state (ADR 006).
+  reads them as a gate: there is no gate, and the band is a signal for the reviewer (ADR 006).
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, `pr` is
   `null`, and `failure` is
   `{"phase": "input | worktree | list | install | restore | advisories | compose | verify | push | pr", "detail": "..."}`.

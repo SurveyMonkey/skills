@@ -1,6 +1,6 @@
 ---
 type: Reference
-description: State and branch map of the resolve-alerts skill and its fix-dependency and audit-pins subagents, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to a draft PR, and the pin audit's findings, guards, and the ways a completed audit opens no PR.
+description: State and branch map of the resolve-alerts skill and its fix-dependency and audit-pins subagents, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's findings, guards, and the ways a completed audit opens no PR.
 owner: brianespinosa
 created: 2026-08-22
 stale_after: 2027-02-22
@@ -30,12 +30,17 @@ anything, so where they stop is a different question from where the orchestrator
 ## Diagram 1: the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
-decides, and nothing dispatches or leaves draft without one. The ask sites are phase 3's how-much,
-phase 4's batch approval, phase 8's promotion (batched, or per PR where auto-merge is armed), and
-both of phase 10's offers: the next batch and the pin audit.
+decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
+approval, and both of phase 8's offers: the next batch and the pin audit.
 
-Two branches exclude one repo's groups without ending the run, and one withholds the offer for a
-single PR without ending it; they are drawn as plain nodes for that reason.
+**No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
+into being, and phase 8's two offers dispatch further work — a next batch, or an audit that may
+open a removal PR of its own — rather than deciding anything about a PR already on the page. PRs
+open ready for review and no phase acts on one afterwards ([ADR
+008](../adr/008-prs-open-ready-for-review.md)).
+
+Two branches exclude one repo's groups without ending the run; they are drawn as plain nodes for
+that reason.
 
 ```mermaid
 flowchart TD
@@ -62,7 +67,7 @@ flowchart TD
 
     P4["Phase 4: detect-capacity.sh, present the plan"] --> P4Q{"batch groups < cap?"}
     P4Q -->|"yes, spare slot"| P4ASK1{"ask: approve batch + audit mode"}
-    P4Q -->|"no, cap full"| P4ASK2{"ask: approve batch<br/>(audit deferred to phase 10)"}
+    P4Q -->|"no, cap full"| P4ASK2{"ask: approve batch<br/>(audit deferred to phase 8)"}
     P4ASK1 -->|"approve, audit mode: pr"| P4OK
     P4ASK1 -->|"approve, audit mode: report"| P4OK
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
@@ -105,47 +110,31 @@ flowchart TD
     P7AU -->|yes| P7AR["Findings grouped per package, below and separate from<br/>the fix table; then the audit's own PR or its<br/>pr_skipped_reason; failure reported with the others"]
     P7AR --> P8
 
-    P8["Phase 8: mark-ready.sh status on every success PR<br/>plus the audit's PR when one exists"] --> P8Q{"checks rollup, per PR"}
-    P8Q -->|failed| P8F["Not offered; list failing_checks.<br/>Other PRs in the batch are unaffected"]
-    P8Q -->|"none / pending"| P8P["Offerable, flagged honestly<br/>(none: promoting starts CI; pending: cite check_counts)"]
-    P8Q -->|passed| P8OK["Offerable; provisional on a fresh PR<br/>or one reporting fewer checks than its siblings"]
-    P8F --> P10
-    P8P --> P8AM{"auto_merge.armed?"}
-    P8OK --> P8AM
-    P8AM -->|"yes: promoting merges it"| P8ASK1{"ask: per-PR confirmation,<br/>re-run status first"}
-    P8AM -->|no| P8ASK2{"ask: one batch confirmation"}
-    P8ASK1 -->|approved| P9
-    P8ASK1 -->|declined| P10
-    P8ASK2 -->|"approved subset"| P9
-    P8ASK2 -->|declined| P10
-
-    P9["Phase 9: mark-ready.sh promote (approved URLs only)"] --> P9Q{"per PR"}
-    P9Q -->|"rebased, marked ready"| P10
-    P9Q -->|conflict| P9C["Report; recommend regeneration<br/>(close, delete branch, re-run) over hand-resolution"] --> P10
-    P9Q -->|error| P9E["Report the error"] --> P10
-
-    P10{"Phase 10: actionable groups remain?"}
-    P10 -->|yes| P10ASK0{"ask: dispatch the next batch?"}
-    P10ASK0 -->|yes| P3
-    P10ASK0 -->|no| P10A
-    P10 -->|no| P10A{"audit already ran in phase 6?"}
-    P10A -->|yes| DONE
-    P10A -->|no| P10ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
-    P10ASK -->|"pr / report"| P10D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 7;<br/>its PR goes through phase 8"]
-    P10D --> P8
-    P10ASK -->|decline| DONE
-    DONE(["Done: not-promoted PRs, remaining skipped_repos,<br/>and what would unblock each"])
+    P8{"Phase 8: actionable groups remain?"}
+    P8 -->|yes| P8ASK0{"ask: dispatch the next batch?"}
+    P8ASK0 -->|yes| P3
+    P8ASK0 -->|no| P8A
+    P8 -->|no| P8A{"audit already ran in phase 6?"}
+    P8A -->|yes| P8REP
+    P8A -->|no| P8ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
+    P8ASK -->|"pr / report"| P8D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 7"]
+    P8D --> P8REP
+    P8ASK -->|decline| P8REP
+    P8REP["pr-status.sh on every success PR plus the audit's<br/>when one exists: checks, merge_state, auto_merge.<br/>Reported as information, never as a prompt"]
+    P8REP --> DONE
+    DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
 ```
 
-Three cycles, and no others. The wave loop (`P6Q` back to `P6W`) is the concurrency cap enforced as
-a barrier. The next-batch loop (phase 10 to phase 3) is reached only when groups remain *and* the
-user accepts the offer, and it re-enters the how-much question with what is left. The third is
-phase 10's audit dispatch back into phase 8: an audit accepted after the fixes still has its draft
-PR gated by the same promotion flow.
+Two cycles, and no others. The wave loop (`P6Q` back to `P6W`) is the concurrency cap enforced as a
+barrier. The next-batch loop (phase 8 to phase 3) is reached only when groups remain *and* the user
+accepts the offer, and it re-enters the how-much question with what is left. There is no third:
+phase 8's audit dispatch used to loop back into the promotion phase, and with that phase gone the
+audit's PR is reported like any other and the flow runs straight to the end.
 
-The audit offer is not conditional on the batch being finished. Phase 10 offers the next batch and
+The audit offer is not conditional on the batch being finished. Phase 8 offers the next batch and
 *then* recommends the audit unless one already ran in phase 6, so declining the next batch still
-reaches the recommendation.
+reaches the recommendation. Both offers precede the closing report, which is the last thing the run
+does and asks nothing.
 
 ## Diagram 2: fix-dependency, one group
 
@@ -199,7 +188,7 @@ flowchart TD
     D6["Phase 6: commit and push from the worktree"] --> D6Q{"repo hooks"}
     D6Q -->|"pre-commit fails"| FCOM["failure: phase commit,<br/>quoting the hook (never --no-verify)"]
     D6Q -->|"pre-push fails"| FPUSH["failure: phase push"]
-    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --draft --label security"]
+    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>(ready for review; the agent never merges it<br/>or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
     D6PRQ -->|no| FPR["failure: phase pr"]
     D6PRQ -->|yes| SUCC(["success: pr_url, action, risk band,<br/>requires_major_bump[], observations[]"])
@@ -237,7 +226,7 @@ above it contradicts.
 
 Dispatched with the repo (`nwo` in the agent's own input contract, `repo` in the orchestrator's
 payload and in the result), `repo_root`, `default_branch`, an `adapter_path`, `scripts_dir`, and a
-`mode` that the user decides in phase 4 or 10 and that is never defaulted. In `pr` mode the
+`mode` that the user decides in phase 4 or 8 and that is never defaulted. In `pr` mode the
 distinction that matters is between a *failure* and one of the five ways a completed audit declines
 to open a PR: both leave `pr` null, and only the first is a broken run.
 
@@ -320,7 +309,7 @@ flowchart TD
     A8Q -->|"scorer usage error, or an<br/>unexplained status --porcelain"| AFV["failure: phase verify"]
     A8Q -->|"push refused, lease included"| AFP["failure: phase push"]
     A8Q -->|"gh pr create fails"| AFPR["failure: phase pr"]
-    A8Q -->|created| APRD(["success with pr: url, attempt,<br/>removed_keys[], left_behind[], risk band"])
+    A8Q -->|created| APRD(["success with pr, open for review: url, attempt,<br/>removed_keys[], left_behind[], risk band"])
 
     AFIN --> ACL
     AFWT --> ACL
@@ -364,12 +353,12 @@ Run outcomes for the orchestrator:
 | Unresolvable default branch | Phase 1, repo scope | Stop before discovery |
 | No actionable groups | Phase 2 | Every skipped group and skipped repo, by name |
 | Batch declined | Phase 4 | Nothing dispatched; no agent ever ran |
-| Done | Phase 10 | Not-promoted PRs, remaining skipped repos, what unblocks each |
+| Done | Phase 8 | Every PR URL with its band and check state, remaining skipped repos, what unblocks each |
 
-Everything else is per repo or per PR, and the run continues past it: a phase 5 checkout conflict or
-unresolvable default branch excludes that repo's groups only; failing checks in phase 8 withhold the
-offer for that PR only; a declined promotion or a conflicted rebase in phase 9 leaves that PR a
-draft and still reaches phase 10.
+Everything else is per repo, and the run continues past it: a phase 5 checkout conflict or
+unresolvable default branch excludes that repo's groups only. Nothing about a PR can withhold
+anything any more — there is no offer left to withhold, so a red check is reported and the run ends
+normally.
 
 Agent results are the other terminals: `success`, `no-op` or `failure` from a fix agent, `success`
 or `failure` from the audit. The three easiest to misread as each other are a fix agent's `failure`,

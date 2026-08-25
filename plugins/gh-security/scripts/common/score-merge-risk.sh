@@ -52,7 +52,7 @@
 # check could not start in this sandbox" into the same 2, and it did not scale:
 # at hundreds of alerts, running every repo's suite per fix is CI's job, not an
 # agent's (issue #71, ADR 006). Both are static analysis now, and CI on the
-# draft PR is the verifier. A High that CI later contradicts is the tests
+# pull request is the verifier. A High that CI later contradicts is the tests
 # working, not a scoring defect.
 #
 # F4 asks whether anything tests the surface this fix touches, reusing F3's
@@ -91,9 +91,9 @@
 # `.github/workflows/*.yml` and `*.yaml` with grep. **Only GitHub Actions is
 # read.** A repo on CircleCI, Buildkite, Jenkins or a self-hosted runner scores
 # 2 here even though its checks will run. That is a documented limit, not a gap
-# to paper over: this flow opens GitHub pull requests and the mark-ready
-# decision reads the GitHub check rollup, so an Actions workflow is the one
-# verifier it can see before the PR exists. A repo scoring 2 on F5 gets a PR
+# to paper over: this flow opens GitHub pull requests and reads the GitHub
+# check rollup, so an Actions workflow is the one verifier it can see before
+# the PR exists. A repo scoring 2 on F5 gets a PR
 # whose merge risk says "nothing here proves CI runs", which is the honest
 # reading.
 #

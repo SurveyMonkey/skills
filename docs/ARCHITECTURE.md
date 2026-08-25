@@ -50,9 +50,10 @@ pass**. Conventions and their reasoning live in
   ecosystem-specific, version comparison and range semantics included, stays behind
   `<adapter>.sh <verb>` calls that emit JSON on stdout and fail with `{"error": ...}`. Adding an
   ecosystem means adding an adapter, not touching `common/`.
-- **PR flow** ([ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix PRs open as drafts;
-  the orchestrator batch-promotes them with check state reported honestly, confirming per PR
-  where auto-merge is armed.
+- **PR flow** ([ADR 008](adr/008-prs-open-ready-for-review.md), superseding
+  [ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix and pin-removal PRs open ready for
+  review. The phase 5 dispatch approval is the only checkpoint, no phase acts on a pull request
+  after it is created, and no agent may merge one or arm auto-merge on it.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
   `.claude/worktrees/`, and waves are sized by a per-machine concurrency cap enforced as a
@@ -65,7 +66,7 @@ pass**. Conventions and their reasoning live in
   `scripts/check.sh`, from committed git hooks locally and from
   `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions.
 - **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening
-  one draft removal PR per repository, gated on a combined test of the whole removed set (the
+  one removal PR per repository, gated on a combined test of the whole removed set (the
   per-pin tests prove nothing about a set) that fails closed on a partial view of the lockfile.
   The branch name is plugin-owned, created only at commit time, and a leftover of it is verified
   against a closed PR's head sha before anything deletes or force-pushes it.

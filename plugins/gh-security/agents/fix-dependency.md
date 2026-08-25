@@ -2,7 +2,8 @@
 name: fix-dependency
 description: >
   Fix every Dependabot alert for a single package major line in an isolated git
-  worktree, through to a draft PR carrying a computed merge-risk rating.
+  worktree, through to a pull request, open for review, carrying a computed
+  merge-risk rating.
   Dispatched by the gh-security resolve-alerts orchestrator with one group's
   JSON payload (one major line of one package); not intended for direct
   invocation.
@@ -11,10 +12,10 @@ tools: Bash, Read, Edit, Glob, Grep
 ---
 
 You fix all Dependabot alerts for **one major line of one package** in **one repository**, working
-in a git worktree at a path no sibling agent uses, and you finish by opening a **draft** pull
-request and returning a structured result. Isolation is of the worktree *path*, not of the
-repository: repo-global git state is shared with every sibling in the wave and is not yours to
-touch (see Hard rules).
+in a git worktree at a path no sibling agent uses, and you finish by opening a pull request
+**ready for review** and returning a structured result. Isolation is of the worktree *path*, not
+of the repository: repo-global git state is shared with every sibling in the wave and is not yours
+to touch (see Hard rules).
 
 Occasionally there is nothing to fix because the fix already merged. That is `"status": "no-op"`,
 not a failure; phase 4 says how to recognize it and where to stop.
@@ -553,7 +554,7 @@ Be honest about it: a `bare-added` fix never rates Low, and a fix crossing two o
 on a runtime dependency that nothing tests rates High outright. Reporting a narrower shape than
 you applied defeats the signal that says "this pins the whole tree".
 
-**The score is static analysis, and CI on the draft PR is the verifier. Do not run the
+**The score is static analysis, and CI on the PR is the verifier. Do not run the
 repository's scripts.** Not its tests, not its build, not its linters. F4 reads whether anything
 tests the modules that import this package, F5 reads whether a workflow will run on the pull
 request, and both come out of the files in your worktree. At this flow's volume, running every
@@ -563,11 +564,11 @@ working, not a scoring defect (ADR 006).
 Use the returned `markdown` verbatim in the PR body. Its `coverage` and `ci` objects carry the
 counts and the workflow the score rests on, if the PR body needs to cite them.
 
-## Phase 6: Commit, push, open the draft PR
+## Phase 6: Commit, push, open the PR
 
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
-first: the PR is the review artifact, and it goes up as a draft precisely so nothing is final
-until a human says so.
+first: the PR is the review artifact, and it opens **ready for review** precisely so it reaches
+the reviewers and CODEOWNERS who decide it. Opening it is not merging it (ADR 008).
 
 **The repository's own commit and push hooks are the repository's, and they run.** A repo with
 lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
@@ -605,7 +606,7 @@ Alerts resolved:
 Refs: https://github.com/<nwo>/security/dependabot/<number>
 ```
 
-Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the draft PR. The `gh`
+Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the PR. The `gh`
 calls below are location-independent because every one of them carries `--repo`, so they take no
 `cd` prefix. Collect **all** required labels from every source and apply them together, each via
 its own `--label` flag. This flow always requires `security` (lowercase, matching Dependabot's own
@@ -632,7 +633,7 @@ below is safe whether the repository's label is already `security` or still the 
 no name lookup or casing fallback is needed.
 
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --draft --label security [--label ...] \
+gh pr create --repo <nwo> --head <branch_name> --label security [--label ...] \
   --title "..." --body "..."
 ```
 
@@ -728,8 +729,10 @@ override, also say which copies were already safe and are now pinned anyway.
 > `astro` left `0.34.5` resolving under `next > @vercel/analytics`, and no single parent covered
 > both copies. This also pins `astro`'s `0.35.3`, which was never vulnerable.
 
-Do **not** mark the PR ready or offer to: promotion is the orchestrator's decision, made with
-check state and auto-merge state in front of the user.
+**Never merge the PR, never enable auto-merge on it, and do not offer to either.** Opening it is
+where your work ends: nothing in this plugin acts on a pull request after `gh pr create`, and the
+decision to merge is made by a human on GitHub, with the diff in front of them (ADR 008). Arming
+auto-merge is that same decision made in advance, so it is theirs too, never yours.
 
 ## Cleanup
 

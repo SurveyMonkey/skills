@@ -9,7 +9,7 @@
     {
       "name": "gh-security",
       "source": "./plugins/gh-security",
-      "description": "Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, draft PRs carrying a computed merge-risk rating, a check-aware mark-ready flow, and a pin audit that finds overrides no longer needed and opens a draft PR removing them.",
+      "description": "Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, pull requests that open ready for review carrying a computed merge-risk rating, and a pin audit that finds overrides no longer needed and opens a PR removing them.",
       "category": "devops",
       "tags": [
         "github",

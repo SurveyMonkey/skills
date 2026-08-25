@@ -1,63 +1,64 @@
 #!/usr/bin/env bash
-# mark-ready.sh — inspect and promote draft fix PRs
+# pr-status.sh — read the state of pull requests this flow opened
 #
-# Usage:
-#   mark-ready.sh status  <pr-url>...   # read-only: checks, auto-merge, behind
-#   mark-ready.sh promote <pr-url>...   # rebase, then mark ready
+# Usage: pr-status.sh <pr-url>...
 #
 # Output: {"prs": [...]} — one entry per URL, in argument order.
 #
-# The two verbs deliberately split the read-only surface from the mutating
-# one: `status` only runs `gh pr view` / `gh api`, `promote` changes PRs.
-# Policy — which PRs to promote, per-PR versus batch confirmation, the
-# F4/F5 verification gate — belongs to the caller. This script does exactly
-# what it is told on exactly the URLs it is given.
+# **Read-only, and the whole script.** It runs `gh pr view` and `gh api` and
+# nothing that changes a pull request. There is deliberately no verb for
+# marking one ready: PRs open ready for review (ADR 008), so nothing in this
+# plugin acts on a PR after `gh pr create`. The mutating half this script
+# used to carry — rebase, then `gh pr ready` — is gone with the promotion
+# phases it served.
 #
-# status entry:
+# Its callers are the orchestrator's closing report and the standalone
+# /gh-security:audit-pins command, both of which print this as information.
+# Interpreting it is the caller's job; this script does exactly what it is told
+# on exactly the URLs it is given.
+#
+# Entry:
 #   { url, number, repo, state, is_draft, head, base, merge_state, behind,
 #     conflict, checks, check_counts: {total, passed, failed, pending},
 #     failing_checks, auto_merge: {permitted, armed, enabled_by, method} }
 #
+#   A URL that could not be read is `{url, error}` instead, with none of the
+#   fields above: either it is not a GitHub pull request URL, or `gh pr view`
+#   failed on it.
+#
 #   - `checks` is passed | failed | pending | none, derived from
 #     statusCheckRollup. The rollup mixes two node shapes — CheckRuns carry
 #     status/conclusion, legacy StatusContexts carry only state — and both
-#     must be read or draft-gated repos misclassify. An empty rollup is
-#     "none", never "passed": no CI, or CI gated off drafts, is a fact to
-#     surface, not a green light (ADR 002 prescribes observing, not
-#     assuming).
+#     must be read or a repo reporting only legacy contexts misclassifies. An
+#     empty rollup is "none", never "passed": no CI at all, or a rollup that
+#     has not populated yet, is a fact to surface, not a green light. This
+#     flow observes checks and never prescribes them (ADR 008, carried
+#     forward from ADR 002).
 #   - `merge_state` passes the raw mergeStateStatus through because UNKNOWN
 #     is a real transient right after a push; the caller must not read it as
-#     clean or behind.
-#   - `auto_merge.armed` means auto-merge is enabled on this PR: promoting
-#     it merges it once checks pass. `permitted` is the repository setting;
-#     null when the token cannot see it.
+#     clean or behind. Most PRs read UNKNOWN when the final report runs,
+#     seconds after they were created.
+#   - `auto_merge.armed` means auto-merge is enabled on this PR: it merges
+#     itself once checks pass, and nothing here or in any agent arms it.
+#     `permitted` is the repository setting; null when the token cannot see
+#     it.
 #
-# promote entry:
-#   { url, status: rebased | already-current | conflict | error, ready,
-#     stage, detail }
-#
-#   Strictly ordered per PR: rebase first, `gh pr ready` only after a
-#   successful rebase, so reviewers are notified once, on final content.
-#   "Already up to date" (any phrasing) is success. Conflicts are reported,
-#   never resolved: a conflicted overrides block is judgment, which a script
-#   refuses to guess at.
-#
-# Exit: status exits 1 if any PR could not be viewed; promote exits 1 if any
-# PR ended in conflict or error. The full report is emitted either way, like
-# the adapter's validate: report and fail.
+# Exit: 1 if any URL produced an error entry — a malformed URL, which is never
+# viewed at all, a failed `gh pr view`, and a `gh pr view` whose output could
+# not be parsed. The full report is emitted either way, like the adapter's
+# validate: report and fail. **One bad URL never costs the others their
+# entries**, which is why a parse failure becomes an entry rather than an
+# abort: `gh` writes its release-upgrade notice to stderr while exiting 0, and
+# capturing that into the payload used to kill the whole run mid-loop with a
+# bare `jq: parse error` and no report at all (#87).
 
 set -euo pipefail
 
 usage() {
-  printf '{"error":"Usage: mark-ready.sh status|promote <pr-url>..."}\n' >&2
+  printf '{"error":"Usage: pr-status.sh <pr-url>..."}\n' >&2
   exit 1
 }
 
-VERB="${1:-}"
-case "$VERB" in
-  status|promote) shift ;;
-  *) usage ;;
-esac
 [ "$#" -ge 1 ] || usage
 
 # https://github.com/OWNER/REPO/pull/123 -> OWNER/REPO; empty on anything else.
@@ -65,10 +66,6 @@ parse_repo() {
   printf '%s\n' "$1" \
     | sed -nE 's#^https://github\.com/([^/]+)/([^/]+)/pull/[0-9]+$#\1/\2#p'
 }
-
-# ---------------------------------------------------------------------------
-# status
-# ---------------------------------------------------------------------------
 
 # One repo-settings call per unique repository. bash 3.2 has no associative
 # arrays, so the memo is newline-delimited "repo value" lines. The result
@@ -162,6 +159,13 @@ run_status() {
   entries=""
   failed=false
 
+  # stderr goes to a file rather than into the payload. `2>&1` here captured
+  # gh's own chatter — the release-upgrade notice is the common one, and it
+  # arrives WITH a zero exit — into $view, so the jq below parsed a diagnostic
+  # as JSON.
+  ERR_FILE=$(mktemp)
+  trap 'rm -f "$ERR_FILE"' EXIT INT TERM
+
   for url in "$@"; do
     repo=$(parse_repo "$url")
     if [ -z "$repo" ]; then
@@ -170,11 +174,21 @@ run_status() {
       failed=true
     elif view=$(gh pr view "$url" \
         --json number,state,isDraft,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,autoMergeRequest \
-        2>&1); then
+        2>"$ERR_FILE"); then
       allow_auto_merge "$repo"
-      entry=$(printf '%s' "$view" | status_entry "$url" "$repo" "$ALLOW_VALUE")
+      # Guarded, not bare: a parse failure is this PR's entry, never the end of
+      # the report. `|| entry=""` keeps set -e out of it, and the empty test
+      # also catches a jq that exits 0 on empty input.
+      entry=$(printf '%s' "$view" | status_entry "$url" "$repo" "$ALLOW_VALUE" 2>/dev/null) \
+        || entry=""
+      if [ -z "$entry" ]; then
+        entry=$(jq -nc --arg url "$url" \
+          --arg err "gh pr view output could not be parsed: $(printf '%s' "$view" | head -c 200)" \
+          '{url: $url, error: $err}')
+        failed=true
+      fi
     else
-      entry=$(jq -nc --arg url "$url" --arg err "$view" \
+      entry=$(jq -nc --arg url "$url" --arg err "$(cat "$ERR_FILE")" \
         '{url: $url, error: $err}')
       failed=true
     fi
@@ -186,77 +200,4 @@ run_status() {
   [ "$failed" = false ]
 }
 
-# ---------------------------------------------------------------------------
-# promote
-# ---------------------------------------------------------------------------
-
-run_promote() {
-  entries=""
-  all_ready=true
-
-  for url in "$@"; do
-    status=""
-    ready=false
-    stage=""
-    detail=""
-
-    rc=0
-    out=$(gh pr update-branch --rebase "$url" 2>&1) || rc=$?
-    lower=$(printf '%s' "$out" | tr '[:upper:]' '[:lower:]')
-    # Every phrasing gh has used for "nothing to do" counts as success; the
-    # exact string varies by version, so match loose, lowercase substrings.
-    case "$lower" in
-      *"up to date"* | *"up-to-date"* | *"no new commits"*)
-        status="already-current" ;;
-      *)
-        if [ "$rc" -eq 0 ]; then
-          status="rebased"
-        else
-          case "$lower" in
-            *conflict*) status="conflict" ;;
-            *)          status="error" ;;
-          esac
-          stage="rebase"
-          detail="$out"
-        fi
-        ;;
-    esac
-
-    if [ "$status" = "rebased" ] || [ "$status" = "already-current" ]; then
-      if rout=$(gh pr ready "$url" 2>&1); then
-        ready=true
-      else
-        rlower=$(printf '%s' "$rout" | tr '[:upper:]' '[:lower:]')
-        case "$rlower" in
-          *"not a draft"*)
-            # Already ready; promoting is idempotent.
-            ready=true ;;
-          *)
-            status="error"
-            stage="ready"
-            detail="$rout"
-            ;;
-        esac
-      fi
-    fi
-
-    [ "$ready" = true ] || all_ready=false
-
-    entry=$(jq -nc \
-      --arg url "$url" --arg status "$status" --argjson ready "$ready" \
-      --arg stage "$stage" --arg detail "$detail" \
-      '{url: $url, status: $status, ready: $ready,
-        stage: (if $stage == "" then null else $stage end),
-        detail: (if $detail == "" then null else $detail end)}')
-    entries="$entries$entry
-"
-  done
-
-  printf '%s' "$entries" | jq -s '{prs: .}'
-  [ "$all_ready" = true ]
-}
-
-case "$VERB" in
-  status)  run_status "$@" ;;
-  promote) run_promote "$@" ;;
-esac
+run_status "$@"

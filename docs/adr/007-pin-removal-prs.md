@@ -1,10 +1,10 @@
 ---
 type: ADR
-description: "The pin audit opens one draft removal PR per repository, defaulting to PR mode, gated on a combined test of the whole removed set that fails closed on a partial view of the tree."
+description: "The pin audit opens one removal PR per repository, ready for review, defaulting to PR mode, gated on a combined test of the whole removed set that fails closed on a partial view of the tree."
 status: stable
 created: 2026-08-21
 owner: brianespinosa
-related_issues: [7, 72]
+related_issues: [7, 72, 87]
 ---
 
 # ADR 007: Pin-removal PRs
@@ -47,8 +47,9 @@ because a package missing from both snapshots shows no change and `[]` is the st
 **The audit gains a `mode` input, `report` or `pr`, set before dispatch and never defaulted.** The
 agent cannot ask, and the two modes differ by whether a pull request is opened against a real
 repository, so a missing or unrecognized value is an `input` failure. At every dispatch point (the
-`/gh-security:audit-pins` command, the `resolve-alerts` skill's phase 4 batch approval, and its phase 10
-recommendation) **PR mode is the first and recommended option** and report-only is the alternative.
+`/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and its final
+phase's recommendation) **PR mode is the first and recommended option** and report-only is the
+alternative.
 In the orchestrator the mode is an option on the single batch approval, not a second prompt: one
 approval covers the batch and the audit's mode together.
 
@@ -105,14 +106,14 @@ gap would ship a deletion nothing checked.
 the scorer from the tree as [ADR 006](006-merge-risk-is-static-analysis.md) settled, and the PR
 band as the highest across the packages that were scored. A removed package that left the tree, or
 whose delta was empty, has no after-version and is not scored at all; where none was scorable
-`pr.risk` is null throughout, which costs nothing because the promotion gate reads the check rollup
-and never the band. No repository check is run: the combined install is the PR's own evidence and
-CI on the draft is the verifier, so a removal that breaks the build ships as a draft and CI says so
-there. The agent never edits source or tests at all. It is a
-**draft** and the agent never marks it ready; promotion stays the dispatcher's decision under
-[ADR 002](002-pr-draft-state-and-approval-flow.md), with the audit's PR joining the skill's same phase 8
-evidence table on the same terms as a fix PR. An open PR already on the head branch means the audit
-still runs and reports, opens nothing, and returns the existing URL.
+`pr.risk` is null throughout, which costs nothing because nothing gates on the band. No repository
+check is run: the combined install is the PR's own evidence and CI on the PR is the verifier, so a
+removal that breaks the build ships as a PR and CI says so there. The agent never edits source or
+tests at all. It opens **ready for review**, on the same terms as a fix PR, and the agent never
+merges it or arms auto-merge on it ([ADR 008](008-prs-open-ready-for-review.md); until then it
+opened as a draft and promotion was the dispatcher's decision under
+[ADR 002](002-pr-draft-state-and-approval-flow.md)). An open PR already on the head branch means
+the audit still runs and reports, opens nothing, and returns the existing URL.
 
 ## Consequences
 
@@ -123,12 +124,12 @@ one makes the rest stale and their evidence wrong. One PR per repository is the 
 evidence is still true at merge time, and the combined test is what buys that.
 
 The audit now writes to the repository, which it previously never did. The blast radius is bounded
-by the same things that bound the fix agents: an isolated worktree, a draft PR, and a batch
-approval before dispatch. Report mode remains available for anyone who wants the old behavior, and
-it is a single answer away at every entry point.
+by the same things that bound the fix agents: an isolated worktree, a pull request that merges only
+when a human merges it, and a batch approval before dispatch. Report mode remains available for
+anyone who wants the old behavior, and it is a single answer away at every entry point.
 
 Removal PRs carry a merge-risk band computed by the same rubric as fix PRs, so the two are directly
-comparable in the summary table and in the promotion decision. That was already RFC 001's intent
+comparable in the summary table and to a reviewer. That was already RFC 001's intent
 ("the audit-pins subagent reuses the same rubric for its removal PRs"); what is settled here is
 that `--override-scope` is `none` for a removal, and that the band is the maximum across packages
 rather than an average.
