@@ -54,7 +54,7 @@ flowchart TD
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
     P1D -->|yes| P2
 
-    P2["Phase 2: discover-alerts.sh | select-adapter.sh | classify-lines.sh<br/>(repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
+    P2["Phase 2: discover-alerts.sh | select-adapter.sh<br/>| classify-lines.sh (repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
     P2REP --> P2Q{"actionable groups?"}
     P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
     P2Q -->|"one or more"| P3
