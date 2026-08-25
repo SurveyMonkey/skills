@@ -352,6 +352,49 @@ Describe 'the rules that gate the removal PR'
     End
   End
 
+  # The peer-only classify stop in fix-dependency (#103): `why`'s `peer_only`
+  # says the package resolves only through pnpm's peer auto-install, and
+  # phase 3 has to stop before phase 4 ever tries an override: a live run
+  # burned four full install cycles proving no scoped, version-qualified, or
+  # bare override shape can move a copy shaped like this.
+  Describe 'the peer-only classify stop in fix-dependency (#103)'
+    FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+
+    It 'stops before phase 4 on a peer_only package'
+      When call phrase_in "$FIX_AGENT" 'Stop here, clean up, and report it'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the classification peer_only_dependency in the failure detail'
+      When call rule_in "$FIX_AGENT" 'peer_only_dependency'
+      The status should be success
+      The output should not equal '0'
+    End
+
+    It 'reports the failure at phase classify'
+      When call rule_in "$FIX_AGENT" 'failure.phase: "classify"'
+      The status should be success
+      The output should not equal '0'
+    End
+
+    It "quotes peer_parents in the failure detail"
+      When call phrase_in "$FIX_AGENT" 'quoting .peer_parents. verbatim'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The remedy names a parent a human should bump, and pointing at an
+    # optional peer is misleading: a parent that merely tolerates the package
+    # cannot force a patched range. `why` orders required peers first and
+    # repeats the optional ones in optional_peer_parents for exactly this.
+    It 'steers the remedy at required peer parents, not optional ones'
+      When call phrase_in "$FIX_AGENT" 'point the human at a required peer parent'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   # The same hook rule, in the other agent definition it governs. Both flows
   # commit and push into repositories carrying lefthook or husky.
   Describe 'the repository hook rule in fix-dependency (#78)'

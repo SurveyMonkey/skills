@@ -6,7 +6,9 @@
 #
 # Verbs:
 #   detect                                     -> toolchain metadata
-#   why <pkg>                                  -> {relationship, parents[], raw}
+#   why <pkg>                                  -> {relationship, parents[], peer_only,
+#                                                  peer_parents[], optional_peer_parents[],
+#                                                  raw}
 #   resolved_versions <pkg>                    -> {present, versions[], lockfile_entries}
 #   resolution_map                             -> {pm, lockfile_entries, entries_read,
 #                                                  entries_expected, unreadable_entries,
@@ -1076,16 +1078,73 @@ npm_parents() {
 # `parents_unreadable` while sitting on another line, and the bare
 # `parent>child` override written for them collapsed the sibling lines
 # ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
-pnpm_edge_rows() {
+#
+# `pnpm_scan_rows` below is the one parser behind this reader and `why`'s
+# peer_only classification (issue #103), rather than a second near-identical
+# awk state machine: the same entry-key splitting, the same suffix handling,
+# one set of parsing rules to keep in sync. It scans the `snapshots:` section
+# only — never `packages:`, whose v9 entries carry declared peer *ranges*
+# rather than resolved edges, and whose pre-v9 keys (`/@nx/vite@21.2.2(...)`)
+# split into garbage parents like `/@nx/vite` that flowed into
+# `parents_unreadable` and then into an unmatchable `/@nx/vite>vite` override
+# key. A v6/v5.4 lockfile has no `snapshots:` section at all, so this reader
+# yields nothing there, exactly as it did before peer detection existed.
+#
+# One pass, three row shapes, tab-separated:
+#
+#   importer<TAB><path><TAB><kind>
+#     $1 is declared by the importer at <path> (`.` or a workspace package)
+#     under <kind> (dependencies, devDependencies, optionalDependencies).
+#   suffix<TAB><parent><TAB><parent_version>
+#     the parent's snapshot KEY carries a `($1@...)` peer suffix: pnpm
+#     resolved $1 as that parent's peer. Matched as a plain substring of the
+#     full key, which covers multi-peer suffixes `(a@1)(b@2)`, scoped peer
+#     names `(@scope/x@1.2.3)`, and nested instantiations `(a@1(b@2))` alike.
+#   edge<TAB><parent><TAB><parent_version><TAB><child_version><TAB><kind><TAB><suffixed>
+#     a `dependencies:`/`optionalDependencies:` edge to $1 inside the
+#     parent's snapshot; <suffixed> is `yes` when that snapshot's key
+#     instantiates $1 as above. This is how real pnpm 9/10 peer auto-install
+#     shows up: the resolved peer is an ordinary-looking edge INSIDE the
+#     consumer's suffixed snapshot (`'@vitejs/plugin-react@4.3.4(vite@6.4.3)':
+#     dependencies: vite: 6.4.3`), never a parentless orphan.
+pnpm_scan_rows() {
   awk -v pkg="$1" '
-    /^snapshots:/ { insnap = 1; next }
-    /^[a-zA-Z]/   { insnap = 0 }
-    insnap {
+    /^importers:/ { sect = "importers"; next }
+    /^snapshots:/ { sect = "snapshots"; next }
+    /^[a-zA-Z]/   { sect = "" }
+    sect == "importers" {
+      if ($0 ~ /^  [^ ]/) {
+        ipath = $0
+        sub(/^  /, "", ipath)
+        sub(/:[[:space:]]*$/, "", ipath)
+        gsub(/\x27/, "", ipath)
+        ikind = ""
+      } else if ($0 ~ /^    (dependencies|devDependencies|optionalDependencies):[[:space:]]*$/) {
+        ikind = $0
+        sub(/^[[:space:]]*/, "", ikind)
+        sub(/:.*$/, "", ikind)
+      } else if ($0 ~ /^    [^ ]/) {
+        ikind = ""
+      } else if (ikind != "" && $0 ~ /^      [^ ]/) {
+        dep = $0
+        sub(/^      /, "", dep)
+        c = index(dep, ":")
+        if (c > 0) {
+          name = substr(dep, 1, c - 1)
+          gsub(/\x27/, "", name)
+          if (name == pkg)
+            printf "importer\t%s\t%s\n", ipath, ikind
+        }
+      }
+      next
+    }
+    sect == "snapshots" {
       if ($0 ~ /^  [^ ]/) {
         cur = $0
         sub(/^  /, "", cur)
         sub(/:[[:space:]]*(\{\})?[[:space:]]*$/, "", cur)
         gsub(/\x27/, "", cur)
+        sfx = (index(cur, "(" pkg "@") > 0) ? "yes" : "no"
         p = index(cur, "(")
         if (p > 0) cur = substr(cur, 1, p - 1)
         # The parent locator splits on its LAST `@`: a scoped name owns the
@@ -1101,12 +1160,15 @@ pnpm_edge_rows() {
           curver = substr(cur, at + 1)
         }
         if (curver == "") curver = "-"
-        indeps = 0
+        kind = ""
+        if (sfx == "yes" && curname != "")
+          printf "suffix\t%s\t%s\n", curname, curver
         next
       }
-      if ($0 ~ /^    dependencies:/) { indeps = 1; next }
-      if ($0 ~ /^    [a-zA-Z]/)      { indeps = 0 }
-      if (indeps && $0 ~ /^      /) {
+      if ($0 ~ /^    dependencies:/)         { kind = "dependencies"; next }
+      if ($0 ~ /^    optionalDependencies:/) { kind = "optionalDependencies"; next }
+      if ($0 ~ /^    [a-zA-Z]/)              { kind = "" }
+      if (kind != "" && $0 ~ /^      /) {
         dep = $0
         sub(/^      /, "", dep)
         c = index(dep, ":")
@@ -1117,15 +1179,23 @@ pnpm_edge_rows() {
         sub(/^[[:space:]]+/, "", val)
         sub(/[[:space:]]+$/, "", val)
         gsub(/\x27/, "", val)
-        # A peer-dependency suffix is not part of the resolved version.
+        # A peer-dependency suffix on a resolved version is not part of it.
         p = index(val, "(")
         if (p > 0) val = substr(val, 1, p - 1)
         if (val == "") val = "-"
         if (name == pkg && curname != "")
-          printf "%s\t%s\t%s\n", curname, curver, val
+          printf "edge\t%s\t%s\t%s\t%s\t%s\n", curname, curver, val, kind, sfx
       }
     }
   ' pnpm-lock.yaml
+}
+
+# Unchanged signature and output: `dependencies:` edges only, three columns.
+# Every existing caller (`pnpm_parents`, `apply_constraint`'s version
+# qualification, `pnpm_copy_rows`) reads exactly this.
+pnpm_edge_rows() {
+  pnpm_scan_rows "$1" \
+    | awk -F'\t' '$1 == "edge" && $5 == "dependencies" { print $2"\t"$3"\t"$4 }'
 }
 
 pnpm_parents() {
@@ -1189,6 +1259,20 @@ pnpm_root_child_major() {
   printf '%s' "$_prcm_major"
 }
 
+# Whether pnpm-lock.yaml declares lockfileVersion 9.x. The peer_only
+# classification is defined for this format only: v9 is where a peer
+# resolution is recorded as a `(pkg@...)` suffix on the consumer's
+# `snapshots:` key. Pre-v9 lockfiles (v6, v5.4) have no `snapshots:` section,
+# and a missing lockfileVersion is treated as not-v9 rather than guessed at.
+pnpm_lockfile_v9() {
+  [ -n "$(awk '/^lockfileVersion:/ {
+      v = $2
+      gsub(/[\x27"]/, "", v)
+      if (v ~ /^9([.]|$)/) print "v9"
+      exit
+    }' pnpm-lock.yaml 2>/dev/null)" ]
+}
+
 # Berry parents, matched on either name, exactly as npm's are.
 #
 # Matching the declared key alone made a Berry parent that reaches a package
@@ -1213,12 +1297,93 @@ verb_why() {
     ((.devDependencies // {}) | has($pkg))
     and (((.dependencies // {}) | has($pkg)) | not)' package.json)
 
+  scan_rows=""
   case "$pm" in
     npm)  parents=$(npm_parents "$pkg")  ;;
-    pnpm) parents=$(pnpm_parents "$pkg") ;;
+    pnpm)
+      # One lockfile pass answers parents AND the peer_only conjuncts below.
+      # The projection here is exactly `pnpm_parents` (`dependencies:` edges,
+      # parent names, sorted unique), taken off the shared scan.
+      scan_rows=$(pnpm_scan_rows "$pkg")
+      parents=$(printf '%s\n' "$scan_rows" \
+        | awk -F'\t' '$1 == "edge" && $5 == "dependencies" { print $2 }' \
+        | sort -u | jq -Rs 'split("\n") | map(select(length > 0))')
+      ;;
     yarn) parents=$(yarn_parents "$pkg") ;;
     *)    die "why: unsupported pm '$pm'" ;;
   esac
+
+  # peer_only/peer_parents (issue #103, redesigned after review): defined for
+  # pnpm lockfileVersion 9 only, false everywhere else.
+  #
+  #   peer_only := lockfile is v9
+  #                AND the package is not declared in package.json
+  #                AND no `importers:` block (root `.` or any workspace
+  #                    package, any dependency type) declares it
+  #                AND at least one snapshot edge or peer instantiation
+  #                    reaches it
+  #                AND every dependencies/optionalDependencies edge to it
+  #                    originates from a parent snapshot KEY whose peer
+  #                    suffix instantiates it (the key contains `(pkg@`)
+  #
+  # A suffix-instantiated edge is pnpm recording a peer resolution, and no
+  # pnpm.overrides key can move it (the #103 field case burned four failed
+  # escalations proving so — every parent there was suffix-instantiated). A
+  # NON-suffixed edge — `next@x: optionalDependencies: sharp:`, where next's
+  # key carries no `(sharp@` — is an ordinary declaration an override CAN
+  # reach (a field-test fix PR), so a single such edge defeats
+  # the classification; that subsumes the old optionalDependencies veto. The
+  # importers conjunct is the workspace guard: a dependency declared only by
+  # `packages/app/package.json` lives only under `importers:`, which the
+  # snapshot scan never reads, and without this check it looks unreachable
+  # and gets abandoned as peer-only when a one-line manifest edit fixes it.
+  #
+  # peer_parents lists the suffix-stripped parents whose keys instantiate the
+  # package, REQUIRED PEERS FIRST, each group sorted: a parent is an optional
+  # peer when its suffixed snapshot reaches the package through
+  # `optionalDependencies:` and never through `dependencies:` — real v9
+  # emission distinguishes required from optional peers exactly this way.
+  # optional_peer_parents repeats just the optional ones, so remedy prose can
+  # steer a human at a parent that requires the package rather than one that
+  # merely tolerates it. peer_parents is provably non-empty whenever
+  # peer_only holds: a reachable package whose every edge is suffixed has at
+  # least one instantiating key.
+  lockfile_v9=false
+  in_importers=false
+  reachable=false
+  all_edges_suffixed=true
+  peers='[]'
+  if [ "$pm" = "pnpm" ] && pnpm_lockfile_v9; then
+    lockfile_v9=true
+    verdict_rows=$(printf '%s\n' "$scan_rows" | awk -F'\t' '
+      $1 == "importer" { imp = 1 }
+      $1 == "suffix"   { if (!seen[$2]++) names[++n] = $2 }
+      $1 == "edge" {
+        edges = 1
+        if ($6 == "yes") {
+          if ($5 == "dependencies") req[$2] = 1
+          else opt[$2] = 1
+        } else plain = 1
+      }
+      END {
+        printf "in_importers\t%s\n", (imp ? "true" : "false")
+        printf "reachable\t%s\n", ((edges || n > 0) ? "true" : "false")
+        printf "all_suffixed\t%s\n", (plain ? "false" : "true")
+        for (i = 1; i <= n; i++)
+          printf "peer\t%s\t%s\n",
+            ((names[i] in opt) && !(names[i] in req) ? 1 : 0), names[i]
+      }')
+    in_importers=$(printf '%s\n' "$verdict_rows" \
+      | awk -F'\t' '$1 == "in_importers" { print $2 }')
+    reachable=$(printf '%s\n' "$verdict_rows" \
+      | awk -F'\t' '$1 == "reachable" { print $2 }')
+    all_edges_suffixed=$(printf '%s\n' "$verdict_rows" \
+      | awk -F'\t' '$1 == "all_suffixed" { print $2 }')
+    peers=$(printf '%s\n' "$verdict_rows" \
+      | awk -F'\t' '$1 == "peer" { print $2 "\t" $3 }' | sort -u \
+      | jq -Rs 'split("\n") | map(select(length > 0) | split("\t"))
+                | map({name: .[1], optional: (.[0] == "1")})')
+  fi
 
   # Best-effort human-readable chain for the PR body. Never fatal: these exit
   # non-zero in normal situations, such as a package present only as a peer.
@@ -1240,7 +1405,12 @@ verb_why() {
   # moves into jq's own program to keep the emitted `raw` field byte-identical.
   printf '%s' "$parents" \
     | jq --arg pkg "$pkg" --arg pm "$pm" --rawfile raw "$raw_file" \
-         --argjson direct "$direct" --argjson dev_only "$dev_only" '
+         --argjson direct "$direct" --argjson dev_only "$dev_only" \
+         --argjson lockfile_v9 "$lockfile_v9" \
+         --argjson in_importers "$in_importers" \
+         --argjson reachable "$reachable" \
+         --argjson all_edges_suffixed "$all_edges_suffixed" \
+         --argjson peers "$peers" '
       (map(select(. != "__root__"))) as $pkgparents
       | {
           pm: $pm,
@@ -1249,6 +1419,15 @@ verb_why() {
           dev_only: $dev_only,
           parents: $pkgparents,
           parent_count: ($pkgparents | length),
+          # The five conjuncts of the redesigned rule (issue #103); see the
+          # contract comment above the shell block that computed them.
+          peer_only: ($lockfile_v9
+                      and ($direct | not)
+                      and ($in_importers | not)
+                      and $reachable
+                      and $all_edges_suffixed),
+          peer_parents: ($peers | map(.name)),
+          optional_peer_parents: ($peers | map(select(.optional).name)),
           raw: ($raw | sub("\n+$"; ""))
         }'
 }

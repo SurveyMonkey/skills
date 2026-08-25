@@ -1,0 +1,6 @@
+{
+  "name": "app",
+  "dependencies": {
+    "vite": "6.4.3"
+  }
+}

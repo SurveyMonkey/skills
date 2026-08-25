@@ -228,6 +228,27 @@ cd "$WORK/fix" && $ADAPTER why <package>
 `relationship` is `direct` or `transitive`, and `parents` lists the direct parents of the package.
 Keep `raw` for the PR body.
 
+**A `peer_only: true` package is a structural dead end. Stop here, clean up, and report it, do not
+attempt phase 4.** Under pnpm's `autoInstallPeers` (lockfileVersion 9), a peer resolution is
+recorded as a `(pkg@...)` suffix on each consumer's `snapshots:` key, with the resolved copy as an
+edge *inside* that suffixed snapshot. `peer_only` is true exactly when no importer declares the
+package and every edge reaching it originates from a key whose suffix instantiates it — so no
+`pnpm.overrides` key can move it: an override intercepts declared edges, and every edge here is
+pnpm recording a peer resolution, not a declaration. A field run proved the impossibility
+empirically rather than theoretically: four escalations (scoped overrides on the two direct peer
+parents, scoped overrides on all four peer consumers, a version-qualified bare override, a plain
+bare override), each followed by a full `node_modules` wipe and reinstall, and none moved the
+resolved copy — every parent there was suffix-instantiated. One agent burned four install cycles
+(~17 minutes) proving a shape `why` can name before any install runs. Clean up per the rules
+above, and return `"status": "failure"` with `failure.phase: "classify"`, and `detail` naming the
+classification `peer_only_dependency`, quoting `peer_parents` verbatim, and stating the remedy: a
+major bump of one of the peer parents wide enough to require a patched range, or a real dependency
+declaration that gives the package an edge an override can reach. `peer_parents` lists required
+peers first and `optional_peer_parents` repeats the optional ones — point the human at a required
+peer parent: bumping a parent that merely tolerates the package cannot force a patched range. Both
+remedies are lockfile regeneration, and both are human work no override can substitute for
+([#103](https://github.com/SurveyMonkey/skills/issues/103)).
+
 **`parents` spans every major line, and only the parents on yours may receive a scoped entry.**
 `why` has no `--line`, so it answers about the package as a whole: on a real run its `undici`
 parents included `@vercel/sandbox` (resolving 7.28.0) and `vercel` (resolving 5.29.0) alongside the
@@ -847,7 +868,7 @@ End your final message with exactly one fenced JSON block:
 - `status` is `success`, `no-op`, or `failure`. Exactly one of `no_op` and `failure` is non-null,
   and both are `null` on success.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
-  `null`, and `failure` is `{"phase": "input | worktree | baseline | install | validate | push | pr", "detail": "..."}`.
+  `null`, and `failure` is `{"phase": "input | worktree | baseline | classify | install | validate | push | pr", "detail": "..."}`.
   Everything you completed before stopping still gets reported (`observations`).
 - On a no-op (phase 4's already-fixed case): `"status": "no-op"`, `pr_url`, `action` and `risk`
   are `null`, `resolved_version` is what is installed, and
