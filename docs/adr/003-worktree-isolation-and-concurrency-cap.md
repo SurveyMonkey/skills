@@ -1,10 +1,10 @@
 ---
 type: ADR
-description: Fix agents work in per-major-line worktrees under .claude/worktrees inside the target repo, with a per-machine concurrency cap enforced as a wave barrier.
+description: Fix agents work in per-major-line worktrees under .claude/worktrees inside the target repo, with a per-machine concurrency cap enforced as a rolling agent pool.
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5, 35, 84]
+related_issues: [5, 35, 84, 94]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
@@ -61,14 +61,18 @@ orphan under `.claude/worktrees/` sits at a stable, discoverable path, which is 
 face of the in-repo trade-off (the crashed-agent stranding that argued for temp directories is
 now at least visible and named in the failure report).
 
-**The concurrency cap is computed per machine and enforced as a wave barrier.**
+**The concurrency cap is computed per machine and ~~enforced as a wave barrier~~ enforced as a
+rolling pool ([#94](https://github.com/SurveyMonkey/skills/issues/94), v0.8.4).**
 `detect-capacity.sh` derives `clamp(min(floor(cores / 3), floor(total_ram_gb / 8)), 3, 6)` from
 unprivileged reads (`sysctl` on macOS, `nproc` and `/proc/meminfo` on Linux), falling back to 3
 on any detection failure. Total rather than available RAM keeps the cap deterministic per
-machine. The orchestrator dispatches at most `cap` Task calls per message and waits for the whole
-wave before starting the next. A rolling pool would utilize slots better, but the Task tool has
-no slot-freed signal, so a barrier is the honest implementation; the slowest agent gating its
-wave is accepted.
+machine. ~~The orchestrator dispatches at most `cap` Task calls per message and waits for the
+whole wave before starting the next. A rolling pool would utilize slots better, but the Task tool
+has no slot-freed signal, so a barrier is the honest implementation; the slowest agent gating its
+wave is accepted.~~ **Superseded in v0.8.4**
+([#94](https://github.com/SurveyMonkey/skills/issues/94)): see
+[the rolling-pool amendment](#amendment-rolling-pool-replaces-the-wave-barrier). The cap itself
+and its computation are unchanged; only how it is enforced changed.
 
 ## Consequences
 
@@ -80,8 +84,11 @@ the base-branch comparison pays twice. That is the price of the attribution rule
 has already earned it: the Phase 1 field case where a vitest bump turned a green suite red looked
 exactly like pre-existing breakage until both trees ran.
 
-Wave-barrier dispatch under-utilizes relative to a rolling pool. Accepted; revisit only if the
-harness grows a completion signal worth reacting to.
+~~Wave-barrier dispatch under-utilizes relative to a rolling pool. Accepted; revisit only if the
+harness grows a completion signal worth reacting to.~~ **Superseded in v0.8.4**
+([#94](https://github.com/SurveyMonkey/skills/issues/94)): the harness grew that signal, which is
+the revisit condition this named. See
+[the rolling-pool amendment](#amendment-rolling-pool-replaces-the-wave-barrier).
 
 Stale local fix branches surface as agent failures instead of silent reuse. The orchestrator's
 summary tells the user which branch to inspect or delete; that judgment stays human.
@@ -105,15 +112,16 @@ Worktree *paths* are isolated; repository state is not.
 
 - **The `.git/info/exclude` line moves out of the agents.** `common/ensure-worktree-exclude.sh`
   writes it, called once per repo by the orchestrator (or by `/gh-security:audit-pins`) before any
-  agent is dispatched. Two agents dispatched in one message — the required pattern — start
-  milliseconds apart, and a read-then-append from each can duplicate the line or tear the file.
-  Writing it before the wave removes the race by construction rather than narrowing it. The
+  agent is dispatched. Two agents working the same repo start milliseconds apart, because the
+  orchestrator fills and refills its pool by dispatching a message of Task calls, and a
+  read-then-append from each can duplicate the line or tear the file. Writing it before any agent
+  for that repo is dispatched removes the race by construction rather than narrowing it. The
   Decision's "only two writes into the user's repository" is now **one**: the worktree directory.
 - **Cleanup drops `git worktree prune`.** It walks every worktree entry in the repository, so a
   call timed against a sibling's `worktree add` or `remove` can delete a live registration — and
   the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
   removes the caller's own entry, and it is the whole cleanup an agent is entitled to. A remove
-  that fails is reported and left alone; an orphan is recoverable by hand once no wave is in
+  that fails is reported and left alone; an orphan is recoverable by hand once no agent is in
   flight.
 
 Everything else above holds. The general rule the two share: an agent may name its own paths, and
@@ -151,3 +159,29 @@ describes. No agent runs the repository's checks, so nothing needs a default-bra
 tree: the fix flow installs one tree, `$WORK/fix`, and cleanup removes that one. Read the
 Decision's "second, lazy, detached worktree" paragraph, its "for both worktrees", and the
 Consequences' "pays twice" as history.
+
+## Amendment: rolling pool replaces the wave barrier
+
+[Issue #94](https://github.com/SurveyMonkey/skills/issues/94) retires the wave barrier. The
+Decision deferred a rolling pool because "the Task tool has no slot-freed signal", and the
+Consequences accepted the under-utilization "revisit only if the harness grows a completion signal
+worth reacting to". **The harness grew it**: subagents run in the background and the orchestrator
+is re-invoked with a task-completion notification when one finishes. That is the named revisit
+condition, met.
+
+- **The orchestrator holds the approved groups as a work queue and keeps `cap` agents in flight**,
+  dispatching the next queued item into each slot a completion frees, until the queue drains.
+  Slots no longer drain to zero `ceil(N/cap)` times waiting on the slowest agent of each wave.
+- **The cap, its value, and `detect-capacity.sh` are unchanged**, as is its machine-wide scope
+  across every repo in the batch. Only its enforcement changed, and the pool must never exceed it:
+  refills are counted from the agents actually in flight, since dispatching against a stale count
+  overshoots in a way a barrier could not.
+- **Worktree isolation is untouched.** Per-major-line worktrees, per-group branches, and the
+  repo-global git state rule from the issue #35 amendment all hold exactly as written, and the
+  last of them binds harder: under a pool something is in flight from the first dispatch until the
+  queue drains, rather than only between barriers.
+- **A failed or unparseable agent result frees its slot like any other completion**, so a crash
+  cannot stall the pool, and refilling a slot never prompts: the single dispatch approval covers
+  the whole queue.
+
+Everything else above holds.

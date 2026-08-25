@@ -28,7 +28,7 @@ request, open for review, that carries a computed merge-risk rating.
 
 | Entry point | Kind | What it does |
 |---|---|---|
-| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents in parallel waves and reports the pull requests they open. |
+| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents from a rolling pool and reports the pull requests they open. |
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
 | `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. |
 | `/gh-security:fix-alert` | Command (deprecated) | Shim that fixes only the single top-ranked alert group, then offers the next batch. Use `resolve-alerts` instead. |
@@ -39,7 +39,7 @@ directly:
 | Agent | Role |
 |---|---|
 | `fix-dependency` | Fixes every alert for one package major line in one repo, in an isolated worktree, through to a pull request, open for review, with a computed merge-risk rating. |
-| `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution, and in PR mode removes the confirmed set, tests it in one further install, and opens a PR. Also rides along automatically in a spare slot when a fix batch does not fill the concurrency cap. |
+| `audit-pins` | Audits one repository's pins and reports which are removable, including whether removing one shifts any other package's resolution, and in PR mode removes the confirmed set, tests it in one further install, and opens a PR. Also rides along automatically in a resolve-alerts run, queued behind the fixes at lowest priority and dispatched as soon as a slot is available for it: in the first dispatch when the fixes do not reach the concurrency cap, otherwise into the first slot a completion frees. |
 
 **Supported package managers, by advisory ecosystem:**
 
@@ -52,8 +52,9 @@ directly:
 
 **What the plugin does, at headline level:**
 
-- **Parallel fix waves.** One subagent per package major line per repo, each in its own git
-  worktree under the target repo, dispatched in waves sized to the machine's capacity.
+- **A rolling pool of fix subagents.** One subagent per package major line per repo, each in its
+  own git worktree under the target repo, kept at the machine's capacity: every time one finishes,
+  the next queued fix takes its slot.
 - **Repo, org, or user scope.** Point it at the current repo, a whole GitHub org, or everything
   you own; org runs filter to repos you can actually push to.
 - **Risk-ranked discovery.** Alerts are grouped by package and major line, then ranked by

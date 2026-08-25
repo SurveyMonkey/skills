@@ -124,14 +124,14 @@ without the wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/ski
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 
-Agents share a `repo_root` by design — the spare-slot pin audit rides in the same wave as a fix
-agent — and worktree *paths* not colliding is not the same as repository state not colliding
+Agents share a `repo_root` by design — the pin audit runs beside a fix agent in the same rolling
+pool — and worktree *paths* not colliding is not the same as repository state not colliding
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)).
 
 - `.git/info/exclude` is written once per repo by `common/ensure-worktree-exclude.sh`, called by
-  the orchestrator before it dispatches any wave. Agents never write it. Two agents dispatched in
-  one message start milliseconds apart, so a read-then-append from each can duplicate the line or
-  tear the file.
+  the orchestrator before it dispatches any agent for that repo. Agents never write it. Two agents
+  working the same repo start milliseconds apart, so a read-then-append from each can duplicate the
+  line or tear the file.
 - **Never `git worktree prune` from an agent.** It walks *every* worktree entry in the repository,
   so a call timed against a sibling mid `worktree add`/`remove` can delete a live registration —
   and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already

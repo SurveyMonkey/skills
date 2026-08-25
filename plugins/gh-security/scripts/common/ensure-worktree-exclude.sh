@@ -7,12 +7,12 @@
 #         action is "already-present" or "added"
 #
 # Agents used to append this line themselves in their own phase 1. Two agents
-# dispatched in ONE message start within milliseconds of each other — the
-# orchestrator's required dispatch pattern — so a read-then-append from both
+# working the same repo start within milliseconds of each other — the
+# orchestrator keeps a pool of them in flight — so a read-then-append from both
 # could duplicate the line or interleave a partial write; `.git/info/exclude`
 # has no locking discipline of its own (issue #35). The orchestrator already
-# knows the repo set, so writing the line here, before the wave, removes the
-# race by construction instead of narrowing it.
+# knows the repo set, so writing the line here, before it dispatches any agent
+# for that repo, removes the race by construction instead of narrowing it.
 #
 # It is also idempotent and safe on its own account: the read-modify-write
 # runs under a `mkdir` lock and publishes with a single rename, so even

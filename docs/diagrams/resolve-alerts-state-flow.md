@@ -31,11 +31,13 @@ anything, so where they stop is a different question from where the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
 decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
-approval, and both of phase 8's offers: the next batch and the pin audit.
+approval, and both of phase 8's offers: the groups declined at phase 3, and the pin audit on any
+repo this run did not already audit.
 
 **No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
-into being, and phase 8's two offers dispatch further work — a next batch, or an audit that may
-open a removal PR of its own — rather than deciding anything about a PR already on the page. PRs
+into being, and phase 8's two offers dispatch further work, the groups declined at phase 3 or an
+audit that may open a removal PR of its own, rather than deciding anything about a PR already on
+the page. PRs
 open ready for review and no phase acts on one afterwards ([ADR
 008](../adr/008-prs-open-ready-for-review.md)).
 
@@ -65,14 +67,10 @@ flowchart TD
     P3ASK -->|"Highest tier"| P4
     P3ASK -->|Everything| P4
 
-    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4Q{"batch groups < cap?"}
-    P4Q -->|"yes, spare slot"| P4ASK1{"ask: approve batch + audit mode"}
-    P4Q -->|"no, cap full"| P4ASK2{"ask: approve batch<br/>(audit deferred to phase 8)"}
+    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve batch + audit mode"}
     P4ASK1 -->|"approve, audit mode: pr"| P4OK
     P4ASK1 -->|"approve, audit mode: report"| P4OK
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
-    P4ASK2 -->|approve| P4OK
-    P4ASK2 -->|decline| STOP3
     P4OK["Batch approved"] --> P5Q{"scope"}
 
     P5Q -->|repo| P6
@@ -87,14 +85,11 @@ flowchart TD
     P5X --> P6
     P5Y --> P6
 
-    P6["Phase 6: ensure-worktree-exclude.sh once per repo<br/>(failure non-fatal, dispatch anyway)"] --> P6W["Dispatch a wave: at most cap Task calls in one<br/>message, one fix-dependency per group,<br/>across every repo"]
-    P6W --> P6A{"audit approved in phase 4?"}
-    P6A -->|"yes, first wave only,<br/>counting against cap"| P6AD["audit-pins in the same message,<br/>mode passed verbatim, one repo"]
-    P6A -->|no| P6BAR
-    P6AD --> P6BAR["Wave barrier: wait for every agent"]
-    P6BAR --> P6Q{"batch exhausted?"}
-    P6Q -->|"no: next wave"| P6W
-    P6Q -->|yes| P7
+    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6Q["Work queue: every approved group across every repo,<br/>in ranked order, with audit-pins last when phase 4<br/>approved one (mode passed verbatim, one repo)"]
+    P6Q --> P6D["Rolling pool, machine-wide: dispatch queued items until cap<br/>are in flight, one message, one Task call per item;<br/>on each completion refill to cap the same way"]
+    P6D --> P6DQ{"queue empty and every agent returned?"}
+    P6DQ -->|"no: refill while the queue holds work<br/>(a failure or unparseable result frees a slot too)"| P6D
+    P6DQ -->|yes| P7
 
     P7["Phase 7: parse each fenced JSON result"] --> P7Q{"per result"}
     P7Q -->|success| P7S["Fix table row: PR, risk, F4/F5, bare-override note"]
@@ -111,13 +106,13 @@ flowchart TD
     P7AR --> P8
 
     P8{"Phase 8: actionable groups remain?"}
-    P8 -->|yes| P8ASK0{"ask: dispatch the next batch?"}
+    P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
     P8ASK0 -->|yes| P3
     P8ASK0 -->|no| P8A
-    P8 -->|no| P8A{"audit already ran in phase 6?"}
-    P8A -->|yes| P8REP
-    P8A -->|no| P8ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
-    P8ASK -->|"pr / report"| P8D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 7"]
+    P8 -->|no| P8A{"repos this run touched but did not audit?<br/>(phase 6 audits one; repo scope leaves none)"}
+    P8A -->|none| P8REP
+    P8A -->|"one or more"| P8ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
+    P8ASK -->|"pr / report"| P8D["Dispatch audit-pins, one per accepted repo,<br/>through a queue drained by the same rolling<br/>pool under cap; report per phase 7"]
     P8D --> P8REP
     P8ASK -->|decline| P8REP
     P8REP["pr-status.sh on every success PR plus the audit's<br/>when one exists: checks, merge_state.<br/>Reported as information, never as a prompt"]
@@ -125,15 +120,20 @@ flowchart TD
     DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
 ```
 
-Two cycles, and no others. The wave loop (`P6Q` back to `P6W`) is the concurrency cap enforced as a
-barrier. The next-batch loop (phase 8 to phase 3) is reached only when groups remain *and* the user
-accepts the offer, and it re-enters the how-much question with what is left. There is no third:
-phase 8's audit dispatch used to loop back into the promotion phase, and with that phase gone the
-audit's PR is reported like any other and the flow runs straight to the end.
+Two cycles, and no others. The drain loop (`P6DQ` back to `P6D`) is the concurrency cap enforced as
+a rolling pool: it turns once per completion, refilling to `cap` from the queue, rather than once
+per barrier. Nothing waits for a slower sibling, and a failed or unparseable result refills exactly
+like a success. The declined-groups loop (phase 8 to phase 3) is reached only when groups
+remain *and* the user accepts the offer, and it re-enters the how-much question with what is left;
+those groups were never approved at phase 4, so it is a scope question rather than a resumption of
+approved work. There is no third: phase 8's audit dispatch used to loop back into the promotion
+phase, and with that phase gone the audit's PR is reported like any other and the flow runs straight
+to the end.
 
-The audit offer is not conditional on the batch being finished. Phase 8 offers the next batch and
-*then* recommends the audit unless one already ran in phase 6, so declining the next batch still
-reaches the recommendation. Both offers precede the closing report, which is the last thing the run
+The audit offer is not conditional on the batch being finished. Phase 8 offers the declined groups
+and *then* recommends the audit for any repo this run did not audit, so declining those groups still
+reaches the recommendation. At repo scope phase 6 has already audited the only repo there is, which
+is why that branch normally ends at the closing report with nothing to ask. Both offers precede the closing report, which is the last thing the run
 does and asks nothing.
 
 ## Diagram 2: fix-dependency, one group

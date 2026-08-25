@@ -69,10 +69,11 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   branch of that name is not yours to touch. Phase 8's `git switch -c` names `$WORK/audit`, which
   is why it is not the `git switch` this rule forbids.
 - **Repo-global git state is not yours.** You may add and remove your own worktree, and nothing
-  else. Never write `.git/info/exclude` (your dispatcher already did, once, before the wave) and
-  never run `git worktree prune`, `git gc`, or any other repository-wide command: a fix agent is
-  very likely running in this same `repo_root` right now, and those commands reach its state. See
-  `scripts/CLAUDE.md`, "Repo-global git state belongs to the orchestrator".
+  else. Never write `.git/info/exclude` (your dispatcher already did, once, before dispatching any
+  agent for this repo) and never run `git worktree prune`, `git gc`, or any other repository-wide
+  command: a fix agent is very likely running in this same `repo_root` right now, and those
+  commands reach its state. See `scripts/CLAUDE.md`, "Repo-global git state belongs to the
+  orchestrator".
 - **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
   `direnv exec <repo_root> gh api ...`, `direnv exec <repo_root> git -C <path> ...`, and the
   `check-advisories.sh` call, which makes its own `gh` call. Without it the account is wrong and
@@ -1091,7 +1092,7 @@ administrative entry, and it names your path: that is the entire cleanup you are
 `repo_root` with you right now; a prune timed against its `worktree add` or `remove` can delete a
 live sibling's registration, and the breakage then surfaces in the victim with no cause it can
 observe. If cleanup itself fails, say so in the result and leave it: an orphaned worktree under
-`.claude/worktrees/` is recoverable at a stable path once no wave is in flight, but only if the
+`.claude/worktrees/` is recoverable at a stable path once no agent is in flight, but only if the
 report says it happened.
 
 ## Result
