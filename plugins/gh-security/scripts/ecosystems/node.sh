@@ -1623,44 +1623,69 @@ verb_apply_constraint() {
         end;
 
       # `--tighten-bare` targets a package major line, not just a package. A
-      # field manifest can carry more than one major-qualified bare key for
-      # the same package at once (`protobufjs@7`, `protobufjs@8`), each
-      # holding its own line. Writing the plain `$pkg` key unconditionally
-      # left the stale qualified key in place, competing with a brand new
-      # plain-key entry for the same resolution
-      # ([#104](https://github.com/SurveyMonkey/skills/issues/104)). pnpm and
-      # npm both accept a `pkg@selector` override key (pnpm: bare, no `>`;
-      # npm: a leaf string value at the top of `.overrides`), so the fix reads
-      # any such key whose package half is `$pkg` and whose selector floor
-      # major equals the target range floor major, and tightens that exact
-      # key in place. Yarn resolutions has no equivalent selector syntax on a
-      # bare key (`is_bare` there is a path-segment count, not a version
-      # qualifier), so it is left out rather than guessed at; a plain `$pkg`
-      # key there already updates in place today because assigning to an
-      # existing key updates its value rather than adding a new one, so the
-      # bug is specific to the qualified-key shape.
-      def qualified_bare_match:
-        if $loc != "pnpm.overrides" and $loc != "overrides" then null
-        else
-          ($range | range_floor_major) as $target_major
-          | (if   $loc == "pnpm.overrides" then (.manifest.pnpm.overrides // {})
-             else (.manifest.overrides // {}) end) as $block
-          | ( [ $block | to_entries[]
-                | select((.value | type) == "string")
-                | .key
-                | select(. != $pkg)
-                | select(startswith($pkg + "@"))
-                | . as $k
-                | ($k | strip_selector) as $sel
-                | ($sel.selector | range_floor_major) as $sel_major
-                | select($target_major != null and $sel_major == $target_major)
-                | $k
-              ] | sort | first ) // null
-        end;
+      # field manifest can carry several bare keys covering that line at
+      # once: the plain `$pkg` key, plus one or more selector-qualified keys
+      # (`protobufjs@8`, `protobufjs@^8.0.0`) whose selector floor major
+      # equals that of the target range. Writing only one of them leaves the
+      # rest competing with the freshly-tightened entry for the same
+      # resolution, which is the shape of
+      # [#104](https://github.com/SurveyMonkey/skills/issues/104) both times
+      # it bit: first a stale qualified key beside a brand new plain key,
+      # then a stale duplicate qualified key beside the single key that a
+      # `sort | first` happened to pick. So the rule is: tighten EVERY
+      # covering key in place (each write through put_override, so every key
+      # touched lands in `written[]`), and only when none exists fall through
+      # to writing the plain key.
+      #
+      # "Bare" is per-syntax, the same predicate the observations block above
+      # uses. pnpm scopes with `>`: `vite@7>rollup` and
+      # `protobufjs@^8.0.0>lodash` pin a DIFFERENT package (the child) under
+      # a parent selector, yet `range_floor_major` still reads a floor out of
+      # the `selector>child` tail (measured: `7>rollup` reads 0,
+      # `^8.0.0>lodash` reads 8), so without the exclusion the pin of the
+      # child package was clobbered with the range meant for the parent
+      # and reported as a bare write. npm keys are never `>`-scoped (npm
+      # nests objects instead), and a `>` there can only sit inside a
+      # comparator selector (`pkg@>=8 <9`), so npm keys are all bare;
+      # excluding on `>` would wrongly skip that selector shape. yarn scopes
+      # with path segments after the (possibly scoped) head
+      # (`lodash@^3/minimist`), and its bare keys carry descriptors too
+      # (`protobufjs@^8`), which PINS_JQ already reads with strip_selector,
+      # so resolutions gets the same qualified-key match under yarn_key
+      # bareness rather than an exclusion.
+      #
+      # `$sel.name == $pkg` guards the startswith match against a key whose
+      # last-`@` split names some other package (`protobufjs@8@x` splits to
+      # name `protobufjs@8`). A selector no floor can be read from (`@beta`)
+      # never matches; with no covering key at all the fall-through still
+      # writes the plain key.
+      def covering_bare_keys:
+        ($range | range_floor_major) as $target_major
+        | (if   $loc == "pnpm.overrides" then (.manifest.pnpm.overrides // {})
+           elif $loc == "resolutions"    then (.manifest.resolutions // {})
+           else (.manifest.overrides // {}) end) as $block
+        | [ $block | to_entries[]
+            | select((.value | type) == "string")
+            | .key
+            | select(if   $loc == "pnpm.overrides" then ((test(">")) | not)
+                     elif $loc == "resolutions" then
+                       ((yarn_key | .parents | length) == 0)
+                     else true end)
+            | select(. == $pkg
+                     or (startswith($pkg + "@")
+                         and ((strip_selector) as $sel
+                              | ($sel.name == $pkg)
+                                and ($target_major != null)
+                                and (($sel.selector | range_floor_major)
+                                     == $target_major))))
+          ] | sort;
 
       {manifest: ., written: []}
       | if $tighten then
-          put_override(null; (qualified_bare_match // $pkg); $range)
+          covering_bare_keys as $covering
+          | if ($covering | length) == 0 then put_override(null; $pkg; $range)
+            else reduce $covering[] as $k (.; put_override(null; $k; $range))
+            end
         elif ($parents | length) == 0 then
           # Direct dependency. The root declares it by name, through one or
           # more alias keys, or (a repo that pins a transitive package it does

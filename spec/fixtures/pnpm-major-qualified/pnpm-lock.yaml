@@ -7,6 +7,9 @@ settings:
 overrides:
   protobufjs@7: '^7.5.5'
   protobufjs@8: '^8.0.1'
+  protobufjs@^8.0.0: '^8.0.0'
+  tar: '^5.0.0'
+  tar@6: '^6.2.0'
 
 importers:
 

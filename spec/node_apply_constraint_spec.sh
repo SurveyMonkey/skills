@@ -412,37 +412,39 @@ Describe 'node.sh apply_constraint'
       The output should equal '{"mode":"tighten-bare","parents":[]}'
     End
 
-    # A pnpm.overrides block can carry more than one major-qualified bare key
-    # for the same package (a live repository pinned both `protobufjs@7` and
-    # `protobufjs@8`). Writing the plain `protobufjs` key unconditionally left
-    # the stale qualified key in place, competing with the new plain-key entry
-    # for the same resolution (issue #104).
-    It 'tightens the qualified key in place instead of adding a plain key'
+    # An override block can carry several bare keys covering the same package
+    # major line at once: a live repository pinned both `protobufjs@7` and
+    # `protobufjs@8`; review of the first #104 fix added `protobufjs@^8.0.0`
+    # beside `protobufjs@8`, and a plain `tar` beside `tar@6`. Any covering
+    # key left untightened keeps competing with the freshly-tightened entry
+    # for the same resolution, so EVERY covering key is tightened in place and
+    # the whole block is read back.
+    It 'tightens every qualified key on the target line, leaving other lines alone'
       use_fixture pnpm-major-qualified
       "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
-      When call manifest '.pnpm.overrides."protobufjs@8"'
-      The output should equal '">=8.6.6 <9"'
+      When call manifest '.pnpm.overrides'
+      The output should equal '{"protobufjs@7":"^7.5.5","protobufjs@8":">=8.6.6 <9","protobufjs@^8.0.0":">=8.6.6 <9","tar":"^5.0.0","tar@6":"^6.2.0"}'
     End
 
-    It 'does not add a new plain key alongside the qualified one'
+    It 'does not add a new plain key alongside the qualified ones'
       use_fixture pnpm-major-qualified
       "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
       When call manifest '.pnpm.overrides | has("protobufjs")'
       The output should equal 'false'
     End
 
-    It 'leaves the other major-qualified key untouched'
+    It 'tightens a coexisting plain key together with its qualified sibling'
       use_fixture pnpm-major-qualified
-      "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
-      When call manifest '.pnpm.overrides."protobufjs@7"'
-      The output should equal '"^7.5.5"'
+      "$ADAPTER" apply_constraint --tighten-bare tar '>=6.2.4 <7' >/dev/null
+      When call manifest '.pnpm.overrides'
+      The output should equal '{"protobufjs@7":"^7.5.5","protobufjs@8":"^8.0.1","protobufjs@^8.0.0":"^8.0.0","tar":">=6.2.4 <7","tar@6":">=6.2.4 <7"}'
     End
 
-    It 'reports the qualified key as what it wrote'
+    It 'reports every key it tightened'
       use_fixture pnpm-major-qualified
       When call adapter_jq '.written' apply_constraint --tighten-bare protobufjs '>=8.6.6 <9'
       The status should be success
-      The output should equal '[{"parent":null,"path":["pnpm","overrides","protobufjs@8"],"value":">=8.6.6 <9"}]'
+      The output should equal '[{"parent":null,"path":["pnpm","overrides","protobufjs@8"],"value":">=8.6.6 <9"},{"parent":null,"path":["pnpm","overrides","protobufjs@^8.0.0"],"value":">=8.6.6 <9"}]'
     End
 
     # The plain-key case must stay exactly as it was: no qualified key exists
@@ -461,6 +463,128 @@ Describe 'node.sh apply_constraint'
       "$ADAPTER" apply_constraint --tighten-bare handlebars '>=4.7.10 <5' >/dev/null
       When call manifest '{qualified: .pnpm.overrides."handlebars@4", has_plain: (.pnpm.overrides | has("handlebars"))}'
       The output should equal '{"qualified":">=4.7.10 <5","has_plain":false}'
+    End
+
+    # pnpm scopes with `>`, and a `>`-bearing key pins a DIFFERENT package
+    # under a parent selector: `vite@7>rollup` is rollup's pin, not vite's,
+    # and `range_floor_major` still reads a floor out of the `selector>child`
+    # tail (measured: `7>rollup` reads 0, `^8.0.0>lodash` reads 8). Matching
+    # such keys clobbered the child's pin with the parent's range, never
+    # wrote the bare key asked for, and produced a false bare-write claim
+    # downstream (PR #111 review).
+    Describe 'parent-scoped pnpm keys are never matched'
+      It 'leaves vite@7>rollup alone and writes the plain vite key'
+        use_fixture pnpm-pins
+        "$ADAPTER" apply_constraint --tighten-bare vite '>=7.1.5 <8' >/dev/null
+        When call manifest '.pnpm.overrides'
+        The output should equal '{"@babel/core":"^7.24.0","vite@7>rollup":"^4.20.0","webpack>terser-webpack-plugin>terser":"^5.31.6","@vercel/fun>undici":">=6.19.0 <7","esbuild":"npm:esbuild-wasm@0.21.5","protobufjs@^8.0.0>lodash":"^4.17.21","vite":">=7.1.5 <8"}'
+      End
+
+      It 'reports the plain key as the only write'
+        use_fixture pnpm-pins
+        When call adapter_jq '.written' apply_constraint --tighten-bare vite '>=7.1.5 <8'
+        The status should be success
+        The output should equal '[{"parent":null,"path":["pnpm","overrides","vite"],"value":">=7.1.5 <8"}]'
+      End
+
+      It 'excludes a dotted-selector parent key (protobufjs@^8.0.0>lodash) too'
+        use_fixture pnpm-pins
+        "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
+        When call manifest '{scoped: .pnpm.overrides."protobufjs@^8.0.0>lodash", plain: .pnpm.overrides.protobufjs}'
+        The output should equal '{"scoped":"^4.17.21","plain":">=8.6.6 <9"}'
+      End
+    End
+
+    # Berry resolutions keys carry descriptors on bare keys too
+    # (`protobufjs@^8` — PINS_JQ already strip_selectors yarn keys), and
+    # scope with path segments (`lodash@^3/minimist`), so yarn takes the same
+    # in-place tighten under its own bareness predicate.
+    Describe 'yarn resolutions'
+      It 'tightens a descriptor-qualified bare key in place'
+        use_fixture yarn-major-qualified
+        "$ADAPTER" apply_constraint --tighten-bare protobufjs '>=8.6.6 <9' >/dev/null
+        When call manifest '.resolutions'
+        The output should equal '{"protobufjs@^8":">=8.6.6 <9","protobufjs@7":"^7.5.5","lodash@^3/minimist":"^1.2.6","@grpc/grpc-js@1":"^1.8.0"}'
+      End
+
+      It 'reports the qualified key as what it wrote'
+        use_fixture yarn-major-qualified
+        When call adapter_jq '.written' apply_constraint --tighten-bare protobufjs '>=8.6.6 <9'
+        The status should be success
+        The output should equal '[{"parent":null,"path":["resolutions","protobufjs@^8"],"value":">=8.6.6 <9"}]'
+      End
+
+      It 'matches a qualified key on a scoped package name'
+        use_fixture yarn-major-qualified
+        "$ADAPTER" apply_constraint --tighten-bare '@grpc/grpc-js' '>=1.8.22 <2' >/dev/null
+        When call manifest '{qualified: .resolutions."@grpc/grpc-js@1", has_plain: (.resolutions | has("@grpc/grpc-js"))}'
+        The output should equal '{"qualified":">=1.8.22 <2","has_plain":false}'
+      End
+
+      # `lodash@^3/minimist` is minimist's pin under a path-scoped parent, so
+      # a minimist tighten must not touch it.
+      It 'never matches a path-scoped key, writing the plain key instead'
+        use_fixture yarn-major-qualified
+        "$ADAPTER" apply_constraint --tighten-bare minimist '>=1.2.8 <2' >/dev/null
+        When call manifest '{scoped: .resolutions."lodash@^3/minimist", plain: .resolutions.minimist}'
+        The output should equal '{"scoped":"^1.2.6","plain":">=1.2.8 <2"}'
+      End
+
+      It 'still writes the plain key when nothing covers the package'
+        use_fixture yarn-major-qualified
+        When call adapter_jq '.written' apply_constraint --tighten-bare left-pad '>=1.3.1 <2'
+        The status should be success
+        The output should equal '[{"parent":null,"path":["resolutions","left-pad"],"value":">=1.3.1 <2"}]'
+      End
+    End
+
+    # npm accepts the same `pkg@selector` shape as a top-level string-valued
+    # override key; nested object values stay out of reach of the match.
+    Describe 'npm overrides'
+      It 'tightens the qualified key on the target line only'
+        use_fixture npm-major-qualified
+        "$ADAPTER" apply_constraint --tighten-bare minimist '>=1.2.8 <2' >/dev/null
+        When call manifest '.overrides'
+        The output should equal '{"minimist@1":">=1.2.8 <2","minimist@0":"^0.2.4","glob":{"minimatch":"^9.0.5"}}'
+      End
+
+      It 'reports the qualified key as what it wrote'
+        use_fixture npm-major-qualified
+        When call adapter_jq '.written' apply_constraint --tighten-bare minimist '>=1.2.8 <2'
+        The status should be success
+        The output should equal '[{"parent":null,"path":["overrides","minimist@1"],"value":">=1.2.8 <2"}]'
+      End
+
+      It 'still writes the plain key when nothing covers the package'
+        use_fixture npm-major-qualified
+        "$ADAPTER" apply_constraint --tighten-bare lodash '>=4.17.21 <5' >/dev/null
+        When call manifest '.overrides'
+        The output should equal '{"minimist@1":"^1.2.5","minimist@0":"^0.2.4","glob":{"minimatch":"^9.0.5"},"lodash":">=4.17.21 <5"}'
+      End
+    End
+
+    # The selector grammar the match must read, row by row: a floor major has
+    # to be readable from the selector and equal the target's; anything else
+    # falls through to the plain key. npm is the venue because its keys are
+    # never `>`-scoped, so even a spaced comparator selector stays bare.
+    Describe 'selector shapes'
+      seed() { jq --arg k "$1" --arg v "$2" '.overrides = {($k): $v}' package.json > pkg.tmp && mv pkg.tmp package.json; }
+
+      Parameters
+        'bare major'   'protobufjs@8'      '^8.0.0' 'protobufjs'    '>=8.6.6 <9'  '{"protobufjs@8":">=8.6.6 <9"}'
+        'caret'        'protobufjs@^8.0.1' '^8.0.1' 'protobufjs'    '>=8.6.6 <9'  '{"protobufjs@^8.0.1":">=8.6.6 <9"}'
+        'spaced range' 'protobufjs@>=8 <9' '>=8 <9' 'protobufjs'    '>=8.6.6 <9'  '{"protobufjs@>=8 <9":">=8.6.6 <9"}'
+        'dist-tag'     'protobufjs@beta'   'beta'   'protobufjs'    '>=8.6.6 <9'  '{"protobufjs@beta":"beta","protobufjs":">=8.6.6 <9"}'
+        'scoped name'  '@grpc/grpc-js@1'   '^1.7.0' '@grpc/grpc-js' '>=1.8.22 <2' '{"@grpc/grpc-js@1":">=1.8.22 <2"}'
+      End
+
+      It "handles a $1 selector"
+        use_fixture npm-major-qualified
+        seed "$2" "$3"
+        "$ADAPTER" apply_constraint --tighten-bare "$4" "$5" >/dev/null
+        When call manifest '.overrides'
+        The output should equal "$6"
+      End
     End
   End
 

@@ -1,0 +1,11 @@
+{
+  "name": "demo-npm-major-qualified",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "overrides": {
+    "minimist@1": "^1.2.5",
+    "minimist@0": "^0.2.4",
+    "glob": { "minimatch": "^9.0.5" }
+  }
+}
