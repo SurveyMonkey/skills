@@ -32,7 +32,8 @@ request, open for review, that carries a computed merge-risk rating.
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
 | `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. Preflights for the repo's own open `security`-labeled PRs first, and stops if any exist: run it after those fix PRs have merged or been closed. |
 
-The parallel work is done by two subagents, each dispatched by its own entry point:
+Two subagents do the work, each dispatched by its own entry point: `fix-dependency` runs in
+parallel from a rolling pool, and `audit-pins` is dispatched alone, one repository at a time.
 
 | Agent | Role |
 |---|---|

@@ -58,10 +58,14 @@ against real repositories. The answer is that the PR is precisely the artifact a
 it is reviewed where review happens. Opening it does not merge it.
 
 **No phase acts on a pull request after it is created.** The orchestrator's phase 9 and phase 10
-are deleted rather than reworked, and the phase that offered the next batch and the pin audit is
-renumbered to 9. **No `AskUserQuestion` after phase 5 is about a pull request**: what remains is
-phase 6's per-repo permissions consent and the final phase's two dispatch offers, none of which
-asks the user to decide anything about a PR that exists. `/gh-security:audit-pins` loses the same tail.
+are deleted rather than reworked, and ~~the phase that offered the next batch and the pin audit~~
+**(amended in [ADR 009](009-decouple-pin-audit.md): renamed to the phase that offers only the next
+batch, since the pin audit is no longer offered here at all)** is renumbered to 9. **No
+`AskUserQuestion` after phase 5 is about a pull request**: what remains is phase 6's per-repo
+permissions consent and the final phase's ~~two dispatch offers~~ **(amended in
+[ADR 009](009-decouple-pin-audit.md): now one — the next batch — since the pin audit is no longer
+offered here)**, none of which asks the user to decide anything about a PR that exists.
+`/gh-security:audit-pins` loses the same tail.
 
 **Merging and arming auto-merge are the human's, on GitHub, and are forbidden to every agent.**
 Both agent definitions state it: never merge the PR, never enable auto-merge on it, never offer to

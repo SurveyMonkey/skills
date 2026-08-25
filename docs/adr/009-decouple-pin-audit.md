@@ -9,10 +9,10 @@ related_issues: [108, 107]
 
 # ADR 009: Decouple the pin audit from resolve-alerts
 
-Supersedes the ride-along dispatch [ADR 007](007-pin-removal-prs.md) and RFC 001 built the audit
-into, without deprecating either: the pin-removal PR mechanics ADR 007 decided (mode input, the
-combined-test attempts, the plugin-owned branch) are unchanged and still stand. What changes is
-where the audit is dispatched from.
+Amends the ride-along dispatch [ADR 007](007-pin-removal-prs.md) and RFC 001 built the audit into,
+without superseding or deprecating either: the pin-removal PR mechanics ADR 007 decided (mode
+input, the combined-test attempts, the plugin-owned branch) are unchanged and still stand, and ADR
+007 stays `stable`. What changes is where the audit is dispatched from.
 
 ## Context
 

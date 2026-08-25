@@ -2,10 +2,11 @@
 description: >
   Audit this repo's dependency pins — the overrides and resolutions added to
   hold transitive dependencies at safe versions — and report which are no
-  longer needed. Each removal is tested in an isolated worktree against every
-  published advisory for the package, and the removable set is tested once more
-  together before a removal PR is opened for review. Report-only is offered as
-  the alternative.
+  longer needed. Preflights for the repo's own open security-labeled PRs and
+  stops if any exist. Each removal is tested in an isolated worktree against
+  every published advisory for the package, and the removable set is tested
+  once more together before a removal PR is opened for review. Report-only is
+  offered as the alternative.
 ---
 
 The user explicitly invoked `/gh-security:audit-pins`. Run the pin audit on the current
@@ -52,19 +53,31 @@ made once more than one exists.
 ## 3. Check for open security fix PRs, and stop if any exist
 
 ```bash
-gh pr list --repo <nwo> --label security --state open --json number,title,url
+direnv exec <repo_root> gh pr list --repo <nwo> --label security --state open --limit 100 \
+  --json number,title,url,headRefName
 ```
 
+**A non-zero exit here is a failure result quoting stderr, never an answer.** An empty list and a
+call that could not run look identical once you stop reading the exit status, and reading a failed
+lookup as "no open PRs" is what opens the audit against a moving target. Report the failure and
+stop; do not dispatch the agent and do not proceed as if the list came back empty.
+
 The audit's verdicts are computed against the default branch. An open PR carrying the `security`
-label is an unmerged fix from `resolve-alerts` or `fix-dependency` that may be adding or tightening
+label may be an unmerged fix from `resolve-alerts` or `fix-dependency` still adding or tightening
 an override the audit is about to judge removable; removing a pin one of these PRs still needs
 produces exactly the inversion the field test's audit PR demonstrated, where an audit PR
 removed 8 keys that four of the batch's own unmerged fix PRs tightened or widened.
 
-If the list is non-empty, report each PR by number and title, say that these open security fixes
-should be merged or closed before the audit runs, and **stop**. Do not dispatch the agent. There is
-no proceed-anyway option here: a user who wants to run the audit regardless says so in conversation,
-and no skill machinery is needed for that.
+**Exclude the audit's own removal PR from this match.** `chore/dependabot-remove-pins` carries the
+`security` label too, so filter out any entry whose `headRefName` is `chore/dependabot-remove-pins`
+before evaluating the list — that PR is this plugin's own prior output, not a fix in flight, and
+the agent's own phase 1 open-PR guard already handles it on its own terms. A removal-PR hit surfacing here
+through some other label or head is still worth reporting; it just is not assumed by name.
+
+If the (filtered) list is non-empty, report each PR by number and title, say that these open
+security fixes should be merged or closed before the audit runs, and **stop**. Do not dispatch the
+agent. There is no proceed-anyway option here: a user who wants to run the audit regardless says so
+in conversation, and no skill machinery is needed for that.
 
 If the list is empty, continue.
 

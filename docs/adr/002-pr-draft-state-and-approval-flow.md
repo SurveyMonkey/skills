@@ -17,10 +17,11 @@ related_issues: [4, 5, 70, 87]
 > argument. Read this as a record of what was decided in July, not as current behavior.
 >
 > Two things below therefore do not resolve against today's tree. **Phase numbers are the
-> pre-v0.8.3 orchestrator's**: phases 9 and 10 are deleted, and what is now phase 9 is the
-> next-batch and pin-audit offer, not a promotion gate. And **`mark-ready.sh` is now
-> `pr-status.sh`**, read-only, so the `mark-ready.sh:204` and `:226` line references point at
-> deleted code.
+> pre-v0.8.3 orchestrator's**: phases 9 and 10 are deleted, and what is now phase 8 is the offer of
+> the groups declined earlier in the run, not a promotion gate — it no longer offers the pin audit
+> either, decoupled from this skill entirely in [ADR 009](009-decouple-pin-audit.md). And
+> **`mark-ready.sh` is now `pr-status.sh`**, read-only, so the `mark-ready.sh:204` and `:226` line
+> references point at deleted code.
 
 Drives [RFC 001](../rfc/001-alert-orchestration.md). Supersedes the RFC's original decision that
 fix PRs open ready for review. Adopted in Phase 1

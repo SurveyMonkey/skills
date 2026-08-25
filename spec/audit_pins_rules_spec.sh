@@ -488,5 +488,33 @@ Describe 'the rules that gate the removal PR'
       The status should be success
       The output should equal '0'
     End
+
+    # Re-coupling can also arrive as a second, harmless-looking mention rather
+    # than a literal Task dispatch — a stray "run the pin audit" aside
+    # reintroduced into a phase's prose. Two mentions of `audit-pins` are
+    # legitimate here: the phase 7 lead on pre-existing unscoped overrides,
+    # which points at the command rather than claiming this skill tests
+    # removability, and the phase 8 pointer, the actual follow-up-work
+    # sentence. Pin the total count to exactly those two and pin each
+    # sentence itself, which catches a re-coupling addition (count goes to 3)
+    # and either pointer's own deletion (count drops, or a sentence stops
+    # matching).
+    It 'mentions audit-pins exactly twice: the phase 7 lead and the phase 8 pointer'
+      When call count_in "$SKILL" 'audit-pins'
+      The status should be success
+      The output should equal '2'
+    End
+
+    It 'points the phase 7 unscoped-override lead at /gh-security:audit-pins'
+      When call phrase_in "$SKILL" '.*gh-security:audit-pins.* tests removability'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'carries the phase 8 pointer sentence to /gh-security:audit-pins'
+      When call phrase_in "$SKILL" 'run via .*gh-security:audit-pins.* once this batch.s fix PRs have landed'
+      The status should be success
+      The output should equal '1'
+    End
   End
 End

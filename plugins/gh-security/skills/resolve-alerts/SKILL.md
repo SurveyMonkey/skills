@@ -369,7 +369,7 @@ the reason the agent gave, the repo, and the PR that introduced them:
 `unscoped_override` entries are pre-existing, and stay one aggregate line per repo:
 
 > Note: `octo/app` contains N unscoped global override(s): `<keys>`. These may be removable or
-> convertible to scoped pins. The pin audit tests removability
+> convertible to scoped pins. `/gh-security:audit-pins` tests removability
 > ([#7](https://github.com/SurveyMonkey/skills/issues/7)).
 
 Leads, not findings. Do not act on either. Without deduplication a five-package dispatch would
@@ -383,13 +383,14 @@ and never queued: the approved batch drained completely. Offer them now as a **n
 question**, not as a resumption of work already approved: back to phase 3 with the remaining
 groups.
 
-The pin audit is separate follow-up work, run via `/gh-security:audit-pins` once this batch's fix
-PRs have landed. This skill does not run it and does not offer it: the audit removes entries from
-the same overrides block these fixes just added to or tightened, each on its own branch against the
-same base, and running both together is exactly the conflict issue #108 documents (field case
-the field test's audit PR). Merge or close the fix PRs from this run first.
-
 Otherwise report done, including any repos still in `skipped_repos` and what would unblock each.
+
+**The closing report also points at the pin audit as separate follow-up work**, run via
+`/gh-security:audit-pins` once this batch's fix PRs have landed. This skill does not run it and
+does not offer it: the audit removes entries from the same overrides block these fixes just added
+to or tightened, each on its own branch against the same base, and running both together is exactly
+the conflict issue #108 documents (the field test's audit PR). Merge or close the
+fix PRs from this run first.
 
 **The closing report lists every PR this run opened, once, as information.** Read the current
 state of them together:

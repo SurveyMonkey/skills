@@ -223,8 +223,8 @@ may be adding or tightening an override the audit is about to judge removable, a
 stops rather than risk the inversion the field test's audit PR demonstrated. There is no
 proceed-anyway path; a user who wants the audit to run anyway says so in conversation.
 
-Once dispatched, the agent carries the repo (`nwo` in the agent's own input contract, `repo` in the
-command's payload and in the result), `repo_root`, `default_branch`, an `adapter_path`,
+Once dispatched, the agent carries the repo (`nwo` in both the command's dispatch payload and the
+agent's own input contract; only the result renames it to `repo`), `repo_root`, `default_branch`, an `adapter_path`,
 `scripts_dir`, and a `mode` that the user decides at the command's step 5 and that is never
 defaulted. In `pr` mode the distinction that matters is between a *failure* and one of the five
 ways a completed audit declines to open a PR: both leave `pr` null, and only the first is a broken
@@ -232,7 +232,11 @@ run.
 
 ```mermaid
 flowchart TD
-    CMD1["/gh-security:audit-pins: detect-scope.sh"] --> CMD2{"manifest present?"}
+    CMD1["/gh-security:audit-pins: detect-scope.sh"] --> CMD1Q{"scope?"}
+    CMD1Q -->|"org / user"| CMD1A["Ask which repo, or ask the user<br/>to run it from that repo's checkout"] --> CMD1D
+    CMD1Q -->|repo| CMD1D{"default_branch resolved?"}
+    CMD1D -->|null| CSTOP0(["Stop: default_branch<br/>could not be resolved"])
+    CMD1D -->|yes| CMD2{"manifest present?"}
     CMD2 -->|no| CSTOP1(["Stop: nothing this command can audit"])
     CMD2 -->|yes| CMD3["select-adapter.sh"]
     CMD3 --> CMD4{"open security-labeled PRs?<br/>gh pr list --label security --state open"}
