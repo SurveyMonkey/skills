@@ -14,6 +14,7 @@
 Describe 'the closed set of merge-risk labels (#109)'
   FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   AUDIT_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+  README="$SHELLSPEC_PROJECT_ROOT/README.md"
 
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
@@ -32,6 +33,21 @@ Describe 'the closed set of merge-risk labels (#109)'
 
     It "creates $2 with color $3"
       When call rule_in "$1" "gh label create $2 --repo <nwo> --color $3 --description"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the same three hexes, pinned in README.md too'
+    Parameters
+      # label name           color word   hex
+      merge-risk:low       green        2da44e
+      merge-risk:medium    yellow       d4a72c
+      merge-risk:high      red          cf222e
+    End
+
+    It "documents $1 as $2 (#$3)"
+      When call rule_in "$README" "\`$1\` ($2, \`#$3\`)"
       The status should be success
       The output should equal '1'
     End
