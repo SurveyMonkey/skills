@@ -222,16 +222,26 @@ parents still unresolved — where it is a real finding
 ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
 **`apply_constraint` also invalidates the stale npm lockfile entries its override must move**, and
-reports them in `lockfile_invalidated` (`{performed, keys[]}`, always present). npm serializes no
+reports them in `lockfile_invalidated` (`{performed, keys[]}`, always present, plus a `reason`
+string exactly when the pass could not run against an override it had just written). npm
+serializes no
 `overrides` field into `package-lock.json` at all — verified on npm 8 through 11 — and on a plain
 install an existing `packages` entry wins over a newly added override, so the locked copy stays at
 its vulnerable version and the override is silently inert
 ([#124](https://github.com/SurveyMonkey/skills/issues/124)). The deletion is scoped to copies of
 the named package on the target line (the major of the range's floor) that do not satisfy the
-range, identified by what they resolve to per the identity rule above; anything the pass cannot
-judge is left in place and fails closed at `validate`. npm only: pnpm records its active overrides
+range, identified by **resolved name only** — deliberately narrower than the two-name rule above,
+because deleting an entry that resolves to a different package cannot help this override — so an
+entry counted only under the install-key arm is left in place and fails closed at `validate`
+under `performed: true`. `performed: false` is two different answers, and `reason` separates
+them. Without one, the pass had nothing to do: no override was written (a direct dependency bump
+npm reconciles on its own), or the manager is not npm. With one — `"unreadable_range_floor"` (the
+range has no readable floor major) or `"no_packages_object"` (a v1 lockfile) — an npm override
+*was* written but the pass could not judge the lockfile, leaving that override presumed inert:
+the stale state this field exists to catch, and a stop-and-report signal to the caller. npm only:
+pnpm records its active overrides
 in the lockfile's own `overrides:` settings block and re-resolves on mismatch, and Yarn Berry
-re-evaluates `resolutions` on every install, so both report `performed: false`.
+re-evaluates `resolutions` on every install, so both report `performed: false` with no reason.
 
 **`declared_ranges [--line <major>] <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,

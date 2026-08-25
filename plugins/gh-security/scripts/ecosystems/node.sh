@@ -2216,14 +2216,26 @@ verb_apply_constraint() {
   # a line this fix does not own — the shape `validate --baseline` fails
   # closed on. Copies already satisfying the range need no move, and leaving
   # their entries keeps the lockfile diff to what had to change (and keeps the
-  # already-fixed case's empty diff empty). Identity follows the read verbs'
-  # resolution rule: an entry counts by what it resolves to (`.name` when
-  # present — an `npm:` alias install — else the last path segment), so the
-  # hoisted aliased copy an alias-key override governs is invalidated too. A
-  # copy this pass cannot judge (a v1 lockfile with no `packages` block, an
-  # unreadable range floor, a version-less link entry) is left alone and fails
-  # closed: the stale entry survives the install and `validate` reports it,
-  # rather than a deletion moving something unjudged.
+  # already-fixed case's empty diff empty). Identity here is resolved name
+  # ONLY (`.name` when present — an `npm:` alias install — else the last path
+  # segment), so the hoisted aliased copy an alias-key override governs is
+  # invalidated too. That is deliberately NARROWER than the read verbs'
+  # two-arm rule (resolved name OR install key, issue #46): deleting an entry
+  # that sits under this package's name while resolving to a DIFFERENT
+  # package cannot help the override and would only churn an unrelated copy.
+  # The consequence: an in-line copy `validate` counts under the key arm is
+  # one this pass declines to judge, and it fails closed at `validate` with
+  # `performed: true` and that copy absent from `keys[]`.
+  #
+  # When the whole pass cannot judge the lockfile — an unreadable range
+  # floor, or no `packages` object (a v1 lockfile) — the override just
+  # written is presumed inert against any stale entry, and the result says
+  # so: `performed: false` with a `reason` naming which, distinct from the
+  # bare nothing-to-do false a direct bump or a pnpm/yarn apply reports. A
+  # version-less entry (a workspace `link: true`) is skipped harmlessly
+  # rather than fail-closed: it carries no version, so there is no vulnerable
+  # version for it to hold the tree at — and `npm_versions` filters
+  # version==null the same way, so `validate` never counts it either.
   #
   # npm only, deliberately. pnpm records the active overrides in
   # `pnpm-lock.yaml`'s own `overrides:` settings block and re-resolves on
@@ -2247,8 +2259,12 @@ verb_apply_constraint() {
               and (($v.version | type) == "string")
               and ((($v.version | semver_parse).core[0] // null) == $floor)
               and ((satisfies($v.version; $range)) | not);
-          if $floor == null or ((.packages | type) != "object") then
-            {performed: false, keys: [], lockfile: .}
+          if $floor == null then
+            {performed: false, keys: [],
+             reason: "unreadable_range_floor", lockfile: .}
+          elif (.packages | type) != "object" then
+            {performed: false, keys: [],
+             reason: "no_packages_object", lockfile: .}
           else
             ([ .packages | to_entries[] | select(stale(.key; .value)) | .key ]
              | sort) as $keys
@@ -2257,8 +2273,13 @@ verb_apply_constraint() {
           end' package-lock.json); then
       die "apply_constraint: cannot read package-lock.json"
     fi
-    lockfile_invalidated=$(printf '%s' "$lock_result" | jq -c '{performed, keys}')
-    if [ "$(printf '%s' "$lock_result" | jq '.keys | length')" -gt 0 ]; then
+    lockfile_invalidated=$(printf '%s' "$lock_result" | jq -c 'del(.lockfile)')
+    # The write gate reads the JSON the result will report, through an
+    # assignment whose jq exit `set -e` sees. A fresh `jq` inside the `if`
+    # condition turned a jq failure into `[ "" -gt 0 ]`, which silently
+    # skipped the write while the result still claimed the deletions.
+    stale_key_count=$(printf '%s' "$lockfile_invalidated" | jq '.keys | length')
+    if [ "$stale_key_count" -gt 0 ]; then
       set_indent_args package-lock.json
       tmp=$(mktemp)
       if ! printf '%s' "$lock_result" \

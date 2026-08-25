@@ -1,0 +1,8 @@
+{
+  "name": "demo-v1",
+  "version": "1.0.0",
+  "dependencies": {
+    "localtunnel": "^2.0.2"
+  },
+  "scripts": { "test": "jest" }
+}
