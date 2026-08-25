@@ -2,9 +2,21 @@
 # discover-alerts.sh: fetch and rank open Dependabot alerts by package major line
 #
 # Usage:
-#   discover-alerts.sh [--scope repo] <owner/repo>
-#   discover-alerts.sh --scope org <org>
-#   discover-alerts.sh --scope user [login]
+#   discover-alerts.sh [--scope repo] [--branch-style slash|flat] <owner/repo>
+#   discover-alerts.sh --scope org [--branch-style slash|flat] <org>
+#   discover-alerts.sh --scope user [--branch-style slash|flat] [login]
+#
+# --branch-style selects the branch naming scheme every emitted `branch_name`
+# uses: `slash` (the default, `fix/dependabot-<pkg>-<line>x`) or `flat`
+# (`fix-dependabot-<pkg>-<line>x`). Git refs are a filesystem namespace, so a
+# remote with a pre-existing branch literally named `fix` (`refs/heads/fix`)
+# rejects every `fix/*` push with `(directory file conflict)` — discovered on
+# a field run only after each fix agent had finished all of its work (issue
+# #123). The caller probes the remote (`git ls-remote --heads origin fix`,
+# resolve-alerts SKILL.md) and passes `flat` when the slash namespace is
+# blocked; this script applies the scheme, it never probes. The flag covers
+# every repo in the invocation, so cross-repo scopes — where the namespace is
+# a per-repo fact — rewrite per repo through classify-lines.sh instead.
 #
 # Scope strategy (RFC 001 Phase 3, issue #6):
 #   repo  GET /repos/{owner}/{repo}/dependabot/alerts (unchanged, single call)
@@ -76,6 +88,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SCOPE="repo"
+BRANCH_STYLE="slash"
 TARGET=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -85,6 +98,14 @@ while [ $# -gt 0 ]; do
       ;;
     --scope=*)
       SCOPE="${1#--scope=}"
+      shift
+      ;;
+    --branch-style)
+      BRANCH_STYLE="${2:?--branch-style requires a value}"
+      shift 2
+      ;;
+    --branch-style=*)
+      BRANCH_STYLE="${1#--branch-style=}"
       shift
       ;;
     -*)
@@ -106,6 +127,14 @@ case "$SCOPE" in
     ;;
 esac
 
+case "$BRANCH_STYLE" in
+  slash|flat) ;;
+  *)
+    printf '{"error":"Unknown branch style: %s (expected slash or flat)"}\n' "$BRANCH_STYLE" >&2
+    exit 1
+    ;;
+esac
+
 if [ "$SCOPE" = "repo" ] && [ -z "$TARGET" ]; then
   printf '{"error":"Usage: discover-alerts.sh [--scope repo] <owner/repo>"}\n' >&2
   exit 1
@@ -122,11 +151,31 @@ trap 'rm -f "$ERR_FILE"' EXIT
 # groups for the same package from colliding on one branch; it is applied to
 # every group, including single-line packages, so a package that grows a second
 # line later does not rename the branch it already had.
-branch_name() {
+#
+# Two spellings of the same name, selected by --branch-style (header comment).
+# The flat scheme differs from the slash one only in the first separator, so a
+# name converts between them without re-deriving anything, which is what lets
+# classify-lines.sh rewrite per repo at cross-repo scopes.
+slash_branch_name() {
   case "$2" in
     none) printf 'fix/dependabot-%s-unfixed' "$1" ;;
     *)    printf 'fix/dependabot-%s-%sx' "$1" "$2" ;;
   esac
+}
+
+flat_branch_name() {
+  case "$2" in
+    none) printf 'fix-dependabot-%s-unfixed' "$1" ;;
+    *)    printf 'fix-dependabot-%s-%sx' "$1" "$2" ;;
+  esac
+}
+
+branch_name() {
+  if [ "$BRANCH_STYLE" = "flat" ]; then
+    flat_branch_name "$@"
+  else
+    slash_branch_name "$@"
+  fi
 }
 
 # Branch name used before per-line grouping shipped. Checked alongside the
@@ -428,7 +477,23 @@ group_repo_alerts() {
     pr_err=""
     pr_reason="open PR exists"
     pr_candidates=("$branch")
-    if [ "$newest_line" = "true" ]; then
+    # Under the slash style, also check the group's flat-scheme name: a repo
+    # that once carried a branch named `fix` had its PRs opened flat (issue
+    # #123), and deleting that branch later flips discovery back to slash while
+    # such a PR can still be open. The reverse check is never made — while
+    # `refs/heads/fix` exists (the flat style's precondition), the remote
+    # cannot also hold any `fix/*` ref, so no slash-named PR can be open.
+    flat_twin=""
+    if [ "$BRANCH_STYLE" = "slash" ]; then
+      flat_twin=$(flat_branch_name "$pkg" "$line")
+      pr_candidates+=("$flat_twin")
+    fi
+    # The legacy name predates per-line grouping and needs no flat twin: the
+    # flat scheme shipped after the per-line split, so no flat branch without a
+    # line suffix has ever been created by this plugin. It is itself a slash
+    # name, so under the flat style it is skipped for the same reason the
+    # slash candidate is — the remote cannot hold it.
+    if [ "$newest_line" = "true" ] && [ "$BRANCH_STYLE" = "slash" ]; then
       pr_candidates+=("$(legacy_branch_name "$pkg")")
     fi
     for candidate in "${pr_candidates[@]}"; do
@@ -439,10 +504,14 @@ group_repo_alerts() {
         rm -f "$pr_check_err"
         if [ -n "$found" ]; then
           pr_url="$found"
-          # Name the legacy branch in the reason: the report should not imply
+          # Name the other branch in the reason: the report should not imply
           # a PR exists on this line`s own branch when it does not.
           if [ "$candidate" != "$branch" ]; then
-            pr_reason="open PR exists (legacy branch $candidate)"
+            if [ -n "$flat_twin" ] && [ "$candidate" = "$flat_twin" ]; then
+              pr_reason="open PR exists (flat-scheme branch $candidate)"
+            else
+              pr_reason="open PR exists (legacy branch $candidate)"
+            fi
           fi
           break
         fi

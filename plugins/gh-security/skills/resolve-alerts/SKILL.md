@@ -66,6 +66,27 @@ happens per repo in phase 5.
 The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
 definitions do; add it to every command you run for a repo that resolved one.
 
+**At repo scope, probe the branch namespace here, once, right after `env_prefix` resolves.** Git
+refs are a filesystem namespace, so a remote branch literally named `fix` (`refs/heads/fix`)
+rejects every `fix/*` push with a `(directory file conflict)` — on the field run that surfaced
+this, every agent in the batch finished its whole fix and then failed at push (issue #123). One
+read-only probe, under `env_prefix` when this repo has one:
+
+```bash
+git -C <repo_root> ls-remote --heads origin fix
+```
+
+A line naming `refs/heads/fix` means the slash namespace is blocked: this repo's **branch style
+is `flat`**, phase 2 passes `--branch-style flat` to `discover-alerts.sh` so every emitted
+`branch_name` uses the collision-safe `fix-dependabot-<pkg>-<line>x` scheme, and the phase 4 plan
+says so. Empty output is the ordinary case: the style is `slash` (the default; pass no flag). A
+non-zero exit gets **one retry**, exactly like phase 6's registry probe; a second failure means
+`git` cannot reach `origin` at all — the same fetch and push every fix agent needs — so report it
+and stop, as with a null `default_branch`. The probe covers the shape seen in the wild; the
+inverse collision (a pre-existing `fix/dependabot-<pkg>-<line>x/<anything>` branch blocking one
+group's exact name) is not probed — a push it rejects fails that one group with the same
+`(directory file conflict)` rejection, which that agent reports as its own failure.
+
 EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
 org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
 ambient credential set a `gh`/`git` invocation resolves, not EMU-ness. A workspace with
@@ -82,6 +103,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target>
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --from-discovery \
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
 ```
+
+When phase 1's namespace probe found `refs/heads/fix`, add `--branch-style flat` to the
+`discover-alerts.sh` call, so every `branch_name` the groups carry — and everything downstream
+that consumes them, the fix agents included — is born with the flat scheme. At org and user scope
+no probe has run yet (there is no checkout), so discovery takes no style flag there; the per-repo
+rewrite happens in phase 5.
 
 `classify-lines.sh` reads `repo_root`'s current working tree, not the default branch by name — it
 runs whatever is actually checked out. At this point in the flow that is phase 1's checkout as the
@@ -184,7 +211,10 @@ repos at once still saturate the same laptop. Show the plan for the chosen batch
 
 Omit the `Repo` column at repo scope, as in phase 3. "Likely action" comes from the alerts'
 `relationship` field (direct → version bump, transitive → scoped override) and is best-effort: the
-subagent's own `why` classification is authoritative.
+subagent's own `why` classification is authoritative. `Branch` shows each group's `branch_name`;
+at repo scope it is final (phase 1's namespace probe already ran — say so when the batch runs
+flat), while at org and user scope it is provisional until phase 5's per-repo probe, which can
+flip a repo's names to the flat `fix-dependabot-...` scheme; say that too.
 
 At org or user scope, name every distinct repo the plan touches and say plainly that a repo not
 yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
@@ -208,7 +238,8 @@ For each **distinct repo** named in the approved batch:
    `env_prefix` is `direnv exec <owner-directory>` until the checkout exists and
    `direnv exec <repo_root>` from then on; if not, the repo has none and its commands run bare.
    **Your own commands for this repo run under it too**, not just the dispatches: the clone or
-   fetch in step 2, `detect-scope.sh` in step 3, `classify-lines.sh` in step 4, and
+   fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
+   `classify-lines.sh` in step 5, and
    `pr-status.sh` in phase 8. `direnv exec` injects environment without changing directory, so it
    composes with the `-C` or `cd` locator each of those already carries.
 2. **Resolve or create a local checkout.** The workspace convention is one `@`-prefixed directory
@@ -230,11 +261,26 @@ For each **distinct repo** named in the approved batch:
    ```
    Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
    dispatch rather than guessing a branch name.
-4. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
+4. **Probe that repo's branch namespace** — the same probe phase 1 makes at repo scope, with the
+   same semantics, one per repo:
+   ```bash
+   git -C <repo_root> ls-remote --heads origin fix
+   ```
+   A line naming `refs/heads/fix` means the remote rejects every `fix/*` push (`(directory file
+   conflict)`, issue #123): this repo's branch style is `flat`, and the next step's
+   `classify-lines.sh` call takes `--branch-style flat`, which rewrites that repo's `branch_name`s
+   to the `fix-dependabot-<pkg>-<line>x` scheme before anything dispatches — the fix agents
+   consume the rewritten names verbatim and never decide naming themselves. Empty output keeps
+   the default slash scheme (no flag). A non-zero exit gets one retry; a second failure means
+   `git` cannot reach `origin` for the fetch and push every agent needs, so exclude that repo's
+   groups from dispatch and report them in phase 7, as with a null `default_branch`. Record every
+   repo that flipped to flat; phase 7 names them.
+5. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
    `{repo, repo_root, default_branch}` triple is resolved, run:
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
    ```
+   (plus `--branch-style flat` when step 4 flipped this repo)
    with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
    (`{actionable: <that repo's approved groups>, skipped: []}`). This reads whatever tree is
    checked out at `repo_root` right now — step 1 just fetched or cloned it, so it should be on
@@ -432,7 +478,12 @@ unaddressed, and every repo phase 6's registry preflight excluded.** These are r
 the batch never touched at all, and belong in the same summary as the batch that did run — never a
 detail left only in the earlier discovery report. A registry-preflight exclusion names the probe
 package, the diagnosed cause (auth, not-found, or network), that the failure may be transient, and
-that re-running the skill re-probes.
+that re-running the skill re-probes. A repo the branch-namespace probe excluded (phase 1 at repo
+scope, phase 5 step 4 otherwise: `ls-remote` failed twice, so `origin` is unreachable) is reported
+the same way. And **name every repo whose batch ran under the flat branch scheme**, with the
+reason: a remote branch named `fix` occupies the `fix/*` ref namespace, so that repo's PRs came
+from `fix-dependabot-...` branches — the user reading branch names in the PRs should not have to
+guess why they differ from a neighbor repo's.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.

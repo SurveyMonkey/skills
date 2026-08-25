@@ -391,6 +391,18 @@ Describe 'discover-alerts.sh --scope'
       The output should equal '["undici","lodash"]'
     End
 
+    # Issue #123: --branch-style is invocation-wide mechanism, so at a
+    # cross-repo scope it renames every repo's groups at once. The per-repo
+    # decision the orchestrator actually makes at org and user scope goes
+    # through classify-lines.sh --branch-style instead (resolve-alerts
+    # SKILL.md phase 5; spec/classify_lines_spec.sh).
+    It 'applies the flat scheme to every repo of the invocation'
+      write_org_agg
+      When call common_jq discover-alerts.sh '[.actionable[] | {repo, branch_name}] | sort_by(.repo)' --scope org --branch-style flat octo
+      The status should be success
+      The output should equal '[{"repo":"octo/app","branch_name":"fix-dependabot-lodash-4x"},{"repo":"octo/other","branch_name":"fix-dependabot-undici-7x"}]'
+    End
+
     # The cross-repo restatement of issue #19's lesson: grouping must key on
     # repo too, or the same package in two repos collapses into one group and
     # silently under-reports one repo's alert count.

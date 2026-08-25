@@ -162,6 +162,46 @@ Describe 'discover-alerts.sh'
     The output should equal '["fix/dependabot-lodash-4x"]'
   End
 
+  # Issue #123: git refs are a filesystem namespace, so a remote branch
+  # literally named `fix` (`refs/heads/fix`) rejects every `fix/*` push —
+  # the field specimen is `! [remote rejected] fix/dependabot-postcss-8x ->
+  # fix/dependabot-postcss-8x (directory file conflict)`, hit only after each
+  # agent had finished its whole fix. The orchestrator probes the remote
+  # (`git ls-remote --heads origin fix`, resolve-alerts SKILL.md phase 1) and
+  # passes --branch-style flat when the namespace is blocked; these examples
+  # pin the mechanical half of that flip, and pin that the ordinary run's
+  # names stay byte-identical to today's.
+  Describe 'the flat fallback branch scheme (issue #123)'
+    discover_flat() { common_jq discover-alerts.sh "$1" --branch-style flat "$REPO"; }
+
+    It 'emits flat names for every group when flat is selected'
+      When call discover_flat '[.actionable[].branch_name]'
+      The status should be success
+      The output should equal '["fix-dependabot-undici-7x","fix-dependabot-undici-6x","fix-dependabot-lodash-4x"]'
+    End
+
+    It 'flattens the unfixed variant too'
+      When call discover_flat '[.skipped[] | select(.package == "left-pad") | .branch_name]'
+      The status should be success
+      The output should equal '["fix-dependabot-left-pad-unfixed"]'
+    End
+
+    # The regression pin: nothing about adding the fallback may move the
+    # default. A renamed default would strand every open slash-named PR and
+    # every stale-branch check keyed on the recorded names.
+    It 'keeps the slash scheme exactly as-is by default'
+      When call discover '[(.actionable[], .skipped[]) | .branch_name]'
+      The status should be success
+      The output should equal '["fix/dependabot-undici-7x","fix/dependabot-undici-6x","fix/dependabot-lodash-4x","fix/dependabot-left-pad-unfixed"]'
+    End
+
+    It 'rejects an unknown branch style'
+      When run script "$COMMON/discover-alerts.sh" --branch-style diagonal "$REPO"
+      The status should be failure
+      The stderr should include 'Unknown branch style'
+    End
+  End
+
   It 'ranks by severity then EPSS, with package and line breaking ties'
     When call discover '[.actionable[] | {s: .max_severity, e: .max_epss_percentile}]'
     The status should be success
@@ -209,6 +249,39 @@ Describe 'discover-alerts.sh'
       When call discover '{actionable: (.actionable | length), reasons: ([.skipped[].reason] | unique)}'
       The status should be success
       The output should equal '{"actionable":0,"reasons":["PR check failed","no fix available"]}'
+    End
+
+    # A repo that once carried a branch named `fix` had its PRs opened under
+    # the flat scheme (issue #123); deleting that branch later flips discovery
+    # back to the slash default while such a PR can still be open. Missing it
+    # would open a duplicate PR for the same line — the verdict asserted is
+    # the skip, not just the candidate list.
+    It 'recognizes a PR opened under the flat scheme after the style flips back'
+      stub_open_pr 'fix-dependabot-undici-6x' 'https://github.com/octo/app/pull/9'
+      When call discover '{actionable: [.actionable[].branch_name], skipped: [.skipped[] | select(.open_pr_url) | {major_line, reason, open_pr_url}]}'
+      The status should be success
+      The output should equal '{"actionable":["fix/dependabot-undici-7x","fix/dependabot-lodash-4x"],"skipped":[{"major_line":"6","reason":"open PR exists (flat-scheme branch fix-dependabot-undici-6x)","open_pr_url":"https://github.com/octo/app/pull/9"}]}'
+    End
+
+    It 'skips a line whose flat-named PR is open when running flat'
+      stub_open_pr 'fix-dependabot-undici-6x' 'https://github.com/octo/app/pull/9'
+      When call common_jq discover-alerts.sh '{actionable: [.actionable[].branch_name], skipped: [.skipped[] | select(.open_pr_url) | {reason, open_pr_url}]}' --branch-style flat "$REPO"
+      The status should be success
+      The output should equal '{"actionable":["fix-dependabot-undici-7x","fix-dependabot-lodash-4x"],"skipped":[{"reason":"open PR exists","open_pr_url":"https://github.com/octo/app/pull/9"}]}'
+    End
+
+    # While `refs/heads/fix` exists — the flat style's precondition — the
+    # remote cannot also hold any `fix/*` ref, so under flat the slash
+    # candidate is never queried at all.
+    flat_slash_queries() {
+      common_jq discover-alerts.sh '.' --branch-style flat "$REPO" >/dev/null || return 1
+      grep -c 'pr-list fix/' "$MOCK_DIR/log" || true
+    }
+
+    It 'queries no slash-named candidate under the flat style'
+      When call flat_slash_queries
+      The status should be success
+      The output should equal '0'
     End
   End
 

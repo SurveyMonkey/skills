@@ -27,7 +27,9 @@
 # of what else the output also contains.
 #
 # A match is suppressed entirely when the branch in hand is one the plugin
-# itself creates (`fix/dependabot-*`, `chore/dependabot-remove-pins`): that
+# itself creates (`fix/dependabot-*`, its flat fallback `fix-dependabot-*`
+# used when a remote branch named `fix` blocks the slash namespace — issue
+# #123 — and `chore/dependabot-remove-pins`): that
 # output is the plugin's own dispatched work reporting back, not a repository
 # whose alerts nobody has looked at. See the block guarding the emit below.
 #
@@ -178,13 +180,23 @@ fi
 #
 # Checked only after a match, so the `git` call costs nothing on the
 # overwhelming majority of Bash calls, which match nothing at all.
-PLUGIN_BRANCH_RE='(fix/dependabot-|chore/dependabot-remove-pins)'
+# `fix[-/]dependabot-` covers both spellings of the fix branch: the slash
+# scheme and the flat fallback dispatched when a remote branch named `fix`
+# blocks the `fix/*` namespace (issue #123). Matching the flat spelling as a
+# bare substring would also hit a user's own `my-fix-dependabot-*` or
+# `hotfix/dependabot-*` branch — the slash-only pattern already had the
+# latter over-match — so the command-text check below requires the match to
+# start the string or follow a separator that cannot continue a branch name
+# fragment (`/` for `refs/heads/...`, space, `:`, quotes all qualify;
+# letters, digits, `_`, `.`, and `-` do not). The branch check stays
+# anchored at `^`, which needs no boundary of its own.
+PLUGIN_BRANCH_RE='(fix[-/]dependabot-|chore/dependabot-remove-pins)'
 
 command_text=$(printf '%s' "$input" | jq -r '
   if (.tool_input | type) == "object" then (.tool_input.command // "") else "" end
 ')
 
-if printf '%s' "$command_text" | grep -Eq "$PLUGIN_BRANCH_RE"; then
+if printf '%s' "$command_text" | grep -Eq "(^|[^[:alnum:]_.-])$PLUGIN_BRANCH_RE"; then
   exit 0
 fi
 

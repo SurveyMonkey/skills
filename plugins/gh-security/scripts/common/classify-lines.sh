@@ -3,7 +3,8 @@
 # the repository's lockfile actually resolves
 #
 # Usage:
-#   ... | select-adapter.sh --from-discovery | classify-lines.sh --repo-root <path>
+#   ... | select-adapter.sh --from-discovery | classify-lines.sh --repo-root <path> \
+#         [--branch-style slash|flat]
 #
 # Input:  the routed discovery JSON select-adapter.sh emits on stdout
 #         ({actionable, skipped, ...}); actionable groups carry `adapter_path`.
@@ -71,14 +72,26 @@
 # mirroring `check-advisories.sh`'s `adapter_errors[]`: the group still
 # classifies "unknown", but the reply names what broke instead of leaving
 # every unknown group looking identical.
+#
+# --branch-style flat rewrites every group's `branch_name` from the slash
+# scheme (`fix/dependabot-...`) to the flat one (`fix-dependabot-...`), and
+# `slash` (the default) rewrites nothing. The scheme is a per-repo fact — a
+# remote branch literally named `fix` blocks every `fix/*` push (issue #123;
+# discover-alerts.sh's header carries the mechanism) — and this script is the
+# one stage of the cross-repo flow that runs once per repo with that repo's
+# groups on stdin (resolve-alerts SKILL.md phase 5), which is why the rewrite
+# sits here. A branch_name not carrying the slash prefix (another tool's
+# name, or one already flat) passes through unchanged.
 
 set -euo pipefail
 
 REPO_ROOT=""
+BRANCH_STYLE="slash"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="${2:?--repo-root requires a value}"; shift 2 ;;
+    --branch-style) BRANCH_STYLE="${2:?--branch-style requires a value}"; shift 2 ;;
     *)
       printf '{"error":"Unknown argument: %s"}\n' "$1" >&2
       exit 1
@@ -94,6 +107,13 @@ if [ ! -d "$REPO_ROOT" ]; then
   printf '{"error":"--repo-root is not a directory: %s"}\n' "$REPO_ROOT" >&2
   exit 1
 fi
+case "$BRANCH_STYLE" in
+  slash|flat) ;;
+  *)
+    printf '{"error":"Unknown branch style: %s (expected slash or flat)"}\n' "$BRANCH_STYLE" >&2
+    exit 1
+    ;;
+esac
 
 input=$(cat)
 printf '%s' "$input" | jq empty 2>/dev/null || {
@@ -262,7 +282,8 @@ if [ -n "$GROUP_ITEMS" ]; then
   done <<< "$GROUP_ITEMS"
 fi
 
-annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" --argjson classify_errors "$CLASSIFY_ERRORS" '
+annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" \
+  --argjson classify_errors "$CLASSIFY_ERRORS" --arg branch_style "$BRANCH_STYLE" '
   (.actionable // []) as $groups
   | [range($groups | length) | $groups[.] + $cls[.]] as $all
   | . as $input
@@ -278,6 +299,15 @@ annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" --argjson classify_
   # scope) unchanged, exactly as select-adapter.sh does.
   | . as $out
   | ($input | del(.actionable, .skipped, .classify_errors)) + $out
+  # The flat rewrite covers skipped groups too: a report naming a slash
+  # branch on a repo whose remote cannot hold one would be wrong the same
+  # way. Groups without a string branch_name pass through untouched.
+  | if $branch_style == "flat" then
+      (.actionable, .skipped) |= map(
+        if (.branch_name? | type) == "string"
+        then .branch_name |= sub("^fix/dependabot-"; "fix-dependabot-")
+        else . end)
+    else . end
   ' 2>"$ERR_FILE") || {
   printf '{"error":"Failed to classify discovery JSON: %s"}\n' "$(cat "$ERR_FILE")" >&2
   exit 1
