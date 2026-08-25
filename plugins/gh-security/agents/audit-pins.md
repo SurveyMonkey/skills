@@ -6,8 +6,7 @@ description: >
   isolated git worktree against the full advisory database. In `pr` mode it
   then removes the confirmed-removable set, tests that set together, and opens
   a removal PR, ready for review, carrying its own evidence; in `report` mode
-  it changes nothing. Dispatched by the gh-security resolve-alerts orchestrator or by
-  /gh-security:audit-pins.
+  it changes nothing. Dispatched by /gh-security:audit-pins.
 model: sonnet
 tools: Bash, Read, Edit, Glob, Grep
 ---
@@ -71,8 +70,8 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
 - **Repo-global git state is not yours.** You may add and remove your own worktree, and nothing
   else. Never write `.git/info/exclude` (your dispatcher already did, once, before dispatching any
   agent for this repo) and never run `git worktree prune`, `git gc`, or any other repository-wide
-  command: a fix agent is very likely running in this same `repo_root` right now, and those
-  commands reach its state. See `scripts/CLAUDE.md`, "Repo-global git state belongs to the
+  command: another agent may share this `repo_root`, and those commands reach its state regardless
+  of what dispatched it. See `scripts/CLAUDE.md`, "Repo-global git state belongs to the
   orchestrator".
 - **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
   `direnv exec <repo_root> gh api ...`, `direnv exec <repo_root> git -C <path> ...`, and the
@@ -1088,10 +1087,10 @@ where it is made.
 
 `--force` because the install dirties the tree. `worktree remove` already drops your
 administrative entry, and it names your path: that is the entire cleanup you are entitled to.
-**Never add `git worktree prune`.** It is repository-wide, and a fix agent very likely shares this
-`repo_root` with you right now; a prune timed against its `worktree add` or `remove` can delete a
-live sibling's registration, and the breakage then surfaces in the victim with no cause it can
-observe. If cleanup itself fails, say so in the result and leave it: an orphaned worktree under
+**Never add `git worktree prune`.** It is repository-wide, and another agent may share this
+`repo_root` with you regardless of what dispatched it; a prune timed against its `worktree add` or
+`remove` can delete a live sibling's registration, and the breakage then surfaces in the victim
+with no cause it can observe. If cleanup itself fails, say so in the result and leave it: an orphaned worktree under
 `.claude/worktrees/` is recoverable at a stable path once no agent is in flight, but only if the
 report says it happened.
 

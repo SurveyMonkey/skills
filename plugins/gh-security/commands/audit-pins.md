@@ -2,10 +2,11 @@
 description: >
   Audit this repo's dependency pins — the overrides and resolutions added to
   hold transitive dependencies at safe versions — and report which are no
-  longer needed. Each removal is tested in an isolated worktree against every
-  published advisory for the package, and the removable set is tested once more
-  together before a removal PR is opened for review. Report-only is offered as
-  the alternative.
+  longer needed. Preflights for the repo's own open security-labeled PRs and
+  stops if any exist. Each removal is tested in an isolated worktree against
+  every published advisory for the package, and the removable set is tested
+  once more together before a removal PR is opened for review. Report-only is
+  offered as the alternative.
 ---
 
 The user explicitly invoked `/gh-security:audit-pins`. Run the pin audit on the current
@@ -49,7 +50,38 @@ empty directory. It cannot stand in for the check above. Python arrives with its
 ([#9](https://github.com/SurveyMonkey/skills/issues/9)), and this call is where the choice will be
 made once more than one exists.
 
-## 3. Keep the audit worktree out of `git status`
+## 3. Check for open security fix PRs, and stop if any exist
+
+```bash
+direnv exec <repo_root> gh pr list --repo <nwo> --label security --state open --limit 100 \
+  --json number,title,url,headRefName
+```
+
+**A non-zero exit here is a failure result quoting stderr, never an answer.** An empty list and a
+call that could not run look identical once you stop reading the exit status, and reading a failed
+lookup as "no open PRs" is what opens the audit against a moving target. Report the failure and
+stop; do not dispatch the agent and do not proceed as if the list came back empty.
+
+The audit's verdicts are computed against the default branch. An open PR carrying the `security`
+label may be an unmerged fix from `resolve-alerts` or `fix-dependency` still adding or tightening
+an override the audit is about to judge removable; removing a pin one of these PRs still needs
+produces exactly the inversion the field test's audit PR demonstrated, where an audit PR
+removed 8 keys that four of the batch's own unmerged fix PRs tightened or widened.
+
+**Exclude the audit's own removal PR from this match.** `chore/dependabot-remove-pins` carries the
+`security` label too, so filter out any entry whose `headRefName` is `chore/dependabot-remove-pins`
+before evaluating the list — that PR is this plugin's own prior output, not a fix in flight, and
+the agent's own phase 1 open-PR guard already handles it on its own terms. A removal-PR hit surfacing here
+through some other label or head is still worth reporting; it just is not assumed by name.
+
+If the (filtered) list is non-empty, report each PR by number and title, say that these open
+security fixes should be merged or closed before the audit runs, and **stop**. Do not dispatch the
+agent. There is no proceed-anyway option here: a user who wants to run the audit regardless says so
+in conversation, and no skill machinery is needed for that.
+
+If the list is empty, continue.
+
+## 4. Keep the audit worktree out of `git status`
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/ensure-worktree-exclude.sh <repo_root>
@@ -60,7 +92,7 @@ is repo-global state, and an agent may share a `repo_root` with a concurrent sib
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)). A failure here is not fatal — report it
 and dispatch anyway.
 
-## 4. Ask which mode, then dispatch
+## 5. Ask which mode, then dispatch
 
 The agent cannot ask anything, so the mode is decided here and passed in. AskUserQuestion, once,
 with two options. **PR mode is the first option and the recommended one**, because the audit
@@ -86,7 +118,7 @@ opened against a real repository.
 The audit runs an install per pin it tests. PR mode adds up to two more for the combined test. It
 is not instant; say so before dispatching.
 
-## 5. Report
+## 6. Report
 
 Parse the agent's fenced JSON result. **An unparseable or missing result block is a failure
 report** — say so; never guess fields. Present its findings **grouped by package, one table per
@@ -115,7 +147,7 @@ Then, in order:
 
 In `report` mode that is the whole result: nothing was changed, and the user acts on the findings.
 
-## 6. Report the PR
+## 7. Report the PR
 
 In `pr` mode only, and only when the result's `pr` is non-null. Report the URL, the attempt that
 passed (`pr.attempt`), `pr.removed_keys`, and `pr.left_behind` with each reason, then the

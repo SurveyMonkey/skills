@@ -70,6 +70,11 @@ pass**. Conventions and their reasoning live in
   per-pin tests prove nothing about a set) that fails closed on a partial view of the lockfile.
   The branch name is plugin-owned, created only at commit time, and a leftover of it is verified
   against a closed PR's head sha before anything deletes or force-pushes it.
+- **The pin audit is decoupled from `resolve-alerts`** ([ADR 009](adr/009-decouple-pin-audit.md)).
+  The two flows edit the same overrides block from opposite directions and running them together
+  produces order-dependent conflicts, so the audit is reached only through
+  `/gh-security:audit-pins`, which preflights for the repo's own open `security`-labeled PRs and
+  stops if any exist rather than judge removability against a moving target.
 
 The multi-agent orchestration itself, phases and all, is specified in
 [RFC 001](rfc/001-alert-orchestration.md).

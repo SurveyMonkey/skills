@@ -168,7 +168,8 @@ fi
 #      checkout rather than the subagent's worktree.
 #   2. Failing that, the branch checked out in the payload's `cwd`, which is
 #      the worktree the command ran in. This covers `git push -u origin HEAD`
-#      and every non-push command (an audit run mid-fix) that trips the scan.
+#      and every non-push command (a follow-up `gh pr create` in the same
+#      worktree) that trips the scan.
 #
 # Deliberately not a documented "ignore this nudge" line in the two agent
 # definitions: that burns a turn on every push, depends on the agent following

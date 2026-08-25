@@ -112,9 +112,10 @@ when `auto` became the recommended default mode and the workaround was removed
 ## Every `gh` and `git` command runs under `direnv exec <repo_root>`
 
 `direnv` does not auto-load in a non-interactive tool shell, so a bare `gh` or `git` uses whatever
-account the shell defaults to. Both agent definitions and both entry points prescribe
-`direnv exec <repo_root> gh ...` and `direnv exec <repo_root> git -C <path> ...` for that reason;
-`check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+account the shell defaults to. Both agent definitions prescribe `direnv exec <repo_root> gh ...`
+and `direnv exec <repo_root> git -C <path> ...` for that reason, and the `audit-pins` command's own
+open-security-PR preflight `gh pr list` call carries the same wrapping; `check-advisories.sh` makes
+its own `gh` call, so it takes the same wrapping too.
 
 The failure modes are misleading rather than obvious, which is why this is a rule and not a tip:
 bare `gh` reports "please run gh auth login" on a correctly configured machine, bare `git fetch`
@@ -124,8 +125,10 @@ without the wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/ski
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 
-Agents share a `repo_root` by design — the pin audit runs beside a fix agent in the same rolling
-pool — and worktree *paths* not colliding is not the same as repository state not colliding
+Agents share a `repo_root` by design — the rolling pool runs multiple `fix-dependency` agents
+against the same repo at once, and a pin audit dispatched separately may still coincide with one in
+the narrow window the preflight does not close (`docs/adr/009-decouple-pin-audit.md`) — and
+worktree *paths* not colliding is not the same as repository state not colliding
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)).
 
 - `.git/info/exclude` is written once per repo by `common/ensure-worktree-exclude.sh`, called by

@@ -46,12 +46,13 @@ because a package missing from both snapshots shows no change and `[]` is the st
 
 **The audit gains a `mode` input, `report` or `pr`, set before dispatch and never defaulted.** The
 agent cannot ask, and the two modes differ by whether a pull request is opened against a real
-repository, so a missing or unrecognized value is an `input` failure. At every dispatch point (the
-`/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and its final
+repository, so a missing or unrecognized value is an `input` failure. ~~At every dispatch point
+(the `/gh-security:audit-pins` command, the `resolve-alerts` phase 4 batch approval, and its final
 phase's recommendation) **PR mode is the first and recommended option** and report-only is the
-alternative.
-In the orchestrator the mode is an option on the single batch approval, not a second prompt: one
-approval covers the batch and the audit's mode together.
+alternative. In the orchestrator the mode is an option on the single batch approval, not a second
+prompt: one approval covers the batch and the audit's mode together.~~ **Amended in
+[ADR 009](009-decouple-pin-audit.md):** `/gh-security:audit-pins` is now the only dispatch point;
+PR mode is still the first and recommended option there.
 
 **One PR per repository, on a fixed `chore/dependabot-remove-pins` branch, built in two bounded
 attempts, each a full combined test.**
@@ -123,13 +124,22 @@ block in the same manifest: N PRs that conflict with each other by construction,
 one makes the rest stale and their evidence wrong. One PR per repository is the only shape whose
 evidence is still true at merge time, and the combined test is what buys that.
 
-The audit now writes to the repository, which it previously never did. The blast radius is bounded
+The audit now writes to the repository, which it previously never did. ~~The blast radius is bounded
 by the same things that bound the fix agents: an isolated worktree, a pull request that merges only
 when a human merges it, and a batch approval before dispatch. Report mode remains available for
-anyone who wants the old behavior, and it is a single answer away at every entry point.
+anyone who wants the old behavior, and it is a single answer away at every entry point.~~ **Amended
+in [ADR 009](009-decouple-pin-audit.md):** there is no batch approval before dispatch to bound
+this, and no second entry point either — `/gh-security:audit-pins` is the only one. The blast
+radius is bounded instead by the isolated worktree, the pull request that merges only when a human
+merges it, and the command's own preflight, which stops before dispatch if the repo carries an open
+security fix PR. Report mode remains available, and it is a single answer away at that one entry
+point.
 
 Removal PRs carry a merge-risk band computed by the same rubric as fix PRs, so the two are directly
-comparable in the summary table and to a reviewer. That was already RFC 001's intent
+comparable ~~in the summary table~~ **(amended in [ADR 009](009-decouple-pin-audit.md): a removal
+PR never shares a summary table with fix PRs now, since the audit is dispatched by a separate
+command at a separate time; the rubric comparability is between the two kinds of PR, read on their
+own)** and to a reviewer. That was already RFC 001's intent
 ("the audit-pins subagent reuses the same rubric for its removal PRs"); what is settled here is
 that `--override-scope` is `none` for a removal, and that the band is the maximum across packages
 rather than an average.

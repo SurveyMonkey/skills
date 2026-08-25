@@ -100,9 +100,9 @@ writing the PR prose. Do not reimplement what the scripts do.
 - **Repo-global git state is not yours.** You may add and remove your own worktrees, and nothing
   else. Never write `.git/info/exclude` (your dispatcher already did, once, before dispatching any
   agent for this repo) and never run `git worktree prune`, `git gc`, or any other repository-wide
-  command: sibling agents — another line of your package, another package, or the pin audit — very
-  likely share this `repo_root` right now, and those commands reach their state. See
-  `scripts/CLAUDE.md`, "Repo-global git state belongs to the orchestrator".
+  command: sibling agents — another line of your package, another package — may share this
+  `repo_root` right now, and those commands reach their state. See `scripts/CLAUDE.md`,
+  "Repo-global git state belongs to the orchestrator".
 - **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
   `direnv exec <repo_root> git -C "$WORK/fix" commit ...` and
   `direnv exec <repo_root> gh pr create ...`. Without it the account is wrong, and the failures

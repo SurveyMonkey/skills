@@ -14,3 +14,4 @@ okf_version: "0.2"
 | [006-merge-risk-is-static-analysis.md](006-merge-risk-is-static-analysis.md) | Merge risk is computed from the repository's files rather than from checks an agent runs, and CI on the pull request is the verifier. |
 | [007-pin-removal-prs.md](007-pin-removal-prs.md) | The pin audit opens one removal PR per repository, ready for review, defaulting to PR mode, gated on a combined test of the whole removed set that fails closed on a partial view of the tree. |
 | [008-prs-open-ready-for-review.md](008-prs-open-ready-for-review.md) | Fix and pin-removal PRs open ready for review, the phase 5 dispatch approval is the only checkpoint, and no phase acts on a pull request after it is created. |
+| [009-decouple-pin-audit.md](009-decouple-pin-audit.md) | The pin audit no longer rides along in a resolve-alerts run; it is reached only through /gh-security:audit-pins, which preflights for the repo's own open security-labeled PRs and stops if any exist. |
