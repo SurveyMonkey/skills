@@ -28,7 +28,10 @@
 # scope.
 #
 # EMU orgs are out of scope (RFC 001 Non-Goals): this script does not detect
-# or special-case them.
+# or special-case them. The boundary is the ambient credential set a gh/git
+# invocation resolves, not EMU-ness — a session with directory-scoped work
+# credentials can reach an EMU repo's alerts at repo scope end to end; asking
+# an EMU org for its aggregate alert list is what RFC 001 never covers.
 #
 # Output: JSON with three top-level keys:
 #   actionable:   groups with a fix available and no open PR (sorted by

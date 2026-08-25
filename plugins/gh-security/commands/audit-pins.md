@@ -29,6 +29,17 @@ report that and stop — the audit worktree is created from it.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`.
 
+**Resolve `env_prefix` here too, before anything else talks to the repo.** In a workspace where
+`gh`, `git`, and the package manager get their identity from `direnv` exporting per-directory
+config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single ambient
+login, a tool-shell invocation misses that: direnv loads via a shell hook, which non-interactive
+shells do not run, so a bare `gh` or `git` silently resolves the wrong identity. Check whether a
+`.envrc` is present at or above `repo_root`. If so, `env_prefix` is `direnv exec <repo_root>`,
+and every `gh`, `git`, and plugin-script invocation this command makes — step 3's `gh pr list`,
+step 7's `pr-status.sh` — runs under it; `direnv exec` injects environment without changing
+directory, so it composes with, never replaces, whatever `cd` or `-C` locator a command already
+carries. If not, there is no `env_prefix` and those commands run bare.
+
 ## 2. Check there is something to audit, then resolve the adapter
 
 Two separate questions, in this order.
@@ -53,9 +64,11 @@ made once more than one exists.
 ## 3. Check for open security fix PRs, and stop if any exist
 
 ```bash
-direnv exec <repo_root> gh pr list --repo <nwo> --label security --state open --limit 100 \
+<env_prefix> gh pr list --repo <nwo> --label security --state open --limit 100 \
   --json number,title,url,headRefName
 ```
+
+`<env_prefix>` is what step 1 resolved; when the repo resolved none, run the call bare.
 
 **A non-zero exit here is a failure result quoting stderr, never an answer.** An empty list and a
 call that could not run look identical once you stop reading the exit status, and reading a failed
@@ -108,8 +121,17 @@ re-derive the diff by hand:
 
 Then one Task call, `subagent_type` `audit-pins`, whose prompt carries `repo_root`, `nwo`,
 `default_branch`, `adapter_path` (from step 2), `scripts_dir`
-(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and `mode`, plus the instruction to follow its agent
-definition and end with its JSON result block.
+(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), `mode`, and an OPTIONAL `env_prefix`, plus the
+instruction to follow its agent definition and end with its JSON result block.
+
+**Pass the `env_prefix` step 1 resolved, when it resolved one; omit the field otherwise.** The
+agent prepends it verbatim to every `gh`, `git`, package-manager, and adapter-script call,
+composed after each command's own `cd` locator, and runs those commands bare when the field is
+absent.
+
+This command runs no registry preflight, deliberately: it dispatches one agent, so a dead
+registry token costs one failed install and one clear failure report — there is no fan-out to
+protect, which is what the `resolve-alerts` probe exists for.
 
 **Never omit `mode` and never guess it.** The agent treats a missing or unrecognized value as an
 `input` failure rather than defaulting, because the two modes differ by whether a pull request is
@@ -181,8 +203,11 @@ exactly as an unparseable result block is reported. Never guess which reason was
 Otherwise read the PR's current state once and report it as information:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr.url>
+<env_prefix> ${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr.url>
 ```
+
+Under the `env_prefix` step 1 resolved (the script's own `gh` call needs the same identity);
+bare when the repo resolved none.
 
 Nothing here acts on a pull request after `gh pr create` (ADR 008): do not offer to merge it, do
 not enable auto-merge, and do not ask whether it may be marked ready for review, because it already

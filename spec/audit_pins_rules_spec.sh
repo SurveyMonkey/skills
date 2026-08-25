@@ -69,23 +69,23 @@ Describe 'the audit rules that read a partially-parsed map'
   End
 End
 
+# Two readers, because a wrapped paragraph is not one grep line. `rule_in`
+# counts lines and suits a sentence that fits on one; `phrase_in` flattens
+# the file first and suits anything the 100-column wrap may split. The
+# earlier "first option and the recommended" example passed only because
+# SKILL.md happened to wrap after the last word it matched.
+rule_in() { grep -c -e "$2" -- "$1"; }
+phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+# `grep -c` exits 1 on no match, which is the expected answer for a shape
+# that must be ABSENT, so this one reports the count without failing on it.
+count_in() { grep -c -e "$2" -- "$1" || true; }
+
 # The removal PR (issue #72) is where a finding stops being words and becomes a
 # deletion in someone's repository, so the definition's own guards are what
 # stand between a plausible per-pin verdict and a bad merge. Each example below
 # names one guard and fails if the sentence carrying it leaves the file.
 Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
-
-  # Two readers, because a wrapped paragraph is not one grep line. `rule_in`
-  # counts lines and suits a sentence that fits on one; `phrase_in` flattens
-  # the file first and suits anything the 100-column wrap may split. The
-  # earlier "first option and the recommended" example passed only because
-  # SKILL.md happened to wrap after the last word it matched.
-  rule_in() { grep -c -e "$2" -- "$1"; }
-  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
-  # `grep -c` exits 1 on no match, which is the expected answer for a shape
-  # that must be ABSENT, so this one reports the count without failing on it.
-  count_in() { grep -c -e "$2" -- "$1" || true; }
 
   # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
   # no set has ever been installed together, and a PR removes a set. Without
@@ -516,5 +516,106 @@ Describe 'the rules that gate the removal PR'
       The status should be success
       The output should equal '1'
     End
+  End
+
+End
+
+# #106: field-tested against an EMU repo with directory-scoped credentials
+# (direnv exporting GH_CONFIG_DIR, GIT_CONFIG_GLOBAL, a registry token). A
+# tool-shell gh/git silently resolved the wrong identity until the
+# orchestrator hand-injected an ad-hoc ENVIRONMENT paragraph into every
+# dispatch; this makes that carriage contractual instead, as an optional
+# `env_prefix` resolved by every dispatcher and honored identically by both
+# agent definitions. The fix-dependency pins live here rather than in
+# spec/fix_dependency_branch_spec.sh because the contract is one rule stated
+# identically in both agents: a Parameters block pins both copies from one
+# example, and splitting them across files is how the two drift apart.
+Describe 'the env_prefix dispatch contract (#106)'
+  SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+  COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+
+  Describe 'the rule both agent definitions state'
+    Parameters
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+    End
+
+    It "states the one env_prefix rule in $1"
+      When call phrase_in "$1" \
+        "one rule for carrying a repo's directory-scoped credentials"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The absent half is load-bearing on its own: without it an agent invents
+    # a direnv wrapping of its own for a repo the dispatcher judged ordinary,
+    # which is the ad-hoc behavior the contract replaced.
+    It "runs bare when env_prefix is absent, per $1"
+      When call phrase_in "$1" \
+        'When .env_prefix. is absent, run every one of  *those commands bare'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The input-contract bullet is what makes the field optional rather than
+    # required: deleting it silently promotes env_prefix into the any-field-
+    # missing input failure.
+    It "declares env_prefix OPTIONAL in the input contract of $1"
+      When call phrase_in "$1" \
+        'OPTIONAL\. A literal command prefix (e\.g\. .direnv exec <repo_root>.) that carries'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  # The .envrc-presence check is the trigger for the whole contract: without
+  # this sentence no dispatcher ever resolves a prefix and every pin below it
+  # guards a field nothing populates. SKILL.md carries it twice (phase 1 at
+  # repo scope, phase 5 per repo at org and user scope) and the audit command
+  # once (step 1).
+  Describe 'the .envrc trigger sentence at every dispatch site'
+    Parameters
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md" 2
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md" 1
+    End
+
+    It "checks for a .envrc at or above repo_root in $1"
+      When call phrase_in "$1" 'a .\.envrc. is present at or above .repo_root.'
+      The status should be success
+      The output should equal "$2"
+    End
+  End
+
+  # The dispatch-payload half: the orchestrator carries env_prefix into the
+  # fix-agent Task call, optionally, alongside the fields phase 6 already
+  # sends.
+  It 'carries env_prefix into the fix-dependency Task payload'
+    When call rule_in "$SKILL" "that repo's .env_prefix. when it resolved one"
+    The status should be success
+    The output should equal '1'
+  End
+
+  It 'runs a registry preflight probe once per repo before phase 6 dispatch'
+    When call rule_in "$SKILL" "Probe that repo's registry, once, before its first dispatch"
+    The status should be success
+    The output should equal '1'
+  End
+
+  # The probe's composed shape is the #106 lesson in one line: direnv exec
+  # does not chdir, so a probe without the cd resolves the wrong
+  # .npmrc/.yarnrc.yml and a dead private token probes green against the
+  # public registry. One occurrence per package-manager snippet.
+  It 'composes the probe as cd repo_root, then env_prefix, in every snippet'
+    When call rule_in "$SKILL" 'cd <repo_root> && <env_prefix> <pm_exec>'
+    The status should be success
+    The output should equal '3'
+  End
+
+  # The audit's own dispatch point, decoupled into commands/audit-pins.md by
+  # #108, carries the same optional field.
+  It 'carries env_prefix into the audit-pins Task payload in commands/audit-pins.md'
+    When call rule_in "$COMMAND" "an OPTIONAL .env_prefix., plus the"
+    The status should be success
+    The output should equal '1'
   End
 End

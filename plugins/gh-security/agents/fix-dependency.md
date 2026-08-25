@@ -41,9 +41,11 @@ Your dispatch prompt provides everything; re-discover nothing:
 - `default_branch` — the repository's default branch
 - `repo_root` — absolute path to the user's checkout
 - `scripts_dir` — absolute path to the plugin's `scripts/common/` directory
+- `env_prefix` — OPTIONAL. A literal command prefix (e.g. `direnv exec <repo_root>`) that carries
+  this repo's directory-scoped credentials. See Hard rules for what it changes.
 
-If any of these is missing from your prompt, return a failure result (phase `input`) instead of
-guessing.
+If any of these except `env_prefix` is missing from your prompt, return a failure result (phase
+`input`) instead of guessing.
 
 Every script emits JSON on stdout and exits non-zero with an `error` key on failure. Your job is
 the judgment: interpreting install failures, deciding which override shape the tree needs, and
@@ -72,8 +74,8 @@ writing the PR prose. Do not reimplement what the scripts do.
   **essential step** (commit, most commonly: hooks from lefthook or husky invoke the bare
   package-manager name) has actually failed on a missing bare `yarn`/`pnpm`, the sanctioned fix
   is `cd "$WORK/fix" && $ADAPTER shim "$WORK/bin"` — one silent call that writes the shim (it
-  detects the package manager from the worktree, so it needs the prefix like every other adapter
-  call) and returns its
+  detects the package manager from the worktree, so it needs the `cd "$WORK/fix" && ` locator
+  like every other adapter call) and returns its
   `path_prefix` to prepend to PATH for that command. The shim exists so commits can succeed and
   for nothing else. Never hand-roll
   the shim (three separate commands, each drawing security review) and never place one in the
@@ -91,7 +93,8 @@ writing the PR prose. Do not reimplement what the scripts do.
   to the session directory between invocations and shell variables do not survive, so a `cd`
   issued once does not govern the calls after it. **Every command locates itself**: git uses
   `git -C <literal path>`, the `gh` calls in phase 6 locate themselves with `--repo <nwo>` and
-  take no prefix, and every other non-git command carries its own `cd "$WORK/fix" && ` prefix.
+  take no `cd` locator (`env_prefix`, when your dispatch carried one, still applies to them), and
+  every other non-git command carries its own `cd "$WORK/fix" && ` locator.
   A command that relies on an earlier `cd` runs in `repo_root` instead, which is exactly how a
   live run bumped a package and regenerated a lockfile in the user's checkout.
 - **Never touch the user's working tree.** All work happens in your worktree. Never `git
@@ -103,16 +106,29 @@ writing the PR prose. Do not reimplement what the scripts do.
   command: sibling agents — another line of your package, another package — may share this
   `repo_root` right now, and those commands reach their state. See `scripts/CLAUDE.md`,
   "Repo-global git state belongs to the orchestrator".
-- **Every `gh` and `git` command carries `direnv exec <repo_root>`** — for example
-  `direnv exec <repo_root> git -C "$WORK/fix" commit ...` and
-  `direnv exec <repo_root> gh pr create ...`. Without it the account is wrong, and the failures
-  are misleading rather than obvious: `git fetch` reports `repository not found` and `git commit`
-  fails on a missing author identity, so phase 1 fails outright. The rule and its failure modes
-  are in `scripts/CLAUDE.md`, "Every `gh` and `git` command runs under `direnv exec`". The
-  snippets below omit the prefix for readability; add it to every one.
+- **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
+  package-manager, and adapter-script invocation** — and it composes with the locator each
+  command already carries, going **after** the `cd`: `direnv exec` injects environment without
+  changing directory, so the locator still does that work. The composed shapes are
+  `<env_prefix> gh pr create ...`, `<env_prefix> git -C "$WORK/fix" commit ...`,
+  `cd "$WORK/fix" && <env_prefix> $ADAPTER install`, `cd "$WORK/fix" && <env_prefix> pnpm
+  install`. Never `<env_prefix> cd ...` — `direnv exec` cannot exec a shell builtin — and never a
+  bare `<env_prefix> $ADAPTER install`, which runs in whatever directory the shell starts in and
+  installs into the user's checkout. It is a literal string your dispatcher resolved for this
+  repo (typically `direnv exec <repo_root>`); prepend it verbatim, do not re-derive it. This is the
+  one rule for carrying a repo's directory-scoped credentials — there is no separate fallback rule
+  to reconcile it with. **When `env_prefix` is absent, run every one of those commands bare, with
+  no `direnv` wrapping of your own.** An absent `env_prefix` means your dispatcher judged this
+  repo's credentials to be ordinary and ambient (see `scripts/CLAUDE.md`, "Directory-scoped
+  credentials travel as `env_prefix`" for why that judgment matters and what a wrong one looks
+  like: `git fetch` reporting `repository not found`, `git commit` failing on a missing author
+  identity, or a package-manager install 401ing against the wrong registry token). The snippets
+  below omit `env_prefix` for readability; compose it into every one whenever your dispatch
+  carried it.
 - **Until `$WORK/fix` exists and your commands name it, every command must be read-only.**
   Every Bash call starts in `repo_root`, so a mutating command issued before worktree setup, or
-  one issued afterwards without the prefix — the adapter's `apply_constraint` or `install`, a
+  one issued afterwards without the `cd "$WORK/fix" && ` locator — the adapter's
+  `apply_constraint` or `install`, a
   package-manager invocation, an Edit of `package.json` — lands in the user's tree. Phase 1
   comes first, always; no fix work of any kind before it.
 - **If you find changes in the user's tree — even changes you believe you caused — never

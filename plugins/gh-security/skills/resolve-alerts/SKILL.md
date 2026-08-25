@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(git clone*), Bash(gh repo clone*), Bash(git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -48,9 +48,30 @@ asked for instead of the detected one, and say so.
   --scope user` always operates on the authenticated user's own repos regardless of what `owner`
   resolves to. `nwo` and `default_branch` are again resolved per repo in phase 5.
 
-EMU orgs are out of scope (RFC 001 Non-Goals). This skill does not detect or special-case them; an
-EMU org simply has no alerts visible to a personal-account session and discovery reports it as
-such through the ordinary org-scope path.
+**At repo scope, resolve `env_prefix` here, before anything else talks to the repo.** In a
+workspace where `gh`, `git`, and the package manager get their identity from `direnv` exporting
+per-directory config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single
+ambient login, a tool-shell invocation misses that: direnv loads via a shell hook, which
+non-interactive shells do not run, so a bare `gh` or `git` silently resolves the wrong identity or
+a dead registry token. Check whether a `.envrc` is present at or above `repo_root`. If so, this
+repo's `env_prefix` is `direnv exec <repo_root>`; if not, the repo has none and every command for
+it runs bare. **The prefix covers your own commands, not just the agents'**: from here on, every
+`gh`, `git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
+`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 8 — runs
+under it, or discovery itself reads the wrong account's alerts before any dispatch exists. Note
+that `direnv exec <repo_root> <cmd>` runs `<cmd>` in the caller's current directory — it injects
+the environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
+locator a command already carries. At org and user scope there is no `repo_root` yet; resolution
+happens per repo in phase 5.
+The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
+definitions do; add it to every command you run for a repo that resolved one.
+
+EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
+org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
+ambient credential set a `gh`/`git` invocation resolves, not EMU-ness. A workspace with
+per-directory work credentials (see `env_prefix`, above) can reach an EMU repo's alerts end to
+end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
+list, which RFC 001 never covers.
 
 ## Phase 2: Discover and route
 
@@ -180,7 +201,17 @@ known from phase 1.
 
 For each **distinct repo** named in the approved batch:
 
-1. **Resolve or create a local checkout.** The workspace convention is one `@`-prefixed directory
+1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same check phase 1 makes
+   at repo scope: whether a `.envrc` is present at or above `repo_root` — the computed checkout
+   path below; in a credential-scoped workspace the `.envrc` sits on the owner directory, which
+   exists before the clone does, so the check works either way. If one is present, the repo's
+   `env_prefix` is `direnv exec <owner-directory>` until the checkout exists and
+   `direnv exec <repo_root>` from then on; if not, the repo has none and its commands run bare.
+   **Your own commands for this repo run under it too**, not just the dispatches: the clone or
+   fetch in step 2, `detect-scope.sh` in step 3, `classify-lines.sh` in step 4, and
+   `pr-status.sh` in phase 8. `direnv exec` injects environment without changing directory, so it
+   composes with the `-C` or `cd` locator each of those already carries.
+2. **Resolve or create a local checkout.** The workspace convention is one `@`-prefixed directory
    per GitHub owner (see `detect-scope.sh`'s header comment). Compute the expected path as
    `<owner-directory>/<repo-name>`, where `<owner-directory>` is `path` from phase 1 at org scope,
    or `path/@<repo-owner>` at user scope (the repo's own owner, read from its `repo` field, which
@@ -193,13 +224,13 @@ For each **distinct repo** named in the approved batch:
    - If a directory exists at that path but is not the expected git repository (wrong remote, or
      not a repository at all), stop and report the conflict for that repo rather than guessing;
      do not dispatch groups for it.
-2. **Resolve `default_branch`** for that `repo_root`:
+3. **Resolve `default_branch`** for that `repo_root`:
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh <repo_root>
    ```
    Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
    dispatch rather than guessing a branch name.
-3. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
+4. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
    `{repo, repo_root, default_branch}` triple is resolved, run:
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
@@ -234,6 +265,49 @@ read-then-append from each can duplicate the line or tear the file (issue #35). 
 set, so one call per repo removes the race by construction. A failure here is not fatal — report it
 and dispatch anyway; the worst case is worktree directories showing up in `git status`.
 
+**Carry that repo's `env_prefix` into this phase.** It was resolved in phase 1 (repo scope) or
+phase 5 step 1 (org and user scope), never here: by the time anything dispatches, every one of
+your own commands for the repo has already been running under it. This phase only applies it — to
+the registry preflight next and to every group dispatched for the repo — and omits the field from
+the dispatches of a repo that resolved none.
+
+**Probe that repo's registry, once, before its first dispatch.** The field run this contract comes
+from began with a dead CodeArtifact token: all 33 agents would have failed at install, one at a
+time, each burning a slot before reporting a confusing failure. Resolve the package manager the
+same way `classify-lines.sh` and the fix agent do — `<adapter_path> detect` gives `pm` and
+`pm_exec` — and run one read-only probe from inside `repo_root`, under `env_prefix` when this repo
+has one (bare when not). The `cd` is load-bearing and `env_prefix` cannot replace it: `direnv
+exec` injects environment without changing directory, so a probe without the `cd` runs in your
+working directory, resolves the wrong `.npmrc`/`.yarnrc.yml`, and lets a dead private-registry
+token probe green against the public registry — the exact failure this preflight exists to catch;
+yarn berry additionally errors outside a project, which would exclude every berry repo. Probe a
+**scoped** dependency from the repo's own manifest when one exists — scoped packages are where
+private registries live — falling back to the top-ranked queued group's `package` for this repo
+when the manifest declares no scoped dependency:
+
+- pnpm: `cd <repo_root> && <env_prefix> <pm_exec> view <package> version`
+- npm: `cd <repo_root> && <env_prefix> <pm_exec> view <package> version`
+- yarn (berry): `cd <repo_root> && <env_prefix> <pm_exec> npm info <package> --fields version`
+
+This is modeled on how phase 1 and phase 5 resolve `default_branch` up front and stop or exclude
+on a null rather than letting every downstream dispatch discover the same failure independently.
+A non-zero exit gets **one retry** before it means anything — registries flake, and a transient
+blip must not cost a repo its whole batch. A second failure is the signal: report one actionable
+message naming the repo and distinguishing the cause by what the output says — an auth failure
+(401 or 403) means dead registry credentials, and that is the one case where the remedy is
+running your login flow for that registry; a 404 means the probe package is not in the registry
+the probe reached, which is a routing or scope-mapping question, not an auth one; anything else
+(timeout, DNS, connection reset) is network trouble. Exclude every one of that repo's groups from
+the queue below, and report them in phase 7 alongside the run's other skipped work, noting that
+the failure may be transient and that re-running the skill re-probes. There is no proceed-anyway
+machinery here: a user who wants to dispatch past a failed probe says so in conversation, the
+same footing as the audit command's open-PR preflight. **One probe per repo, not per group** — the probe package, scoped dependency or
+fallback, stands in for that repo's
+registry reachability as a whole; a second dead package in the same repo is the same root cause; a
+green probe does not shield an actual `install` inside a fix agent from failing on that group's
+package specifically, but a probe failing here is worth stopping 30+ downstream failures for one
+report.
+
 Then hold the approved groups as a **work queue**: every group across every repo, in the ranked
 order phases 3 and 4 settled. Drain that queue as a **rolling pool**, in two motions:
 
@@ -250,8 +324,9 @@ Each queued group is **one Task tool call**:
 - `subagent_type`: `fix-dependency`
 - prompt: the group JSON verbatim, plus `adapter_path`, the group's own `nwo` (its `repo` field),
   `default_branch` and `repo_root` for that group's repo (from phase 1 at repo scope, or phase 5's
-  resolved triples at org/user scope), and `scripts_dir`
-  (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and the instruction to follow its agent definition
+  resolved triples at org/user scope), `scripts_dir`
+  (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), that repo's `env_prefix` when it resolved one (phase 1
+  at repo scope, phase 5 at org and user scope; OPTIONAL — omit rather than send null), and the instruction to follow its agent definition
   and end with its JSON result block.
 
 Two lines of the same package may be in flight together, whether in the same repo or different
@@ -352,8 +427,11 @@ Reporting a batch as done without either kind is the failure mode issue #19 is a
 worse coming from the summary than from an agent.
 
 **Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
-unaddressed.** These are repos with alerts the batch never touched at all, and belong in the same
-summary as the batch that did run — never a detail left only in the earlier discovery report.
+unaddressed, and every repo phase 6's registry preflight excluded.** These are repos with alerts
+the batch never touched at all, and belong in the same summary as the batch that did run — never a
+detail left only in the earlier discovery report. A registry-preflight exclusion names the probe
+package, the diagnosed cause (auth, not-found, or network), that the failure may be transient, and
+that re-running the skill re-probes.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.
