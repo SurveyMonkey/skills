@@ -1,0 +1,98 @@
+# pnpm-cross-line after an install under the BARE scoped key
+# `minimatch>brace-expansion: '>=5.0.9 <6'` — the entry the fix flow used to
+# write. pnpm matches the parent half of an unqualified key against every
+# resolved copy of `minimatch`, so all four copies now resolve
+# brace-expansion 5.0.9 and the 1.x and 2.x lines have vanished — the
+# collapse `validate --baseline` fails closed on (issue #100; the field run's
+# ws 7.x/8.x and brace-expansion 1.x failures).
+
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  minimatch>brace-expansion: '>=5.0.9 <6'
+
+importers:
+
+  .:
+    dependencies:
+      '@ts-morph/common':
+        specifier: ^0.26.0
+        version: 0.26.1
+      filelist:
+        specifier: ^1.0.4
+        version: 1.0.4
+      glob:
+        specifier: ^7.2.3
+        version: 7.2.3
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.5
+
+packages:
+
+  '@ts-morph/common@0.26.1':
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  balanced-match@4.0.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000DDD==}
+
+  brace-expansion@5.0.9:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000PPP==}
+
+  filelist@1.0.4:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000III==}
+
+  glob@7.2.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000JJJ==}
+
+  minimatch@10.0.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000KKK==}
+
+  minimatch@10.2.5:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000LLL==}
+
+  minimatch@3.1.5:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000MMM==}
+
+  minimatch@5.1.6:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000NNN==}
+
+snapshots:
+
+  '@ts-morph/common@0.26.1':
+    dependencies:
+      minimatch: 10.0.3
+
+  balanced-match@4.0.2: {}
+
+  brace-expansion@5.0.9:
+    dependencies:
+      balanced-match: 4.0.2
+
+  filelist@1.0.4:
+    dependencies:
+      minimatch: 5.1.6
+
+  glob@7.2.3:
+    dependencies:
+      minimatch: 3.1.5
+
+  minimatch@10.0.3:
+    dependencies:
+      brace-expansion: 5.0.9
+
+  minimatch@10.2.5:
+    dependencies:
+      brace-expansion: 5.0.9
+
+  minimatch@3.1.5:
+    dependencies:
+      brace-expansion: 5.0.9
+
+  minimatch@5.1.6:
+    dependencies:
+      brace-expansion: 5.0.9

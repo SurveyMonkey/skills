@@ -353,3 +353,37 @@ Describe 'node.sh validate --baseline'
     The output should equal '{"ok":true,"other_line_moves":[]}'
   End
 End
+
+# ---------------------------------------------------------------------------
+# The same collapse in pnpm's syntax (issue #100). The specimen pair mirrors
+# yarn-cross-line-collapsed: `pnpm-cross-line-collapsed` is the tree an
+# install produces under the BARE `minimatch>brace-expansion` key the fix
+# flow used to write — pnpm matches an unqualified parent half against every
+# resolved copy of minimatch, so the 1.x and 2.x lines vanish —
+# and `pnpm-cross-line-qualified` is the tree the version-qualified keys
+# `apply_constraint` now writes produce, sibling lines intact (the shape the
+# field run's five shipped PRs validated with `other_line_moves: []`).
+# ---------------------------------------------------------------------------
+Describe 'node.sh validate --baseline (pnpm)'
+  After 'cleanup_fixture'
+
+  PNPM_BASELINE='{"pm":"pnpm","package":"brace-expansion","present":true,"count":3,"versions":[{"version":"1.1.11","path":"brace-expansion@1.1.11"},{"version":"2.0.2","path":"brace-expansion@2.0.2"},{"version":"5.0.5","path":"brace-expansion@5.0.5"}],"lockfile_entries":14}'
+
+  It 'fails closed on the collapse the bare parent key produces'
+    use_fixture pnpm-cross-line-collapsed
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 5 --vulnerable '< 5.0.9' --baseline "$PNPM_BASELINE" \
+      brace-expansion '>=5.0.9 <6'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":1,"before":["1.1.11"],"after":[],"status":"vanished"},{"major":2,"before":["2.0.2"],"after":[],"status":"vanished"}]}'
+  End
+
+  It 'passes the tree the version-qualified keys produce, sibling lines intact'
+    use_fixture pnpm-cross-line-qualified
+    When call adapter_jq '{ok, other_line_moves, resolved_versions}' \
+      validate --line 5 --vulnerable '< 5.0.9' --baseline "$PNPM_BASELINE" \
+      brace-expansion '>=5.0.9 <6'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[],"resolved_versions":["1.1.11","2.0.2","5.0.9"]}'
+  End
+End

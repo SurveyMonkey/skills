@@ -1,0 +1,124 @@
+# Two shapes issue #100's follow-up review proved the suite could not see,
+# both from real pnpm 10 output (isolated store, no node_modules committed):
+#
+#   * PEER-VARIANT SNAPSHOT KEYS: one parent VERSION, several snapshot
+#     entries — `react-redux@8.1.3(react@17.0.2)` and `(react@18.2.0)` —
+#     each resolving the child at a DIFFERENT major. `unique parent_version`
+#     is 1, so only the per-edge resolution says which lines the parent
+#     serves. The 17.x variant comes first in file order on purpose: the
+#     pre-fix `first`-row shortcut classified the parent off the 18.x line
+#     it genuinely serves.
+#   * A GIT-TARGET RESOLUTION: `optimist@0.5.2` resolves `minimist` to a
+#     codeload tarball URL, the value pnpm records for a git dependency.
+#     No major can be read from it, so the copy must be KEPT (over-cover)
+#     wherever versions are filtered by line.
+#
+# The second importer is what makes both react peer variants exist at all: a
+# workspace package still on react 17. Public names only.
+
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      optimist:
+        specifier: ^0.6.1
+        version: 0.6.1
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      react-redux:
+        specifier: ^8.1.3
+        version: 8.1.3(react@18.2.0)
+
+  packages/legacy:
+    dependencies:
+      optimist:
+        specifier: ~0.5.2
+        version: 0.5.2
+      react:
+        specifier: ^17.0.2
+        version: 17.0.2
+      react-redux:
+        specifier: ^8.1.3
+        version: 8.1.3(react@17.0.2)
+
+packages:
+
+  '@babel/runtime@7.23.2':
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  js-tokens@4.0.0:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+  minimist@0.0.10:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000DDD==}
+
+  minimist@https://codeload.github.com/minimistjs/minimist/tar.gz/6901ee216ba1d1cbbcd347b0470a2ac05eb2af07:
+    resolution: {tarball: https://codeload.github.com/minimistjs/minimist/tar.gz/6901ee216ba1d1cbbcd347b0470a2ac05eb2af07}
+    version: 1.2.8
+
+  optimist@0.5.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000EEE==}
+
+  optimist@0.6.1:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000FFF==}
+
+  react-redux@8.1.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000GGG==}
+    peerDependencies:
+      react: ^16.8 || ^17.0 || ^18.0
+
+  react@17.0.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000HHH==}
+
+  react@18.2.0:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000III==}
+
+snapshots:
+
+  '@babel/runtime@7.23.2': {}
+
+  js-tokens@4.0.0: {}
+
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
+
+  minimist@0.0.10: {}
+
+  minimist@https://codeload.github.com/minimistjs/minimist/tar.gz/6901ee216ba1d1cbbcd347b0470a2ac05eb2af07: {}
+
+  optimist@0.5.2:
+    dependencies:
+      minimist: https://codeload.github.com/minimistjs/minimist/tar.gz/6901ee216ba1d1cbbcd347b0470a2ac05eb2af07
+
+  optimist@0.6.1:
+    dependencies:
+      minimist: 0.0.10
+
+  react-redux@8.1.3(react@17.0.2):
+    dependencies:
+      '@babel/runtime': 7.23.2
+      react: 17.0.2
+
+  react-redux@8.1.3(react@18.2.0):
+    dependencies:
+      '@babel/runtime': 7.23.2
+      react: 18.2.0
+
+  react@17.0.2:
+    dependencies:
+      loose-envify: 1.4.0
+
+  react@18.2.0:
+    dependencies:
+      loose-envify: 1.4.0

@@ -273,7 +273,8 @@ is your `major_line` and the one above it.
 # direct dependency
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>'
 
-# transitive: pass the parents_read set from phase 3, and only those
+# transitive: pass phase 3's eligible set (parents_read + parents_unreadable
+# + parents_without_range), and only those — never parents_other_lines
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
 ```
 

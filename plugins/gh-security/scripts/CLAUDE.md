@@ -192,6 +192,25 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   parses and then silently never matches: no warning, exit 0, nothing applied. That is a worse
   failure than the collapse, and it is why "just narrow the key" is not a one-line fix.
 - **pnpm** matches `parent@^10>dep` with `semver.satisfies` against the parent's resolved version.
+  An exact version there narrows the key to one copy, and `apply_constraint` uses it: a pnpm
+  parent the lockfile resolves at more than one version gets **version-qualified keys**
+  (`minimatch@10.2.5>brace-expansion`), one per parent version whose resolution of the child sits
+  on the target line, read from the same `snapshots:` edges `declared_ranges --line` classifies
+  with. A bare key there matched every copy of the parent, which is how `ws` 7.x/8.x and
+  `brace-expansion` 1.x each collapsed their sibling lines on the field run; the qualified form is
+  the one five shipped field PRs validated with `other_line_moves: []`
+  ([#100](https://github.com/SurveyMonkey/skills/issues/100)). A single-version parent keeps the
+  bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
+  the bare key on two fallback paths — no parent version qualifies for the target line, or none
+  of its snapshot keys carries a readable version — because an entry that over-covers beats
+  writing nothing. The exact-version form is a deliberate staleness tradeoff: it is the shape the
+  field PRs validated, and a later bump of a parent copy inertly un-matches its key rather than
+  dragging the new copy onto the wrong line; re-running the fix refreshes it. The same snapshots
+  record only what each copy *resolved*, never the specifier it was declared with, so a
+  multi-copy pnpm parent keeps its per-copy line while its declared ranges stay unread
+  (`parents_unreadable`) — under pnpm the risk score sees fewer declared ranges than under npm or
+  yarn. pnpm only: yarn's narrowing needs the full
+  resolved locator (above) and npm's nesting has its own semantics, so neither is qualified.
 - **npm** matches `{"parent@^10": {...}}` with `semver.intersects` on the edge's descriptor and
   `semver.satisfies` on the node's resolved version, and its nesting is transitive rather than
   direct-child-only.
@@ -303,7 +322,16 @@ reports the parent as unreadable, which is what happened on a live `brace-expans
 copy** whenever the manifest cannot: more than one copy, or no manifest on disk. A manifest that
 is on disk and will not parse is a damaged install and stays `parents_unreadable` +
 `parents_malformed` rather than falling back — the reviewer needs that fact, not a substitute for
-it. pnpm has no rows here at all, for the same reason `alias_lookup` reports `unsupported` for it.
+it. pnpm's rows carry no declared range, for the same reason `alias_lookup` reports `unsupported`
+for it — its snapshots record what resolved, never the specifier — but they do carry **line
+membership**: the child version each parent copy resolves, which is what `--line` classifies on.
+Under the isolated store neither of the installed-tree probes can answer that (the child is never
+nested under `node_modules/<parent>/`, and the hoisted fallback describes the root's copy), so
+every pnpm parent used to land in `parents_unreadable` with `parents_other_lines` empty, and the
+overrides written for them collapsed the sibling lines
+([#100](https://github.com/SurveyMonkey/skills/issues/100)). An other-line pnpm parent is now
+named in `parents_other_lines`; only an on-line copy whose manifest is truly absent stays
+`parents_unreadable`, because its range — unlike its line — really is unreadable.
 
 `spec/fixtures/npm-alias` has **no committed `node_modules`** for this reason, and
 `spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`
