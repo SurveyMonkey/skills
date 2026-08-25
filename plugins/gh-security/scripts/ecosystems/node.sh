@@ -1130,12 +1130,24 @@ verb_why() {
 
   # Best-effort human-readable chain for the PR body. Never fatal: these exit
   # non-zero in normal situations, such as a package present only as a peer.
-  raw=""
+  #
+  # A large dependency tree can push `pnpm why` output to megabytes, and
+  # handing that to jq as a plain string argument puts it on argv rather than
+  # a file. That overflows the exec argument list before jq ever runs
+  # ([#102](https://github.com/SurveyMonkey/skills/issues/102)). A temp file
+  # plus `--rawfile` keeps it off argv entirely; stdin is already carrying
+  # `$parents`, so a file is the only clean channel left for `raw`.
   why_cmd=$(verb_detect | jq -r '.why_cmd')
-  raw=$($why_cmd "$pkg" 2>&1 || true)
 
+  raw_file=$(mktemp)
+  trap 'rm -f "$raw_file"' EXIT INT TERM
+  $why_cmd "$pkg" > "$raw_file" 2>&1 || true
+
+  # Command substitution (the old `raw=$($why_cmd ...)` form) stripped every
+  # trailing newline; streaming straight to the file keeps them, so the strip
+  # moves into jq's own program to keep the emitted `raw` field byte-identical.
   printf '%s' "$parents" \
-    | jq --arg pkg "$pkg" --arg pm "$pm" --arg raw "$raw" \
+    | jq --arg pkg "$pkg" --arg pm "$pm" --rawfile raw "$raw_file" \
          --argjson direct "$direct" --argjson dev_only "$dev_only" '
       (map(select(. != "__root__"))) as $pkgparents
       | {
@@ -1145,7 +1157,7 @@ verb_why() {
           dev_only: $dev_only,
           parents: $pkgparents,
           parent_count: ($pkgparents | length),
-          raw: $raw
+          raw: ($raw | sub("\n+$"; ""))
         }'
 }
 
