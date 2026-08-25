@@ -284,6 +284,22 @@ Describe 'node.sh apply_constraint'
       printf 'wrote=%s still_vulnerable=%s\n' "$_wrote" "$_left"
     }
 
+    # The npm half of the chain runs validate BEFORE the apply: under npm the
+    # apply also invalidates the stale lockfile entries on the target line
+    # (issue #124), so the copy validate flags up front is asserted to be the
+    # same copy the alias-key override names AND the same entry the
+    # invalidation deletes — governed in both the halves npm needs.
+    npm_alias_chain() {
+      _flagged=$("$ADAPTER" validate --line 4 --vulnerable '>= 4.18.0, < 4.18.2' \
+        lodash '>=4.18.2 <5' | jq -c '[.unresolved_alerts[].path]')
+      _out=$("$ADAPTER" apply_constraint lodash '>=4.18.2 <5' "$@")
+      _wrote=$(printf '%s' "$_out" \
+        | jq -c '[.written[] | select(.value | startswith("npm:")) | .path]')
+      _inv=$(printf '%s' "$_out" | jq -c --argjson flagged "$_flagged" \
+        '[.lockfile_invalidated.keys[] | select(. as $k | $flagged | index($k))]')
+      printf 'flagged=%s wrote=%s invalidated=%s\n' "$_flagged" "$_wrote" "$_inv"
+    }
+
     It 'writes the alias key, with the protocol, under the parent that declared it'
       use_fixture npm-alias
       "$ADAPTER" apply_constraint lodash '>=4.18.2 <5' alias-parent dupe-parent >/dev/null
@@ -293,10 +309,10 @@ Describe 'node.sh apply_constraint'
 
     It 'governs the aliased copy validate flags, with no node_modules to read'
       use_fixture npm-alias
-      When call alias_chain alias-parent dupe-parent
+      When call npm_alias_chain alias-parent dupe-parent
       The status should be success
       The path node_modules should not be exist
-      The output should equal 'wrote=[["overrides","alias-parent","lodash-alias"]] still_vulnerable=["node_modules/lodash-alias"]'
+      The output should equal 'flagged=["node_modules/lodash-alias"] wrote=[["overrides","alias-parent","lodash-alias"]] invalidated=["node_modules/lodash-alias"]'
     End
 
     # Yarn Berry, which had no working path at all until `yarn_parents` learned
@@ -687,6 +703,114 @@ Describe 'node.sh apply_constraint'
         "$ADAPTER" apply_constraint --tighten-bare "$4" "$5" >/dev/null
         When call manifest '.overrides'
         The output should equal "$6"
+      End
+    End
+  End
+
+  # npm keeps an existing lockfile entry over a newly added override: the
+  # locked copy stays at its vulnerable version and `npm ls` flags it
+  # `invalid`, while npm serializes no `overrides` field into the lockfile at
+  # all (verified on npm 8 through 11 against lockfile v3, and reproduced both
+  # ways on the field repo behind issue #124: entry kept, override inert;
+  # entry deleted, the next install dedupes the copy onto the patched
+  # resolution). So the apply must invalidate the stale entries or the
+  # override silently never takes effect. `spec/fixtures/npm-stale-nested` is
+  # trimmed from the field shape: a nested copy locked at a vulnerable version
+  # under an unscoped parent, a satisfied top-level copy, a second major line
+  # under another parent, and a manifest overrides block the lockfile records
+  # nowhere — npm's normal state, not drift.
+  Describe 'a stale npm lockfile entry is invalidated with the override'
+    It 'deletes the locked stale copy on the target line, and only it'
+      use_fixture npm-stale-nested
+      When call adapter_jq '.lockfile_invalidated' apply_constraint axios '>=1.18.0 <2' nx
+      The status should be success
+      The output should equal '{"performed":true,"keys":["node_modules/nx/node_modules/axios"]}'
+    End
+
+    # Through the consuming rule: the stale copy leaves the resolution set
+    # `validate` composes on, while the satisfied 1.x copy and the 0.x line —
+    # a sibling group's property, which re-resolving could move — keep their
+    # entries.
+    It 'removes the stale copy from resolved_versions and nothing else'
+      use_fixture npm-stale-nested
+      "$ADAPTER" apply_constraint axios '>=1.18.0 <2' nx >/dev/null
+      When call adapter_jq '[.versions[].version] | sort' resolved_versions axios
+      The status should be success
+      The output should equal '["0.21.4","1.18.1"]'
+    End
+
+    # The chain to the verdict, both halves. The post-apply lockfile is the
+    # state the field-verified install produced (the deleted entry stays gone
+    # and the copy dedupes onto the satisfied top-level resolution), so a
+    # validate that fails on the stale copy before the apply and passes after
+    # it is the difference the invalidation exists to make.
+    validate_line1() {
+      "$ADAPTER" validate --line 1 --vulnerable '< 1.18.0' axios '>=1.18.0 <2' \
+        | jq -c '{ok, unresolved: [.unresolved_alerts[].path]}'
+    }
+
+    It 'fails validate on the stale locked copy before the fix'
+      use_fixture npm-stale-nested
+      When call validate_line1
+      The output should equal '{"ok":false,"unresolved":["node_modules/nx/node_modules/axios"]}'
+    End
+
+    It 'passes validate once the stale entry is invalidated'
+      use_fixture npm-stale-nested
+      "$ADAPTER" apply_constraint axios '>=1.18.0 <2' nx >/dev/null
+      When call validate_line1
+      The output should equal '{"ok":true,"unresolved":[]}'
+    End
+
+    # A copy already satisfying the range needs no move, so the in-sync twin
+    # of the same shape reports an empty key set and an untouched lockfile —
+    # which also keeps the already-fixed case's empty diff empty.
+    It 'reports the pass ran and found nothing stale when the copy satisfies'
+      use_fixture npm-stale-nested
+      When call adapter_jq '.lockfile_invalidated' apply_constraint axios '>=1.16.0 <2' nx
+      The status should be success
+      The output should equal '{"performed":true,"keys":[]}'
+    End
+
+    It 'leaves the lockfile byte-identical when nothing is stale'
+      use_fixture npm-stale-nested
+      "$ADAPTER" apply_constraint axios '>=1.16.0 <2' nx >/dev/null
+      When call cmp package-lock.json "$FIXTURES/npm-stale-nested/package-lock.json"
+      The status should be success
+    End
+
+    # A direct dependency bump is a manifest range change npm reconciles on
+    # its own; no override is written, so nothing is invalidated.
+    It 'performs no invalidation for a direct dependency bump'
+      use_fixture npm-stale-nested
+      When call adapter_jq '.lockfile_invalidated' apply_constraint axios '>=1.18.0 <2'
+      The status should be success
+      The output should equal '{"performed":false,"keys":[]}'
+    End
+
+    It 'leaves the lockfile alone for a direct dependency bump'
+      use_fixture npm-stale-nested
+      "$ADAPTER" apply_constraint axios '>=1.18.0 <2' >/dev/null
+      When call cmp package-lock.json "$FIXTURES/npm-stale-nested/package-lock.json"
+      The status should be success
+    End
+
+    # pnpm records the active overrides in the lockfile's own `overrides:`
+    # settings block and re-resolves on mismatch, and Yarn Berry re-evaluates
+    # `resolutions` on every install, so neither has npm's stale-entry
+    # failure. The field is still present per the contract, reporting that no
+    # invalidation applies.
+    Describe 'other package managers'
+      Parameters
+        pnpm-v9    undici '>=6.19.0 <7' express
+        yarn-berry undici '>=6.19.0 <7' '@vercel/fun'
+      End
+
+      It "reports not-performed for $1"
+        use_fixture "$1"
+        When call adapter_jq '.lockfile_invalidated' apply_constraint "$2" "$3" "$4"
+        The status should be success
+        The output should equal '{"performed":false,"keys":[]}'
       End
     End
   End

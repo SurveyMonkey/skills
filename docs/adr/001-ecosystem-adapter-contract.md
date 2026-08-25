@@ -221,6 +221,18 @@ pnpm scoped fix, which trains the reading agent to discount the one case — `so
 parents still unresolved — where it is a real finding
 ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
+**`apply_constraint` also invalidates the stale npm lockfile entries its override must move**, and
+reports them in `lockfile_invalidated` (`{performed, keys[]}`, always present). npm serializes no
+`overrides` field into `package-lock.json` at all — verified on npm 8 through 11 — and on a plain
+install an existing `packages` entry wins over a newly added override, so the locked copy stays at
+its vulnerable version and the override is silently inert
+([#124](https://github.com/SurveyMonkey/skills/issues/124)). The deletion is scoped to copies of
+the named package on the target line (the major of the range's floor) that do not satisfy the
+range, identified by what they resolve to per the identity rule above; anything the pass cannot
+judge is left in place and fails closed at `validate`. npm only: pnpm records its active overrides
+in the lockfile's own `overrides:` settings block and re-resolves on mismatch, and Yarn Berry
+re-evaluates `resolutions` on every install, so both report `performed: false`.
+
 **`declared_ranges [--line <major>] <pkg>` collects what the dependents declare.** It returns the union of
 `dependencies`, `optionalDependencies` and `peerDependencies` ranges across the package's parents,
 plus the root manifest's own declaration, which is read from those three and `devDependencies` too:

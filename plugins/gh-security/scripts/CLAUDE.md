@@ -158,7 +158,9 @@ everything else.
 Scripts that are cwd-sensitive enforce it rather than trust it, through one shared guard:
 `common/require-linked-worktree.sh`, invoked by `refuse_primary_checkout` in
 `ecosystems/node.sh` for the verbs that write: `apply_constraint`
-(rewrites `package.json`), `install` (rewrites the lockfile and `node_modules`) and `shim`
+(rewrites `package.json`, and under npm deletes the stale lockfile entries its override must
+move — npm keeps an existing `package-lock.json` entry over a newly added override, issue #124),
+`install` (rewrites the lockfile and `node_modules`) and `shim`
 (creates a directory and an executable, and absolutizes a vendored runner from the cwd). That is
 the whole set today; a verb that starts writing joins it, and the guard is its first statement. It
 requires the cwd to sit inside a **linked** worktree, which a primary checkout, any subdirectory
