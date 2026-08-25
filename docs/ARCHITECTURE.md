@@ -29,7 +29,7 @@ plugins/
     commands/       # explicit entry points and deprecation shims
     scripts/
       common/       # ecosystem-agnostic: scope, discovery, adapter routing, risk scoring,
-                    # capacity detection, PR state, advisory lookup, permissions preflight
+                    # capacity detection, PR state, advisory lookup
       ecosystems/   # one adapter per GitHub advisory ecosystem (node.sh handles npm alerts)
     hooks/
       hooks.json    # PostToolUse hook registration (Bash/BashOutput -> notice-scan.sh)

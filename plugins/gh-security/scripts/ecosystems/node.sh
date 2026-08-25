@@ -1740,8 +1740,8 @@ verb_range_facts() {
 # declared_ranges — the ranges this package's dependents declare for it
 #
 # The scorer's F7 needs these, and collecting them used to be a shell loop in
-# the agent definition: a `for` over a command substitution, which the
-# preflight catalog cannot pre-approve (so it prompted on every run), which
+# the agent definition: a `for` over a command substitution, which no
+# permission rule can pre-approve (so it prompted on every run), which
 # discarded every per-parent error (so a partial read was indistinguishable
 # from a complete one), and which missed optionalDependencies. It is a single
 # flat command here instead, and the partial read is reported rather than

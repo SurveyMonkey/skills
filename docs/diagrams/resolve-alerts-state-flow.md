@@ -18,7 +18,7 @@ Sources, in the order the flow reads them:
 | File | Role here |
 |---|---|
 | [`plugins/gh-security/commands/resolve-alerts.md`](../../plugins/gh-security/commands/resolve-alerts.md) | Entry point; runs the skill from phase 1. |
-| [`plugins/gh-security/commands/fix-alert.md`](../../plugins/gh-security/commands/fix-alert.md) | Deprecation shim, scheduled for removal; same flow with phase 4's *question* skipped and its answer pre-supplied as **One**. The ranked table is still presented. Delete its node from diagram 1 when the shim goes. |
+| [`plugins/gh-security/commands/fix-alert.md`](../../plugins/gh-security/commands/fix-alert.md) | Deprecation shim, scheduled for removal; same flow with phase 3's *question* skipped and its answer pre-supplied as **One**. The ranked table is still presented. Delete its node from diagram 1 when the shim goes. |
 | [`plugins/gh-security/skills/resolve-alerts/SKILL.md`](../../plugins/gh-security/skills/resolve-alerts/SKILL.md) | The orchestrator's phases, diagram 1. |
 | [`plugins/gh-security/agents/fix-dependency.md`](../../plugins/gh-security/agents/fix-dependency.md) | One group's fix, diagram 2. |
 | [`plugins/gh-security/agents/audit-pins.md`](../../plugins/gh-security/agents/audit-pins.md) | The pin audit that rides along, diagram 3. |
@@ -30,10 +30,9 @@ anything, so where they stop is a different question from where the orchestrator
 ## Diagram 1: the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
-decides, and nothing dispatches or leaves draft without one. The ask sites are phase 2's preflight
-consent, phase 4's how-much, phase 5's batch approval, phase 6's per-repo preflight consent, phase
-9's promotion (batched, or per PR where auto-merge is armed), and both of phase 11's offers: the
-next batch and the pin audit.
+decides, and nothing dispatches or leaves draft without one. The ask sites are phase 3's how-much,
+phase 4's batch approval, phase 8's promotion (batched, or per PR where auto-merge is armed), and
+both of phase 10's offers: the next batch and the pin audit.
 
 Two branches exclude one repo's groups without ending the run, and one withholds the offer for a
 single PR without ending it; they are drawn as plain nodes for that reason.
@@ -41,119 +40,111 @@ single PR without ending it; they are drawn as plain nodes for that reason.
 ```mermaid
 flowchart TD
     START["/gh-security:resolve-alerts, or a natural-language ask"] --> P1
-    SHIM["/gh-security:fix-alert (deprecated shim):<br/>print notice, pre-supply phase 4 = One,<br/>still present the ranked table"] --> P1
+    SHIM["/gh-security:fix-alert (deprecated shim):<br/>print notice, pre-supply phase 3 = One,<br/>still present the ranked table"] --> P1
 
     P1["Phase 1: detect-scope.sh"] --> P1Q{"scope, or the user's own<br/>if the request names a different one"}
     P1Q -->|repo| P1R{"git_remote agrees with nwo?"}
-    P1Q -->|"org / user"| P3
+    P1Q -->|"org / user"| P2
     P1R -->|no| P1RT["Trust git_remote, say so"] --> P1D
     P1R -->|yes| P1D{"default_branch resolved?"}
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
     P1D -->|yes| P2
 
-    P2["Phase 2: preflight-permissions.sh check<br/>(repo scope only)"] --> P2Q{"result"}
-    P2Q -->|"script error"| P2SKIP["Report, skip the preflight, continue:<br/>never block alert resolution on<br/>permissions housekeeping"] --> P3
-    P2Q -->|"nothing missing"| P3
-    P2Q -->|"rules missing"| P2ASK{"ask: add the enumerated rules?"}
-    P2ASK -->|"add them"| P2APPLY["preflight-permissions.sh apply,<br/>report what was added"] --> P3
-    P2ASK -->|"continue without"| P3
+    P2["Phase 2: discover-alerts.sh | select-adapter.sh"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
+    P2REP --> P2Q{"actionable groups?"}
+    P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
+    P2Q -->|"one or more"| P3
 
-    P3["Phase 3: discover-alerts.sh | select-adapter.sh"] --> P3REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
-    P3REP --> P3Q{"actionable groups?"}
-    P3Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
-    P3Q -->|"one or more"| P4
+    P3["Phase 3: ranked table<br/>(Repo column at org/user scope only)"] --> P3ASK{"ask: how much to fix?<br/>(pre-supplied as One on the shim path)"}
+    P3ASK -->|One| P4
+    P3ASK -->|"Highest tier"| P4
+    P3ASK -->|Everything| P4
 
-    P4["Phase 4: ranked table<br/>(Repo column at org/user scope only)"] --> P4ASK{"ask: how much to fix?<br/>(pre-supplied as One on the shim path)"}
-    P4ASK -->|One| P5
-    P4ASK -->|"Highest tier"| P5
-    P4ASK -->|Everything| P5
+    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4Q{"batch groups < cap?"}
+    P4Q -->|"yes, spare slot"| P4ASK1{"ask: approve batch + audit mode"}
+    P4Q -->|"no, cap full"| P4ASK2{"ask: approve batch<br/>(audit deferred to phase 10)"}
+    P4ASK1 -->|"approve, audit mode: pr"| P4OK
+    P4ASK1 -->|"approve, audit mode: report"| P4OK
+    P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
+    P4ASK2 -->|approve| P4OK
+    P4ASK2 -->|decline| STOP3
+    P4OK["Batch approved"] --> P5Q{"scope"}
 
-    P5["Phase 5: detect-capacity.sh, present the plan"] --> P5Q{"batch groups < cap?"}
-    P5Q -->|"yes, spare slot"| P5ASK1{"ask: approve batch + audit mode"}
-    P5Q -->|"no, cap full"| P5ASK2{"ask: approve batch<br/>(audit deferred to phase 11)"}
-    P5ASK1 -->|"approve, audit mode: pr"| P5OK
-    P5ASK1 -->|"approve, audit mode: report"| P5OK
-    P5ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
-    P5ASK2 -->|approve| P5OK
-    P5ASK2 -->|decline| STOP3
-    P5OK["Batch approved"] --> P6Q{"scope"}
+    P5Q -->|repo| P6
+    P5Q -->|"org / user"| P5["Phase 5: per distinct repo in the batch"]
+    P5 --> P5A{"checkout at the conventional path?"}
+    P5A -->|"git repo exists"| P5F["git -C fetch origin"] --> P5B
+    P5A -->|"nothing there"| P5C["gh repo clone into the @owner convention"] --> P5B
+    P5A -->|"wrong remote / not a repo"| P5X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
+    P5B{"detect-scope.sh default_branch?"}
+    P5B -->|null| P5Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
+    P5B -->|yes| P6
+    P5X --> P6
+    P5Y --> P6
 
-    P6Q -->|repo| P7
-    P6Q -->|"org / user"| P6["Phase 6: per distinct repo in the batch"]
-    P6 --> P6A{"checkout at the conventional path?"}
-    P6A -->|"git repo exists"| P6F["git -C fetch origin"] --> P6B
-    P6A -->|"nothing there"| P6C["gh repo clone into the @owner convention"] --> P6B
-    P6A -->|"wrong remote / not a repo"| P6X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
-    P6B{"detect-scope.sh default_branch?"}
-    P6B -->|null| P6Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
-    P6B -->|yes| P6P{"ask: same preflight consent as phase 2,<br/>per repo (failure non-fatal)"}
-    P6P --> P7
-    P6X --> P7
-    P6Y --> P7
+    P6["Phase 6: ensure-worktree-exclude.sh once per repo<br/>(failure non-fatal, dispatch anyway)"] --> P6W["Dispatch a wave: at most cap Task calls in one<br/>message, one fix-dependency per group,<br/>across every repo"]
+    P6W --> P6A{"audit approved in phase 4?"}
+    P6A -->|"yes, first wave only,<br/>counting against cap"| P6AD["audit-pins in the same message,<br/>mode passed verbatim, one repo"]
+    P6A -->|no| P6BAR
+    P6AD --> P6BAR["Wave barrier: wait for every agent"]
+    P6BAR --> P6Q{"batch exhausted?"}
+    P6Q -->|"no: next wave"| P6W
+    P6Q -->|yes| P7
 
-    P7["Phase 7: ensure-worktree-exclude.sh once per repo<br/>(failure non-fatal, dispatch anyway)"] --> P7W["Dispatch a wave: at most cap Task calls in one<br/>message, one fix-dependency per group,<br/>across every repo"]
-    P7W --> P7A{"audit approved in phase 5?"}
-    P7A -->|"yes, first wave only,<br/>counting against cap"| P7AD["audit-pins in the same message,<br/>mode passed verbatim, one repo"]
-    P7A -->|no| P7BAR
-    P7AD --> P7BAR["Wave barrier: wait for every agent"]
-    P7BAR --> P7Q{"batch exhausted?"}
-    P7Q -->|"no: next wave"| P7W
-    P7Q -->|yes| P8
+    P7["Phase 7: parse each fenced JSON result"] --> P7Q{"per result"}
+    P7Q -->|success| P7S["Fix table row: PR, risk, F4/F5, bare-override note"]
+    P7Q -->|"no-op"| P7N["Its own 'already fixed' line,<br/>never the failure list"]
+    P7Q -->|failure| P7F["Failure list: phase + detail"]
+    P7Q -->|"missing or unparseable block"| P7U["Recorded as a failure; never guess fields"]
+    P7S --> P7AGG
+    P7N --> P7AGG
+    P7F --> P7AGG
+    P7U --> P7AGG
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos,<br/>then deduplicated observations split by type"] --> P7AU{"audit ran in phase 6?"}
+    P7AU -->|no| P8
+    P7AU -->|yes| P7AR["Findings grouped per package, below and separate from<br/>the fix table; then the audit's own PR or its<br/>pr_skipped_reason; failure reported with the others"]
+    P7AR --> P8
 
-    P8["Phase 8: parse each fenced JSON result"] --> P8Q{"per result"}
-    P8Q -->|success| P8S["Fix table row: PR, risk, F4/F5, bare-override note"]
-    P8Q -->|"no-op"| P8N["Its own 'already fixed' line,<br/>never the failure list"]
-    P8Q -->|failure| P8F["Failure list: phase + detail"]
-    P8Q -->|"missing or unparseable block"| P8U["Recorded as a failure; never guess fields"]
-    P8S --> P8AGG
-    P8N --> P8AGG
-    P8F --> P8AGG
-    P8U --> P8AGG
-    P8AGG["requires_major_bump[] first, then unaddressed skipped_repos,<br/>then deduplicated observations split by type"] --> P8AU{"audit ran in phase 7?"}
-    P8AU -->|no| P9
-    P8AU -->|yes| P8AR["Findings grouped per package, below and separate from<br/>the fix table; then the audit's own PR or its<br/>pr_skipped_reason; failure reported with the others"]
-    P8AR --> P9
+    P8["Phase 8: mark-ready.sh status on every success PR<br/>plus the audit's PR when one exists"] --> P8Q{"checks rollup, per PR"}
+    P8Q -->|failed| P8F["Not offered; list failing_checks.<br/>Other PRs in the batch are unaffected"]
+    P8Q -->|"none / pending"| P8P["Offerable, flagged honestly<br/>(none: promoting starts CI; pending: cite check_counts)"]
+    P8Q -->|passed| P8OK["Offerable; provisional on a fresh PR<br/>or one reporting fewer checks than its siblings"]
+    P8F --> P10
+    P8P --> P8AM{"auto_merge.armed?"}
+    P8OK --> P8AM
+    P8AM -->|"yes: promoting merges it"| P8ASK1{"ask: per-PR confirmation,<br/>re-run status first"}
+    P8AM -->|no| P8ASK2{"ask: one batch confirmation"}
+    P8ASK1 -->|approved| P9
+    P8ASK1 -->|declined| P10
+    P8ASK2 -->|"approved subset"| P9
+    P8ASK2 -->|declined| P10
 
-    P9["Phase 9: mark-ready.sh status on every success PR<br/>plus the audit's PR when one exists"] --> P9Q{"checks rollup, per PR"}
-    P9Q -->|failed| P9F["Not offered; list failing_checks.<br/>Other PRs in the batch are unaffected"]
-    P9Q -->|"none / pending"| P9P["Offerable, flagged honestly<br/>(none: promoting starts CI; pending: cite check_counts)"]
-    P9Q -->|passed| P9OK["Offerable; provisional on a fresh PR<br/>or one reporting fewer checks than its siblings"]
-    P9F --> P11
-    P9P --> P9AM{"auto_merge.armed?"}
-    P9OK --> P9AM
-    P9AM -->|"yes: promoting merges it"| P9ASK1{"ask: per-PR confirmation,<br/>re-run status first"}
-    P9AM -->|no| P9ASK2{"ask: one batch confirmation"}
-    P9ASK1 -->|approved| P10
-    P9ASK1 -->|declined| P11
-    P9ASK2 -->|"approved subset"| P10
-    P9ASK2 -->|declined| P11
+    P9["Phase 9: mark-ready.sh promote (approved URLs only)"] --> P9Q{"per PR"}
+    P9Q -->|"rebased, marked ready"| P10
+    P9Q -->|conflict| P9C["Report; recommend regeneration<br/>(close, delete branch, re-run) over hand-resolution"] --> P10
+    P9Q -->|error| P9E["Report the error"] --> P10
 
-    P10["Phase 10: mark-ready.sh promote (approved URLs only)"] --> P10Q{"per PR"}
-    P10Q -->|"rebased, marked ready"| P11
-    P10Q -->|conflict| P10C["Report; recommend regeneration<br/>(close, delete branch, re-run) over hand-resolution"] --> P11
-    P10Q -->|error| P10E["Report the error"] --> P11
-
-    P11{"Phase 11: actionable groups remain?"}
-    P11 -->|yes| P11ASK0{"ask: dispatch the next batch?"}
-    P11ASK0 -->|yes| P4
-    P11ASK0 -->|no| P11A
-    P11 -->|no| P11A{"audit already ran in phase 7?"}
-    P11A -->|yes| DONE
-    P11A -->|no| P11ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
-    P11ASK -->|"pr / report"| P11D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 8;<br/>its PR goes through phase 9"]
-    P11D --> P9
-    P11ASK -->|decline| DONE
+    P10{"Phase 10: actionable groups remain?"}
+    P10 -->|yes| P10ASK0{"ask: dispatch the next batch?"}
+    P10ASK0 -->|yes| P3
+    P10ASK0 -->|no| P10A
+    P10 -->|no| P10A{"audit already ran in phase 6?"}
+    P10A -->|yes| DONE
+    P10A -->|no| P10ASK{"ask: run the pin audit?<br/>pr mode first, or report"}
+    P10ASK -->|"pr / report"| P10D["Dispatch audit-pins, one per accepted repo,<br/>in waves under cap; report per phase 7;<br/>its PR goes through phase 8"]
+    P10D --> P8
+    P10ASK -->|decline| DONE
     DONE(["Done: not-promoted PRs, remaining skipped_repos,<br/>and what would unblock each"])
 ```
 
-Three cycles, and no others. The wave loop (`P7Q` back to `P7W`) is the concurrency cap enforced as
-a barrier. The next-batch loop (phase 11 to phase 4) is reached only when groups remain *and* the
+Three cycles, and no others. The wave loop (`P6Q` back to `P6W`) is the concurrency cap enforced as
+a barrier. The next-batch loop (phase 10 to phase 3) is reached only when groups remain *and* the
 user accepts the offer, and it re-enters the how-much question with what is left. The third is
-phase 11's audit dispatch back into phase 9: an audit accepted after the fixes still has its draft
+phase 10's audit dispatch back into phase 8: an audit accepted after the fixes still has its draft
 PR gated by the same promotion flow.
 
-The audit offer is not conditional on the batch being finished. Phase 11 offers the next batch and
-*then* recommends the audit unless one already ran in phase 7, so declining the next batch still
+The audit offer is not conditional on the batch being finished. Phase 10 offers the next batch and
+*then* recommends the audit unless one already ran in phase 6, so declining the next batch still
 reaches the recommendation.
 
 ## Diagram 2: fix-dependency, one group
@@ -232,7 +223,7 @@ flowchart TD
 
 `requires_major_bump[]` is not a state of its own. It rides on a `success` result, with its own
 PR-body section, and it is also what rung 4's failure names when the group's line was never
-installed. Either way the orchestrator re-reports it in phase 8; copies below the group's line
+installed. Either way the orchestrator re-reports it in phase 7; copies below the group's line
 cannot be fixed from here and are never attempted.
 
 Two things in this diagram follow the source's prose where its own schema disagrees, and are worth
@@ -246,7 +237,7 @@ above it contradicts.
 
 Dispatched with the repo (`nwo` in the agent's own input contract, `repo` in the orchestrator's
 payload and in the result), `repo_root`, `default_branch`, an `adapter_path`, `scripts_dir`, and a
-`mode` that the user decides in phase 5 or 11 and that is never defaulted. In `pr` mode the
+`mode` that the user decides in phase 4 or 10 and that is never defaulted. In `pr` mode the
 distinction that matters is between a *failure* and one of the five ways a completed audit declines
 to open a PR: both leave `pr` null, and only the first is a broken run.
 
@@ -371,14 +362,14 @@ Run outcomes for the orchestrator:
 | Terminal state | Reached from | What the user sees |
 |---|---|---|
 | Unresolvable default branch | Phase 1, repo scope | Stop before discovery |
-| No actionable groups | Phase 3 | Every skipped group and skipped repo, by name |
-| Batch declined | Phase 5 | Nothing dispatched; no agent ever ran |
-| Done | Phase 11 | Not-promoted PRs, remaining skipped repos, what unblocks each |
+| No actionable groups | Phase 2 | Every skipped group and skipped repo, by name |
+| Batch declined | Phase 4 | Nothing dispatched; no agent ever ran |
+| Done | Phase 10 | Not-promoted PRs, remaining skipped repos, what unblocks each |
 
-Everything else is per repo or per PR, and the run continues past it: a phase 6 checkout conflict or
-unresolvable default branch excludes that repo's groups only; failing checks in phase 9 withhold the
-offer for that PR only; a declined promotion or a conflicted rebase in phase 10 leaves that PR a
-draft and still reaches phase 11.
+Everything else is per repo or per PR, and the run continues past it: a phase 5 checkout conflict or
+unresolvable default branch excludes that repo's groups only; failing checks in phase 8 withhold the
+offer for that PR only; a declined promotion or a conflicted rebase in phase 9 leaves that PR a
+draft and still reaches phase 10.
 
 Agent results are the other terminals: `success`, `no-op` or `failure` from a fix agent, `success`
 or `failure` from the audit. The three easiest to misread as each other are a fix agent's `failure`,

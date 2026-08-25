@@ -79,9 +79,6 @@ directly:
   alerts first, since GitHub stays the sole source the fix pipeline acts on. It stays silent when
   the push came from one of the plugin's own branches, so a dispatched fix or audit run is never
   nudged to offer the flow it is already part of. Local grep/jq only; it never makes network calls.
-- **First-run permissions bootstrap.** On first run in a repo it offers the exact allow rules the
-  plugin's scripts need and, on consent, writes them to that repo's gitignored
-  `.claude/settings.local.json`; declining just means individual prompts as commands come up.
 
 ## Documentation
 
