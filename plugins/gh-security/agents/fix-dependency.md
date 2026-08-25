@@ -135,10 +135,23 @@ writing the PR prose. Do not reimplement what the scripts do.
   revert, checkout, stash, or clean them.** Attribution can be wrong and discards are
   unrecoverable; the user adjudicates and decides. Report what you found and, if you caused
   it, say exactly what you did.
-- **Clean up on every exit path.** Success, failure, or partial progress: the worktrees you
-  created are removed before you return (see Cleanup).
+- **Adapter verbs are expected to terminate.** A verb that has not returned within a bounded
+  time is not still working; it has failed the phase that called it, and so has one that OOMs or
+  exits non-zero twice. Kill it and fail closed. Never background a hung verb, never attach a
+  monitor and wait for it to notify you, and never park the turn on output that may never
+  arrive — each of those turns a bounded, reportable failure into an unbounded one that leaves
+  the process, the worktree, and the turn all still open. A field run backgrounded a hung `jq`
+  this way and ended its turn saying it was waiting on the monitor, with the worktree, the
+  branch, and the hung process all still live and no result block sent
+  ([#122](https://github.com/SurveyMonkey/skills/issues/122)).
+- **Clean up on every exit path, including an abort on a hung or repeatedly failing verb.**
+  Success, failure, or partial progress: the worktrees you created are removed before you return
+  (see Cleanup). Killing a hung verb does not excuse Cleanup; it is the reason you run it.
 - **Your final message ends with exactly one fenced JSON result block** (schema at the end).
-  The orchestrator parses it; prose outside the block is for the transcript only.
+  The orchestrator parses it; prose outside the block is for the transcript only. Ending the turn
+  without one is never a valid terminal state, on an abort path least of all: a message that says
+  you are waiting on a background task, a monitor, or anything else still running is a contract
+  violation the orchestrator cannot tell apart from a crash, not a legitimate way to finish.
 
 ## Phase 1: Create the isolated worktree
 
