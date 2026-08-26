@@ -36,6 +36,10 @@ verb=$1; shift
 if [ -n "${CALL_LOG:-}" ]; then printf '%s %s\n' "$verb" "$*" >> "$CALL_LOG"; fi
 case "$verb" in
   detect)
+    if [ -n "${STUB_DETECT_BROKEN:-}" ]; then
+      printf '{"error":"detect: no lockfile found"}\n' >&2
+      exit 1
+    fi
     printf '{"pm":"npm","ecosystem":"npm","override_location":"%s"}\n' "${STUB_LOC:-overrides}" ;;
   declared_ranges)
     # $1 is --line, $2 the major, $3 the package.
@@ -52,6 +56,14 @@ case "$verb" in
         printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}\n' ;;
       "same-copy 1")
         printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}\n' ;;
+      "scoped-copy 5")
+        printf '{"parents_read":["@npmcli/map-workspaces"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["@npmcli/map-workspaces@2.0.4"]}\n' ;;
+      "scoped-copy 10")
+        printf '{"parents_read":["@npmcli/map-workspaces"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["@npmcli/map-workspaces@2.0.4"]}\n' ;;
+      "null-copy 5")
+        printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch"]}\n' ;;
+      "null-copy 1")
+        printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch"]}\n' ;;
       "dr-broken "*)
         printf '{"error":"declared_ranges: parser refused the lockfile"}\n' >&2
         exit 1 ;;
@@ -90,6 +102,10 @@ case "$verb" in
         printf '{"pm":"npm","package":"same-copy","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
       dr-broken)
         printf '{"pm":"npm","package":"dr-broken","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
+      scoped-copy)
+        printf '{"pm":"npm","package":"scoped-copy","present":true,"count":2,"versions":[{"version":"5.1.6"},{"version":"10.0.3"}],"lockfile_entries":10}\n' ;;
+      null-copy)
+        printf '{"pm":"npm","package":"null-copy","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
       partial-a)
         printf '{"pm":"npm","package":"partial-a","present":true,"count":2,"versions":[{"version":"1.0.0"},{"version":"9.9.9-badcompare"}],"lockfile_entries":10}\n' ;;
       partial-b)
@@ -454,6 +470,42 @@ STUB_EOF
       When call collision_call_counts
       The status should be success
       The output should equal 'detect=1 line1=1 line5=1'
+    End
+
+    # A broken detect is the same rule as a broken declared_ranges: the
+    # group stays dispatched and the error is named, because withdrawing on
+    # a broken read is this stage's one unsafe act.
+    classify_broken_detect() {
+      STUB_DETECT_BROKEN=1
+      export STUB_DETECT_BROKEN
+      classify "$@"
+      _st=$?
+      unset STUB_DETECT_BROKEN
+      return "$_st"
+    }
+
+    It 'keeps the group actionable and names the error when detect fails'
+      When call classify_broken_detect '{statuses: [.actionable[].line_status], errs: [.classify_errors[] | {package, error}]}' sep-ok 5
+      The status should be success
+      The output should equal '{"statuses":["resolved"],"errs":[{"package":"sep-ok","error":"{\"error\":\"detect: no lockfile found\"}"}]}'
+    End
+
+    # A scoped parent entry splits on its LAST @: the leading @ of the scope
+    # is index 0 and never splits, so `@npmcli/map-workspaces@2.0.4` names
+    # the parent `@npmcli/map-workspaces`.
+    It 'skips a scoped shared parent and names it without its version'
+      When call classify '{moved: [.skipped[] | select(.package == "scoped-copy") | {reason, collision_parents}]}' scoped-copy 5
+      The status should be success
+      The output should equal '{"moved":[{"reason":"shared parent across major lines","collision_parents":["@npmcli/map-workspaces"]}]}'
+    End
+
+    # A version-less entry riding the intersection is the conservative
+    # branch: a copy no version can name is a copy no qualifier can
+    # exclude, so it skips like the same-copy shape.
+    It 'skips a version-less shared parent entry conservatively'
+      When call classify '{moved: [.skipped[] | select(.package == "null-copy") | {reason, collision_parents}]}' null-copy 5
+      The status should be success
+      The output should equal '{"moved":[{"reason":"shared parent across major lines","collision_parents":["minimatch"]}]}'
     End
   End
 

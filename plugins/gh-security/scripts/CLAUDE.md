@@ -248,7 +248,18 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   the `EOVERRIDE` shape. Same fallbacks as pnpm, in both directions: a single-version parent and
   a parent with no qualifying copy keep the bare nested key, and the same staleness tradeoff
   applies, since a later bump of a parent copy inertly un-matches its exact key rather than
-  dragging the new copy onto the wrong line.
+  dragging the new copy onto the wrong line. The carve-out's hard edges each have a fixed route:
+  a root spec that ALSO admits an off-line copy of the parent (`*`, `>=3`, a cross-major `||`)
+  is refused outright before anything is written, because no key satisfies the byte-identical
+  rule and the line separation at once; a root spec the range readers cannot judge (a dist-tag,
+  `file:`, a tarball URL, `workspace:*`, an `npm:` alias) and a parent copy whose lockfile
+  version is unreadable or not plain semver all fall back to the bare key; and a prerelease copy
+  is never counted covered by the root spec (node-semver excludes prereleases from plain ranges)
+  and takes its own exact key. A pre-existing bare nested key for the same parent and child is
+  superseded and reported in `superseded_keys` when it pins this line, because npm inserts it
+  first into the OverrideSet and it would leave the qualified keys inert, and the call refuses
+  when that key pins a DIFFERENT line, since deleting it strips that line's protection and
+  keeping it smothers this fix.
 
 So `validate --baseline` detects rather than prevents, and that ordering is deliberate: detection
 is the guard that has to exist under any of the three narrowing schemes, including the one that

@@ -1,0 +1,11 @@
+{
+  "name": "demo-npm-scoped-cross-line",
+  "version": "1.0.0",
+  "dependencies": {
+    "@npmcli/arborist": "^9.1.6",
+    "pacote": "^18.0.6"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -62,10 +62,11 @@
 # the sibling lines share an eligible parent name AND qualification cannot
 # express the separation:
 #
-#   - Yarn `resolutions` cannot version-qualify at all (a range in the key's
-#     parent half parses and then silently never matches; scripts/CLAUDE.md,
-#     "An override's key is scoped"), so any shared parent name across
-#     lines is the collapse shape there.
+#   - Yarn `resolutions` cannot version-qualify today (a range in the key's
+#     parent half parses and then silently never matches, and the
+#     exact-locator form that could express the separation is unimplemented;
+#     scripts/CLAUDE.md, "An override's key is scoped"), so any shared
+#     parent name across lines is the collapse shape there.
 #   - Under npm and pnpm, qualified keys separate the lines per parent COPY,
 #     so the inexpressible shape is a single copy (one `parent@version`)
 #     resolving the package on two majors at once: such an entry appears in
@@ -74,9 +75,11 @@
 #     that same intersection is treated the same way, conservatively: a
 #     copy no version can name is a copy no qualifier can exclude. Both
 #     shapes only arise from one manifest declaring the package across a
-#     major boundary, and they poison every key naming that parent version,
-#     so all of the package's groups are withdrawn rather than dispatched to
-#     fail closed at validate one install apiece.
+#     major boundary, and they poison every key naming that parent version.
+#     The verdict stays per GROUP: each group whose line shares that parent
+#     is withdrawn rather than dispatched to fail closed at validate one
+#     install apiece, while a group whose eligible parents are disjoint from
+#     every other line's stays actionable.
 #
 # Every other overlap stays actionable: `apply_constraint` writes
 # version-qualified parent keys for npm and pnpm, which is exactly the
@@ -430,6 +433,8 @@ EOF
           def name_of: (rindex("@") // 0) as $i
             | if $i > 0 then .[0:$i] else . end;
           . as $rows
+          # $mine is never null: the check runs only for line_status
+          # "resolved", so the group line is one of the queried majors.
           | (map(select(.line == $line)) | first) as $mine
           | ([ $mine.eligible[] | . as $n
                | select(any($rows[];

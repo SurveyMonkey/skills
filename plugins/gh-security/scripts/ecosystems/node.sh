@@ -1973,10 +1973,31 @@ verb_apply_constraint() {
   # beside a direct `^10.2.5`) intersect each other, which is exactly the
   # EOVERRIDE shape.
   #
-  # yarn stays unqualified, deliberately: a resolutions key narrows only
-  # through the parent's full resolved locator (`parent@npm:<v>/dep`), and a
-  # version-qualified form there parses and then silently never matches
-  # (see "An override's key is scoped" in scripts/CLAUDE.md).
+  # The carve-out has hard edges of its own, each with its own route:
+  #
+  #   - A root spec that ALSO admits an off-line copy of the parent (`*`,
+  #     `>=3`, a cross-major `||`) would drag that copy's child exactly the
+  #     way the bare key did, so that shape is REFUSED outright (`refused`
+  #     below dies before anything is written): no key satisfies both npm'\''s
+  #     byte-identical EOVERRIDE rule and the line separation at once.
+  #   - A root spec these range readers cannot judge (a dist-tag, `file:`,
+  #     a tarball URL, `workspace:*`) falls back to the bare key for that
+  #     parent: npm'\''s getEdgeRule accepts an override for such specs
+  #     unconditionally and assertRootOverrides then throws EOVERRIDE on any
+  #     exact-version key (reproduced with a root `latest`), while the bare
+  #     name-only key is confirmed EOVERRIDE-clean beside a direct dep.
+  #   - A prerelease copy is never counted as covered by the root spec:
+  #     node-semver excludes prereleases from plain ranges where the
+  #     in-repo `satisfies` admits them, and counting one covered would
+  #     silently under-cover. It gets its own exact key instead.
+  #   - A copy whose lockfile version is not plain semver cannot become a
+  #     selector (`semver.intersects` throws on it at install), so that
+  #     parent falls back to the bare key.
+  #
+  # yarn stays unqualified: a version-range resolutions key parses and then
+  # silently never matches, and the exact-locator form that could express
+  # the separation is unimplemented here (see "An override's key is scoped"
+  # in scripts/CLAUDE.md).
   qualified_parent_versions='{}'
   if { [ "$loc" = "pnpm.overrides" ] || [ "$loc" = "overrides" ]; } \
     && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
@@ -1998,40 +2019,105 @@ verb_apply_constraint() {
     # of the parent resolve the child, and a section this parser cannot
     # read must not fail OPEN into the bare key whose collapse the
     # qualification exists to prevent.
-    qualified_parent_versions=$(jq -c \
+    #
+    # A parent with any copy whose own version is unreadable (`pver == "-"`)
+    # falls back to the bare key, for npm and pnpm alike (this jq serves
+    # both): a copy no version can name is a copy no qualifier can cover,
+    # and dropping it from the set under-covers, the one direction every
+    # rule here forbids.
+    qual_result=$(jq -c \
       --argjson edges "$edges" \
       --argjson parents "$parents_json" --arg target "$target_major" \
       --arg loc "$loc" \
       "$SEMVER_JQ"'
+      # A spec the range logic downstream can actually judge: semver ranges
+      # lead with a digit, v/=, a range operator or *. Dist-tags, file:,
+      # git and tarball URLs, and workspace: specs never do.
+      def looks_range: test("^[[:space:]]*[v=^~><*0-9]");
+      # A version that can become an npm key selector without
+      # semver.intersects throwing on it at install time.
+      def is_plain_semver: test("^[0-9]+\\.[0-9]+\\.[0-9]+");
       # The root manifest'\''s own declared spec for a parent, for the npm
       # EOVERRIDE carve-out above. An `npm:` alias declaration is not a
       # selector npm compares byte-wise against override keys, so it does
       # not participate.
-      def root_spec($p):
+      def root_decl($p):
         ([ (.dependencies // {}), (.devDependencies // {}),
            (.optionalDependencies // {}), (.peerDependencies // {}) ]
-         | map(.[$p] // empty) | map(select(type == "string")) | first) as $s
-        | if $s != null and (($s | startswith("npm:")) | not)
-          then $s else null end;
+         | map(.[$p] // empty) | map(select(type == "string")) | first);
       . as $manifest
       | [ $parents[] | . as $p
-          | ([ $edges[] | select(.parent == $p and .pver != "-") | .pver ]
-             | unique) as $pv
+          | [ $edges[] | select(.parent == $p) ] as $pe
+          | ([ $pe[] | select(.pver != "-") | .pver ] | unique) as $pv
           | select(($pv | length) > 1)
-          | ([ $edges[]
-               | select(.parent == $p and .pver != "-")
+          | (([ $pe[] | select(.pver == "-") ] | length) > 0) as $unreadable_pver
+          | ([ $pe[]
+               | select(.pver != "-")
                | (.cver | ltrimstr("v") | split(".")[0]) as $m
-               | (if ($m | test("^[0-9]+$")) then $m else null end) as $cm
-               | select($target == "" or $cm == null or $cm == $target)
+               | {pver,
+                  cm: (if ($m | test("^[0-9]+$")) then $m else null end)} ]) as $rows
+          | ([ $rows[] | select($target == "" or .cm == null or .cm == $target)
                | .pver ] | unique) as $line_pv
-          | (if $loc == "overrides" then ($manifest | root_spec($p))
-             else null end) as $r0
-          | ([ $line_pv[] | select($r0 != null and satisfies(.; $r0)) ]) as $covered
-          | { key: $p,
-              value: ((if ($covered | length) > 0 then [$r0] else [] end)
-                      + ($line_pv - $covered)) }
-          | select((.value | length) > 0) ]
-      | from_entries' package.json)
+          | ([ $rows[] | select($target != "" and .cm != null and .cm != $target)
+               | .pver ] | unique) as $off_pv
+          | (if $loc == "overrides" then ($manifest | root_decl($p))
+             else null end) as $rd
+          | (if $rd != null and (($rd | startswith("npm:")) | not)
+                and ($rd | looks_range)
+             then $rd else null end) as $r0
+          | ([ $line_pv[]
+               | select($r0 != null and (contains("-") | not)
+                        and satisfies(.; $r0)) ]) as $covered
+          | ($line_pv - $covered) as $exact
+          | (if ($covered | length) > 0
+             then [ $off_pv[] | select(satisfies(.; $r0)) ] else [] end) as $leaks
+          | { parent: $p,
+              refused: (($covered | length) > 0 and ($leaks | length) > 0),
+              root_spec: $r0,
+              leaks: $leaks,
+              bare: ($unreadable_pver
+                     or ($rd != null and $r0 == null)
+                     or ($loc == "overrides"
+                         and any($exact[]; is_plain_semver | not))),
+              qv: ((if ($covered | length) > 0 then [$r0] else [] end)
+                   + $exact) }
+        ] as $per
+      | { refused: [ $per[] | select(.refused)
+                     | {parent, root_spec, other_line_versions: .leaks} ],
+          quals: ([ $per[]
+                    | select((.refused or .bare) | not)
+                    | select((.qv | length) > 0)
+                    | {key: .parent, value: .qv} ] | from_entries) }' package.json)
+    refused=$(printf '%s' "$qual_result" | jq -c '.refused')
+    if [ "$(printf '%s' "$refused" | jq 'length')" -gt 0 ]; then
+      die "apply_constraint: cannot scope '$pkg' on this line: the root manifest's own declared spec for a shared parent also admits that parent's copies on other major lines, so every key npm's EOVERRIDE rule allows would drag those lines across their major boundary (issue #132). Detail: $refused. Nothing was written. This is the shared-parent shape: escalate it like a fatal cross-line move; the remedy is a bump of the shared parent or dropping the dependent that pins it."
+    fi
+    qualified_parent_versions=$(printf '%s' "$qual_result" | jq -c '.quals')
+  fi
+
+  # A pre-existing bare nested key for the same (parent, child) pair decides
+  # what qualification may do with it by its own floor major. On this
+  # group's line it is superseded: left in place it sits FIRST in npm's
+  # OverrideSet insertion order and wins getEdgeRule for every edge, leaving
+  # the qualified keys inert, so the main pass below deletes it and reports
+  # it in `superseded_keys`. On a DIFFERENT line (or unreadable), deleting
+  # it would strip another line's protection and keeping it would smother
+  # this fix, so the call refuses before writing: that state needs human
+  # reconciliation (issue #132).
+  if [ "$loc" = "overrides" ] \
+    && [ "$(printf '%s' "$qualified_parent_versions" | jq 'length')" -gt 0 ]; then
+    bare_conflict=$(jq -c --argjson pverq "$qualified_parent_versions" \
+      --arg pkg "$pkg" --arg range "$range" "$SEMVER_JQ"'
+      ($range | range_floor_major) as $tf
+      | [ ($pverq | keys[]) as $p
+          | ((.overrides // {})[$p] // null) as $v
+          | select(($v | type) == "object" and ($v | has($pkg)))
+          | (($v[$pkg] | tostring | range_floor_major)) as $bf
+          | select($bf == null or $tf == null or $bf != $tf)
+          | {parent: $p, value: $v[$pkg]} ] | first // empty' package.json)
+    if [ -n "$bare_conflict" ]; then
+      die "apply_constraint: a pre-existing bare override for '$pkg' under a parent this call must version-qualify pins a DIFFERENT major line: $bare_conflict. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132)."
+    fi
   fi
 
   set_indent_args
@@ -2157,8 +2243,24 @@ verb_apply_constraint() {
         else
           ($pverq[$parent] // []) as $qv
           | if ($qv | length) > 0 then
-              reduce $qv[] as $q (.;
-                put_nested($parent; $parent + "@" + $q; $key; $value))
+              # A pre-existing bare nested key for this same (parent, child)
+              # pair is superseded, not kept: npm inserts it FIRST in the
+              # OverrideSet and getEdgeRule stops on it for every edge, so
+              # beside it the qualified keys are inert. Only a same-line key
+              # reaches here (a different-line one refused before this
+              # pass), and the removal is reported in superseded_keys.
+              (if ((.manifest.overrides[$parent]? | type) == "object")
+                  and (.manifest.overrides[$parent] | has($key))
+               then (.superseded += [{parent: $parent,
+                                      path: ["overrides", $parent, $key],
+                                      value: .manifest.overrides[$parent][$key]}])
+                    | (.manifest.overrides |=
+                        (del(.[$parent][$key])
+                         | if (.[$parent] | length) == 0
+                           then del(.[$parent]) else . end))
+               else . end)
+              | reduce $qv[] as $q (.;
+                  put_nested($parent; $parent + "@" + $q; $key; $value))
             else
               put_nested($parent; $parent; $key; $value)
             end
@@ -2222,7 +2324,7 @@ verb_apply_constraint() {
                                      == $target_major))))
           ] | sort;
 
-      {manifest: ., written: []}
+      {manifest: ., written: [], superseded: []}
       | if $tighten then
           covering_bare_keys as $covering
           | if ($covering | length) == 0 then put_override(null; $pkg; $range)
@@ -2356,6 +2458,7 @@ verb_apply_constraint() {
     | jq --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" --arg pm "$pm" \
          --arg alias_source "$alias_source" \
          --argjson written "$(printf '%s' "$written_and_manifest" | jq -c '.written')" \
+         --argjson superseded "$(printf '%s' "$written_and_manifest" | jq -c '.superseded')" \
          --argjson unresolved "$parents_unresolved" \
          --argjson invalidated "$lockfile_invalidated" \
          --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
@@ -2369,6 +2472,7 @@ verb_apply_constraint() {
                else "scoped" end),
         parents: $parents,
         written: $written,
+        superseded_keys: $superseded,
         alias_lookup: {source: $alias_source, parents_unresolved: $unresolved},
         lockfile_invalidated: $invalidated,
         observations: .

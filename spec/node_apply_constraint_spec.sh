@@ -360,6 +360,151 @@ Describe 'node.sh apply_constraint'
       The status should be success
       The output should equal '{"performed":true,"keys":["node_modules/brace-expansion"]}'
     End
+
+    # The EOVERRIDE carve-out reads the root spec from every dependency
+    # block, not just `dependencies`: a dev-declared parent is a direct
+    # dependency to npm's conflict check all the same, and missing it here
+    # writes an exact key the install rejects.
+    It 'reads the root spec from devDependencies too'
+      use_fixture npm-cross-line
+      jq '.devDependencies = {minimatch: .dependencies.minimatch}
+          | del(.dependencies.minimatch)' package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3","minimatch@^10.2.5"]'
+    End
+
+    # A root spec that ALSO admits an off-line parent copy (`>=3.0.0` admits
+    # the 3.1.5 copy whose child is on the 1.x line) is the collapse shape
+    # no key can express: the only key npm allows beside the direct dep is
+    # the byte-identical spec, and that key drags the off-line copies. The
+    # call refuses before writing anything, so the agent fails closed at
+    # apply with no install burned.
+    refused_shape() {
+      _st=0
+      _err=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch \
+        2>&1 >/dev/null) || _st=$?
+      printf 'st=%s named=%s overrides=%s\n' "$_st" \
+        "$(printf '%s' "$_err" | grep -c 'copies on other major lines')" \
+        "$(jq -c '.overrides // "absent"' package.json)"
+    }
+
+    It 'refuses a root spec that also admits an off-line parent copy, writing nothing'
+      use_fixture npm-cross-line
+      jq '.dependencies.minimatch = ">=3.0.0"' package.json > p.tmp && mv p.tmp package.json
+      When call refused_shape
+      The status should be success
+      The output should equal 'st=1 named=1 overrides="absent"'
+    End
+
+    # A root spec the range readers cannot judge (a dist-tag here; file:,
+    # tarball and workspace: specs behave the same) must never produce exact
+    # keys: npm accepts an override for such specs unconditionally at the
+    # edge and then throws EOVERRIDE on the exact-version key at install
+    # (reproduced on npm 11.16.0). The bare key is the EOVERRIDE-clean
+    # fallback, and validate stays the net behind it.
+    It 'falls back to the bare nested key when the root spec is a dist-tag'
+      use_fixture npm-cross-line
+      jq '.dependencies.minimatch = "latest"' package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # A parent copy whose own lockfile version is unreadable is a copy no
+    # qualifier can cover; dropping it from the set under-covers, so the
+    # parent falls back to the bare key instead. The branch is shared with
+    # pnpm, which gets the same fix.
+    It 'falls back to the bare nested key when a parent copy has no readable version'
+      use_fixture npm-cross-line
+      jq 'del(.packages["node_modules/@ts-morph/common/node_modules/minimatch"].version)' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # node-semver excludes prereleases from plain ranges where the in-repo
+    # satisfies admits them; counting such a copy covered by the root spec
+    # writes no key for it at all, a silent under-cover. It takes its own
+    # exact key instead, which npm's prerelease rules keep off the direct
+    # dep's edge.
+    It 'gives a prerelease copy its own exact key rather than counting it covered'
+      use_fixture npm-cross-line
+      jq '.packages["node_modules/minimatch"].version = "10.3.0-beta.1"' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3","minimatch@10.3.0-beta.1"]'
+    End
+
+    # A lockfile version that is not plain semver cannot become a key
+    # selector: semver.intersects throws on it at install time. Bare
+    # fallback, same as every other unjudgeable copy.
+    It 'falls back to the bare nested key when a parent copy version is not plain semver'
+      use_fixture npm-cross-line
+      jq '.packages["node_modules/@ts-morph/common/node_modules/minimatch"].version = "10.x-bogus"' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # A pre-existing bare nested key for the same (parent, child) pair on
+    # THIS line sits first in npm's OverrideSet and wins getEdgeRule for
+    # every edge, leaving the qualified keys inert; it is superseded, the
+    # removal reported. The resulting override state is byte-identical to
+    # the qualified specimen.
+    It 'supersedes a same-line bare nested key and reports it'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=5.0.6 <6"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call adapter_jq '{superseded: .superseded_keys, keys: [.written[].path[1]]}' \
+        apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should be success
+      The output should equal '{"superseded":[{"parent":"minimatch","path":["overrides","minimatch","brace-expansion"],"value":">=5.0.6 <6"}],"keys":["minimatch@^10.2.5","minimatch@10.0.3"]}'
+    End
+
+    It 'leaves no bare pair behind after superseding it'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=5.0.6 <6"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call overrides_matching_npm_specimen
+      The status should be success
+      The output should equal '{"minimatch@10.0.3":{"brace-expansion":">=5.0.9 <6"},"minimatch@^10.2.5":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # The same bare pair pinning a DIFFERENT line is a previous fix this
+    # call must not delete and cannot coexist with: refusal, nothing
+    # written, human reconciliation.
+    conflicting_bare() {
+      _st=0
+      _err=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch \
+        2>&1 >/dev/null) || _st=$?
+      printf 'st=%s named=%s overrides=%s\n' "$_st" \
+        "$(printf '%s' "$_err" | grep -c 'reconcile the existing override by hand')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    It 'refuses to write beside a bare pair that pins a different line'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=1.1.18 <2"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call conflicting_bare
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"minimatch":{"brace-expansion":">=1.1.18 <2"}}'
+    End
+
+    # A scoped parent name qualifies the same way: the key is the whole
+    # scoped name plus the copy's version after a second `@`.
+    It 'qualifies a scoped parent resolved at several versions'
+      use_fixture npm-scoped-cross-line
+      When call adapter_jq '{written: [.written[].path]}' \
+        apply_constraint minimatch '>=10.0.5 <11' '@npmcli/map-workspaces'
+      The status should be success
+      The output should equal '{"written":[["overrides","@npmcli/map-workspaces@4.0.2","minimatch"]]}'
+    End
   End
 
   # An aliased dependency, which `validate` now counts and which nothing could

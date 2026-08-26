@@ -383,10 +383,21 @@ lockfile) — an npm override WAS written but the pass could not judge the lockf
 override is presumed inert against any stale entry: a fail-closed stop-and-report signal, the
 stale-lockfile case of the escalation ladder (phase 4's step 3), not a benign no-op.
 
+**An `apply_constraint` error naming the shared-parent shape is a fail-closed stop, before any
+install.** Two states produce it: the root manifest's own spec for a shared parent also admits
+that parent's copies on other major lines, or a pre-existing bare override for your package under
+such a parent pins a different major line. Nothing was written in either case. Return
+`"status": "failure"` with `failure.phase: "apply"` quoting the error verbatim, and escalate it
+exactly like a fatal cross-line move: the remedy is a bump of the shared parent, or reconciling
+the existing override by hand (issue #132).
+
 **Quote `written[]`, not your own arguments, when the PR body says what changed.** It carries one
 `{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
 parent reached through an `npm:` alias is written under the alias key with the protocol in the value
 (`{"express/lodash-alias": "npm:lodash@>=4.18.2 <5"}`), not under the package name you passed.
+Disclose `superseded_keys` beside it when non-empty: it lists a pre-existing bare nested key for
+the same parent and child that the qualified entries replaced, which left in place would win
+npm's rule matching and leave them inert (issue #132).
 
 **Reject a written `npm:` value that names a different package, and fail the run.** If any
 `written[]` entry's value starts with `npm:` and the package it names — everything between `npm:`

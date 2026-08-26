@@ -156,8 +156,9 @@ will see:
 - `shared parent across major lines`: the package resolves on more than one major line, the
   sibling lines share a parent (`collision_parents` names them), and the shape is one no override
   key in that repo's syntax can scope apart: Yarn `resolutions` keys cannot carry a parent
-  version at all, and under npm and pnpm a single copy of the shared parent resolves the package
-  on two majors at once, so every key naming it drags a sibling line. Dispatching such groups
+  version today (the exact-locator form that could is unimplemented), and under npm and pnpm a
+  single copy of the shared parent resolves the package on two majors at once, so every key
+  naming it drags a sibling line. Dispatching such groups
   burns a worktree, install and validate cycle apiece before each fails closed on the same fact
   ([#132](https://github.com/SurveyMonkey/skills/issues/132)). Human work: a bump of the shared
   parent, or dropping the dependent that pins it. A shared parent whose copies version-qualified
@@ -567,9 +568,10 @@ from `fix-dependabot-...` branches — the user reading branch names in the PRs 
 guess why they differ from a neighbor repo's.
 
 **Then report every group classify-lines.sh skipped under `shared parent across major lines`,
-with its `collision_parents`.** These alerts also stay open: the package resolves on several
-major lines that share a parent no override key in that repo's syntax can scope apart, so none
-of that package's groups was dispatched
+with its `collision_parents`.** These alerts also stay open: the group's line shares a parent
+with a sibling line in a shape no override key in that repo's syntax can scope apart, so that
+group was never dispatched. The verdict is per group, so a line of the same package whose
+parents are disjoint may still have run normally
 ([#132](https://github.com/SurveyMonkey/skills/issues/132)). The remedy is human work: bumping
 the shared parent past the old line, or dropping the dependent that pins it. Like the
 requires-major-bump skips, report these whether phase 2 found them at repo scope or phase 5
