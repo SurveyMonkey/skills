@@ -78,6 +78,16 @@ Describe 'scope and checkout resolution in prose (issue #134)'
       The status should be success
       The output should equal '1'
     End
+
+    # Discovery for a named repo happens in phase 2, before phase 5 resolves
+    # that repo's environment, so the call runs with whatever identity the
+    # shell has. Saying so is the honest version; the alternative is a reader
+    # assuming a prefix that does not exist yet.
+    It 'admits discovery for a named repo precedes per-repo environment resolution'
+      When call phrase_in "$SKILL" 'runs before any per-repo environment resolution exists'
+      The status should be success
+      The output should equal '1'
+    End
   End
 
   Describe 'phase 5 asks once where clones go'
@@ -95,6 +105,39 @@ Describe 'scope and checkout resolution in prose (issue #134)'
 
     It 'offers a directory the user keeps and a temporary one'
       When call phrase_in "$SKILL" 'A temporary directory, cleaned up when the run ends'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The temporary directory sits outside every workspace directory by
+    # construction, so nothing above it can supply directory-scoped
+    # credentials and every command for those repos runs unprefixed. That is
+    # the issue #33 failure class — a fetch that reports the repository as
+    # missing, an install that 401s — so the cost is stated in the question
+    # rather than discovered mid-batch.
+    It 'warns that the temporary option voids a directory-scoped command prefix'
+      When call phrase_in "$SKILL" 'runs without the command prefix your environment requires'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'tells the user to name a directory in such a workspace'
+      When call phrase_in "$SKILL" 'In such a workspace, name a directory instead'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The temporary path is created with a greppable prefix and recorded, so
+    # the removal in phase 7 is one literal string rather than a computed
+    # path, and the tool grant can name the shape.
+    It 'creates the temporary directory with a recognizable prefix'
+      When call phrase_in "$SKILL" 'mktemp -d -t gh-security-clones'
+      The status should be success
+      The output should equal '2'
+    End
+
+    It 'records that path as the only removable one'
+      When call phrase_in "$SKILL" "treat it as this run's only removable"
       The status should be success
       The output should equal '1'
     End
@@ -135,21 +178,51 @@ Describe 'scope and checkout resolution in prose (issue #134)'
     End
   End
 
-  Describe 'phase 7 cleans up the temporary destination'
-    It 'removes it and says so'
-      When call phrase_in "$SKILL" 'when phase 5.s clone destination was the temporary one, remove it and say so'
+  Describe 'phase 7 cleans up the temporary destination only when it is safe'
+    It 'decides rather than removing unconditionally'
+      When call phrase_in "$SKILL" 'clone destination was the temporary one, decide whether it can be'
       The status should be success
       The output should equal '1'
     End
 
-    It 'prescribes the removal against the destination path'
-      When call phrase_in "$SKILL" 'rm -rf <clone-destination>'
+    # The defect this replaced: an unconditional `rm -rf` destroyed exactly
+    # what phase 6's reap deliberately preserves. A group whose agent ended
+    # without a verified open PR never pushed, so its worktree and branch
+    # inside the temporary directory are the only copies of that work.
+    It 'states why an unverified group makes the directory unremovable'
+      When call phrase_in "$SKILL" 'agent ended without a verified open PR has nothing on the remote'
       The status should be success
       The output should equal '1'
     End
 
-    It 'scopes the removal to the directory this run created'
-      When call phrase_in "$SKILL" 'only the directory this run created for its own clones'
+    It 'keeps the whole directory when any group ended another way'
+      When call phrase_in "$SKILL" 'keep the whole directory'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reports the kept path and the groups that are the reason'
+      When call phrase_in "$SKILL" 'where it is, and which groups are the reason'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'refuses to read the temporary destination as a licence to delete work'
+      When call phrase_in "$SKILL" 'never in the sense that this skill deletes unpushed work'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The removal names the recorded mktemp path and nothing else: no parent,
+    # no glob, no path the user named.
+    It 'prescribes the removal against the recorded path'
+      When call phrase_in "$SKILL" 'rm -rf <the recorded gh-security-clones path>'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'forbids widening or substituting that path'
+      When call phrase_in "$SKILL" 'Never widen that path and never substitute another'
       The status should be success
       The output should equal '1'
     End
@@ -160,10 +233,18 @@ Describe 'scope and checkout resolution in prose (issue #134)'
       The output should equal '1'
     End
 
-    It 'grants the two commands the phase needs'
-      When call phrase_in "$SKILL" 'allowed-tools:.*Bash(mktemp -d.*Bash(rm -rf '
+    # The grant is as narrow as every other entry on that line: a verb plus a
+    # fixed component, not `rm -rf` over the filesystem.
+    It 'grants the two commands the phase needs, narrowed to that prefix'
+      When call phrase_in "$SKILL" 'allowed-tools:.*Bash(mktemp -d -t gh-security-clones.*Bash(rm -rf .gh-security-clones'
       The status should be success
       The output should equal '1'
+    End
+
+    It 'grants no unqualified recursive removal'
+      When call count_in "$SKILL" 'Bash(rm -rf .), '
+      The status should be success
+      The output should equal '0'
     End
   End
 
@@ -182,6 +263,22 @@ Describe 'scope and checkout resolution in prose (issue #134)'
 
     It 'stops on a null nwo'
       When call phrase_in "$CMD" 'this checkout has no usable .origin.; report that and stop'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The first detect-scope output described a path in no repository, so
+    # every field of it is null. Continuing from the checkout the user names
+    # means reading a second output, or the two paragraphs below stop the
+    # audit on a null that describes the wrong path.
+    It 're-runs detect-scope against the checkout the user names'
+      When call phrase_in "$CMD" 'Re-run .detect-scope.sh <that checkout>. and read .nwo., .default_branch.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reads the second output rather than the first'
+      When call phrase_in "$CMD" 'from the second output.., never from the first'
       The status should be success
       The output should equal '1'
     End

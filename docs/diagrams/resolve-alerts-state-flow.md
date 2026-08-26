@@ -109,7 +109,7 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then what the reap removed and left,<br/>then the temporary clone destination removed if<br/>phase 5 created one, then deduplicated observations by type"] --> P8
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then what the reap removed and left,<br/>then the temporary clone destination removed only if<br/>every group in it verified an open PR and kept otherwise,<br/>then deduplicated observations by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
@@ -242,8 +242,10 @@ run.
 ```mermaid
 flowchart TD
     CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from a .envrc<br/>at or above repo_root"] --> CMD1Q{"inside a git repository?"}
-    CMD1Q -->|"no: scope null"| CMD1A["Ask which repo, or ask the user<br/>to run it from that repo's checkout"] --> CMD1D
-    CMD1Q -->|"yes: repo scope"| CMD1D{"default_branch resolved?"}
+    CMD1Q -->|"no: scope null"| CMD1A["Ask which repo, or ask the user to run it from<br/>that repo's checkout, then re-run detect-scope.sh<br/>against that checkout and read the second output"] --> CMD1N
+    CMD1Q -->|"yes: repo scope"| CMD1N{"nwo resolved from origin?"}
+    CMD1N -->|null| CSTOPN(["Stop: the checkout has no usable origin;<br/>the removal PR has no repository to open against"])
+    CMD1N -->|yes| CMD1D{"default_branch resolved?"}
     CMD1D -->|null| CSTOP0(["Stop: default_branch<br/>could not be resolved"])
     CMD1D -->|yes| CMD2{"manifest present?"}
     CMD2 -->|no| CSTOP1(["Stop: nothing this command can audit"])

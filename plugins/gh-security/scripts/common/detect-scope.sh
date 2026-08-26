@@ -26,6 +26,20 @@
 # remote, or one whose URL yields no `<owner>/<name>` pair. The scope is still
 # `repo`: being in a checkout is a fact about git, independent of whether the
 # checkout has a remote the caller can reach.
+#
+# **Only a host-bearing URL yields an nwo**, and only when its path is exactly
+# two segments. GitHub NWOs are exactly two segments; a deeper path is not a
+# GitHub repository, and a local path, a `file://` URL or a relative `../`
+# remote names no host at all. All of those answer null rather than the last
+# two path segments of whatever they are: a fabricated `src/other-repo` reads
+# downstream as a real repository, and the only stop condition left is a null
+# nwo.
+#
+# A **bare** repository answers a null scope, deliberately: `rev-parse
+# --show-toplevel` fails without a work tree, and there is no tree for an
+# agent to branch, install or validate in. A **linked worktree** is the
+# opposite case and answers `repo`: it has its own toplevel and shares the
+# repository's `origin`.
 
 set -euo pipefail
 
@@ -52,28 +66,47 @@ if [ -n "$scope" ]; then
   # Local, no network.
   git_remote=$(git -C "$TARGET" remote get-url origin 2>/dev/null || printf '')
 
-  # Reduce every URL form to `<owner>/<name>`: strip a trailing slash and a
-  # trailing `.git`, drop any `scheme://`, drop everything through the first
-  # colon (the scp-style `git@host:owner/name`, and a `host:port` prefix in a
-  # ssh URL), then take the last two path segments. Anything that does not
-  # yield two segments leaves owner and repo empty rather than guessing.
+  # Split the URL into a host and a path, and demand both. Two forms carry a
+  # host: `scheme://[user[:pass]@]host[:port]/owner/name`, and the scp-style
+  # `[user@]host:owner/name` that also covers an ssh-config alias
+  # (`gh-alias:owner/name`). Anything else — a local path, a `file://` URL, a
+  # relative `../sibling` — has no host and yields no nwo. Then the path must
+  # be exactly two segments: taking the last two of a deeper path is how
+  # `https://host/a/b/c` becomes a plausible, wrong `b/c`.
   url="${git_remote%/}"
   url="${url%.git}"
   url="${url%/}"
+  host=""
+  url_path=""
   case "$url" in
-    *://*) url="${url#*://}" ;;
-  esac
-  case "$url" in
-    *:*) url="${url#*:}" ;;
-  esac
-  case "$url" in
-    */*)
-      repo="${url##*/}"
-      rest="${url%/*}"
-      owner="${rest##*/}"
+    *://*)
+      rest="${url#*://}"
+      case "$rest" in
+        */*)
+          host="${rest%%/*}"
+          url_path="${rest#*/}"
+          ;;
+      esac
+      ;;
+    *:*)
+      host="${url%%:*}"
+      url_path="${url#*:}"
+      # A colon inside a path (`/tmp/we:ird/a/b`) is not a host separator.
+      case "$host" in
+        */*) host="" ;;
+      esac
       ;;
   esac
-  if [ -z "$owner" ] || [ -z "$repo" ]; then
+  host="${host##*@}"   # drop any credentials
+  host="${host%%:*}"   # drop any port
+  case "$url_path" in
+    */*/*) ;;          # three segments or more: not a GitHub repository
+    */*)
+      owner="${url_path%%/*}"
+      repo="${url_path#*/}"
+      ;;
+  esac
+  if [ -z "$host" ] || [ -z "$owner" ] || [ -z "$repo" ]; then
     owner=""
     repo=""
   fi

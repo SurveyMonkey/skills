@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d*), Bash(rm -rf *), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -130,9 +130,14 @@ user left it, so it should be on `default_branch` and current; a stale or featur
 misclassify a group (a lockfile the fix agent will branch from `origin/<default_branch>` may
 resolve differently from one sitting on an unrelated branch).
 
-Wherever there is no local checkout yet — org and user scope, and a repo the user named when phase
-1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation happens
-after checkout, in phase 5, per repo.
+Wherever there is no local checkout yet — org and user scope, and a repo the user named when
+phase 1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation
+happens after checkout, in phase 5, per repo. **Discovery for a named repo therefore runs before
+any per-repo environment resolution exists**: phase 5 is where that repo's `env_prefix` and
+`repo_root` are settled, so this call, like every org and user scope discovery call, is made with
+whatever identity your own shell resolves. In a workspace whose credentials are scoped to its
+directories, run this skill from inside the relevant directory so that identity is the right one,
+or expect discovery to read the wrong account's alerts.
 
 `target` is `nwo` at repo scope, `owner` at org scope, and omitted (or the authenticated login) at
 user scope. Returns `actionable` (ranked by severity then EPSS, each group annotated with its
@@ -263,13 +268,30 @@ of some repo in the batch, and there is no convention that says where a new one 
 is **one question for the whole run**, never one per repo: AskUserQuestion in the phase 3 style,
 with two options.
 
-- **A directory I name** — clones land at `<destination>/<repo-name>` and stay there after the run.
+- **A directory I name** — clones land at `<destination>/<repo-name>` and stay there afterwards.
   Take the directory from the question's free-form answer. When the current directory holds
   `@`-prefixed owner directories, offer `<current directory>/@<repo-owner>`
   as the suggested default: a layout the machine already has is a reasonable guess, and it is only
   ever a default the user can replace. Nothing else in this skill reads that convention.
-- **A temporary directory, cleaned up when the run ends** — create one with `mktemp -d`, clone
-  into it, and let phase 7 remove it and say what it removed.
+- **A temporary directory, cleaned up when the run ends** — create it with the exact command
+  below, clone into it, and let phase 7 decide whether it can be removed.
+
+  ```bash
+  mktemp -d -t gh-security-clones
+  ```
+
+  **Record the path that command printed, verbatim, and treat it as this run's only removable
+  path.** Phase 7 removes exactly that recorded string and refuses any other; the
+  `gh-security-clones` component is what makes a removal recognizable as this skill's own, in the
+  transcript and in the tool grant.
+
+  **Say what this option costs before the user picks it.** Clones under a temporary directory sit
+  outside every workspace directory, so in a workspace whose credentials are scoped to its
+  directories, **a repo cloned there runs without the command prefix your environment requires**,
+  and `gh`, `git` and the package manager resolve whatever identity the bare shell has. The
+  failures that produces are misleading rather than obvious: a fetch that reports the repository
+  as missing, an install that 401s against the wrong registry.
+  **In such a workspace, name a directory instead.**
 
 Ask it even when every repo turns out to already have a checkout; the answer costs one question
 and the alternative is discovering the need for it halfway through resolving repos.
@@ -627,20 +649,33 @@ path and comes off by hand with `git -C <repo_root> worktree remove --force <pat
 is in flight, but only if this summary says it is there. Nothing left behind is a failure on its
 own; a run that reaped everything says so in one line.
 
-**Then, when phase 5's clone destination was the temporary one, remove it and say so.** One
-command, after the last agent has returned:
+**Then, when phase 5's clone destination was the temporary one, decide whether it can be
+removed.** The condition is the one that gates the reap, for the same reason: **a group whose
+agent ended without a verified open PR has nothing on the remote**, so its worktree and its branch
+are the only copies of that work, and both sit inside this directory. Removing it would destroy
+exactly what phase 6 deliberately preserved.
+
+- **Every group in that destination ended with a verified open PR**, or nothing was cloned into it
+  at all: remove it, and name the directory and the repositories that were in it, in one line.
+  Those clones hold nothing the run still needs, because every pull request lives on the remote,
+  and anything the reap left behind inside goes with the directory, so say that rather than
+  pointing the user at a worktree path that no longer exists.
+- **Any group in it ended any other way** — a failure, a crash, a `no-op`, an unparseable or
+  missing result block, or a `pr_url` whose PR is not open: **keep the whole directory**, and
+  report that it was kept, where it is, and which groups are the reason. It is temporary in the
+  sense that nothing else will reuse it, never in the sense that this skill deletes unpushed work.
+
+The removal is one command, after the last agent has returned, against the path phase 5 recorded
+from `mktemp`, verbatim:
 
 ```bash
-rm -rf <clone-destination>
+rm -rf <the recorded gh-security-clones path>
 ```
 
-Name the directory and the repositories that were in it, in one line. This is the whole of what
-that choice promised, and it removes **only the directory this run created for its own clones**:
-a checkout that already existed is reused, never created, so it is never in there. Nothing in the
-summary depends on those clones surviving — every pull request lives on the remote — and anything
-the reap left behind inside one goes with the directory, so say that rather than pointing the user
-at a worktree path that no longer exists. A run whose clones went to a directory the user named
-removes nothing and says nothing here.
+**Never widen that path and never substitute another**: not a parent of it, not a glob, not a
+directory the user named. A checkout that already existed is reused, never created, so it is never
+inside the removable directory. A run whose clones went to a directory the user named removes
+nothing and says nothing here.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.

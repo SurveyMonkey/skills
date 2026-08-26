@@ -32,14 +32,21 @@ Describe 'detect-scope.sh'
     mkdir -p "$PLAIN_DIR"
   }
 
-  # One nwo per URL form. The parse is the only source of owner and repo, so a
-  # form it cannot reduce to `<owner>/<name>` is a silently wrong target.
-  Describe 'nwo from the origin URL'
+  # One nwo per URL form the parser accepts, one row per branch it takes:
+  # scheme form, scp form, an ssh-config alias, credentials, a port, a trailing
+  # slash, and an owner and name spelled with case and dots. The parse is the
+  # only source of owner and repo, so a form read wrongly is a silently wrong
+  # target rather than a failure.
+  Describe 'nwo from a host-bearing origin URL'
     Parameters
       'https://github.com/example-org/example-repo.git'  example-org  example-repo
       'https://github.com/example-org/example-repo'      example-org  example-repo
       'git@github.com:octo/app.git'                      octo         app
       'ssh://git@github.com/octo/app.git'                octo         app
+      'ssh://git@github.com:2222/octo/app.git'           octo         app
+      'https://user:pass@github.com/octo/app.git'        octo         app
+      'gh-alias:octo/app.git'                            octo         app
+      'https://github.com/Owner/My.Repo.git'             Owner        My.Repo
     End
 
     It "parses $1"
@@ -49,6 +56,51 @@ Describe 'detect-scope.sh'
       The status should be success
       The output should equal "$expected"
     End
+  End
+
+  # The other half, and the one that matters more. Every row here once produced
+  # a plausible, wrong nwo by taking the last two path segments of whatever it
+  # was handed: a sibling checkout became `src/other-repo`, a self-hosted
+  # subgroup URL became `b/c`, and a relative remote became `../sibling`. With
+  # the old directory-convention cross-check gone, a null nwo is the only stop
+  # condition left, so a fabricated one is dispatched against.
+  Describe 'a remote that names no GitHub repository'
+    Parameters
+      # A sibling checkout added as a local path remote.
+      '/example/src/other-repo'
+      'file:///example/src/other-repo'
+      '../sibling'
+      # Host-bearing, but three path segments: a self-hosted subgroup, not an nwo.
+      'https://gitlab.example.com/a/b/c.git'
+      # Host-bearing, one path segment.
+      'git@github.com:owner'
+    End
+
+    It "answers repo scope with a null nwo for $1"
+      make_repo "$1"
+      expected='{"scope":"repo","owner":null,"repo":null,"nwo":null,"git_remote":"'"$1"'"}'
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo, git_remote}' "$REPO_DIR"
+      The status should be success
+      The output should equal "$expected"
+    End
+  End
+
+  # Two more rows in spirit, written as examples because a `Parameters` row
+  # whose first token ends in `/` reads to ShellCheck as a command name ending
+  # in a slash (SC2287); passing the URL as an argument is the same case
+  # without the false positive, and no directive.
+  It 'ignores a trailing slash on an otherwise complete URL'
+    make_repo 'https://github.com/octo/app/'
+    When call common_jq detect-scope.sh '.nwo' "$REPO_DIR"
+    The status should be success
+    The output should equal '"octo/app"'
+  End
+
+  It 'answers a null nwo for a URL with no path at all'
+    make_repo 'https://github.com/'
+    When call common_jq detect-scope.sh '{scope, nwo}' "$REPO_DIR"
+    The status should be success
+    The output should equal '{"scope":"repo","nwo":null}'
   End
 
   It 'reports the origin URL it parsed'
@@ -125,6 +177,70 @@ Describe 'detect-scope.sh'
     When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
     The status should be success
     The output should equal '"main"'
+  End
+
+  # A bare repository has no work tree, so `rev-parse --show-toplevel` fails
+  # and the scope is null. That is the right answer rather than an oversight:
+  # every downstream consumer branches, installs and validates in a tree, and
+  # there is none here.
+  It 'reports a null scope for a bare repository'
+    TEST_DIR=$(mktemp -d)
+    git init -q --bare "$TEST_DIR/origin.git"
+    When call common_jq detect-scope.sh '{scope, nwo}' "$TEST_DIR/origin.git"
+    The status should be success
+    The output should equal '{"scope":null,"nwo":null}'
+  End
+
+  # The opposite case, and the one the fix agents live in: a linked worktree
+  # resolves its own toplevel and shares the repository's origin, so it is
+  # repo scope with the same nwo as the checkout it was added from.
+  It 'answers repo scope from inside a linked worktree'
+    make_repo 'https://github.com/octo/app.git'
+    git -C "$REPO_DIR" config user.email 'spec@example.invalid'
+    git -C "$REPO_DIR" config user.name 'spec'
+    git -C "$REPO_DIR" commit -q --allow-empty -m init
+    git -C "$REPO_DIR" worktree add -q "$TEST_DIR/linked" -b topic
+    When call common_jq detect-scope.sh '{scope, nwo}' "$TEST_DIR/linked"
+    The status should be success
+    The output should equal '{"scope":"repo","nwo":"octo/app"}'
+  End
+
+  # The network fallback, exercised without a network: `origin` is a bare
+  # repository on the same filesystem, so `remote show origin` answers locally
+  # and its `HEAD branch:` line is the only source left once the symref is
+  # gone. That sed branch is otherwise never executed by the suite, and it is
+  # what stands between a checkout cloned before origin/HEAD was recorded and
+  # a run that stops for a null default_branch.
+  Describe 'default_branch when origin/HEAD was never recorded'
+    make_clone() {
+      TEST_DIR=$(mktemp -d)
+      git init -q --bare "$TEST_DIR/origin.git"
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/checkout" 2>/dev/null
+      CLONE_DIR="$TEST_DIR/checkout"
+      git -C "$CLONE_DIR" config user.email 'spec@example.invalid'
+      git -C "$CLONE_DIR" config user.name 'spec'
+      git -C "$CLONE_DIR" commit -q --allow-empty -m init
+      git -C "$CLONE_DIR" push -q -u origin HEAD:main
+      git -C "$CLONE_DIR" symbolic-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+    }
+
+    It 'falls back to remote show'
+      make_clone
+      When call common_jq detect-scope.sh '.default_branch' "$CLONE_DIR"
+      The status should be success
+      The output should equal '"main"'
+    End
+
+    # And when the fallback cannot answer either — here because origin points
+    # at a path that is not a repository — the field is null rather than a
+    # guessed branch name. Callers that need it stop on the null.
+    It 'reports null when the fallback fails too'
+      make_clone
+      git -C "$CLONE_DIR" remote set-url origin "$TEST_DIR/absent.git"
+      When call common_jq detect-scope.sh '.default_branch' "$CLONE_DIR"
+      The status should be success
+      The output should equal 'null'
+    End
   End
 End
 

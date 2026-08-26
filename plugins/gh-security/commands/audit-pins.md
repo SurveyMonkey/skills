@@ -23,8 +23,12 @@ scope: one `audit-pins` agent tests one repository's pins. `scope` is `repo` whe
 directory is inside a git repository and `null` when it is not; nothing is inferred from what the
 directories are named (issue #134). If `scope` is null, say that this command audits a single
 repository and ask which one, or ask the user to run it from that repo's checkout; then continue
-from that checkout. Never fan out across every repo in an org by hand — each pin tested costs an
-install, and a silent org-wide sweep is not what the user asked for.
+from that checkout. **Re-run `detect-scope.sh <that checkout>` and read `nwo`, `default_branch`
+and `repo_root` from the second output**, never from the first: the first ran outside every
+repository, so every one of its fields is null, and the two paragraphs below would stop the audit
+on a null that describes the old path rather than the checkout the user named. Never fan out
+across every repo in an org by hand — each pin tested costs an install, and a silent org-wide
+sweep is not what the user asked for.
 
 `nwo` is parsed from `origin`'s remote URL and has no other source, so there is nothing to
 cross-check it against: if it is null, this checkout has no usable `origin`; report that and stop,
