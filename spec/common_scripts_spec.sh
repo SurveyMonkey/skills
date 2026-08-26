@@ -215,6 +215,11 @@ Describe 'detect-scope.sh'
     make_clone() {
       TEST_DIR=$(mktemp -d)
       git init -q --bare "$TEST_DIR/origin.git"
+      # Pin the bare repository's own HEAD to the branch the push below creates.
+      # `git init --bare` points HEAD at the ambient init.defaultBranch, which
+      # differs across machines (Apple Git compiles in main, CI runners default
+      # to master); a dangling HEAD makes `remote show` answer "(unknown)".
+      git -C "$TEST_DIR/origin.git" symbolic-ref HEAD refs/heads/main
       git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/checkout" 2>/dev/null
       CLONE_DIR="$TEST_DIR/checkout"
       git -C "$CLONE_DIR" config user.email 'spec@example.invalid'
