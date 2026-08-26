@@ -2405,6 +2405,26 @@ resolved_major_for_parent() {
 # entry whose key list contains it, so the rows are joined against a descriptor
 # -> version map built from the same file.
 #
+# A scoped package occupies TWO path segments (`@scope/name`), so the strip
+# that walks upward has to take the `@`-prefixed segment together with its
+# tail; a single-segment strip cannot match a scoped tail at all, `sub()`
+# returns its input unchanged, and `prefixes` recurses on the same path until
+# jq's allocator fails. On the field-test repository that OOMed
+# `declared_ranges --line` for 10 of 12 dispatched groups, every one with a
+# parent copy declared under a `node_modules/@scope/name/node_modules/<parent>`
+# key ([#121](https://github.com/SurveyMonkey/skills/issues/121)). The strip
+# is scoped-segment-aware now, and the recursion carries a progress check
+# besides, with two degrades for a path the strip cannot shorten. A workspace
+# key (no `node_modules/` segment, e.g. `packages/tool`) degrades to itself
+# plus the root: for such a key that two-entry list is the complete upward
+# walk, so nothing is guessed. A path that still contains `node_modules/` yet
+# would not shorten is a shape this strip does not understand, and offering
+# the root there would let a root copy at another version become `resolved` —
+# a confident wrong answer that misfiles the parent into
+# `parents_other_lines` and drops its range. That degrade is the path alone:
+# no candidate resolves, `resolved` stays null, and the consumer's rule that
+# an undeterminable line keeps the parent conservatively keeps the range.
+#
 # pnpm has no DECLARED range in these rows, for the same reason
 # `apply_constraint`'s `alias_lookup` reports `unsupported` for it: its
 # `snapshots:` blocks record what a dependency resolved to, never the
@@ -2428,7 +2448,12 @@ resolved_major_for_parent() {
 NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
 def prefixes:
   if . == "" then [""]
-  else [.] + ((sub("/?node_modules/[^/]+$"; "")) | prefixes) end;
+  else . as $path
+  | (sub("/?node_modules/(@[^/]+/)?[^/]+$"; "")) as $rest
+  | if $rest != $path then [$path] + ($rest | prefixes)
+    elif ($path | contains("node_modules/")) then [$path]
+    else [$path, ""] end
+  end;
 def candidates($dk):
   prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
 (.packages // {}) as $pkgs

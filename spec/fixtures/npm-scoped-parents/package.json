@@ -1,0 +1,11 @@
+{
+  "name": "demo-scoped-parents",
+  "version": "1.0.0",
+  "workspaces": ["packages/tool"],
+  "dependencies": {
+    "@npmcli/arborist": "^9.1.6",
+    "@nx/devkit": "22.7.6",
+    "minimatch": "^7.4.9"
+  },
+  "scripts": { "test": "jest" }
+}
