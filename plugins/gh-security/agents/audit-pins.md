@@ -835,6 +835,13 @@ cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
   --declared-range <range> [--declared-range <range>]...
 ```
 
+**Slug `<package>` before it goes into that filename: replace every `/` with `-`.** A scoped
+name substituted raw breaks the redirect — `@babel/traverse` would target
+`why-@babel/traverse.json`, inside a directory `$WORK` never creates — so `@babel/traverse`
+becomes `why-@babel-traverse.json` and every unscoped name is unaffected. This run scores many
+packages in the same `$WORK`, one after another, so the qualified name is also what keeps one
+package's why-capture from being overwritten by the next package's before it is read.
+
 - `--before` is the pinned resolved version and `--after` the naturally resolved one. That is the
   removal's actual delta, and it is frequently a *downgrade*: the rubric rates distance, which is
   what a reviewer needs either way. When phase 4's baseline holds several versions of the package,
