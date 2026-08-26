@@ -104,7 +104,7 @@ Describe 'scope and checkout resolution in prose (issue #134)'
     End
 
     It 'offers a directory the user keeps and a temporary one'
-      When call phrase_in "$SKILL" 'A temporary directory, cleaned up when the run ends'
+      When call phrase_in "$SKILL" 'A temporary directory, cleaned up when every group in it opens a PR'
       The status should be success
       The output should equal '1'
     End

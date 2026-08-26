@@ -248,8 +248,9 @@ flip a repo's names to the flat `fix-dependabot-...` scheme; say that too.
 
 At org or user scope, name every distinct repo the plan touches and say plainly that a repo not
 yet checked out locally will be cloned before dispatch, into a destination phase 5 asks about
-once: a directory the user names and keeps, or a temporary directory removed at the end of the
-run. Say that the cloning is part of what this approval covers, and that the destination question
+once: a directory the user names and keeps, or a temporary directory removed at the end of the run
+when every group in it opened a PR, and kept and reported otherwise. Say that the cloning is part
+of what this approval covers, and that the destination question
 is the one thing still to be settled, not a separate consent step for the work itself.
 
 Ask for **one** approval of the whole batch. This is **the last checkpoint before pull requests
@@ -273,8 +274,10 @@ with two options.
   `@`-prefixed owner directories, offer `<current directory>/@<repo-owner>`
   as the suggested default: a layout the machine already has is a reasonable guess, and it is only
   ever a default the user can replace. Nothing else in this skill reads that convention.
-- **A temporary directory, cleaned up when the run ends** — create it with the exact command
-  below, clone into it, and let phase 7 decide whether it can be removed.
+- **A temporary directory, cleaned up when every group in it opens a PR** — create it with the
+  exact command below, clone into it, and let phase 7 decide whether it can be removed. The label
+  is literal: phase 7 keeps and reports the whole directory when any group in it ended without a
+  verified open PR, because its worktree and branch are then the only copies of that work.
 
   ```bash
   mktemp -d -t gh-security-clones
