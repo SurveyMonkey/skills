@@ -379,8 +379,9 @@ verified its pull request and before you refill its slot. The completion is the 
 know exactly which branch and which worktree belonged to that agent, and its result block names
 them, so nothing here needs a run-start snapshot or any bookkeeping about what existed before:
 
-1. Parse the completed agent's fenced JSON result. A `success` result carries `branch` and
-   `pr_url`; a `no-op`, a failure, an unparseable block and a missing block do not.
+1. Parse the completed agent's fenced JSON result. A `success` result carries both `branch` and
+   `pr_url`. A `no-op` and a failure null `pr_url` but still carry `branch`, which is what phase 7
+   names them by; only an unparseable block and a missing block carry nothing.
 2. Verify that pull request is open, under that repo's `env_prefix` when it has one:
 
 ```bash
@@ -419,8 +420,12 @@ the tip against `origin/<branch_name>` itself and leaves any branch that is not 
 it in `left_behind`. **A failure here is not fatal**: record what its `left_behind` and `errors`
 name for phase 7, refill the slot, and carry on. A reap that could not finish must never stall the
 pool. **A reap that exits without printing a report at all** (a rejected argument, a refused path)
-did nothing and reported nothing, so take the branch and worktree path from that agent's own
-result block and carry those to phase 7 instead.
+did nothing and reported nothing, so take the branch from that agent's own result block (or from
+the dispatch payload for that group when there is no block to read) and **rebuild** the worktree
+path from the template in step 3,
+`<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x`, with that group's own
+package and major line: no result field carries the path, so it is derived, never copied. Carry
+both to phase 7 instead.
 
 Each queued group is **one Task tool call**:
 
@@ -552,8 +557,10 @@ guess why they differ from a neighbor repo's.
 
 **Then say what phase 6's reap removed and what it left.** Give the count of agents reaped, and
 name every artifact still on the user's disk: each `left_behind` entry a reap reported, every
-group whose reap exited without printing a report at all (named by the `branch` and the worktree
-path from that agent's own result block, since no report exists to read them from), together
+group whose reap exited without printing a report at all (named by the `branch` from that agent's
+own result block, or from its dispatch payload when it left no block, and by the worktree path
+rebuilt from phase 6's template with that group's package and major line, since no report exists
+to read either from), together
 with the worktree directory and branch of every group whose agent ended without a verified open
 PR, which is deliberately never reaped. A leftover under `.claude/worktrees/` sits at a stable
 path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent
