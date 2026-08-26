@@ -3,97 +3,128 @@
 # scripts/common/: detect-scope.sh, select-adapter.sh, score-merge-risk.sh.
 
 Describe 'detect-scope.sh'
-  # The workspace convention is one @-prefixed directory per GitHub owner, with
-  # repositories inside it. Owner directories may nest, so the *innermost*
-  # @-segment is the owner and the next non-@ segment is the repository.
-  Describe 'path classification'
+  # Scope is a fact about git, never about what the directories are named
+  # (issue #134). Every example therefore builds a real repository in a temp
+  # directory whose name carries no convention at all, and sets `origin` to a
+  # literal URL string. Nothing here reaches the network: `remote add` writes
+  # config, `symbolic-ref` writes a local ref, and the `remote show` fallback
+  # for default_branch is never reached while that symref exists.
+  After 'cleanup_fixture'
+
+  # `origin/HEAD` is what a clone records, so every repository that has a
+  # remote here has one too — which is also what keeps the network fallback
+  # out of the suite.
+  make_repo() {
+    TEST_DIR=$(mktemp -d)
+    REPO_DIR="$TEST_DIR/plain-directory-name"
+    mkdir -p "$REPO_DIR"
+    git -C "$REPO_DIR" init -q
+    if [ -n "${1:-}" ]; then
+      git -C "$REPO_DIR" remote add origin "$1"
+      git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    fi
+  }
+
+  # A directory in no repository at all, for the not-in-a-repository answer.
+  make_bare_directory() {
+    TEST_DIR=$(mktemp -d)
+    PLAIN_DIR="$TEST_DIR/@example-org/example-repo"
+    mkdir -p "$PLAIN_DIR"
+  }
+
+  # One nwo per URL form. The parse is the only source of owner and repo, so a
+  # form it cannot reduce to `<owner>/<name>` is a silently wrong target.
+  Describe 'nwo from the origin URL'
     Parameters
-      '/Code/@example-umbrella/@example-org/example-repo'     repo example-org   example-repo
-      '/Code/@SurveyMonkey/skills'                            repo SurveyMonkey   skills
-      '/Code/@example-owner/example-site/src/components'      repo example-owner  example-site
-      '/Code/@SurveyMonkey'                                   org  SurveyMonkey   null
-      '/Code/@example-umbrella/@example-org'                  org  example-org    null
+      'https://github.com/example-org/example-repo.git'  example-org  example-repo
+      'https://github.com/example-org/example-repo'      example-org  example-repo
+      'git@github.com:octo/app.git'                      octo         app
+      'ssh://git@github.com/octo/app.git'                octo         app
     End
 
-    It "maps $1"
-      expected='{"scope":"'"$2"'","owner":"'"$3"'","repo":'
-      case $4 in
-        null) expected="$expected"'null}' ;;
-        *)    expected="$expected"'"'"$4"'"}' ;;
-      esac
-      When call common_jq detect-scope.sh '{scope, owner, repo}' "$1"
+    It "parses $1"
+      make_repo "$1"
+      expected='{"scope":"repo","owner":"'"$2"'","repo":"'"$3"'","nwo":"'"$2"'/'"$3"'"}'
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo}' "$REPO_DIR"
       The status should be success
       The output should equal "$expected"
     End
   End
 
-  It 'builds nwo only when both owner and repo are known'
-    When call common_jq detect-scope.sh '.nwo' '/Code/@SurveyMonkey/skills'
+  It 'reports the origin URL it parsed'
+    make_repo 'git@github.com:octo/app.git'
+    When call common_jq detect-scope.sh '.git_remote' "$REPO_DIR"
     The status should be success
-    The output should equal '"SurveyMonkey/skills"'
+    The output should equal '"git@github.com:octo/app.git"'
   End
 
-  It 'leaves nwo null at org scope'
-    When call common_jq detect-scope.sh '.nwo' '/Code/@SurveyMonkey'
+  # A subdirectory of a checkout is still that checkout. The old path walk
+  # answered this from the segment after the owner directory; git answers it
+  # from the repository the path is in.
+  It 'answers repo scope from inside a subdirectory of the checkout'
+    make_repo 'https://github.com/octo/app.git'
+    mkdir -p "$REPO_DIR/src/components"
+    When call common_jq detect-scope.sh '{scope, nwo}' "$REPO_DIR/src/components"
     The status should be success
-    The output should equal 'null'
+    The output should equal '{"scope":"repo","nwo":"octo/app"}'
   End
 
-  # A path with no owner directory falls back to the authenticated gh user.
-  # Mocked so the spec never touches the network.
-  Describe 'user scope'
-    Mock gh
-      case "$*" in
-        'api user --jq .login') echo 'mocked-login' ;;
-        *) return 1 ;;
-      esac
+  # Being in a checkout is a fact about git and does not depend on the
+  # checkout having a remote anyone can reach, so the scope stays `repo` and
+  # only the identity is null. A caller that needs nwo stops on the null.
+  It 'stays repo scope with a null nwo when the repository has no origin'
+    make_repo
+    When call common_jq detect-scope.sh '{scope, owner, repo, nwo, git_remote}' "$REPO_DIR"
+    The status should be success
+    The output should equal '{"scope":"repo","owner":null,"repo":null,"nwo":null,"git_remote":null}'
+  End
+
+  # The whole point of issue #134: an `@owner/repo` shaped path that is not a
+  # repository gets no scope at all, rather than the org or repo scope the
+  # directory names suggest. Exit stays 0 — this is an answer, and the
+  # orchestrator asks the user what to operate on.
+  Describe 'outside any repository'
+    It 'returns a null scope rather than reading the directory names'
+      make_bare_directory
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo, default_branch}' "$PLAIN_DIR"
+      The status should be success
+      The output should equal '{"scope":null,"owner":null,"repo":null,"nwo":null,"default_branch":null}'
     End
 
-    It 'resolves the owner from the gh session'
-      When call common_jq detect-scope.sh '{scope, owner}' '/Code'
+    It 'echoes the path it was asked about'
+      make_bare_directory
+      When call common_jq detect-scope.sh '.path' "$PLAIN_DIR"
       The status should be success
-      The output should equal '{"scope":"user","owner":"mocked-login"}'
+      The output should equal "\"$PLAIN_DIR\""
+    End
+
+    It 'reports a null scope for a path that does not exist'
+      When call common_jq detect-scope.sh '.scope' '/no/such/directory/anywhere'
+      The status should be success
+      The output should equal 'null'
     End
   End
 
-  Describe 'user scope when gh is unavailable'
-    Mock gh
-      return 1
-    End
-
-    It 'reports a null owner rather than failing'
-      When call common_jq detect-scope.sh '{scope, owner}' '/Code'
-      The status should be success
-      The output should equal '{"scope":"user","owner":null}'
-    End
+  # The optional path argument is the documented test seam (detect-capacity.sh
+  # cites it as precedent); every example above depends on it, and this one
+  # pins that a relative argument is resolved against $PWD rather than passed
+  # to git as-is.
+  It 'accepts a relative path argument as the seam'
+    make_repo 'https://github.com/octo/app.git'
+    cd "$TEST_DIR" || return 1
+    When call common_jq detect-scope.sh '.nwo' 'plain-directory-name'
+    The status should be success
+    The output should equal '"octo/app"'
   End
 
   # Resolved script-side so no agent prompt carries a shell pipeline for it.
   # The local origin/HEAD symref is how clones record the default branch, and
   # reading it needs no network.
-  Describe 'default branch'
-    After 'cleanup_fixture'
-
-    make_repo() {
-      TEST_DIR=$(mktemp -d)
-      REPO_DIR="$TEST_DIR/@octo/app"
-      mkdir -p "$REPO_DIR"
-      git -C "$REPO_DIR" init -q
-      git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
-    }
-
-    It 'resolves default_branch from the origin/HEAD symref'
-      make_repo
-      When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
-      The status should be success
-      The output should equal '"main"'
-    End
-
-    It 'reports null where no repository exists'
-      When call common_jq detect-scope.sh '.default_branch' '/Code/@SurveyMonkey/skills'
-      The status should be success
-      The output should equal 'null'
-    End
+  It 'resolves default_branch from the origin/HEAD symref'
+    make_repo 'https://github.com/octo/app.git'
+    When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
+    The status should be success
+    The output should equal '"main"'
   End
 End
 

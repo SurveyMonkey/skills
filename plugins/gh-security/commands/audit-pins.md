@@ -19,13 +19,17 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
 ```
 
 The audit is **repo-scoped**, and stays so even though alert resolution now reaches org and user
-scope: one `audit-pins` agent tests one repository's pins. If `scope` is `org` or `user`, say that
-this command audits a single repository and ask which one, or ask the user to run it from that
-repo's checkout; then continue from that repo. Never fan out across every repo in the org by hand
-— each pin tested costs an install, and a silent org-wide sweep is not what the user asked for.
+scope: one `audit-pins` agent tests one repository's pins. `scope` is `repo` when the working
+directory is inside a git repository and `null` when it is not; nothing is inferred from what the
+directories are named (issue #134). If `scope` is null, say that this command audits a single
+repository and ask which one, or ask the user to run it from that repo's checkout; then continue
+from that checkout. Never fan out across every repo in an org by hand — each pin tested costs an
+install, and a silent org-wide sweep is not what the user asked for.
 
-If `git_remote` disagrees with `nwo`, trust `git_remote` and say so. If `default_branch` is null,
-report that and stop — the audit worktree is created from it.
+`nwo` is parsed from `origin`'s remote URL and has no other source, so there is nothing to
+cross-check it against: if it is null, this checkout has no usable `origin`; report that and stop,
+since the audit's own PR is opened against that repository. If `default_branch` is null, report
+that and stop — the audit worktree is created from it.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`.
 

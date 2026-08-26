@@ -30,8 +30,9 @@ anything, so where they stop is a different question from where the orchestrator
 ## Diagram 1: the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
-decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
-approval, and phase 8's offer of the groups declined at phase 3.
+decides, and nothing dispatches without one. The ask sites are phase 1's what-to-operate-on when
+the working directory is in no repository, phase 3's how-much, phase 4's batch approval, phase 5's
+once-per-run clone destination, and phase 8's offer of the groups declined at phase 3.
 
 **No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
 into being, and phase 8's offer dispatches further work, the groups declined at phase 3, rather
@@ -48,10 +49,12 @@ for that reason.
 ```mermaid
 flowchart TD
     START["/gh-security:resolve-alerts, or a natural-language ask"] --> P1
-    P1["Phase 1: detect-scope.sh"] --> P1Q{"scope, or the user's own<br/>if the request names a different one"}
-    P1Q -->|repo| P1R{"git_remote agrees with nwo?"}
-    P1Q -->|"org / user"| P2
-    P1R -->|no| P1RT["Trust git_remote, say so"] --> P1D
+    P1["Phase 1: detect-scope.sh"] --> P1Q{"inside a git repository?"}
+    P1Q -->|"yes: repo scope"| P1R{"nwo resolved from origin?"}
+    P1Q -->|"no: scope null"| P1ASK{"ask: this org, my repos,<br/>or one named repo?"}
+    P1ASK -->|"org / user"| P2
+    P1ASK -->|"one named repo"| P2
+    P1R -->|null| STOP0(["Stop: the checkout has no usable origin"])
     P1R -->|yes| P1D{"default_branch resolved?"}
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
     P1D -->|yes| P1E["Resolve env_prefix at repo scope: .envrc at or above<br/>repo_root? The orchestrator's own gh/git/script<br/>calls for the repo run under it from here on"] --> P2
@@ -71,12 +74,13 @@ flowchart TD
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
     P4OK["Batch approved"] --> P5Q{"scope"}
 
-    P5Q -->|repo| P6
-    P5Q -->|"org / user"| P5["Phase 5: per distinct repo in the batch"]
-    P5 --> P5E["Resolve env_prefix per repo from the conventional<br/>path's .envrc; clone, fetch and the calls below run under it"]
-    P5E --> P5A{"checkout at the conventional path?"}
+    P5Q -->|"repo scope from a local checkout"| P6
+    P5Q -->|"org / user, or one named repo"| P5ASK{"ask once for the run: where new clones go —<br/>a directory the user names and keeps,<br/>or a temporary one removed in phase 7"}
+    P5ASK --> P5["Phase 5: per distinct repo in the batch"]
+    P5 --> P5E["Resolve env_prefix per repo from a .envrc at or above the<br/>checkout path; clone, fetch and the calls below run under it"]
+    P5E --> P5A{"checkout already at the destination path?"}
     P5A -->|"git repo exists"| P5F["git -C fetch origin"] --> P5B
-    P5A -->|"nothing there"| P5C["gh repo clone into the @owner convention"] --> P5B
+    P5A -->|"nothing there"| P5C["gh repo clone into the chosen destination"] --> P5B
     P5A -->|"wrong remote / not a repo"| P5X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
     P5B{"detect-scope.sh default_branch?"}
     P5B -->|null| P5Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
@@ -105,7 +109,7 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then deduplicated observations split by type"] --> P8
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then what the reap removed and left,<br/>then the temporary clone destination removed if<br/>phase 5 created one, then deduplicated observations by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
@@ -237,9 +241,9 @@ run.
 
 ```mermaid
 flowchart TD
-    CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from a .envrc<br/>at or above repo_root"] --> CMD1Q{"scope?"}
-    CMD1Q -->|"org / user"| CMD1A["Ask which repo, or ask the user<br/>to run it from that repo's checkout"] --> CMD1D
-    CMD1Q -->|repo| CMD1D{"default_branch resolved?"}
+    CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from a .envrc<br/>at or above repo_root"] --> CMD1Q{"inside a git repository?"}
+    CMD1Q -->|"no: scope null"| CMD1A["Ask which repo, or ask the user<br/>to run it from that repo's checkout"] --> CMD1D
+    CMD1Q -->|"yes: repo scope"| CMD1D{"default_branch resolved?"}
     CMD1D -->|null| CSTOP0(["Stop: default_branch<br/>could not be resolved"])
     CMD1D -->|yes| CMD2{"manifest present?"}
     CMD2 -->|no| CSTOP1(["Stop: nothing this command can audit"])
@@ -368,6 +372,7 @@ Run outcomes for the orchestrator:
 
 | Terminal state | Reached from | What the user sees |
 |---|---|---|
+| No usable `origin` on the checkout | Phase 1, repo scope | Stop before discovery; `nwo` has no other source |
 | Unresolvable default branch | Phase 1, repo scope | Stop before discovery |
 | No actionable groups | Phase 2 | Every skipped group and skipped repo, by name |
 | Batch declined | Phase 4 | Nothing dispatched; no agent ever ran |

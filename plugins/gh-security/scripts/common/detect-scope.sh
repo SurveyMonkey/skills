@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
-# detect-scope.sh — map a working directory to an alert-discovery scope
+# detect-scope.sh — decide whether a path is inside a git repository, and say which
 #
 # Usage: detect-scope.sh [path]        (defaults to $PWD)
 # Output: {scope, owner, repo, nwo, path, git_remote, default_branch}
 #
-# The workspace convention is one `@`-prefixed directory per GitHub owner, with
-# repositories checked out inside it. Owner directories may nest (an umbrella
-# `@org/` containing several `@sub-org/` directories), so the *innermost*
-# `@`-segment is the owner and the next non-`@` segment is the repository.
+# Scope comes from git, never from what the directories are named. Inside a
+# repository (`git rev-parse --show-toplevel` succeeds) the scope is always
+# `repo`, and `nwo` is parsed from `origin`'s remote URL as the only source:
+# the remote is the fact, and a directory layout is at best a convention of
+# one workspace.
 #
-#   ~/Code/@example-umbrella/@example-org/example-repo -> repo  example-org/example-repo
-#   ~/Code/@SurveyMonkey/skills                        -> repo  SurveyMonkey/skills
-#   ~/Code/@SurveyMonkey                               -> org   SurveyMonkey
-#   ~/Code                                             -> user  <authenticated login>
+#   ~/Code/@example-org/example-repo   (origin git@github.com:example-org/example-repo.git)
+#                                      -> repo   example-org/example-repo
+#   ~/projects/example-repo            (origin https://github.com/octo/app)
+#                                      -> repo   octo/app
+#   ~/projects                         (no repository at or above it)
+#                                      -> scope null
 #
-# Phase 1 consumes only repo scope. Org and user are classified now so Phase 3
-# (issue #6) inherits the mapping rather than reimplementing it.
+# **A null `scope` is an answer, not an error** (exit stays 0): the path is in
+# no repository, so there is nothing to infer, and the caller asks the user
+# what to operate on — an org, a user, or a named repo. Guessing org versus
+# user from directory names is exactly what this script no longer does.
+#
+# `owner`, `repo` and `nwo` are also null inside a repository with no `origin`
+# remote, or one whose URL yields no `<owner>/<name>` pair. The scope is still
+# `repo`: being in a checkout is a fact about git, independent of whether the
+# checkout has a remote the caller can reach.
 
 set -euo pipefail
 
@@ -25,57 +35,60 @@ case "$TARGET" in
   *) TARGET="$PWD/$TARGET" ;;
 esac
 
-# Walk the path segments, remembering the last `@`-prefixed one and whatever
-# followed it. Reading left to right means the last match wins, which is the
-# innermost owner directory.
-owner=""
-repo=""
-saved_ifs="$IFS"
-IFS="/"
-for segment in $TARGET; do
-  [ -n "$segment" ] || continue
-  case "$segment" in
-    @*)
-      owner="${segment#@}"
-      repo=""
-      ;;
-    *)
-      # Only the segment immediately following the owner is the repository.
-      # Anything deeper is a subdirectory of that repository.
-      if [ -n "$owner" ] && [ -z "$repo" ]; then
-        repo="$segment"
-      fi
-      ;;
-  esac
-done
-IFS="$saved_ifs"
-
-if [ -n "$owner" ] && [ -n "$repo" ]; then
+# The whole scope decision. A path outside every repository, and a path that
+# does not exist at all, both land here as "not a repository".
+if git -C "$TARGET" rev-parse --show-toplevel >/dev/null 2>&1; then
   scope="repo"
-elif [ -n "$owner" ]; then
-  scope="org"
 else
-  scope="user"
-  # No owner directory in the path, so the only sensible owner is whoever the
-  # active gh session belongs to. Non-fatal: report null and let the caller
-  # decide, rather than failing a scope lookup on a network hiccup.
-  owner=$(gh api user --jq '.login' 2>/dev/null || printf '')
+  scope=""
 fi
 
-# Local, no network. A cross-check for the caller: if the path convention and
-# the actual remote disagree, the path convention is probably wrong.
-git_remote=$(git -C "$TARGET" remote get-url origin 2>/dev/null || printf '')
+owner=""
+repo=""
+git_remote=""
+default_branch=""
 
-# Origin's default branch. Local symref first (set by clone; no network), then
-# `remote show` as the network fallback for checkouts where origin/HEAD was
-# never recorded. Null when both fail — callers that need it must stop, not
-# guess. Resolved here rather than in caller prose so no agent prompt carries
-# a shell pipeline for it.
-default_branch=$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
-  | sed 's@^refs/remotes/origin/@@' || printf '')
-if [ -z "$default_branch" ] && [ -n "$git_remote" ]; then
-  default_branch=$(git -C "$TARGET" remote show origin 2>/dev/null \
-    | sed -n 's/.*HEAD branch: //p' || printf '')
+if [ -n "$scope" ]; then
+  # Local, no network.
+  git_remote=$(git -C "$TARGET" remote get-url origin 2>/dev/null || printf '')
+
+  # Reduce every URL form to `<owner>/<name>`: strip a trailing slash and a
+  # trailing `.git`, drop any `scheme://`, drop everything through the first
+  # colon (the scp-style `git@host:owner/name`, and a `host:port` prefix in a
+  # ssh URL), then take the last two path segments. Anything that does not
+  # yield two segments leaves owner and repo empty rather than guessing.
+  url="${git_remote%/}"
+  url="${url%.git}"
+  url="${url%/}"
+  case "$url" in
+    *://*) url="${url#*://}" ;;
+  esac
+  case "$url" in
+    *:*) url="${url#*:}" ;;
+  esac
+  case "$url" in
+    */*)
+      repo="${url##*/}"
+      rest="${url%/*}"
+      owner="${rest##*/}"
+      ;;
+  esac
+  if [ -z "$owner" ] || [ -z "$repo" ]; then
+    owner=""
+    repo=""
+  fi
+
+  # Origin's default branch. Local symref first (set by clone; no network),
+  # then `remote show` as the network fallback for checkouts where origin/HEAD
+  # was never recorded. Null when both fail — callers that need it must stop,
+  # not guess. Resolved here rather than in caller prose so no agent prompt
+  # carries a shell pipeline for it.
+  default_branch=$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's@^refs/remotes/origin/@@' || printf '')
+  if [ -z "$default_branch" ] && [ -n "$git_remote" ]; then
+    default_branch=$(git -C "$TARGET" remote show origin 2>/dev/null \
+      | sed -n 's/.*HEAD branch: //p' || printf '')
+  fi
 fi
 
 jq -n \
@@ -86,7 +99,7 @@ jq -n \
   --arg remote "$git_remote" \
   --arg default_branch "$default_branch" \
   '{
-     scope: $scope,
+     scope: (if $scope == "" then null else $scope end),
      owner: (if $owner == "" then null else $owner end),
      repo:  (if $repo  == "" then null else $repo  end),
      nwo:   (if $owner != "" and $repo != "" then "\($owner)/\($repo)" else null end),
