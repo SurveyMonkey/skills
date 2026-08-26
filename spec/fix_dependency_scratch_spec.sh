@@ -21,6 +21,12 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
   # `grep -c` exits 1 on no match, which is the expected answer for a shape
   # that must be ABSENT, so this reports the count without failing on it.
   count_in() { grep -c -e "$2" -- "$1" || true; }
+  # A local `phrase_in`, distinct from the other suites' (spec/audit_pins_rules_spec.sh:78,
+  # spec/fix_dependency_branch_spec.sh:24), which flatten without squeezing whitespace and so are
+  # sensitive to the extra leading spaces a bullet's indented continuation introduces after
+  # `tr '\n' ' '`. This one squeezes runs of spaces first, so a fragment spanning a line-wrap
+  # boundary still matches regardless of how the document happens to wrap.
+  phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'the Hard rules cluster names the shared scratchpad for every scratch file'
     # The pre-#133 wording stated only the $WORK-vs-/tmp rule, with the
@@ -38,6 +44,47 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
       When call rule_in "$AGENT" 'Scratch files live under .[$]WORK., never .[/]tmp.'
       The status should be success
       The output should not equal '0'
+    End
+
+    # #133's actual incident: not the sibling's cleanup deleting a file, but a
+    # sibling writing the same predictable name mid-run and clobbering it.
+    # Deleting this sentence must fail the suite (mutation-tested finding).
+    It 'names the predictable-filename hazard, not just cleanup deletion'
+      When call rule_in "$AGENT" \
+        'a predictable filename there lets a sibling overwrite yours mid-run'
+      The status should be success
+      The output should not equal '0'
+    End
+
+    # The load-bearing generalization: without it, the corepack-shim bullet
+    # below is the only place a scratch-file rule exists at all, and a
+    # reader never learns the rule covers every scratch file this flow
+    # writes. Deleting it must fail the suite (mutation-tested finding);
+    # `phrase_in` is used because the sentence spans an indented
+    # continuation line.
+    It 'generalizes to every scratch file and confines all of them to WORK'
+      When call phrase_in "$AGENT" \
+        'every scratch or intermediate file this flow writes, not only the tooling case below: name it under .[$]WORK., never in the shared scratchpad'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The narrower half of the generalization: qualification is required
+    # only for a data/intermediate file whose name could otherwise collide
+    # or be mistaken between runs, not for every artifact universally -- the
+    # corepack shim below is named the same way on every run and needs none.
+    It 'scopes the qualified-name requirement to collision-prone files, not every artifact'
+      When call phrase_in "$AGENT" \
+        'collide or be mistaken between runs.*the phase 5 .why. capture below is one.*also gets its own qualified name'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'carves the fixed-purpose shim out of the qualified-name requirement'
+      When call phrase_in "$AGENT" \
+        'a fixed-purpose tool like the shim below needs no such qualification'
+      The status should be success
+      The output should equal '1'
     End
 
     # The corepack-shim bullet's own collision warning is precedent, not
@@ -76,7 +123,7 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
     End
 
     # The prose reference near phase 5's parent-disclosure paragraph, plus the
-    # write and consume sites above: three literal occurrences total.
+    # write and consume sites above: three lines carry the literal.
     It 'names the package-qualified path three times: write, prose, consume'
       When call rule_in "$AGENT" 'why-<package>\.json'
       The status should be success
@@ -90,6 +137,23 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
       When call count_in "$AGENT" 'why\.json'
       The status should be success
       The output should equal '0'
+    End
+
+    # Finding 1: `<package>` substituted raw breaks the redirect for a scoped
+    # package, since `$WORK/why-@babel/` is never created
+    # (`$WORK/why-@babel/traverse.json`). The doc must say to slash-to-dash
+    # slug the name before it goes into this one filename. Deleting the rule
+    # must fail the suite (mutation-tested finding).
+    It 'states the slash-to-dash slug rule for a scoped package name'
+      When call rule_in "$AGENT" 'Slug .<package>. before it goes into that filename'
+      The status should be success
+      The output should not equal '0'
+    End
+
+    It 'gives the slug rule the concrete scoped-package example'
+      When call rule_in "$AGENT" 'why-@babel-traverse\.json'
+      The status should be success
+      The output should not equal '0'
     End
   End
 End
