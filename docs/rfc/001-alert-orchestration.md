@@ -68,7 +68,7 @@ plugins/gh-security/
     audit-pins.md           # direct entry: run the pin audit on demand
   scripts/
     common/
-      detect-scope.sh       # cwd -> {scope: repo|org|user, owner, repo?}
+      detect-scope.sh       # cwd -> {scope: repo|null, nwo from origin's URL}
       detect-capacity.sh    # cores + total RAM -> concurrency cap (3-6)
       discover-alerts.sh    # extended: --scope repo|org|user
       select-adapter.sh     # alert ecosystem + manifest_path -> adapter
@@ -112,7 +112,7 @@ landed, never dispatched by the orchestrator.
 
 The orchestrator is a skill (`resolve-alerts`) that runs in the main session. Flow:
 
-1. **Detect scope.** `detect-scope.sh` maps the working directory to repo, org, or user scope using the existing `@`-segment convention. The user can override by asking explicitly ("fix alerts across the whole org").
+1. **Detect scope.** ~~`detect-scope.sh` maps the working directory to repo, org, or user scope using the existing `@`-segment convention. The user can override by asking explicitly ("fix alerts across the whole org").~~ **Superseded** ([#134](https://github.com/SurveyMonkey/skills/issues/134)): scope comes from git, not from directory names. `detect-scope.sh` answers `repo` when the working directory is inside a git repository, with `nwo` parsed from `origin`'s remote URL as its only source, and `null` when it is not — a workspace's `@`-owner layout is one machine's convention, and reading it as scope silently gave a plain `~/projects/my-repo` checkout user scope against the wrong target. On a null scope the orchestrator asks the user what to operate on (an org, the user's own repos, or one named repo), and there is no override to make at repo scope: being in a checkout is what repo scope means. Where a new clone lands is asked once per run in step 5's checkout resolution rather than derived from the convention; the convention survives only as a suggested default in that question.
 2. **Discover.** `discover-alerts.sh --scope <scope>` fetches, groups, ranks, and PR-checks alerts (see endpoint strategy below). Output is the existing `{actionable, skipped}` contract, with each group additionally carrying `repo` so cross-repo dispatch works.
 3. **Ask.** Present the ranked table, then AskUserQuestion with three options:
    - **One**: fix only the top-ranked group (current behavior).
@@ -219,7 +219,7 @@ Principle: **agents decide, scripts do.** Anything with one correct procedure be
 
 | Current prose | Becomes | Notes |
 |---|---|---|
-| Phase 1 owner/repo derivation | `detect-scope.sh` | Also classifies repo/org/user |
+| Phase 1 owner/repo derivation | `detect-scope.sh` | From `origin`'s URL; also answers whether the path is in a repository at all ([#134](https://github.com/SurveyMonkey/skills/issues/134)) |
 | Phase 2 PM table | `select-adapter.sh` + adapter `detect` | Routes by alert ecosystem and manifest; emits toolchain commands |
 | Phase 3 | `discover-alerts.sh` | Already exists; gains `--scope` |
 | Phase 6 override JSON shapes | adapter `apply_constraint` | Merges with existing entries; per-toolchain syntax lives in the adapter |

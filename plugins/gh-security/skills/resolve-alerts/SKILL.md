@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -32,28 +32,36 @@ front of them.
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
 ```
 
-`scope` is `repo`, `org`, or `user`, derived from the working directory's `@`-segment convention
-(see the script's own header comment). **The user can override this**: if the request names a
-different scope than the directory implies ("fix alerts across the whole org" while sitting in one
-repo's checkout, or "just this repo" while sitting in the org directory), use the scope the user
-asked for instead of the detected one, and say so.
+**Scope comes from git, never from what the directories are named** (issue #134). `scope` is
+`repo` when the working directory is inside a git repository and `null` when it is not, and the
+script infers nothing from a path segment.
 
-- **repo scope**: use `nwo` for everything downstream. If `git_remote` disagrees with `nwo`, trust
-  `git_remote` and say so; the directory convention is a heuristic and the remote is the fact.
-  Carry `default_branch` from the same output into dispatch. If it is null, the script could not
-  resolve origin's default branch; report that and stop.
-- **org scope**: use `owner` as the org. `nwo` and `default_branch` are null here; they are
-  resolved per repo in phase 5, once discovery says which repos are actually in play.
-- **user scope**: use `owner` (the authenticated login) for display only; `discover-alerts.sh
-  --scope user` always operates on the authenticated user's own repos regardless of what `owner`
-  resolves to. `nwo` and `default_branch` are again resolved per repo in phase 5.
+- **repo scope**: use `nwo` for everything downstream. It is parsed from `origin`'s remote URL,
+  which is now its only source, so there is no directory convention to disagree with it and no
+  tiebreak to make: being in a checkout is what repo scope means, and the remote is what that
+  checkout is. If `nwo` is null the repository has no usable `origin`; report that and stop, since
+  every call downstream names the repo. Carry `default_branch` from the same output into dispatch.
+  If it is null, the script could not resolve origin's default branch; report that and stop.
+- **null scope**: the working directory is in no repository, so there is nothing to detect and
+  nothing to guess. **Ask what to operate on**, with AskUserQuestion in the phase 3 style, and say
+  first that no repository was found at the current path. Three options:
+  - **This org** — org scope; the user names the org, which becomes `owner`.
+  - **My repos** — user scope, the authenticated user's own repositories. `discover-alerts.sh
+    --scope user` always operates on those regardless of what `owner` resolves to, so nothing here
+    needs the login resolved.
+  - **One repo** — repo scope against a repo the user names as `owner/name`, which becomes `nwo`.
 
-**At repo scope, resolve `env_prefix` here, before anything else talks to the repo.** In a
-workspace where `gh`, `git`, and the package manager get their identity from `direnv` exporting
-per-directory config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single
-ambient login, a tool-shell invocation misses that: direnv loads via a shell hook, which
-non-interactive shells do not run, so a bare `gh` or `git` silently resolves the wrong identity or
-a dead registry token. Check whether a `.envrc` is present at or above `repo_root`. If so, this
+  Whatever the answer, `nwo`, `repo_root` and `default_branch` for each repo are resolved in phase
+  5, once discovery says which repos are actually in play and a local checkout exists to read them
+  from.
+
+**At repo scope detected from a local checkout, resolve `env_prefix` here, before anything else
+talks to the repo.** In a workspace where `gh`, `git`, and the package manager get their identity
+from `direnv` exporting per-directory config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry
+token) rather than a single ambient login, a tool-shell invocation misses that: direnv loads via a
+shell hook, which non-interactive shells do not run, so a bare `gh` or `git` silently resolves the
+wrong identity or a dead registry token.
+Check whether a `.envrc` is present at or above `repo_root`. If so, this
 repo's `env_prefix` is `direnv exec <repo_root>`; if not, the repo has none and every command for
 it runs bare. **The prefix covers your own commands, not just the agents'**: from here on, every
 `gh`, `git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
@@ -61,16 +69,16 @@ it runs bare. **The prefix covers your own commands, not just the agents'**: fro
 under it, or discovery itself reads the wrong account's alerts before any dispatch exists. Note
 that `direnv exec <repo_root> <cmd>` runs `<cmd>` in the caller's current directory — it injects
 the environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
-locator a command already carries. At org and user scope there is no `repo_root` yet; resolution
-happens per repo in phase 5.
+locator a command already carries. Wherever there is no `repo_root` yet — org and user scope, and
+a repo the user named when the scope came back null — resolution happens per repo in phase 5.
 The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
 definitions do; add it to every command you run for a repo that resolved one.
 
-**At repo scope, probe the branch namespace here, once, right after `env_prefix` resolves.** Git
-refs are a filesystem namespace, so a remote branch literally named `fix` (`refs/heads/fix`)
-rejects every `fix/*` push with a `(directory file conflict)` — on the field run that surfaced
-this, every agent in the batch finished its whole fix and then failed at push (issue #123). One
-read-only probe, under `env_prefix` when this repo has one:
+**At repo scope detected from a local checkout, probe the branch namespace here, once, right after
+`env_prefix` resolves.** Git refs are a filesystem namespace, so a remote branch literally named
+`fix` (`refs/heads/fix`) rejects every `fix/*` push with a `(directory file conflict)` — on the
+field run that surfaced this, every agent in the batch finished its whole fix and then failed at
+push (issue #123). One read-only probe, under `env_prefix` when this repo has one:
 
 ```bash
 git -C <repo_root> ls-remote --heads origin refs/heads/fix
@@ -94,14 +102,15 @@ group's exact name) is not probed — a push it rejects fails that one group wit
 
 EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
 org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
-ambient credential set a `gh`/`git` invocation resolves, not EMU-ness. A workspace with
+ambient credential set a `gh`/`git` invocation resolves, not EMU-ness, and nothing about it is
+read off a directory name now that scope comes from git. A checkout whose commands run under
 per-directory work credentials (see `env_prefix`, above) can reach an EMU repo's alerts end to
 end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
 list, which RFC 001 never covers.
 
 ## Phase 2: Discover and route
 
-At repo scope:
+At repo scope, when phase 1 detected it from a local checkout:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target> \
@@ -121,8 +130,14 @@ user left it, so it should be on `default_branch` and current; a stale or featur
 misclassify a group (a lockfile the fix agent will branch from `origin/<default_branch>` may
 resolve differently from one sitting on an unrelated branch).
 
-At org and user scope, stop after `select-adapter.sh`: there is no local checkout yet, so line
-reconciliation happens after checkout, in phase 5, per repo.
+Wherever there is no local checkout yet — org and user scope, and a repo the user named when
+phase 1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation
+happens after checkout, in phase 5, per repo. **Discovery for a named repo therefore runs before
+any per-repo environment resolution exists**: phase 5 is where that repo's `env_prefix` and
+`repo_root` are settled, so this call, like every org and user scope discovery call, is made with
+whatever identity your own shell resolves. In a workspace whose credentials are scoped to its
+directories, run this skill from inside the relevant directory so that identity is the right one,
+or expect discovery to read the wrong account's alerts.
 
 `target` is `nwo` at repo scope, `owner` at org scope, and omitted (or the authenticated login) at
 user scope. Returns `actionable` (ranked by severity then EPSS, each group annotated with its
@@ -232,50 +247,91 @@ flat), while at org and user scope it is provisional until phase 5's per-repo pr
 flip a repo's names to the flat `fix-dependabot-...` scheme; say that too.
 
 At org or user scope, name every distinct repo the plan touches and say plainly that a repo not
-yet checked out locally will be cloned under the workspace's `@owner` convention before dispatch
-(phase 5) — this is part of what the approval covers, not a separate consent step.
+yet checked out locally will be cloned before dispatch, into a destination phase 5 asks about
+once: a directory the user names and keeps, or a temporary directory removed at the end of the run
+when every group in it opened a PR, and kept and reported otherwise. Say that the cloning is part
+of what this approval covers, and that the destination question
+is the one thing still to be settled, not a separate consent step for the work itself.
 
 Ask for **one** approval of the whole batch. This is **the last checkpoint before pull requests
 exist**: subagents run unattended from here through PR creation, and no phase after this one asks
 the user to approve anything about a PR. Nothing dispatches without it.
 
-## Phase 5: Resolve local checkouts (org and user scope only)
+## Phase 5: Resolve local checkouts
 
-Skip this phase entirely at repo scope — `repo_root`, `nwo`, and `default_branch` are already
-known from phase 1.
+Skip this phase entirely when phase 1 detected repo scope from a local checkout — `repo_root`,
+`nwo`, and `default_branch` are already known from there. Run it otherwise: at org and user scope,
+and for the single repo a user named when phase 1's scope came back null, which has no local
+checkout either.
+
+**Ask once, before the first repo is resolved, where new clones go.** The machine may have no copy
+of some repo in the batch, and there is no convention that says where a new one belongs, so this
+is **one question for the whole run**, never one per repo: AskUserQuestion in the phase 3 style,
+with two options.
+
+- **A directory I name** — clones land at `<destination>/<repo-name>` and stay there afterwards.
+  Take the directory from the question's free-form answer. When the current directory holds
+  `@`-prefixed owner directories, offer `<current directory>/@<repo-owner>`
+  as the suggested default: a layout the machine already has is a reasonable guess, and it is only
+  ever a default the user can replace. Nothing else in this skill reads that convention.
+- **A temporary directory, cleaned up when every group in it opens a PR** — create it with the
+  exact command below, clone into it, and let phase 7 decide whether it can be removed. The label
+  is literal: phase 7 keeps and reports the whole directory when any group in it ended without a
+  verified open PR, because its worktree and branch are then the only copies of that work.
+
+  ```bash
+  mktemp -d -t gh-security-clones
+  ```
+
+  **Record the path that command printed, verbatim, and treat it as this run's only removable
+  path.** Phase 7 removes exactly that recorded string and refuses any other; the
+  `gh-security-clones` component is what makes a removal recognizable as this skill's own, in the
+  transcript and in the tool grant.
+
+  **Say what this option costs before the user picks it.** Clones under a temporary directory sit
+  outside every workspace directory, so in a workspace whose credentials are scoped to its
+  directories, **a repo cloned there runs without the command prefix your environment requires**,
+  and `gh`, `git` and the package manager resolve whatever identity the bare shell has. The
+  failures that produces are misleading rather than obvious: a fetch that reports the repository
+  as missing, an install that 401s against the wrong registry.
+  **In such a workspace, name a directory instead.**
+
+Ask it even when every repo turns out to already have a checkout; the answer costs one question
+and the alternative is discovering the need for it halfway through resolving repos.
 
 For each **distinct repo** named in the approved batch:
 
 1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same check phase 1 makes
-   at repo scope: whether a `.envrc` is present at or above `repo_root` — the computed checkout
-   path below; in a credential-scoped workspace the `.envrc` sits on the owner directory, which
-   exists before the clone does, so the check works either way. If one is present, the repo's
-   `env_prefix` is `direnv exec <owner-directory>` until the checkout exists and
-   `direnv exec <repo_root>` from then on; if not, the repo has none and its commands run bare.
+   at repo scope: whether a `.envrc` is present at or above `repo_root` — the checkout path
+   resolved below; in a credential-scoped workspace the `.envrc` sits on a directory above the
+   checkout, which exists before the clone does, so the check works either way. If one is present,
+   the repo's `env_prefix` is `direnv exec <the directory the checkout will live in>` until the
+   checkout exists and `direnv exec <repo_root>` from then on; if not, the repo has none and its
+   commands run bare.
    **Your own commands for this repo run under it too**, not just the dispatches: the clone or
    fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
    `classify-lines.sh` in step 5, and
    `pr-status.sh` in phase 8. `direnv exec` injects environment without changing directory, so it
    composes with the `-C` or `cd` locator each of those already carries.
-2. **Resolve or create a local checkout.** The workspace convention is one `@`-prefixed directory
-   per GitHub owner (see `detect-scope.sh`'s header comment). Compute the expected path as
-   `<owner-directory>/<repo-name>`, where `<owner-directory>` is `path` from phase 1 at org scope,
-   or `path/@<repo-owner>` at user scope (the repo's own owner, read from its `repo` field, which
-   at user scope is always the authenticated login).
+2. **Reuse a checkout wherever one is found; clone only what is missing.** The expected path is
+   `<destination>/<repo-name>`, where `<destination>` is the answer to the clone-destination
+   question above, plus any path the user named for this repo specifically in conversation.
    - If a git repository already exists at that path, use it as `repo_root` and refresh it:
-     `git -C <repo_root> fetch origin`.
-   - If nothing exists there, clone it there: `gh repo clone <repo> <repo_root>`. This keeps the
-     new checkout discoverable under the same convention next time, rather than stashing it
-     somewhere temporary.
+     `git -C <repo_root> fetch origin`. A checkout the run did not create is never removed by it,
+     whichever destination was chosen.
+   - If nothing exists there, clone it there: `gh repo clone <repo> <repo_root>`.
    - If a directory exists at that path but is not the expected git repository (wrong remote, or
      not a repository at all), stop and report the conflict for that repo rather than guessing;
-     do not dispatch groups for it.
-3. **Resolve `default_branch`** for that `repo_root`:
+     do not dispatch groups for it. Step 3's `detect-scope.sh` call answers "is this the right
+     repository" from `origin` itself, which is where its `nwo` comes from.
+3. **Resolve `default_branch` and confirm the identity** of that `repo_root`:
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh <repo_root>
    ```
    Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
-   dispatch rather than guessing a branch name.
+   dispatch rather than guessing a branch name. Its `nwo` is read from that checkout's own
+   `origin`, so an `nwo` that is not the repo this batch meant is the wrong-repository conflict
+   from step 2 arriving one step late: report it and exclude that repo's groups the same way.
 4. **Probe that repo's branch namespace** — the same probe phase 1 makes at repo scope, with the
    same semantics, one per repo:
    ```bash
@@ -595,6 +651,34 @@ PR, which is deliberately never reaped. A leftover under `.claude/worktrees/` si
 path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent
 is in flight, but only if this summary says it is there. Nothing left behind is a failure on its
 own; a run that reaped everything says so in one line.
+
+**Then, when phase 5's clone destination was the temporary one, decide whether it can be
+removed.** The condition is the one that gates the reap, for the same reason: **a group whose
+agent ended without a verified open PR has nothing on the remote**, so its worktree and its branch
+are the only copies of that work, and both sit inside this directory. Removing it would destroy
+exactly what phase 6 deliberately preserved.
+
+- **Every group in that destination ended with a verified open PR**, or nothing was cloned into it
+  at all: remove it, and name the directory and the repositories that were in it, in one line.
+  Those clones hold nothing the run still needs, because every pull request lives on the remote,
+  and anything the reap left behind inside goes with the directory, so say that rather than
+  pointing the user at a worktree path that no longer exists.
+- **Any group in it ended any other way** — a failure, a crash, a `no-op`, an unparseable or
+  missing result block, or a `pr_url` whose PR is not open: **keep the whole directory**, and
+  report that it was kept, where it is, and which groups are the reason. It is temporary in the
+  sense that nothing else will reuse it, never in the sense that this skill deletes unpushed work.
+
+The removal is one command, after the last agent has returned, against the path phase 5 recorded
+from `mktemp`, verbatim:
+
+```bash
+rm -rf <the recorded gh-security-clones path>
+```
+
+**Never widen that path and never substitute another**: not a parent of it, not a glob, not a
+directory the user named. A checkout that already existed is reused, never created, so it is never
+inside the removable directory. A run whose clones went to a directory the user named removes
+nothing and says nothing here.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.

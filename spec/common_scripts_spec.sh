@@ -3,94 +3,246 @@
 # scripts/common/: detect-scope.sh, select-adapter.sh, score-merge-risk.sh.
 
 Describe 'detect-scope.sh'
-  # The workspace convention is one @-prefixed directory per GitHub owner, with
-  # repositories inside it. Owner directories may nest, so the *innermost*
-  # @-segment is the owner and the next non-@ segment is the repository.
-  Describe 'path classification'
+  # Scope is a fact about git, never about what the directories are named
+  # (issue #134). Every example therefore builds a real repository in a temp
+  # directory whose name carries no convention at all, and sets `origin` to a
+  # literal URL string. Nothing here reaches the network: `remote add` writes
+  # config, `symbolic-ref` writes a local ref, and the `remote show` fallback
+  # for default_branch is never reached while that symref exists.
+  After 'cleanup_fixture'
+
+  # `origin/HEAD` is what a clone records, so every repository that has a
+  # remote here has one too — which is also what keeps the network fallback
+  # out of the suite.
+  make_repo() {
+    TEST_DIR=$(mktemp -d)
+    REPO_DIR="$TEST_DIR/plain-directory-name"
+    mkdir -p "$REPO_DIR"
+    git -C "$REPO_DIR" init -q
+    if [ -n "${1:-}" ]; then
+      git -C "$REPO_DIR" remote add origin "$1"
+      git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    fi
+  }
+
+  # A directory in no repository at all, for the not-in-a-repository answer.
+  make_bare_directory() {
+    TEST_DIR=$(mktemp -d)
+    PLAIN_DIR="$TEST_DIR/@example-org/example-repo"
+    mkdir -p "$PLAIN_DIR"
+  }
+
+  # One nwo per URL form the parser accepts, one row per branch it takes:
+  # scheme form, scp form, an ssh-config alias, credentials, a port, a trailing
+  # slash, and an owner and name spelled with case and dots. The parse is the
+  # only source of owner and repo, so a form read wrongly is a silently wrong
+  # target rather than a failure.
+  Describe 'nwo from a host-bearing origin URL'
     Parameters
-      '/Code/@example-umbrella/@example-org/example-repo'     repo example-org   example-repo
-      '/Code/@SurveyMonkey/skills'                            repo SurveyMonkey   skills
-      '/Code/@example-owner/example-site/src/components'      repo example-owner  example-site
-      '/Code/@SurveyMonkey'                                   org  SurveyMonkey   null
-      '/Code/@example-umbrella/@example-org'                  org  example-org    null
+      'https://github.com/example-org/example-repo.git'  example-org  example-repo
+      'https://github.com/example-org/example-repo'      example-org  example-repo
+      'git@github.com:octo/app.git'                      octo         app
+      'ssh://git@github.com/octo/app.git'                octo         app
+      'ssh://git@github.com:2222/octo/app.git'           octo         app
+      'https://user:pass@github.com/octo/app.git'        octo         app
+      'gh-alias:octo/app.git'                            octo         app
+      'https://github.com/Owner/My.Repo.git'             Owner        My.Repo
     End
 
-    It "maps $1"
-      expected='{"scope":"'"$2"'","owner":"'"$3"'","repo":'
-      case $4 in
-        null) expected="$expected"'null}' ;;
-        *)    expected="$expected"'"'"$4"'"}' ;;
-      esac
-      When call common_jq detect-scope.sh '{scope, owner, repo}' "$1"
+    It "parses $1"
+      make_repo "$1"
+      expected='{"scope":"repo","owner":"'"$2"'","repo":"'"$3"'","nwo":"'"$2"'/'"$3"'"}'
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo}' "$REPO_DIR"
       The status should be success
       The output should equal "$expected"
     End
   End
 
-  It 'builds nwo only when both owner and repo are known'
-    When call common_jq detect-scope.sh '.nwo' '/Code/@SurveyMonkey/skills'
-    The status should be success
-    The output should equal '"SurveyMonkey/skills"'
-  End
-
-  It 'leaves nwo null at org scope'
-    When call common_jq detect-scope.sh '.nwo' '/Code/@SurveyMonkey'
-    The status should be success
-    The output should equal 'null'
-  End
-
-  # A path with no owner directory falls back to the authenticated gh user.
-  # Mocked so the spec never touches the network.
-  Describe 'user scope'
-    Mock gh
-      case "$*" in
-        'api user --jq .login') echo 'mocked-login' ;;
-        *) return 1 ;;
-      esac
+  # The other half, and the one that matters more. Every row here once produced
+  # a plausible, wrong nwo by taking the last two path segments of whatever it
+  # was handed: a sibling checkout became `src/other-repo`, a self-hosted
+  # subgroup URL became `b/c`, and a relative remote became `../sibling`. With
+  # the old directory-convention cross-check gone, a null nwo is the only stop
+  # condition left, so a fabricated one is dispatched against.
+  Describe 'a remote that names no GitHub repository'
+    Parameters
+      # A sibling checkout added as a local path remote.
+      '/example/src/other-repo'
+      'file:///example/src/other-repo'
+      '../sibling'
+      # Host-bearing, but three path segments: a self-hosted subgroup, not an nwo.
+      'https://gitlab.example.com/a/b/c.git'
+      # Host-bearing, one path segment.
+      'git@github.com:owner'
     End
 
-    It 'resolves the owner from the gh session'
-      When call common_jq detect-scope.sh '{scope, owner}' '/Code'
+    It "answers repo scope with a null nwo for $1"
+      make_repo "$1"
+      expected='{"scope":"repo","owner":null,"repo":null,"nwo":null,"git_remote":"'"$1"'"}'
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo, git_remote}' "$REPO_DIR"
       The status should be success
-      The output should equal '{"scope":"user","owner":"mocked-login"}'
+      The output should equal "$expected"
     End
   End
 
-  Describe 'user scope when gh is unavailable'
-    Mock gh
-      return 1
+  # Two more rows in spirit, written as examples because a `Parameters` row
+  # whose first token ends in `/` reads to ShellCheck as a command name ending
+  # in a slash (SC2287); passing the URL as an argument is the same case
+  # without the false positive, and no directive.
+  It 'ignores a trailing slash on an otherwise complete URL'
+    make_repo 'https://github.com/octo/app/'
+    When call common_jq detect-scope.sh '.nwo' "$REPO_DIR"
+    The status should be success
+    The output should equal '"octo/app"'
+  End
+
+  It 'answers a null nwo for a URL with no path at all'
+    make_repo 'https://github.com/'
+    When call common_jq detect-scope.sh '{scope, nwo}' "$REPO_DIR"
+    The status should be success
+    The output should equal '{"scope":"repo","nwo":null}'
+  End
+
+  It 'reports the origin URL it parsed'
+    make_repo 'git@github.com:octo/app.git'
+    When call common_jq detect-scope.sh '.git_remote' "$REPO_DIR"
+    The status should be success
+    The output should equal '"git@github.com:octo/app.git"'
+  End
+
+  # A subdirectory of a checkout is still that checkout. The old path walk
+  # answered this from the segment after the owner directory; git answers it
+  # from the repository the path is in.
+  It 'answers repo scope from inside a subdirectory of the checkout'
+    make_repo 'https://github.com/octo/app.git'
+    mkdir -p "$REPO_DIR/src/components"
+    When call common_jq detect-scope.sh '{scope, nwo}' "$REPO_DIR/src/components"
+    The status should be success
+    The output should equal '{"scope":"repo","nwo":"octo/app"}'
+  End
+
+  # Being in a checkout is a fact about git and does not depend on the
+  # checkout having a remote anyone can reach, so the scope stays `repo` and
+  # only the identity is null. A caller that needs nwo stops on the null.
+  It 'stays repo scope with a null nwo when the repository has no origin'
+    make_repo
+    When call common_jq detect-scope.sh '{scope, owner, repo, nwo, git_remote}' "$REPO_DIR"
+    The status should be success
+    The output should equal '{"scope":"repo","owner":null,"repo":null,"nwo":null,"git_remote":null}'
+  End
+
+  # The whole point of issue #134: an `@owner/repo` shaped path that is not a
+  # repository gets no scope at all, rather than the org or repo scope the
+  # directory names suggest. Exit stays 0 — this is an answer, and the
+  # orchestrator asks the user what to operate on.
+  Describe 'outside any repository'
+    It 'returns a null scope rather than reading the directory names'
+      make_bare_directory
+      When call common_jq detect-scope.sh '{scope, owner, repo, nwo, default_branch}' "$PLAIN_DIR"
+      The status should be success
+      The output should equal '{"scope":null,"owner":null,"repo":null,"nwo":null,"default_branch":null}'
     End
 
-    It 'reports a null owner rather than failing'
-      When call common_jq detect-scope.sh '{scope, owner}' '/Code'
+    It 'echoes the path it was asked about'
+      make_bare_directory
+      When call common_jq detect-scope.sh '.path' "$PLAIN_DIR"
       The status should be success
-      The output should equal '{"scope":"user","owner":null}'
+      The output should equal "\"$PLAIN_DIR\""
     End
+
+    It 'reports a null scope for a path that does not exist'
+      When call common_jq detect-scope.sh '.scope' '/no/such/directory/anywhere'
+      The status should be success
+      The output should equal 'null'
+    End
+  End
+
+  # The optional path argument is the documented test seam (detect-capacity.sh
+  # cites it as precedent); every example above depends on it, and this one
+  # pins that a relative argument is resolved against $PWD rather than passed
+  # to git as-is.
+  It 'accepts a relative path argument as the seam'
+    make_repo 'https://github.com/octo/app.git'
+    cd "$TEST_DIR" || return 1
+    When call common_jq detect-scope.sh '.nwo' 'plain-directory-name'
+    The status should be success
+    The output should equal '"octo/app"'
   End
 
   # Resolved script-side so no agent prompt carries a shell pipeline for it.
   # The local origin/HEAD symref is how clones record the default branch, and
   # reading it needs no network.
-  Describe 'default branch'
-    After 'cleanup_fixture'
+  It 'resolves default_branch from the origin/HEAD symref'
+    make_repo 'https://github.com/octo/app.git'
+    When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
+    The status should be success
+    The output should equal '"main"'
+  End
 
-    make_repo() {
+  # A bare repository has no work tree, so `rev-parse --show-toplevel` fails
+  # and the scope is null. That is the right answer rather than an oversight:
+  # every downstream consumer branches, installs and validates in a tree, and
+  # there is none here.
+  It 'reports a null scope for a bare repository'
+    TEST_DIR=$(mktemp -d)
+    git init -q --bare "$TEST_DIR/origin.git"
+    When call common_jq detect-scope.sh '{scope, nwo}' "$TEST_DIR/origin.git"
+    The status should be success
+    The output should equal '{"scope":null,"nwo":null}'
+  End
+
+  # The opposite case, and the one the fix agents live in: a linked worktree
+  # resolves its own toplevel and shares the repository's origin, so it is
+  # repo scope with the same nwo as the checkout it was added from.
+  It 'answers repo scope from inside a linked worktree'
+    make_repo 'https://github.com/octo/app.git'
+    git -C "$REPO_DIR" config user.email 'spec@example.invalid'
+    git -C "$REPO_DIR" config user.name 'spec'
+    git -C "$REPO_DIR" commit -q --allow-empty -m init
+    git -C "$REPO_DIR" worktree add -q "$TEST_DIR/linked" -b topic
+    When call common_jq detect-scope.sh '{scope, nwo}' "$TEST_DIR/linked"
+    The status should be success
+    The output should equal '{"scope":"repo","nwo":"octo/app"}'
+  End
+
+  # The network fallback, exercised without a network: `origin` is a bare
+  # repository on the same filesystem, so `remote show origin` answers locally
+  # and its `HEAD branch:` line is the only source left once the symref is
+  # gone. That sed branch is otherwise never executed by the suite, and it is
+  # what stands between a checkout cloned before origin/HEAD was recorded and
+  # a run that stops for a null default_branch.
+  Describe 'default_branch when origin/HEAD was never recorded'
+    make_clone() {
       TEST_DIR=$(mktemp -d)
-      REPO_DIR="$TEST_DIR/@octo/app"
-      mkdir -p "$REPO_DIR"
-      git -C "$REPO_DIR" init -q
-      git -C "$REPO_DIR" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+      git init -q --bare "$TEST_DIR/origin.git"
+      # Pin the bare repository's own HEAD to the branch the push below creates.
+      # `git init --bare` points HEAD at the ambient init.defaultBranch, which
+      # differs across machines (Apple Git compiles in main, CI runners default
+      # to master); a dangling HEAD makes `remote show` answer "(unknown)".
+      git -C "$TEST_DIR/origin.git" symbolic-ref HEAD refs/heads/main
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/checkout" 2>/dev/null
+      CLONE_DIR="$TEST_DIR/checkout"
+      git -C "$CLONE_DIR" config user.email 'spec@example.invalid'
+      git -C "$CLONE_DIR" config user.name 'spec'
+      git -C "$CLONE_DIR" commit -q --allow-empty -m init
+      git -C "$CLONE_DIR" push -q -u origin HEAD:main
+      git -C "$CLONE_DIR" symbolic-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
     }
 
-    It 'resolves default_branch from the origin/HEAD symref'
-      make_repo
-      When call common_jq detect-scope.sh '.default_branch' "$REPO_DIR"
+    It 'falls back to remote show'
+      make_clone
+      When call common_jq detect-scope.sh '.default_branch' "$CLONE_DIR"
       The status should be success
       The output should equal '"main"'
     End
 
-    It 'reports null where no repository exists'
-      When call common_jq detect-scope.sh '.default_branch' '/Code/@SurveyMonkey/skills'
+    # And when the fallback cannot answer either — here because origin points
+    # at a path that is not a repository — the field is null rather than a
+    # guessed branch name. Callers that need it stop on the null.
+    It 'reports null when the fallback fails too'
+      make_clone
+      git -C "$CLONE_DIR" remote set-url origin "$TEST_DIR/absent.git"
+      When call common_jq detect-scope.sh '.default_branch' "$CLONE_DIR"
       The status should be success
       The output should equal 'null'
     End
