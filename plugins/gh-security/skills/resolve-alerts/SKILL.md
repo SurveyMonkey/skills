@@ -56,19 +56,32 @@ script infers nothing from a path segment.
   from.
 
 **At repo scope detected from a local checkout, resolve `env_prefix` here, before anything else
-talks to the repo.** In a workspace where `gh`, `git`, and the package manager get their identity
-from `direnv` exporting per-directory config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry
-token) rather than a single ambient login, a tool-shell invocation misses that: direnv loads via a
-shell hook, which non-interactive shells do not run, so a bare `gh` or `git` silently resolves the
-wrong identity or a dead registry token.
-Check whether a `.envrc` is present at or above `repo_root`. If so, this
-repo's `env_prefix` is `direnv exec <repo_root>`; if not, the repo has none and every command for
-it runs bare. **The prefix covers your own commands, not just the agents'**: from here on, every
-`gh`, `git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
-`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 8 — runs
-under it, or discovery itself reads the wrong account's alerts before any dispatch exists. Note
-that `direnv exec <repo_root> <cmd>` runs `<cmd>` in the caller's current directory — it injects
-the environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
+talks to the repo.** `env_prefix` is **a command prefix the environment requires for repo-targeted
+commands** — nothing more is known or assumed about it here. It is optional, it is opaque, and it
+is never derived: **take it from your session context.** When the CLAUDE.md or rules covering this
+repo's directory state that commands in that tree need a prefix, that stated prefix is this repo's
+`env_prefix`, used verbatim. When no such context exists — the ordinary single-login case — the
+repo has none and every command for it runs bare, with no wrapping invented here.
+
+**Any context that names a wrapper command for tools run in a directory tree is such a statement**,
+however it is phrased. It does not have to use the word `env_prefix`, name this plugin, or mention
+security work: a rule saying that commands in some tree must be run through a wrapper is stating
+this repo's `env_prefix` whenever the repo sits in that tree. Where the stated prefix takes a
+directory, instantiate it against this repo's directory, which already exists at repo scope.
+Recognizing one is your job and missing one is silent, which is what the failure class below
+describes.
+
+The failure class the seam guards against is real and manager-agnostic: where `gh`, `git`, and the
+package manager get their identity per directory rather than from a single ambient login, the tools
+that arrange that load through interactive shell hooks that a non-interactive tool shell never
+runs, so a bare `gh`, `git`, or install silently resolves the wrong identity or a dead registry
+token. **The prefix covers your own commands, not just the agents'**: from here on, every `gh`,
+`git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
+`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 6's reap
+step and again in phase 8 — runs under it, or discovery itself reads the wrong account's alerts
+before any dispatch exists. Note
+that `<env_prefix> <cmd>` runs `<cmd>` in the caller's current directory — it injects the
+environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
 locator a command already carries. Wherever there is no `repo_root` yet — org and user scope, and
 a repo the user named when the scope came back null — resolution happens per repo in phase 5.
 The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
@@ -103,8 +116,8 @@ group's exact name) is not probed — a push it rejects fails that one group wit
 EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
 org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
 ambient credential set a `gh`/`git` invocation resolves, not EMU-ness, and nothing about it is
-read off a directory name now that scope comes from git. A checkout whose commands run under
-per-directory work credentials (see `env_prefix`, above) can reach an EMU repo's alerts end to
+read off a directory name now that scope comes from git. A session whose `gh` invocations resolve
+credentials that can see an EMU repo (see `env_prefix`, above) reaches that repo's alerts end to
 end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
 list, which RFC 001 never covers.
 
@@ -301,18 +314,21 @@ and the alternative is discovering the need for it halfway through resolving rep
 
 For each **distinct repo** named in the approved batch:
 
-1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same check phase 1 makes
-   at repo scope: whether a `.envrc` is present at or above `repo_root` — the checkout path
-   resolved below; in a credential-scoped workspace the `.envrc` sits on a directory above the
-   checkout, which exists before the clone does, so the check works either way. If one is present,
-   the repo's `env_prefix` is `direnv exec <the directory the checkout will live in>` until the
-   checkout exists and `direnv exec <repo_root>` from then on; if not, the repo has none and its
-   commands run bare.
+1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same resolution phase 1
+   makes at repo scope, and by the same rule: whatever prefix your session context states for the
+   directory this repo's checkout will live in is that repo's `env_prefix`, taken verbatim; where
+   the context states none, the repo has none and its commands run bare. Nothing is probed here
+   either, so no checkout has to exist for the statement to be read. **Where the stated prefix
+   takes a directory, instantiate it against the destination directory this run chose, never
+   against the checkout path.** Phase 1 can name the checkout because it has one; here the checkout
+   is what step 2 is about to create under this very prefix, and a prefix instantiated against a
+   path that does not exist yet fails on that clone. The destination exists first and contains the
+   checkout, so the environment it selects is the one the checkout inherits.
    **Your own commands for this repo run under it too**, not just the dispatches: the clone or
    fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
-   `classify-lines.sh` in step 5, and
-   `pr-status.sh` in phase 8. `direnv exec` injects environment without changing directory, so it
-   composes with the `-C` or `cd` locator each of those already carries.
+   `classify-lines.sh` in step 5, and `pr-status.sh` in phase 6's reap step and again in phase 8.
+   The prefix injects environment without changing directory, so it composes with the `-C` or `cd`
+   locator each of those already carries.
 2. **Reuse a checkout wherever one is found; clone only what is missing.** The expected path is
    `<destination>/<repo-name>`, where `<destination>` is the answer to the clone-destination
    question above, plus any path the user named for this repo specifically in conversation.
@@ -395,12 +411,12 @@ the registry preflight next and to every group dispatched for the repo — and o
 the dispatches of a repo that resolved none.
 
 **Probe that repo's registry, once, before its first dispatch.** The field run this contract comes
-from began with a dead CodeArtifact token: all 33 agents would have failed at install, one at a
+from began with a dead private-registry token: all 33 agents would have failed at install, one at a
 time, each burning a slot before reporting a confusing failure. Resolve the package manager the
 same way `classify-lines.sh` and the fix agent do — `<adapter_path> detect` gives `pm` and
 `pm_exec` — and run one read-only probe from inside `repo_root`, under `env_prefix` when this repo
-has one (bare when not). The `cd` is load-bearing and `env_prefix` cannot replace it: `direnv
-exec` injects environment without changing directory, so a probe without the `cd` runs in your
+has one (bare when not). The `cd` is load-bearing and `env_prefix` cannot replace it: the prefix
+injects environment without changing directory, so a probe without the `cd` runs in your
 working directory, resolves the wrong `.npmrc`/`.yarnrc.yml`, and lets a dead private-registry
 token probe green against the public registry — the exact failure this preflight exists to catch;
 yarn berry additionally errors outside a project, which would exclude every berry repo. Probe a

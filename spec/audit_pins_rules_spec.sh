@@ -526,8 +526,8 @@ Describe 'the rules that gate the removal PR'
 
 End
 
-# #106: field-tested against an EMU repo with directory-scoped credentials
-# (direnv exporting GH_CONFIG_DIR, GIT_CONFIG_GLOBAL, a registry token). A
+# #106: field-tested against a repo whose commands resolve their identity from
+# a per-directory environment rather than a single ambient login. A
 # tool-shell gh/git silently resolved the wrong identity until the
 # orchestrator hand-injected an ad-hoc ENVIRONMENT paragraph into every
 # dispatch; this makes that carriage contractual instead, as an optional
@@ -548,13 +548,13 @@ Describe 'the env_prefix dispatch contract (#106)'
 
     It "states the one env_prefix rule in $1"
       When call phrase_in "$1" \
-        "one rule for carrying a repo's directory-scoped credentials"
+        "one rule for carrying a repo's environment"
       The status should be success
       The output should equal '1'
     End
 
     # The absent half is load-bearing on its own: without it an agent invents
-    # a direnv wrapping of its own for a repo the dispatcher judged ordinary,
+    # a wrapping of its own for a repo whose dispatch carried no prefix,
     # which is the ad-hoc behavior the contract replaced.
     It "runs bare when env_prefix is absent, per $1"
       When call phrase_in "$1" \
@@ -568,25 +568,26 @@ Describe 'the env_prefix dispatch contract (#106)'
     # missing input failure.
     It "declares env_prefix OPTIONAL in the input contract of $1"
       When call phrase_in "$1" \
-        'OPTIONAL\. A literal command prefix (e\.g\. .direnv exec <repo_root>.) that carries'
+        'OPTIONAL\. A literal, opaque command prefix that this repo.s environment requires'
       The status should be success
       The output should equal '1'
     End
   End
 
-  # The .envrc-presence check is the trigger for the whole contract: without
-  # this sentence no dispatcher ever resolves a prefix and every pin below it
-  # guards a field nothing populates. SKILL.md carries it twice (phase 1 at
-  # repo scope, phase 5 per repo at org and user scope) and the audit command
-  # once (step 1).
-  Describe 'the .envrc trigger sentence at every dispatch site'
+  # Session context is the trigger for the whole contract: without this
+  # sentence no dispatcher ever resolves a prefix and every pin below it
+  # guards a field nothing populates. It replaced a probe for one environment
+  # manager's config file (#135). SKILL.md carries it twice (phase 1 at repo
+  # scope, phase 5 per repo at org and user scope) and the audit command once
+  # (step 1).
+  Describe 'the session-context trigger sentence at every dispatch site'
     Parameters
       "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md" 2
       "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md" 1
     End
 
-    It "checks for a .envrc at or above repo_root in $1"
-      When call phrase_in "$1" 'a .\.envrc. is present at or above .repo_root.'
+    It "takes the prefix from session context in $1"
+      When call phrase_in "$1" 'your session context'
       The status should be success
       The output should equal "$2"
     End
@@ -607,7 +608,7 @@ Describe 'the env_prefix dispatch contract (#106)'
     The output should equal '1'
   End
 
-  # The probe's composed shape is the #106 lesson in one line: direnv exec
+  # The probe's composed shape is the #106 lesson in one line: the prefix
   # does not chdir, so a probe without the cd resolves the wrong
   # .npmrc/.yarnrc.yml and a dead private token probes green against the
   # public registry. One occurrence per package-manager snippet.

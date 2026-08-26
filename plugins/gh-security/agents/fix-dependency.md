@@ -41,8 +41,8 @@ Your dispatch prompt provides everything; re-discover nothing:
 - `default_branch` — the repository's default branch
 - `repo_root` — absolute path to the user's checkout
 - `scripts_dir` — absolute path to the plugin's `scripts/common/` directory
-- `env_prefix` — OPTIONAL. A literal command prefix (e.g. `direnv exec <repo_root>`) that carries
-  this repo's directory-scoped credentials. See Hard rules for what it changes.
+- `env_prefix` — OPTIONAL. A literal, opaque command prefix that this repo's environment requires
+  for repo-targeted commands. See Hard rules for what it changes.
 
 If any of these except `env_prefix` is missing from your prompt, return a failure result (phase
 `input`) instead of guessing.
@@ -113,20 +113,21 @@ writing the PR prose. Do not reimplement what the scripts do.
   "Repo-global git state belongs to the orchestrator".
 - **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
   package-manager, and adapter-script invocation** — and it composes with the locator each
-  command already carries, going **after** the `cd`: `direnv exec` injects environment without
+  command already carries, going **after** the `cd`: the prefix injects environment without
   changing directory, so the locator still does that work. The composed shapes are
   `<env_prefix> gh pr create ...`, `<env_prefix> git -C "$WORK/fix" commit ...`,
   `cd "$WORK/fix" && <env_prefix> $ADAPTER install`, `cd "$WORK/fix" && <env_prefix> pnpm
-  install`. Never `<env_prefix> cd ...` — `direnv exec` cannot exec a shell builtin — and never a
-  bare `<env_prefix> $ADAPTER install`, which runs in whatever directory the shell starts in and
-  installs into the user's checkout. It is a literal string your dispatcher resolved for this
-  repo (typically `direnv exec <repo_root>`); prepend it verbatim, do not re-derive it. This is the
-  one rule for carrying a repo's directory-scoped credentials — there is no separate fallback rule
-  to reconcile it with. **When `env_prefix` is absent, run every one of those commands bare, with
-  no `direnv` wrapping of your own.** An absent `env_prefix` means your dispatcher judged this
-  repo's credentials to be ordinary and ambient (see `scripts/CLAUDE.md`, "Directory-scoped
-  credentials travel as `env_prefix`" for why that judgment matters and what a wrong one looks
-  like: `git fetch` reporting `repository not found`, `git commit` failing on a missing author
+  install`. Never `<env_prefix> cd ...` — the prefix wraps a command, not a shell builtin — and
+  never a bare `<env_prefix> $ADAPTER install`, which runs in whatever directory the shell starts
+  in and installs into the user's checkout. **It is opaque to you**: your dispatcher resolved it
+  once for this repo, before your dispatch existed, and that resolution is final, so
+  prepend it verbatim, do not re-derive it, and never reason about what it
+  contains. This is the one rule for carrying a repo's environment — there is no separate fallback
+  rule to reconcile it with. **When `env_prefix` is absent, run every one of those commands bare,
+  with no wrapping of your own.** An absent `env_prefix` means your dispatcher was given none,
+  which is the ordinary ambient-login case (see `scripts/CLAUDE.md`, "`env_prefix` is an opaque,
+  optional seam" for why the field matters and what a missing one looks like: `git fetch`
+  reporting `repository not found`, `git commit` failing on a missing author
   identity, or a package-manager install 401ing against the wrong registry token). The snippets
   below omit `env_prefix` for readability; compose it into every one whenever your dispatch
   carried it.

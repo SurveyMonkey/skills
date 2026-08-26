@@ -37,16 +37,18 @@ that and stop — the audit worktree is created from it.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`.
 
-**Resolve `env_prefix` here too, before anything else talks to the repo.** In a workspace where
-`gh`, `git`, and the package manager get their identity from `direnv` exporting per-directory
-config (`GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, a registry token) rather than a single ambient
-login, a tool-shell invocation misses that: direnv loads via a shell hook, which non-interactive
-shells do not run, so a bare `gh` or `git` silently resolves the wrong identity. Check whether a
-`.envrc` is present at or above `repo_root`. If so, `env_prefix` is `direnv exec <repo_root>`,
-and every `gh`, `git`, and plugin-script invocation this command makes — step 3's `gh pr list`,
-step 7's `pr-status.sh` — runs under it; `direnv exec` injects environment without changing
-directory, so it composes with, never replaces, whatever `cd` or `-C` locator a command already
-carries. If not, there is no `env_prefix` and those commands run bare.
+**Resolve `env_prefix` here too, before anything else talks to the repo.** `env_prefix` is a
+command prefix the environment requires for repo-targeted commands: optional, opaque, and never
+derived. **Take it from your session context** — when the CLAUDE.md or rules covering this repo's
+directory state that commands in that tree need a prefix, that stated prefix is `env_prefix`, used
+verbatim; when no such context exists, there is none and those commands run bare. The failure it
+guards against is manager-agnostic: where `gh`, `git`, and the package manager get their identity
+per directory rather than from a single ambient login, the tools that arrange that load through
+interactive shell hooks that a non-interactive tool shell never runs, so a bare `gh` or `git`
+silently resolves the wrong identity. Every `gh`, `git`, and plugin-script invocation this command
+makes — step 3's `gh pr list`, step 7's `pr-status.sh` — runs under it; the prefix injects
+environment without changing directory, so it composes with, never replaces, whatever `cd` or `-C`
+locator a command already carries.
 
 ## 2. Check there is something to audit, then resolve the adapter
 
