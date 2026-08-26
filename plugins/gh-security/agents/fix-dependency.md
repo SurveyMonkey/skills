@@ -1079,7 +1079,7 @@ End your final message with exactly one fenced JSON block:
 - `status` is `success`, `no-op`, or `failure`. Exactly one of `no_op` and `failure` is non-null,
   and both are `null` on success.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
-  `null`, and `failure` is `{"phase": "input | worktree | baseline | classify | install | validate | push | pr", "detail": "..."}`.
+  `null`, and `failure` is `{"phase": "input | worktree | baseline | classify | apply | install | validate | push | pr", "detail": "..."}`.
   Everything you completed before stopping still gets reported (`observations`).
 - On a no-op (phase 4's already-fixed case): `"status": "no-op"`, `pr_url`, `action` and `risk`
   are `null`, `resolved_version` is what is installed, and

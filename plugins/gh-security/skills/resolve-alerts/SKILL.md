@@ -524,6 +524,13 @@ through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the 
 bump of one of the peer parents `detail` quotes, or a real dependency declaration. Both are
 lockfile regeneration, both human work ([#103](https://github.com/SurveyMonkey/skills/issues/103)).
 
+A `phase: "apply"` failure whose `detail` names the shared-parent shape gets its own Notes label
+(`shared parent, no reachable override`) rather than the generic `failure: apply`: the root
+manifest's own spec for that parent also admits its copies on other major lines, or a pre-existing
+bare override for the package under that parent pins a different line, so the adapter wrote nothing
+and no install ran. The remedy is a bump of the shared parent, or reconciling the existing override
+by hand, both human work ([#132](https://github.com/SurveyMonkey/skills/issues/132)).
+
 A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file
 conflict` push rejection) gets its own Notes label (`branch-namespace collision (preflight
 miss)`): the namespace probe in phase 1 or phase 5 said `slash`, but this group's exact `fix/*`
