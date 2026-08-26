@@ -33,8 +33,32 @@ Describe 'classify-lines.sh'
     cat > "$STUB" <<'STUB_EOF'
 #!/bin/sh
 verb=$1; shift
-if [ -n "${CALL_LOG:-}" ]; then printf '%s %s\n' "$verb" "${1:-}" >> "$CALL_LOG"; fi
+if [ -n "${CALL_LOG:-}" ]; then printf '%s %s\n' "$verb" "$*" >> "$CALL_LOG"; fi
 case "$verb" in
+  detect)
+    printf '{"pm":"npm","ecosystem":"npm","override_location":"%s"}\n' "${STUB_LOC:-overrides}" ;;
+  declared_ranges)
+    # $1 is --line, $2 the major, $3 the package.
+    case "$3 $2" in
+      "duped 1")
+        printf '{"parents_read":["alpha"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["beta"]}\n' ;;
+      "duped 2")
+        printf '{"parents_read":["beta"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["alpha"]}\n' ;;
+      "sep-ok 5")
+        printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}\n' ;;
+      "sep-ok 1")
+        printf '{"parents_read":[],"parents_without_range":[],"parents_unreadable":["minimatch"],"parents_other_lines":["minimatch@10.2.5"]}\n' ;;
+      "same-copy 5")
+        printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}\n' ;;
+      "same-copy 1")
+        printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch@3.1.5"]}\n' ;;
+      "dr-broken "*)
+        printf '{"error":"declared_ranges: parser refused the lockfile"}\n' >&2
+        exit 1 ;;
+      *)
+        printf '{"error":"unexpected declared_ranges %s"}\n' "$*" >&2
+        exit 1 ;;
+    esac ;;
   resolved_versions)
     case "$1" in
       path-to-regexp)
@@ -60,6 +84,12 @@ case "$verb" in
         printf '{"pm":"npm","package":"vbuild","present":true,"count":1,"versions":[{"version":"v6.2.0+build.99"}],"lockfile_entries":10}\n' ;;
       duped)
         printf '{"pm":"npm","package":"duped","present":true,"count":2,"versions":[{"version":"1.5.0"},{"version":"2.5.0"}],"lockfile_entries":10}\n' ;;
+      sep-ok)
+        printf '{"pm":"npm","package":"sep-ok","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
+      same-copy)
+        printf '{"pm":"npm","package":"same-copy","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
+      dr-broken)
+        printf '{"pm":"npm","package":"dr-broken","present":true,"count":2,"versions":[{"version":"1.1.11"},{"version":"5.0.5"}],"lockfile_entries":10}\n' ;;
       partial-a)
         printf '{"pm":"npm","package":"partial-a","present":true,"count":2,"versions":[{"version":"1.0.0"},{"version":"9.9.9-badcompare"}],"lockfile_entries":10}\n' ;;
       partial-b)
@@ -350,6 +380,80 @@ STUB_EOF
       When call duped_call_count
       The status should be success
       The output should equal '1'
+    End
+  End
+
+  # Issue #132: a package resolved on several major lines whose sibling
+  # lines share a parent name. The field case is brace-expansion at majors
+  # 1/2/5 under minimatch copies at two majors: every group's bare npm parent
+  # key dragged the sibling lines, each agent burned a worktree + install +
+  # validate cycle, and all failed closed on the same fact. apply_constraint
+  # now writes version-qualified parent keys for npm and pnpm, so the ONLY
+  # shapes withdrawn here are the ones qualification cannot express: any
+  # shared parent name under yarn `resolutions` (its key cannot carry a
+  # parent version), and a single parent copy resolving the package on two
+  # majors at once (the entry sits in parents_other_lines of EVERY line's
+  # query). Everything else must stay actionable. The verdict is asserted
+  # through the routing, exactly like the requires_major_bump examples.
+  Describe 'the cross-line shared-parent collision (issue #132)'
+    It 'keeps a qualification-separable shared parent actionable'
+      When call classify '{actionable: [.actionable[] | {package, line_status}], skipped_count: (.skipped | length), errs: .classify_errors}' sep-ok 5
+      The status should be success
+      The output should equal '{"actionable":[{"package":"sep-ok","line_status":"resolved"}],"skipped_count":1,"errs":[]}'
+    End
+
+    It 'skips the same-copy-on-two-majors shape with the shared-parent reason'
+      When call classify '{actionable_count: (.actionable | length), moved: [.skipped[] | select(.package == "same-copy") | {package, reason, line_status, collision_parents}]}' same-copy 5
+      The status should be success
+      The output should equal '{"actionable_count":0,"moved":[{"package":"same-copy","reason":"shared parent across major lines","line_status":"cross_line_collision","collision_parents":["minimatch"]}]}'
+    End
+
+    # yarn resolutions cannot version-qualify at all, so the separable shape
+    # npm keeps actionable is the collapse shape there.
+    classify_yarn() {
+      STUB_LOC=resolutions
+      export STUB_LOC
+      classify "$@"
+      _st=$?
+      unset STUB_LOC
+      return "$_st"
+    }
+
+    It 'skips any shared parent name under yarn resolutions'
+      When call classify_yarn '{actionable_count: (.actionable | length), moved: [.skipped[] | select(.package == "sep-ok") | {reason, collision_parents}]}' sep-ok 5
+      The status should be success
+      The output should equal '{"actionable_count":0,"moved":[{"reason":"shared parent across major lines","collision_parents":["minimatch"]}]}'
+    End
+
+    # Withdrawing on a broken read is this stage's one unsafe act: a failing
+    # declared_ranges leaves the group dispatched (validate fail-closes
+    # later) and names what broke.
+    It 'keeps the group actionable and names the error when declared_ranges fails'
+      When call classify '{statuses: [.actionable[].line_status], errs: [.classify_errors[] | {package, error}]}' dr-broken 5
+      The status should be success
+      The output should equal '{"statuses":["resolved"],"errs":[{"package":"dr-broken","error":"{\"error\":\"declared_ranges: parser refused the lockfile\"}"}]}'
+    End
+
+    # Two groups of the same package must not double the new reads: one
+    # detect per adapter, one declared_ranges per (package, line), exactly
+    # like the resolved_versions cache above.
+    collision_call_counts() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [
+            {package: "sep-ok", major_line: "1", ecosystem: "npm", adapter_path: $a},
+            {package: "sep-ok", major_line: "5", ecosystem: "npm", adapter_path: $a}],
+          skipped: []}' \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" >/dev/null
+      printf 'detect=%s line1=%s line5=%s\n' \
+        "$(grep -c '^detect $' "$CALL_LOG")" \
+        "$(grep -c -- '^declared_ranges --line 1 sep-ok$' "$CALL_LOG")" \
+        "$(grep -c -- '^declared_ranges --line 5 sep-ok$' "$CALL_LOG")"
+    }
+
+    It 'caches the detect and declared_ranges reads across sibling groups'
+      When call collision_call_counts
+      The status should be success
+      The output should equal 'detect=1 line1=1 line5=1'
     End
   End
 

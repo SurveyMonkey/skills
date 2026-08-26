@@ -403,6 +403,41 @@ Describe 'node.sh validate --baseline (pnpm)'
 End
 
 # ---------------------------------------------------------------------------
+# The same collapse in npm's nested syntax (issue #132). The specimen pair
+# mirrors the pnpm one: `npm-cross-line-collapsed` is the tree an install
+# produces under the BARE `.overrides.minimatch["brace-expansion"]` key the
+# fix flow used to write (npm applies an unqualified parent key to every
+# resolved copy of `minimatch`, so the 1.x and 2.x lines vanish: the field
+# run's three brace-expansion failures), and `npm-cross-line-qualified` is
+# the tree the qualified keys `apply_constraint` now writes produce
+# (`minimatch@^10.2.5` for the direct dependency's spec verbatim,
+# `minimatch@10.0.3` exact for the nested copy), sibling lines intact.
+# ---------------------------------------------------------------------------
+Describe 'node.sh validate --baseline (npm)'
+  After 'cleanup_fixture'
+
+  NPM_BASELINE='{"pm":"npm","package":"brace-expansion","present":true,"count":3,"versions":[{"version":"5.0.5","path":"node_modules/brace-expansion"},{"version":"2.0.2","path":"node_modules/filelist/node_modules/brace-expansion"},{"version":"1.1.11","path":"node_modules/glob/node_modules/brace-expansion"}],"lockfile_entries":14}'
+
+  It 'fails closed on the collapse the bare parent key produces'
+    use_fixture npm-cross-line-collapsed
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 5 --vulnerable '< 5.0.9' --baseline "$NPM_BASELINE" \
+      brace-expansion '>=5.0.9 <6'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":1,"before":["1.1.11"],"after":[],"status":"vanished","class":"fatal"},{"major":2,"before":["2.0.2"],"after":[],"status":"vanished","class":"fatal"}]}'
+  End
+
+  It 'passes the tree the qualified keys produce, sibling lines intact'
+    use_fixture npm-cross-line-qualified
+    When call adapter_jq '{ok, other_line_moves, resolved_versions}' \
+      validate --line 5 --vulnerable '< 5.0.9' --baseline "$NPM_BASELINE" \
+      brace-expansion '>=5.0.9 <6'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[],"resolved_versions":["1.1.11","2.0.2","5.0.9"]}'
+  End
+End
+
+# ---------------------------------------------------------------------------
 # --sibling-alerts: the benign within-major dedup carve-out (issue #105)
 #
 # The specimen is the picomatch field shape from the field-test repository,

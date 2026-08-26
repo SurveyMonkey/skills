@@ -339,7 +339,10 @@ Two consequences travel with it:
 - **Scope by parent name.** `parents_other_lines` entries may carry the parent's resolved version
   (`minimatch@3.1.5`), because a parent in the tree at several versions is excluded per copy. Such
   a parent appears in **both** lists and is eligible — one of its copies is on your line. Pass the
-  bare name.
+  bare name. The adapter decides key qualification internally, so under npm and pnpm the keys in
+  `written[]` may come back version-qualified (`minimatch@10.0.3`, `minimatch@^10.2.5`,
+  `minimatch@10.2.5>brace-expansion`): that is the adapter scoping the entry to your line's parent
+  copies, not a different parent (issues #100 and #132).
 - **Name every unreadable parent you scoped to in the PR body**, marking any that are also in
   `parents_malformed` as a damaged install, and say that its entry rests on a declaration no source
   could be read for. Same disclosure phase 5 requires for the risk score, and for the same reason:
@@ -478,7 +481,9 @@ section (phase 6), never silently absorbed.
 
 Narrowing the key yourself is not the remedy and you must not try it. Yarn's parent half matches
 the parent's **exact resolved version** and a range there parses and then silently never matches;
-pnpm and npm accept a range but with two further different semantics. Escalate the repository
+under pnpm and npm the adapter already wrote version-qualified parent keys wherever they can
+express the separation (issues #100 and #132), so a fatal move that survives them is a shape no
+key can express. Escalate the repository
 instead: say which line moved, from what to what, and which parent carries it.
 
 Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout

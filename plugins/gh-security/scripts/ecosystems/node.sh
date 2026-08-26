@@ -1934,61 +1934,104 @@ verb_apply_constraint() {
   keys_by_parent=$(printf '%s' "$lookup" | jq -c '.keys_by_parent')
   parents_unresolved=$(printf '%s' "$lookup" | jq -c '.unresolved')
 
-  # pnpm only: the parent versions each scoped key must be qualified with.
+  # pnpm and npm: the qualifiers each scoped parent key must carry.
   #
-  # A bare `parent>child` key matches EVERY resolved copy of the parent, so a
-  # parent in the tree at several versions — each copy resolving its own major
-  # of the child — has all of its copies dragged onto this group's line, which
+  # A bare parent key matches EVERY resolved copy of the parent, so a parent
+  # in the tree at several versions, each copy resolving its own major of
+  # the child, has all of its copies dragged onto this group's line, which
   # collapses the sibling lines and fails closed at `validate --baseline`
-  # (field run: `ws` 7.x/8.x and `brace-expansion` 1.x each overrode every
-  # copy of every parent; the sibling lines vanished). pnpm compares the
-  # parent half of `parent@<v>>child` with `semver.satisfies` against the
-  # parent's resolved version, so an exact version narrows the key to one
-  # copy. The map is parent -> the versions to qualify with: only parents the
-  # lockfile resolves at MORE than one version (a single-version parent keeps
-  # today's bare key — nothing else exists for the key to leak onto), and only
-  # the versions whose resolution of the child sits on the target line, read
-  # from the same `snapshots:` edges `declared_ranges --line` classifies with.
-  # A version whose child resolution cannot be read is kept — covering a copy
-  # twice is harmless, missing one is not. A parent with no qualifying
-  # version at all falls back to the bare key rather than writing nothing
-  # ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
+  # (field runs: pnpm's `ws` 7.x/8.x and `brace-expansion` 1.x under issue
+  # #100; npm's `brace-expansion` 1.x/2.x/5.x, `minimatch` 3.x and `ajv` 6.x
+  # under issue #132). The map is parent -> the key qualifiers to write: only
+  # parents the lockfile resolves at MORE than one version (a single-version
+  # parent keeps today's bare key: nothing else exists for the key to leak
+  # onto), and only for the copies whose resolution of the child sits on the
+  # target line, read from the same lockfile rows `declared_ranges --line`
+  # classifies with. A copy whose child resolution cannot be read is kept:
+  # covering a copy twice is harmless, missing one is not. A parent with no
+  # qualifying copy at all falls back to the bare key rather than writing
+  # nothing ([#100](https://github.com/SurveyMonkey/skills/issues/100)).
   #
-  # pnpm only, deliberately: npm's nested `.overrides[$parent][$key]` matches
-  # transitively with its own semver rules, and a Yarn resolutions key narrows
-  # only through the parent's full resolved locator (`parent@npm:<v>/dep`) —
-  # a version-qualified form there parses and then silently never matches
-  # (see "An override's key is scoped" in scripts/CLAUDE.md). Neither gets a
-  # syntax guessed at here.
+  # pnpm compares the parent half of `parent@<v>>child` with
+  # `semver.satisfies` against the copy's resolved version, so the qualifier
+  # is that exact version.
+  #
+  # npm matches `{"parent@<sel>": {...}}` with `semver.intersects` against
+  # each edge's DECLARED descriptor (plus `semver.satisfies` against the
+  # node's resolved version), and hard-fails the install (`EOVERRIDE`) on any
+  # key whose selector intersects a direct dependency's spec without being
+  # byte-identical to it; both verified empirically on npm 11.16.0 (issue
+  # #132). So the npm qualifier is also the copy's exact resolved version
+  # (every edge that resolved that copy admits it, while a sibling line's
+  # edges admit it only when their declared ranges span majors), EXCEPT for
+  # copies satisfying the root manifest's own declared spec: those share one
+  # key carrying that spec VERBATIM, because any other selector admitting
+  # them is the EOVERRIDE shape, and the byte-identical key provably covers
+  # every edge whose range admits such a copy (two ranges sharing a version
+  # always intersect). Declared-range qualifiers were rejected for the
+  # general case on the same evidence: two same-major ranges (`^10.0.3`
+  # beside a direct `^10.2.5`) intersect each other, which is exactly the
+  # EOVERRIDE shape.
+  #
+  # yarn stays unqualified, deliberately: a resolutions key narrows only
+  # through the parent's full resolved locator (`parent@npm:<v>/dep`), and a
+  # version-qualified form there parses and then silently never matches
+  # (see "An override's key is scoped" in scripts/CLAUDE.md).
   qualified_parent_versions='{}'
-  if [ "$loc" = "pnpm.overrides" ] \
+  if { [ "$loc" = "pnpm.overrides" ] || [ "$loc" = "overrides" ]; } \
     && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
     target_major=$(jq -rn --arg range "$range" \
       "$SEMVER_JQ"'($range | range_floor_major) // empty')
-    edges=$(pnpm_edge_rows "$pkg" | jq -Rs -c '
-      split("\n") | map(select(length > 0) | split("\t"))
-      | map({parent: .[0], pver: .[1], cver: .[2]})')
+    if [ "$loc" = "pnpm.overrides" ]; then
+      edges=$(pnpm_edge_rows "$pkg" | jq -Rs -c '
+        split("\n") | map(select(length > 0) | split("\t"))
+        | map({parent: .[0], pver: .[1], cver: .[2]})')
+    else
+      # The npm rows come from the same lockfile reader `declared_ranges
+      # --line` classifies with; `-` is the missing-value sentinel the pnpm
+      # rows already use, so one jq below serves both.
+      edges=$(npm_copy_rows "$pkg" | jq -c '
+        map({parent, pver: (.parent_version // "-"), cver: (.resolved // "-")})')
+    fi
     # The multiplicity gate reads the same edges the values do, not the
-    # `packages:` section: the edges already prove how many versions of the
-    # parent resolve the child, and a `packages:` section this parser cannot
+    # lockfile's version catalog: the edges already prove how many versions
+    # of the parent resolve the child, and a section this parser cannot
     # read must not fail OPEN into the bare key whose collapse the
     # qualification exists to prevent.
-    qualified_parent_versions=$(jq -nc \
+    qualified_parent_versions=$(jq -c \
       --argjson edges "$edges" \
-      --argjson parents "$parents_json" --arg target "$target_major" '
-      [ $parents[] | . as $p
-        | ([ $edges[] | select(.parent == $p and .pver != "-") | .pver ]
-           | unique) as $pv
-        | select(($pv | length) > 1)
-        | { key: $p,
-            value: ([ $edges[]
-                      | select(.parent == $p and .pver != "-")
-                      | (.cver | ltrimstr("v") | split(".")[0]) as $m
-                      | (if ($m | test("^[0-9]+$")) then $m else null end) as $cm
-                      | select($target == "" or $cm == null or $cm == $target)
-                      | .pver ] | unique) }
-        | select((.value | length) > 0) ]
-      | from_entries')
+      --argjson parents "$parents_json" --arg target "$target_major" \
+      --arg loc "$loc" \
+      "$SEMVER_JQ"'
+      # The root manifest'\''s own declared spec for a parent, for the npm
+      # EOVERRIDE carve-out above. An `npm:` alias declaration is not a
+      # selector npm compares byte-wise against override keys, so it does
+      # not participate.
+      def root_spec($p):
+        ([ (.dependencies // {}), (.devDependencies // {}),
+           (.optionalDependencies // {}), (.peerDependencies // {}) ]
+         | map(.[$p] // empty) | map(select(type == "string")) | first) as $s
+        | if $s != null and (($s | startswith("npm:")) | not)
+          then $s else null end;
+      . as $manifest
+      | [ $parents[] | . as $p
+          | ([ $edges[] | select(.parent == $p and .pver != "-") | .pver ]
+             | unique) as $pv
+          | select(($pv | length) > 1)
+          | ([ $edges[]
+               | select(.parent == $p and .pver != "-")
+               | (.cver | ltrimstr("v") | split(".")[0]) as $m
+               | (if ($m | test("^[0-9]+$")) then $m else null end) as $cm
+               | select($target == "" or $cm == null or $cm == $target)
+               | .pver ] | unique) as $line_pv
+          | (if $loc == "overrides" then ($manifest | root_spec($p))
+             else null end) as $r0
+          | ([ $line_pv[] | select($r0 != null and satisfies(.; $r0)) ]) as $covered
+          | { key: $p,
+              value: ((if ($covered | length) > 0 then [$r0] else [] end)
+                      + ($line_pv - $covered)) }
+          | select((.value | length) > 0) ]
+      | from_entries' package.json)
   fi
 
   set_indent_args
@@ -2080,12 +2123,26 @@ verb_apply_constraint() {
                          (if $key == $pkg then $range else alias_value end))
           end;
 
-      # pnpm keys carry the parent version whenever $pverq names versions for
-      # the parent — one key per version, so only the copies whose resolution
-      # of the child is on the target line are moved and the sibling lines
-      # keep their own copies (issue #100). $pverq is {} for npm and yarn:
-      # their narrowing syntaxes have different semantics and are not written
-      # here (see the comment where $pverq is computed).
+      # One nested npm entry, under whatever outer key the caller scoped:
+      # the bare parent name, or a qualified `parent@<sel>` selector.
+      def put_nested($parent; $okey; $key; $value):
+        (.manifest |= ((.overrides //= {})
+                       | .overrides[$okey] =
+                           (((.overrides[$okey] // {})
+                             | if type == "string" then {} else . end)
+                            + {($key): $value})))
+        | note($parent; ["overrides", $okey, $key]; $value);
+
+      # pnpm and npm keys carry a parent qualifier whenever $pverq names any
+      # for the parent, one key per qualifier, so only the copies whose
+      # resolution of the child is on the target line are moved and the
+      # sibling lines keep their own copies (issues #100 and #132). pnpm
+      # qualifiers are exact resolved versions; npm qualifiers are exact
+      # resolved versions except the root manifest'\''s own declared spec,
+      # verbatim, for the copies that satisfy it (the EOVERRIDE carve-out;
+      # see the comment where $pverq is computed). $pverq is {} for yarn:
+      # its narrowing needs the parent'\''s full resolved locator and is not
+      # written here.
       def put_scoped($parent; $key; $value):
         if   $loc == "pnpm.overrides" then
           ($pverq[$parent] // []) as $qv
@@ -2098,12 +2155,13 @@ verb_apply_constraint() {
         elif $loc == "resolutions" then
           put_override($parent; $parent + "/" + $key; $value)
         else
-          (.manifest |= ((.overrides //= {})
-                         | .overrides[$parent] =
-                             (((.overrides[$parent] // {})
-                               | if type == "string" then {} else . end)
-                              + {($key): $value})))
-          | note($parent; ["overrides", $parent, $key]; $value)
+          ($pverq[$parent] // []) as $qv
+          | if ($qv | length) > 0 then
+              reduce $qv[] as $q (.;
+                put_nested($parent; $parent + "@" + $q; $key; $value))
+            else
+              put_nested($parent; $parent; $key; $value)
+            end
         end;
 
       # `--tighten-bare` targets a package major line, not just a package. A
@@ -2211,7 +2269,10 @@ verb_apply_constraint() {
   #
   # The invalidation is scoped to what the override is entitled to move: the
   # `packages` entries for copies of this package ON THE TARGET LINE (the major
-  # of the range's floor) that do not already satisfy the range. Copies on
+  # of the range's floor) that do not already satisfy the range. Qualified
+  # parent keys (issue #132) do not change that scope: they narrow which
+  # parent copies the override reaches, never which child line it targets,
+  # and the qualifier set keeps every on-line copy covered. Copies on
   # other major lines belong to sibling groups, and re-resolving one could move
   # a line this fix does not own — the shape `validate --baseline` fails
   # closed on. Copies already satisfying the range need no move, and leaving
