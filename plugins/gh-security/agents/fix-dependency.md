@@ -66,7 +66,12 @@ writing the PR prose. Do not reimplement what the scripts do.
   the package manager, git, and gh — and the only JSON tool in it is `jq` (`python3` is not
   guaranteed to exist on the user's machine).
 - **Scratch files live under `$WORK`, never `/tmp`.** Your cleanup removes `$WORK`; anything
-  written elsewhere outlives you.
+  written elsewhere outlives you, the session scratchpad is shared with agents running beside you,
+  and a predictable filename there lets a sibling overwrite yours mid-run. This applies to every
+  scratch or intermediate file this flow writes, not only the tooling case below: name it under
+  `$WORK`, never in the shared scratchpad. A data or intermediate file whose name could otherwise
+  collide or be mistaken between runs — the phase 5 `why` capture below is one — also gets its
+  own qualified name; a fixed-purpose tool like the shim below needs no such qualification.
 - **Never modify machine-global state.** No `corepack enable`, no `npm install -g`, no
   `git config --global`, no installing tools. When a package manager is corepack-managed but not
   on PATH, invoke it through corepack (`corepack yarn ...`, `corepack pnpm ...`); that works
@@ -582,8 +587,13 @@ a non-empty list:
 Capture the post-fix version with `cd "$WORK/fix" && $ADAPTER resolved_versions <package>`, then:
 
 ```bash
-cd "$WORK/fix" && $ADAPTER why <package> > "$WORK/why.json"
+cd "$WORK/fix" && $ADAPTER why <package> > "$WORK/why-<package>.json"
 ```
+
+**Slug `<package>` before it goes into that filename: replace every `/` with `-`.** A scoped
+name substituted raw breaks the redirect — `@babel/traverse` would target
+`why-@babel/traverse.json`, inside a directory `$WORK` never creates — so `@babel/traverse`
+becomes `why-@babel-traverse.json` and every unscoped name is unaffected.
 
 Then collect the ranges the dependents actually declare for the package. A parent declaring `^9`
 has been tested against `9.x` and never saw `10.x`, so how far past that a fix lands is the
@@ -625,8 +635,8 @@ An unreadable parent is now rarer than it was and means more: the adapter falls 
 lockfile for a parent with no installed manifest, so Yarn PnP and pnpm's partly-linked
 `node_modules` no longer produce one on their own. A **malformed** one is not normal, and says the
 install is damaged. **Name every unreadable parent in the PR body**, marking any malformed ones as
-such, so a reviewer knows the distance was measured against a partial view; `why.json`'s `raw`
-field often carries the ranges the package manager printed for them.
+such, so a reviewer knows the distance was measured against a partial view;
+`why-<package>.json`'s `raw` field often carries the ranges the package manager printed for them.
 
 ```bash
 cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
@@ -634,7 +644,7 @@ cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --before <lowest version from phase 2, omit entirely if there was no baseline> \
   --after <resolved version now> \
   --adapter $ADAPTER \
-  --why-json "$WORK/why.json" \
+  --why-json "$WORK/why-<package>.json" \
   --override-scope <none|scoped|bare-tightened|bare-added> \
   --declared-range <range> [--declared-range <range>]...
 ```
