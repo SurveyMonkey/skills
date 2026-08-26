@@ -63,6 +63,14 @@ repo's directory state that commands in that tree need a prefix, that stated pre
 `env_prefix`, used verbatim. When no such context exists — the ordinary single-login case — the
 repo has none and every command for it runs bare, with no wrapping invented here.
 
+**Any context that names a wrapper command for tools run in a directory tree is such a statement**,
+however it is phrased. It does not have to use the word `env_prefix`, name this plugin, or mention
+security work: a rule saying that commands in some tree must be run through a wrapper is stating
+this repo's `env_prefix` whenever the repo sits in that tree. Where the stated prefix takes a
+directory, instantiate it against this repo's directory, which already exists at repo scope.
+Recognizing one is your job and missing one is silent, which is what the failure class below
+describes.
+
 The failure class the seam guards against is real and manager-agnostic: where `gh`, `git`, and the
 package manager get their identity per directory rather than from a single ambient login, the tools
 that arrange that load through interactive shell hooks that a non-interactive tool shell never
@@ -108,9 +116,9 @@ EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or spe
 org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
 ambient credential set a `gh`/`git` invocation resolves, not EMU-ness, and nothing about it is
 read off a directory name now that scope comes from git. A session whose `gh` invocations resolve
-credentials that can see an EMU repo (see `env_prefix`, above, where a prefix is what puts them
-there) reaches that repo's alerts end to end at **repo** scope; what stays out of scope is asking
-an EMU **org** for its aggregate alert list, which RFC 001 never covers.
+credentials that can see an EMU repo (see `env_prefix`, above) reaches that repo's alerts end to
+end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
+list, which RFC 001 never covers.
 
 ## Phase 2: Discover and route
 
@@ -308,9 +316,13 @@ For each **distinct repo** named in the approved batch:
 1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same resolution phase 1
    makes at repo scope, and by the same rule: whatever prefix your session context states for the
    directory this repo's checkout will live in is that repo's `env_prefix`, taken verbatim; where
-   the context states none, the repo has none and its commands run bare. Nothing is probed and
-   nothing is derived, so the clone not existing yet costs nothing — the context describes the
-   tree, not the checkout, and reads the same before and after the clone.
+   the context states none, the repo has none and its commands run bare. Nothing is probed here
+   either, so no checkout has to exist for the statement to be read. **Where the stated prefix
+   takes a directory, instantiate it against the destination directory this run chose, never
+   against the checkout path.** Phase 1 can name the checkout because it has one; here the checkout
+   is what step 2 is about to create under this very prefix, and a prefix instantiated against a
+   path that does not exist yet fails on that clone. The destination exists first and contains the
+   checkout, so the environment it selects is the one the checkout inherits.
    **Your own commands for this repo run under it too**, not just the dispatches: the clone or
    fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
    `classify-lines.sh` in step 5, and

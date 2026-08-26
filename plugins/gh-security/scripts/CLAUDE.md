@@ -112,10 +112,17 @@ when `auto` became the recommended default mode and the workaround was removed
 ## `env_prefix` is an opaque, optional seam
 
 `env_prefix` is **a command prefix the environment requires for repo-targeted commands**. The
-plugin knows nothing else about it: it never names, probes for, or constructs one, and it never
-assumes per-directory environments exist at all. **Where a prefix comes from is the user's
-environment's concern** — a workspace- or user-level CLAUDE.md or rules file saying commands in
-that tree need one — and the dispatcher passes verbatim whatever the session context supplies.
+plugin never names an environment manager, probes the filesystem for one, or invents a prefix of
+its own, and it never assumes per-directory environments exist at all. **Where a prefix comes from
+is the user's environment's concern** — a workspace- or user-level CLAUDE.md or rules file saying
+commands in that tree need one — and the dispatcher passes verbatim whatever the session context
+supplies.
+
+**The opacity is the agent's, not the dispatcher's.** The dispatcher does have to recognize a
+context statement, and to instantiate the prefix against a directory where the statement takes one
+(SKILL.md phase 5 says which directory, and why it is not the checkout path). That happens once,
+before the repo's first command. From then on the prefix is a literal string that is threaded and
+prepended and never re-derived, by the dispatcher or by any agent it dispatches.
 Absent any such context there is no prefix and nothing extra happens, which is the ordinary
 single-login case ([#135](https://github.com/SurveyMonkey/skills/issues/135)).
 
@@ -137,6 +144,11 @@ misleading rather than obvious, which is why this is a contract and not a tip: b
 `git commit` fails on a missing author identity, and a bare package-manager install 401s against
 the wrong registry token. Following an agent definition literally without the wrapping fails at
 phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
+
+**An absent prefix has two causes and only one of them is benign**: the environment genuinely
+needs none, or session context stated one and the dispatcher did not recognize it. Any of the
+symptoms above is the signal to re-read session context for a prefix you missed, before concluding
+that this repo's commands belong bare.
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 

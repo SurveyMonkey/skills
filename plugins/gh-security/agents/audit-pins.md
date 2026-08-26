@@ -83,8 +83,9 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   `cd "$WORK/audit" && <env_prefix> $ADAPTER install`, and the same for the
   `check-advisories.sh` call, which makes its own `gh` call. Never `<env_prefix> cd ...` — the
   prefix wraps a command, not a shell builtin — and never a bare `<env_prefix> $ADAPTER install`,
-  which runs in whatever directory the shell starts in. It is an opaque literal string your
-  dispatcher was given for this repo; prepend it verbatim, do not re-derive it, and never reason
+  which runs in whatever directory the shell starts in. **It is opaque to you**: your dispatcher
+  resolved it once for this repo, before your dispatch existed, and that resolution is final, so
+  prepend it verbatim, do not re-derive it, and never reason
   about what it contains. This is the one rule for carrying a repo's environment — there is
   no separate fallback rule to reconcile it with. **When `env_prefix` is absent, run every one of
   those commands bare, with no wrapping of your own.** An absent `env_prefix` means your
