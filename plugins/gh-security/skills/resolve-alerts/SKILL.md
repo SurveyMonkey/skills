@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -374,6 +374,41 @@ order phases 3 and 4 settled. Drain that queue as a **rolling pool**, in two mot
 
 Keep going until the queue is empty and the last agent has returned. Nothing waits for a sibling.
 
+**Reap that agent's local artifacts between the two motions**, on each completion, after you have
+verified its pull request and before you refill its slot. The completion is the one moment you
+know exactly which branch and which worktree belonged to that agent, and its result block names
+them, so nothing here needs a run-start snapshot or any bookkeeping about what existed before:
+
+1. Parse the completed agent's fenced JSON result. A `success` result carries `branch` and
+   `pr_url`; a `no-op`, a failure, an unparseable block and a missing block do not.
+2. Verify that pull request is open, under that repo's `env_prefix` when it has one:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr_url>
+```
+
+3. **Only when it reads `OPEN`**, reap that group's worktree directory and local branch:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x
+```
+
+An open PR is what makes this safe rather than merely tidy: the agent pushed that tip, so the
+remote carries it and the local branch is a duplicate of a ref that outlives the delete. **An
+agent that ended any other way is never reaped**: a failure result, a crash, an unparseable or
+missing result block, a `no-op`, or a `pr_url` whose PR is not open all leave the worktree and the
+branch exactly where they are, for phase 7 to report. The agent's own Cleanup is the first line of
+defense and normally leaves nothing but the local branch, which it deliberately keeps in some
+cases; this step covers that, and gives a crashed success a bounded story instead of an
+accumulating one.
+
+The script is **local scope only and reaps one named worktree and one named ref**, which is what
+makes it legal while siblings are in flight: it never prunes, never touches another group's
+artifacts, and never deletes the remote branch the open PR is built on. It re-checks the tip
+against `origin/<branch_name>` itself and leaves any branch that is not on origin, naming it in
+`left_behind`. **A failure here is not fatal**: record what its `left_behind` and `errors` name for
+phase 7, refill the slot, and carry on. A reap that could not finish must never stall the pool.
+
 Each queued group is **one Task tool call**:
 
 - `subagent_type`: `fix-dependency`
@@ -501,6 +536,14 @@ the same way. And **name every repo whose batch ran under the flat branch scheme
 reason: a remote branch named `fix` occupies the `fix/*` ref namespace, so that repo's PRs came
 from `fix-dependabot-...` branches — the user reading branch names in the PRs should not have to
 guess why they differ from a neighbor repo's.
+
+**Then say what phase 6's reap removed and what it left.** Give the count of agents reaped, and
+name every artifact still on the user's disk: each `left_behind` entry a reap reported, together
+with the worktree directory and branch of every group whose agent ended without a verified open
+PR, which is deliberately never reaped. A leftover under `.claude/worktrees/` sits at a stable
+path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent
+is in flight, but only if this summary says it is there. Nothing left behind is a failure on its
+own; a run that reaped everything says so in one line.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.
