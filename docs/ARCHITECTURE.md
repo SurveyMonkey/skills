@@ -61,10 +61,12 @@ pass**. Conventions and their reasoning live in
   `.git/info/exclude`) is written only by the orchestrator, never by agents.
 - **Subagent model tiering** ([ADR 004](adr/004-subagent-model-tiering.md)). The fix subagent is
   pinned to sonnet in its frontmatter; the orchestrator inherits the session model.
-- **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md)). Three gates (shellspec suite,
-  ShellCheck, `claude plugin validate --strict`) run through one entry point,
-  `scripts/check.sh`, from committed git hooks locally and from
-  `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions.
+- **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md)). Four gates (shellspec suite,
+  ShellCheck, `claude plugin validate --strict`, and a plugin version gate) run through one entry
+  point, `scripts/check.sh`, from committed git hooks locally and from
+  `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions. The version
+  gate is CI-only: it requires a plugin whose files changed to carry a changed `plugin.json`
+  version, and only CI has an unambiguous base to compare against.
 - **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening
   one removal PR per repository, gated on a combined test of the whole removed set (the
   per-pin tests prove nothing about a set) that fails closed on a partial view of the lockfile.

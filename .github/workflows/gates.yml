@@ -1,7 +1,9 @@
-# The three quality gates (root CLAUDE.md "Testing", ADR 005), run on every
-# PR and on main. The committed .githooks/ run the same gates locally via the
-# same entry point, scripts/check.sh; CI is the enforcement boundary because
-# hooks can be uninstalled, skipped, or absent on a fresh clone.
+# The quality gates (root CLAUDE.md "Testing", ADR 005), run on every PR and
+# on main. The committed .githooks/ run the three local ones via the same
+# entry point, scripts/check.sh; CI is the enforcement boundary because hooks
+# can be uninstalled, skipped, or absent on a fresh clone, and it is the only
+# venue for the version gate, whose comparison base a hook cannot know
+# (ADR 005).
 #
 # No `paths:` filters, ever: the aggregate `gates` job IS a required status
 # check on the default branch (protect-default ruleset), and a PR filtered out
@@ -13,6 +15,18 @@ name: gates
 
 on:
   pull_request:
+    # `edited` is on top of the default three (opened, synchronize, reopened)
+    # and is load-bearing for the version gate, which skips a pull request
+    # whose base ref is not the default branch. Changing a base ref fires
+    # `edited` with `changes.base` and nothing else: without it a stacked
+    # layer retargeted to the default branch (by hand or by GitHub when its
+    # parent merges) keeps the green skip run it recorded under the old base
+    # and merges ungated, since nothing re-runs until someone pushes to the
+    # branch. The cost is a full run on title and body edits too, because
+    # `edited` cannot be narrowed to base changes at the trigger and the
+    # aggregate `gates` check needs every job on every run. A few minutes of
+    # runner time per description edit buys a gate that is actually reached.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -124,15 +138,102 @@ jobs:
       - name: Run the shellspec suite
         run: ./scripts/check.sh spec
 
+  version:
+    # A plugin's version lives in its own plugin.json and nowhere else, so a
+    # change shipped without bumping it reaches nobody while every other gate
+    # stays green (root CLAUDE.md, "Releasing a plugin"; ADR 005).
+    #
+    # Two venues, each with an unambiguous comparison base:
+    #   pull_request  the merge base against the default branch, i.e. what
+    #                 merging this branch would put on the default branch.
+    #                 Only when the PR's base ref IS the default branch: one
+    #                 pull request in a stack carries the bump, so a layer
+    #                 below it would fail on a rule it cannot satisfy alone.
+    #                 Stacked layers skip loudly here and are gated when they
+    #                 retarget to the default branch, which is why the
+    #                 workflow's pull_request trigger lists `edited`: a base
+    #                 change fires that and nothing else, and without it the
+    #                 skip run stays the last word.
+    #   push (main)   the sha the push moved from, so the range is exactly
+    #                 what landed. This is the backstop the pull request
+    #                 venue cannot be: it sees what actually merged.
+    #
+    # The skip is a step that exits 0, never an `if:` on the job: `gates`
+    # needs this job's result, and a skipped need is not a success.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The gate walks history to a merge base; the default depth-1
+          # checkout has none, and would fail on every run.
+          fetch-depth: 0
+          # The default pull_request checkout is the merge commit, whose
+          # parent is the base tip: comparing that against the base would
+          # report the base's own history as this branch's changes. The head
+          # sha is the branch as it actually stands.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Every changed plugin carries a version bump
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+              echo "This pull request targets $BASE_REF, not $DEFAULT_BRANCH."
+              echo "One pull request in a stack carries the version bump, so a"
+              echo "layer is gated when it retargets to $DEFAULT_BRANCH, not before."
+              exit 0
+            fi
+            CHECK_VERSION_BASE="refs/remotes/origin/$DEFAULT_BRANCH"
+            # fetch-depth: 0 populates refs/remotes/origin/*, but the gate is
+            # worthless if that ever stops being true, so make sure rather
+            # than assume. check.sh itself never fetches; this is the venue
+            # handing it a base it can resolve.
+            if ! git rev-parse --verify --quiet "$CHECK_VERSION_BASE" >/dev/null; then
+              echo "$CHECK_VERSION_BASE is absent after checkout; fetching it"
+              git fetch --no-tags origin \
+                "+refs/heads/$DEFAULT_BRANCH:$CHECK_VERSION_BASE"
+            fi
+          elif [ "$EVENT" = "push" ]; then
+            # `before` is all-zeros when the push created the ref, and points
+            # at a discarded commit after a force-push. Both are once-ever
+            # shapes with no comparison base to offer, and check.sh rightly
+            # refuses a base it cannot resolve; a red on the default branch
+            # for a base nobody could have supplied teaches nothing, so this
+            # says which shape it saw and stands down.
+            if ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+              echo "The push event's before sha ($PUSH_BEFORE) is not a commit"
+              echo "in this repository: the ref was just created, or history"
+              echo "moved non-linearly. There is no range to compare, so this"
+              echo "run has nothing to gate. The next push to $DEFAULT_BRANCH"
+              echo "carries a usable base."
+              exit 0
+            fi
+            CHECK_VERSION_BASE="$PUSH_BEFORE"
+          else
+            # Neither venue. A trigger added to this workflow without a
+            # decision about which base it implies must not pick one by
+            # falling through.
+            echo "the version gate has no comparison base for a $EVENT event;"
+            echo "give it one in .github/workflows/gates.yml, or exclude the"
+            echo "event from this job deliberately"
+            exit 1
+          fi
+          export CHECK_VERSION_BASE
+          ./scripts/check.sh version
+
   gates:
     # The single required status check on the default branch, pinned there to
     # the GitHub Actions app: green only when every gate is. !cancelled() so a failed dependency
     # produces a red check here rather than a skipped one, while a
     # superseded (cancelled) PR run does not publish a spurious red. The
     # arity floor keeps a gate dropped from `needs:` from shrinking coverage
-    # silently: zero (or two) results iterating to success is the same
+    # silently: zero (or three) results iterating to success is the same
     # found-nothing-is-a-pass shape every other gate refuses.
-    needs: [lint, validate, spec]
+    needs: [lint, validate, spec, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -149,7 +250,7 @@ jobs:
               exit 1
             fi
           done
-          if [ "$n" -ne 3 ]; then
-            echo "expected 3 gate results, got $n"
+          if [ "$n" -ne 4 ]; then
+            echo "expected 4 gate results, got $n"
             exit 1
           fi
