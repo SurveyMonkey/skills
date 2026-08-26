@@ -199,7 +199,9 @@ Setup, as separate simple steps, not one compound block:
    previous run crashed before cleanup. Stop and return a failure (phase `worktree`) naming the
    directory so the user can inspect and remove it
    (`git -C <repo_root> worktree remove --force <path>`, then delete the directory). Never reuse
-   or silently delete it.
+   or silently delete it. The orchestrator reaps this directory once it has verified a completed
+   agent's pull request, so a surviving `$WORK` means a failed or crashed run, or a session that
+   is not this flow at all. Neither is yours to clear from a distance.
 2. **Stale-branch guard, and it verifies rather than stops on sight**: discovery only checked for
    open PRs, so a local branch of your name *may* hold someone's unpushed work — but the common
    case is a leftover of a previous run of this very flow, and the two are told apart by the tip,
@@ -980,6 +982,16 @@ in a worktree, so a `branch -D` issued before `worktree remove` fails on exactly
 meant to clean up. Any error from `branch -D` goes in `detail` verbatim — never silence it — and
 leaves the branch in place; it is not a failure result on its own, because by this point the work
 either shipped or already failed for its own reason.
+
+**You are the first line of defense here, not the only one.** After your result lands, the
+orchestrator verifies your pull request is open and then reaps this group's worktree directory and
+local branch itself. What that adds is narrow, and worth knowing exactly: a success that crashed
+before reaching this section, and a `branch -D` that errored here. **It applies the same tip test
+you do**, so a branch you left because its tip is not on origin is left there too and reported,
+never deleted; the judgment above is not made for you at the other end either.
+
+That never licenses skipping this section: the reap runs only on a verified open PR, so every
+other exit path (a failure, an abort on a hung verb, a crash) is cleaned up here or not at all.
 
 Deleting the branch is what keeps the next run of this group from meeting phase 1's guard at all.
 The old rule left it behind on every run ("it is pushed, or irrelevant on failure"), which made the

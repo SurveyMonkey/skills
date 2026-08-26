@@ -30,7 +30,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status, advisory lookup, worktree ignore setup |
+| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status, advisory lookup, worktree ignore setup, agent artifact reaping |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -145,6 +145,16 @@ worktree *paths* not colliding is not the same as repository state not colliding
   so a call timed against a sibling mid `worktree add`/`remove` can delete a live registration —
   and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
   removes the caller's own entry; that is the whole cleanup an agent is entitled to.
+- **What an agent leaves behind is reaped by the orchestrator, one agent at a time**, through
+  `common/reap-agent-artifacts.sh`: on each completion, after the orchestrator has verified that
+  agent's pull request is open, and never for an agent that ended any other way. The verified open
+  PR is what makes the local branch delete safe (its tip is on origin), and the script is local
+  scope only, touching exactly one worktree path and one local ref, so it is legal while siblings
+  are in flight. It never prunes either. Its one administrative write is the narrow form of the
+  same rule: a worktree directory that is gone while its registration survives blocks both a later
+  `worktree add` on that path and any `branch -D` of its branch, and `git worktree remove` refuses
+  it, so the reap removes the **single** entry under `<git-common-dir>/worktrees/` whose `gitdir`
+  file names that one path, identified by that content and never by position.
 
 ## No Bash snippet may depend on the previous call
 
