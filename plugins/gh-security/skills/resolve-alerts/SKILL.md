@@ -77,8 +77,9 @@ that arrange that load through interactive shell hooks that a non-interactive to
 runs, so a bare `gh`, `git`, or install silently resolves the wrong identity or a dead registry
 token. **The prefix covers your own commands, not just the agents'**: from here on, every `gh`,
 `git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
-`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 8 — runs
-under it, or discovery itself reads the wrong account's alerts before any dispatch exists. Note
+`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 6's reap
+step and again in phase 8 — runs under it, or discovery itself reads the wrong account's alerts
+before any dispatch exists. Note
 that `<env_prefix> <cmd>` runs `<cmd>` in the caller's current directory — it injects the
 environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
 locator a command already carries. Wherever there is no `repo_root` yet — org and user scope, and
@@ -325,9 +326,9 @@ For each **distinct repo** named in the approved batch:
    checkout, so the environment it selects is the one the checkout inherits.
    **Your own commands for this repo run under it too**, not just the dispatches: the clone or
    fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
-   `classify-lines.sh` in step 5, and
-   `pr-status.sh` in phase 8. The prefix injects environment without changing directory, so it
-   composes with the `-C` or `cd` locator each of those already carries.
+   `classify-lines.sh` in step 5, and `pr-status.sh` in phase 6's reap step and again in phase 8.
+   The prefix injects environment without changing directory, so it composes with the `-C` or `cd`
+   locator each of those already carries.
 2. **Reuse a checkout wherever one is found; clone only what is missing.** The expected path is
    `<destination>/<repo-name>`, where `<destination>` is the answer to the clone-destination
    question above, plus any path the user named for this repo specifically in conversation.
