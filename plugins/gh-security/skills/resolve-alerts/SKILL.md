@@ -393,21 +393,34 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr_url>
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x
 ```
 
+**The reap takes no `env_prefix`, and the asymmetry with step 2 is deliberate.** Step 2 reads a
+pull request, which needs the account the repo's credentials resolve to; the reap only removes a
+directory and a local ref in a repository whose path it is handed, reaching no remote and no
+service, so no identity is involved in it at all.
+
 An open PR is what makes this safe rather than merely tidy: the agent pushed that tip, so the
 remote carries it and the local branch is a duplicate of a ref that outlives the delete. **An
 agent that ended any other way is never reaped**: a failure result, a crash, an unparseable or
 missing result block, a `no-op`, or a `pr_url` whose PR is not open all leave the worktree and the
-branch exactly where they are, for phase 7 to report. The agent's own Cleanup is the first line of
-defense and normally leaves nothing but the local branch, which it deliberately keeps in some
-cases; this step covers that, and gives a crashed success a bounded story instead of an
-accumulating one.
+branch exactly where they are, for phase 7 to report.
+
+The agent's own Cleanup is the first line of defense, and what this step adds to it is narrow:
+**a success that crashed before its Cleanup ran, and a `branch -D` that errored there.** It
+applies the same tip test the agent does, so a branch the agent deliberately left because its tip
+is not on origin is left here too and reported, never deleted. Neither end ever discards an
+unpushed commit.
 
 The script is **local scope only and reaps one named worktree and one named ref**, which is what
 makes it legal while siblings are in flight: it never prunes, never touches another group's
-artifacts, and never deletes the remote branch the open PR is built on. It re-checks the tip
-against `origin/<branch_name>` itself and leaves any branch that is not on origin, naming it in
-`left_behind`. **A failure here is not fatal**: record what its `left_behind` and `errors` name for
-phase 7, refill the slot, and carry on. A reap that could not finish must never stall the pool.
+artifacts, and never deletes the remote branch the open PR is built on. Its one administrative
+write is the single registration entry of that one path, when a worktree directory is gone while
+its entry survives; nothing else in the repository is read for it or written by it. It re-checks
+the tip against `origin/<branch_name>` itself and leaves any branch that is not on origin, naming
+it in `left_behind`. **A failure here is not fatal**: record what its `left_behind` and `errors`
+name for phase 7, refill the slot, and carry on. A reap that could not finish must never stall the
+pool. **A reap that exits without printing a report at all** (a rejected argument, a refused path)
+did nothing and reported nothing, so take the branch and worktree path from that agent's own
+result block and carry those to phase 7 instead.
 
 Each queued group is **one Task tool call**:
 
@@ -538,7 +551,9 @@ from `fix-dependabot-...` branches — the user reading branch names in the PRs 
 guess why they differ from a neighbor repo's.
 
 **Then say what phase 6's reap removed and what it left.** Give the count of agents reaped, and
-name every artifact still on the user's disk: each `left_behind` entry a reap reported, together
+name every artifact still on the user's disk: each `left_behind` entry a reap reported, every
+group whose reap exited without printing a report at all (named by the `branch` and the worktree
+path from that agent's own result block, since no report exists to read them from), together
 with the worktree directory and branch of every group whose agent ended without a verified open
 PR, which is deliberately never reaped. A leftover under `.claude/worktrees/` sits at a stable
 path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent

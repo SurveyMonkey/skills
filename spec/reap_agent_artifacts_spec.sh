@@ -217,6 +217,131 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
     End
   End
 
+  # Every example here asserts the VERDICT, not the parse: exit 1, a non-empty
+  # errors[], and the report still on stdout. A mutant that never exits 1
+  # survived the first round of this suite, because nothing asserted the status
+  # on a path that had to fail.
+  Describe 'a reap that could not finish reports and fails'
+    # `worktree remove` refuses a pointer file naming a gitdir that is not
+    # there, which is the shape a half-deleted worktree leaves.
+    broken_pointer() {
+      mkdir -p "$WORK/fix"
+      printf 'gitdir: /nonexistent\n' > "$WORK/fix/.git"
+    }
+
+    It 'fails with the report on stdout when the worktree cannot come off'
+      make_repo
+      broken_pointer
+      When call reap '{w: .worktree.action, d: .work_dir.action, e: (.errors | length)}'
+      The status should be failure
+      The output should equal '{"w":"failed","d":"skipped","e":1}'
+    End
+
+    # The directory is deliberately kept: removing it out from under a
+    # registration git still holds turns a reportable leftover into a broken
+    # one, so both paths are named for phase 7 instead.
+    It 'keeps the work directory and names both paths'
+      make_repo
+      broken_pointer
+      When call reap '[.left_behind[] | sub("^.*/worktrees/"; "")]'
+      The status should be failure
+      The output should equal '["fix-dependabot-example-pkg-6x/fix","fix-dependabot-example-pkg-6x"]'
+    End
+
+    # git refuses to delete a branch that is checked out anywhere, the primary
+    # checkout included, and that refusal must reach the caller rather than
+    # passing for a delete.
+    It 'fails when the branch delete errors'
+      make_repo
+      add_agent_worktree
+      push_fix_commit
+      git -C "$REPO" worktree remove --force "$WORK/fix" >/dev/null 2>&1
+      git -C "$REPO" checkout -q "$BRANCH" >/dev/null 2>&1
+      When call reap '{b: .branch_ref.action, r: .branch_ref.reason, l: .left_behind, e: (.errors | length)}'
+      The status should be failure
+      The output should equal "{\"b\":\"left\",\"r\":\"delete-failed\",\"l\":[\"$BRANCH\"],\"e\":1}"
+    End
+
+    # `rev-parse --verify --quiet` answers a missing ref with an empty stdout,
+    # exit 1 and NO stderr. A broken ref answers with the same empty stdout and
+    # exit 1, plus `warning: ignoring broken ref`. Folding the two together
+    # reported a branch that is still there as `absent`, and exited 0.
+    It 'tells a ref it could not read apart from a ref that is not there'
+      make_repo
+      printf 'not-a-sha\n' > "$REPO/.git/refs/heads/broken-ref"
+      When call common_jq reap-agent-artifacts.sh \
+        '{b: .branch_ref.action, r: .branch_ref.reason, l: .left_behind, e: (.errors | length)}' \
+        --repo-root "$REPO" --branch broken-ref --work "$WORK"
+      The status should be failure
+      The output should equal '{"b":"left","r":"tip-read-failed","l":["broken-ref"],"e":1}'
+    End
+
+    # Something at $WORK that is not a directory is nothing this flow makes.
+    # Reporting `absent` there is a false claim about the user's disk.
+    It 'reports a work path that is not a directory rather than claiming it is gone'
+      make_repo
+      : > "$WORK"
+      When call reap '{d: .work_dir.action, l: [.left_behind[] | sub("^.*/worktrees/"; "")], e: (.errors | length)}'
+      The status should be failure
+      The output should equal '{"d":"not-a-directory","l":["fix-dependabot-example-pkg-6x"],"e":1}'
+    End
+  End
+
+  # A worktree directory that is gone while its registration survives blocks the
+  # next `worktree add` on that path AND every `branch -D` of its branch ("used
+  # by worktree"), and `git worktree remove` refuses it outright. Pruning is
+  # forbidden here, so the one entry that names this path comes off by itself.
+  Describe 'a registration whose worktree directory is gone'
+    stale_registration() {
+      add_agent_worktree
+      push_fix_commit
+      rm -rf "$WORK"
+    }
+
+    It 'removes the stale entry and goes on to delete the branch'
+      make_repo
+      stale_registration
+      When call reap '{w: .worktree.action, b: .branch_ref.action, l: .left_behind, e: .errors}'
+      The status should be success
+      The output should equal '{"w":"stale-registration-removed","b":"deleted","l":[],"e":[]}'
+    End
+
+    # The whole reason prune is banned: the entry that comes off is found by
+    # the gitdir file naming this one path, so a sibling's live registration is
+    # never a candidate.
+    It 'leaves a sibling registration and its worktree alone'
+      make_repo
+      sibling_work="$REPO/.claude/worktrees/fix-dependabot-example-other-2x"
+      git -C "$REPO" worktree add -q "$sibling_work/fix" -b "$SIBLING_BRANCH" origin/main >/dev/null 2>&1
+      stale_registration
+      survey_registrations() {
+        "$COMMON/reap-agent-artifacts.sh" \
+          --repo-root "$REPO" --branch "$BRANCH" --work "$WORK" >/dev/null
+        git -C "$REPO" worktree list --porcelain \
+          | sed -n 's|^worktree .*/worktrees/||p'
+      }
+      When call survey_registrations
+      The status should be success
+      The output should equal 'fix-dependabot-example-other-2x/fix'
+    End
+
+    # And the state that made this worth fixing: with the entry gone, the path
+    # is reusable by the next run of this group.
+    It 'leaves the path free for a later worktree add'
+      make_repo
+      stale_registration
+      readd() {
+        "$COMMON/reap-agent-artifacts.sh" \
+          --repo-root "$REPO" --branch "$BRANCH" --work "$WORK" >/dev/null
+        git -C "$REPO" worktree add -q "$WORK/fix" -b "$BRANCH" origin/main >/dev/null 2>&1 \
+          && printf 'readded\n'
+      }
+      When call readd
+      The status should be success
+      The output should equal 'readded'
+    End
+  End
+
   Describe 'argument validation'
     # The script runs `rm -rf` on the path it is handed, so the one shape it
     # accepts is a directory under that repository's own agent worktree root.
@@ -258,6 +383,70 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
       When run script "$COMMON/reap-agent-artifacts.sh" --repo-root /tmp
       The status should be failure
       The stderr should include 'Usage:'
+    End
+
+    It 'refuses a work path reached through a .. segment'
+      make_repo
+      When run script "$COMMON/reap-agent-artifacts.sh" \
+        --repo-root "$REPO" --branch "$BRANCH" \
+        --work "$REPO/.claude/worktrees/x/../../.."
+      The status should be failure
+      The stderr should include 'must not contain a .. segment'
+    End
+
+    # A relocated worktree root is refused rather than followed: the cost is a
+    # leftover the user removes by hand, where following the link would put
+    # `rm -rf` somewhere this script never proved it owns.
+    It 'refuses a work path that is a symlink out of the repository'
+      make_repo
+      mkdir -p "$TEST_DIR/outside"
+      ln -s "$TEST_DIR/outside" "$REPO/.claude/worktrees/relocated"
+      When run script "$COMMON/reap-agent-artifacts.sh" \
+        --repo-root "$REPO" --branch "$BRANCH" \
+        --work "$REPO/.claude/worktrees/relocated"
+      The status should be failure
+      The stderr should include 'is not under'
+    End
+
+    # The same resolution, read from the other side: two spellings of one
+    # repository must not read as containment escape. Without it, a caller that
+    # reaches the repo through a symlink (the everyday macOS `/var` case) has
+    # its own worktree refused.
+    It 'accepts a repo_root and a work path spelled through different links'
+      make_repo
+      add_agent_worktree
+      push_fix_commit
+      ln -s "$REPO" "$TEST_DIR/repo-link"
+      When call common_jq reap-agent-artifacts.sh \
+        '{w: .worktree.action, b: .branch_ref.action}' \
+        --repo-root "$TEST_DIR/repo-link" --branch "$BRANCH" --work "$WORK"
+      The status should be success
+      The output should equal '{"w":"removed","b":"deleted"}'
+    End
+
+    # A leading dash is a valid ref name that `git branch -D` reads as an
+    # option, so it is refused by name rather than by check-ref-format.
+    It 'refuses a branch name that begins with a dash'
+      make_repo
+      When run script "$COMMON/reap-agent-artifacts.sh" \
+        --repo-root "$REPO" --branch '-D' --work "$WORK"
+      The status should be failure
+      The stderr should include 'must not begin with a dash'
+    End
+
+    # jq is how every exit path here reports, `die` included, so a missing jq
+    # has to be caught before anything is removed rather than after.
+    It 'refuses to run at all without jq'
+      make_repo
+      mkdir -p "$TEST_DIR/bin"
+      ln -s "$(command -v bash)" "$TEST_DIR/bin/bash"
+      without_jq() {
+        PATH="$TEST_DIR/bin" "$COMMON/reap-agent-artifacts.sh" \
+          --repo-root "$REPO" --branch "$BRANCH" --work "$WORK"
+      }
+      When run without_jq
+      The status should be failure
+      The stderr should include 'jq is required'
     End
   End
 End
@@ -331,6 +520,46 @@ Describe 'the orchestrator-side reap (issue #131)'
       The status should be success
       The output should equal '1'
     End
+
+    # The reap performs only local git operations, so it needs no account
+    # identity where the PR read in step 2 does. Unexplained, the asymmetry
+    # reads as an omission and invites someone to "fix" it either way.
+    It 'says why the reap takes no credential prefix where the PR read does'
+      When call rule_in "$SKILL" 'The reap takes no .env_prefix., and the asymmetry with step 2 is deliberate'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # What the reap adds to agent Cleanup, stated exactly. The looser earlier
+    # wording claimed it picked up any branch the agent left, which is wrong in
+    # the one case that matters: the script refuses a tip that is not on origin.
+    It 'claims only the two exit paths the reap actually covers'
+      When call rule_in "$SKILL" 'a success that crashed before its Cleanup ran, and a .branch -D. that errored there'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'does not claim a deliberately left branch is reaped later'
+      When call rule_in "$SKILL" 'is not on origin is left here too and reported, never deleted'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The one administrative write, named where the local-scope claim is made,
+    # so the claim stays true rather than becoming an omission.
+    It 'names the single registration entry as its one administrative write'
+      When call phrase_in "$SKILL" 'single registration entry of that one path'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The gap a reviewer found: a reap rejected before it printed anything falls
+    # into neither phase 7 bucket, since this group's PR *was* verified.
+    It 'routes a reap that printed no report at all to phase 7 as well'
+      When call rule_in "$SKILL" 'A reap that exits without printing a report at all'
+      The status should be success
+      The output should equal '1'
+    End
   End
 
   Describe 'the report in phase 7'
@@ -342,6 +571,14 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     It 'says a leftover is recoverable only if the summary names it'
       When call phrase_in "$SKILL" 'but only if this summary says it is there'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Named from the agent's result block, because the reap that would have
+    # named them never printed a report.
+    It 'names the groups whose reap produced no report'
+      When call rule_in "$SKILL" 'group whose reap exited without printing a report at all'
       The status should be success
       The output should equal '1'
     End
@@ -372,6 +609,20 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     It 'says the reap covers only the verified-PR exit path'
       When call phrase_in "$AGENT" 'the reap runs only on a verified open PR'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The agent must not read the reap as a safety net under the one judgment
+    # this section refuses to make: an unpushed tip is left at both ends.
+    It 'tells the agent the reap applies the same tip test it does'
+      When call rule_in "$AGENT" 'It applies the same tip test'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'does not promise a deliberately left branch is reaped later'
+      When call rule_in "$AGENT" 'is not on origin is left there too and reported'
       The status should be success
       The output should equal '1'
     End

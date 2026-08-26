@@ -45,6 +45,22 @@
 # victim rather than here (issue #35). Sibling agents are in flight by
 # construction whenever the pool refills, which is exactly when this runs.
 #
+# A worktree whose directory is gone while its registration survives is the one
+# state that needs an administrative write, and it gets the narrow form of the
+# same rule: `git worktree remove` refuses it outright (`is not a working
+# tree`), and until the entry goes, `git worktree add` cannot recreate the path
+# and `git branch -D` refuses the branch as `used by worktree`. So this removes
+# the SINGLE admin entry under `<git-common-dir>/worktrees/` whose `gitdir` file
+# names this one path, identified by that content and never by position. One
+# path, one entry, no walk over anyone else's.
+#
+# Both paths are resolved physically before anything is touched, so a
+# `.claude/worktrees` that has been relocated behind a symlink resolves outside
+# the containment guard and is **refused rather than reaped**. That is the safe
+# direction: the cost is a reported leftover the user removes by hand, where
+# following the link would put `rm -rf` and `worktree remove` somewhere this
+# script never proved it owns.
+#
 # Idempotent: a second run over the same group finds nothing and succeeds
 # reporting `absent` for every artifact.
 #
@@ -54,6 +70,15 @@
 # and exits 0 with the reason in `branch_ref`.
 
 set -euo pipefail
+
+# jq is this plugin's one hard dependency and every exit path here is built out
+# of it, `die` included. Checked before anything is removed, because a jq that
+# is missing kills the script the moment it reports, which without this preflight
+# means after the deletions, with no report of what went (issue #131 review).
+if ! command -v jq >/dev/null 2>&1; then
+  printf '{"error":"jq is required by reap-agent-artifacts.sh"}\n' >&2
+  exit 1
+fi
 
 die() {
   printf '{"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)" >&2
@@ -86,7 +111,12 @@ git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 \
   || die "not a git repository: $REPO_ROOT"
 
 # A branch name git would refuse is a caller bug, not something to discover
-# halfway through a delete.
+# halfway through a delete. The leading-dash test is separate because
+# `check-ref-format` accepts `refs/heads/-D` happily, and that name reaches
+# `git branch -D <name>` as an option rather than as a ref.
+case "$BRANCH" in
+  -*) die "branch name must not begin with a dash: $BRANCH" ;;
+esac
 git check-ref-format "refs/heads/$BRANCH" 2>/dev/null \
   || die "not a valid branch name: $BRANCH"
 
@@ -97,7 +127,13 @@ git check-ref-format "refs/heads/$BRANCH" 2>/dev/null \
 # case, so resolution walks up to the deepest ancestor that does exist and
 # re-appends the rest; resolving only its immediate parent would fail the
 # guard on a second run that finds `.claude/worktrees/` itself already gone.
+#
+# A `cd` that fails on an ancestor that does exist is a permission problem, and
+# it is reported as one: returning the unresolved path instead turned it into a
+# containment refusal naming the wrong cause (issue #131 review).
+RESOLVE_ERR=""
 resolve_path() {
+  RESOLVE_ERR=""
   _p=$1
   _suffix=""
   while [ ! -d "$_p" ]; do
@@ -106,24 +142,53 @@ resolve_path() {
     [ "$_parent" != "$_p" ] || break
     _p=$_parent
   done
-  printf '%s%s\n' "$( ( cd "$_p" 2>/dev/null && pwd -P ) || printf '%s' "$_p" )" "$_suffix"
+  if [ ! -d "$_p" ]; then
+    printf '%s\n' "$1"
+    return 0
+  fi
+  _resolved=$( ( cd "$_p" 2>/dev/null && pwd -P ) || true )
+  if [ -z "$_resolved" ]; then
+    RESOLVE_ERR="cannot resolve $1: $_p exists but could not be entered"
+    printf '%s\n' "$1"
+    return 0
+  fi
+  printf '%s%s\n' "$_resolved" "$_suffix"
 }
 
 REPO_ROOT=$(resolve_path "$REPO_ROOT")
+[ -z "$RESOLVE_ERR" ] || die "$RESOLVE_ERR"
 WORK=$(resolve_path "$WORK")
+[ -z "$RESOLVE_ERR" ] || die "$RESOLVE_ERR"
 
 # The containment guard. This script runs `rm -rf` on `$WORK`, so the one path
 # it accepts is a directory *under* that repository's own agent worktree root,
 # never the root itself and never anything reached through a `..` segment.
-case "$WORK" in
-  *"/../"* | */..) die "work path must not contain a .. segment: $WORK" ;;
-esac
-case "$WORK" in
-  "$REPO_ROOT/.claude/worktrees/"?*) ;;
-  *) die "work path is not under $REPO_ROOT/.claude/worktrees/: $WORK" ;;
-esac
+no_dotdot() {
+  case "$1" in
+    *"/../"* | */..) return 1 ;;
+  esac
+  return 0
+}
 
-WORKTREE="$WORK/fix"
+contained() {
+  case "$1" in
+    "$REPO_ROOT/.claude/worktrees/"?*) return 0 ;;
+  esac
+  return 1
+}
+
+no_dotdot "$WORK" || die "work path must not contain a .. segment: $WORK"
+contained "$WORK" \
+  || die "work path is not under $REPO_ROOT/.claude/worktrees/: $WORK"
+
+# `$WORK/fix` is resolved the same way and held to the same guard: a symlink
+# there would otherwise carry `worktree remove` out of the tree this script
+# proved it owns.
+WORKTREE=$(resolve_path "$WORK/fix")
+[ -z "$RESOLVE_ERR" ] || die "$RESOLVE_ERR"
+no_dotdot "$WORKTREE" || die "worktree path must not contain a .. segment: $WORKTREE"
+contained "$WORKTREE" \
+  || die "worktree path resolves outside $REPO_ROOT/.claude/worktrees/: $WORKTREE"
 
 errors=""
 left=""
@@ -135,17 +200,59 @@ note_left() { left="$left$1
 # --- the git worktree ------------------------------------------------------
 #
 # A checked-out worktree carries a `.git` pointer file, so its presence is what
-# tells a live registration apart from a plain leftover directory, with no need
-# to read the repository's worktree list (whose recorded paths normalize
-# differently again). A live one must come off through git; a plain directory
-# is covered by the `rm -rf` below.
+# tells a live registration apart from a plain leftover directory. A live one
+# must come off through git; a plain directory is covered by the `rm -rf`
+# below; and a registration whose directory is gone is the stale case the
+# header describes.
+registered() {
+  git -C "$REPO_ROOT" worktree list --porcelain 2>/dev/null \
+    | grep -Fqx "worktree $WORKTREE"
+}
+
+# The one admin entry whose `gitdir` file names this worktree, found by that
+# content rather than by a name pattern: git numbers the directories itself
+# (`fix`, `fix1`, ...) and two agents in the same repo both want `fix`.
+admin_entry() {
+  _common=$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null) || return 1
+  case "$_common" in
+    /*) ;;
+    *) _common="$REPO_ROOT/$_common" ;;
+  esac
+  for _entry in "$_common"/worktrees/*; do
+    [ -f "$_entry/gitdir" ] || continue
+    _recorded=""
+    IFS= read -r _recorded < "$_entry/gitdir" 2>/dev/null || true
+    [ "$_recorded" = "$WORKTREE/.git" ] || continue
+    printf '%s\n' "$_entry"
+    return 0
+  done
+  return 1
+}
+
 worktree_action="absent"
+worktree_blocked=0
 if [ -e "$WORKTREE/.git" ]; then
   if worktree_err=$(git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" 2>&1); then
     worktree_action="removed"
   else
     worktree_action="failed"
+    worktree_blocked=1
     note_error "worktree remove failed: $worktree_err"
+    note_left "$WORKTREE"
+  fi
+elif registered; then
+  entry=$(admin_entry) || entry=""
+  if [ -z "$entry" ]; then
+    worktree_action="stale-registration"
+    worktree_blocked=1
+    note_error "a registration for $WORKTREE survives and no admin entry names it"
+    note_left "$WORKTREE"
+  elif admin_err=$(rm -rf "$entry" 2>&1); then
+    worktree_action="stale-registration-removed"
+  else
+    worktree_action="stale-registration"
+    worktree_blocked=1
+    note_error "could not remove the admin entry $entry: $admin_err"
     note_left "$WORKTREE"
   fi
 elif [ -d "$WORKTREE" ]; then
@@ -154,11 +261,11 @@ fi
 
 # --- the $WORK directory ---------------------------------------------------
 #
-# Skipped outright when the worktree is still registered: removing the
-# directory out from under a live registration turns a reportable leftover
-# into a broken one.
+# Skipped outright while the worktree is still registered: removing the
+# directory out from under a live registration turns a reportable leftover into
+# a broken one.
 work_action="absent"
-if [ "$worktree_action" = "failed" ]; then
+if [ "$worktree_blocked" -eq 1 ]; then
   work_action="skipped"
   note_left "$WORK"
 elif [ -d "$WORK" ]; then
@@ -169,6 +276,13 @@ elif [ -d "$WORK" ]; then
     note_error "rm -rf failed: $work_err"
     note_left "$WORK"
   fi
+elif [ -e "$WORK" ]; then
+  # Something is there and it is not a directory. No agent of this flow makes
+  # that, so it is reported rather than deleted: `absent` would be a false
+  # claim about the user's disk.
+  work_action="not-a-directory"
+  note_error "work path exists and is not a directory: $WORK"
+  note_left "$WORK"
 fi
 
 # --- the local branch ------------------------------------------------------
@@ -176,12 +290,46 @@ fi
 # Order matters: the worktree comes off first. Git refuses to delete a branch
 # that is checked out in a worktree, so a delete issued earlier would fail on
 # exactly the branch it was meant to reap (issue #84).
-local_tip=$(git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/heads/$BRANCH" 2>/dev/null || true)
-origin_tip=$(git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" 2>/dev/null || true)
+#
+# `rev-parse --verify --quiet` answers a missing ref with an empty stdout, exit
+# 1 and no stderr, so "missing" and "git failed" are told apart by the stderr
+# and nowhere else. Folding both into an empty tip reported a branch as `absent`
+# while it was still there, on exactly the transient a sibling's ref lock
+# produces (issue #131 review).
+TIP=""
+TIP_ERR=""
+tip_err_file=$(mktemp 2>/dev/null) || die "cannot create a temporary file"
+trap 'rm -f "$tip_err_file"' EXIT
+
+read_tip() {
+  TIP=""
+  TIP_ERR=""
+  : > "$tip_err_file"
+  _st=0
+  TIP=$(git -C "$REPO_ROOT" rev-parse --verify --quiet "$1" 2>"$tip_err_file") || _st=$?
+  if [ "$_st" -ne 0 ]; then
+    TIP=""
+    TIP_ERR=$(tr '\n' ' ' < "$tip_err_file")
+  fi
+}
+
+spoke() { case "$1" in *[![:space:]]*) return 0 ;; *) return 1 ;; esac; }
+
+read_tip "refs/heads/$BRANCH"
+local_tip=$TIP
+local_err=$TIP_ERR
+read_tip "refs/remotes/origin/$BRANCH"
+origin_tip=$TIP
+origin_err=$TIP_ERR
 
 branch_action="absent"
 branch_reason="no-local-branch"
-if [ -n "$local_tip" ]; then
+if spoke "$local_err" || spoke "$origin_err"; then
+  branch_action="left"
+  branch_reason="tip-read-failed"
+  note_error "rev-parse failed: ${local_err}${origin_err}"
+  note_left "$BRANCH"
+elif [ -n "$local_tip" ]; then
   if [ -z "$origin_tip" ]; then
     branch_action="left"
     branch_reason="no-remote-tracking-ref"
