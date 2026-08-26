@@ -133,7 +133,7 @@ nothing repository-wide.
 pre-existing local fix branch stops the agent**" and the Cleanup rule that leaves the branch behind
 to be a deadlock when read together: cleanup left a branch on every exit path, so the next run of
 the same group always found one and always stopped. The guard's stated subject — someone's unpushed
-work — was in practice never what it caught. `brianespinosa/bork` carried
+work — was in practice never what it caught. The branch-leftover field-test repository carried
 `fix/dependabot-react-router-6x` at this plugin's own pushed commit and `fix/dependabot-vite-6x` at
 what was then `origin/main`, and both blocked a rerun until a human deleted them.
 

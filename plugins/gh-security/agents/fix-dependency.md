@@ -196,9 +196,9 @@ that one, and never reuse it: your commit would land on top of theirs and your p
 
 The guard used to stop on any local branch at all, which deadlocked the flow against its own
 leftovers: cleanup left a branch behind on every run, so the next run of the same group always
-found one and always stopped. `brianespinosa/bork` is the specimen —
-`fix/dependabot-react-router-6x` at `d1e0b48`, this plugin's own pushed commit from the since-closed
-PR #377, and `fix/dependabot-vite-6x` at `a24f38c`, which was `origin/main` at the time, i.e. a run
+found one and always stopped. The branch-leftover field-test repository is the specimen —
+`fix/dependabot-react-router-6x` at `d1e0b48`, this plugin's own pushed commit from a since-closed
+fix PR, and `fix/dependabot-vite-6x` at `a24f38c`, which was `origin/main` at the time, i.e. a run
 that created the branch and committed nothing. Neither held a human's commit, and both blocked a
 rerun until a human deleted them by hand
 ([#84](https://github.com/SurveyMonkey/skills/issues/84)).
@@ -535,7 +535,7 @@ cd "$WORK/fix" && $ADAPTER declared_ranges --line <major_line> <package>
 **Always pass `--line <major_line>`**, the same major line you passed to `validate --line` in phase
 4. Without it the verb collects every declaration of the package name anywhere in the lockfile,
 including parents whose own resolved copy sits on a major line your override never touches, and
-their ranges then score as distance this fix crossed. On `arsenalamerica/app#300` a 7.28.0 ->
+their ranges then score as distance this fix crossed. On a field-test fix PR a 7.28.0 ->
 7.29.0 bump scoped to line 7 scored F7 = 2, "2 major lines crossed ... crosses the pinned range
 5.28.4", entirely on the strength of 5.x and 6.x parents that a line-bounded override leaves
 exactly where they were ([#76](https://github.com/SurveyMonkey/skills/issues/76)). Distance is
@@ -630,8 +630,8 @@ the reviewers and CODEOWNERS who decide it. Opening it is not merging it (ADR 00
 **The repository's own commit and push hooks are the repository's, and they run.** A repo with
 lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
 and *your* push, and that is correct: you are committing to that repository on its terms.
-`arsenalamerica/app` ran biome and knip on commit and its test and typecheck suite on push through
-every fix run. Three rules follow, and none of them is a judgment call:
+A field-test repository ran biome and knip on commit and its test and typecheck suite
+on push through every fix run. Three rules follow, and none of them is a judgment call:
 
 - **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
   `core.hooksPath`. This is the user-level git convention as well as this flow's.

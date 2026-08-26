@@ -349,7 +349,7 @@ in the tree, so they are both the most costly and the most likely to be over-bro
 
    **`jq . package.json` comes first because a removal can leave the manifest syntactically
    broken**, and the classic way is a trailing comma where the removed entry was the last one in
-   its block. That happened on `prusa-connect-auto-ready#40` removing the picomatch/minimatch
+   its block. That happened on the first field-test audit run removing the picomatch/minimatch
    entries. A non-zero exit here is a failure result (phase `install`) quoting jq's own parse
    error: the manifest is corrupt, and every verdict measured against an install of it would be
    fiction. Do not repair it by re-editing around the error — restore the file per step 7 and stop.
@@ -387,7 +387,7 @@ in the tree, so they are both the most costly and the most likely to be over-bro
    unavailable `resolution_map` below, for the same reason: a partial view is not a whole-tree
    view, and a verdict that outruns what was checked is a wrong one.
    **A large collateral fan-out is checked, not sampled, unless it is a platform-binary family.**
-   Removing one pin on `prusa-connect-auto-ready#40` moved 26 `@esbuild/*` packages together. The
+   Removing one pin in the first field-test audit run moved 26 `@esbuild/*` packages together. The
    default is that **every** collateral entry is judged against the advisory database, because a
    list of 26 is 26 packages that moved and "most of them look alike" is not a verdict. The one
    exception is a **platform-binary family**: sibling packages published from a single release of
@@ -842,7 +842,7 @@ cd "$WORK/audit" && <scripts_dir>/score-merge-risk.sh \
 - `--after` follows the same rule from the other end: when removing the pins admits **more than
   one** newly resolved version of the package, `--after` is the **highest** of them. Same
   rationale as `--before` — widest true distance — and the pair is what makes it a rule rather
-  than a preference. On `prusa-connect-auto-ready#40` picomatch was held at 2.3.2 by one pin and
+  than a preference. In the first field-test audit run picomatch was held at 2.3.2 by one pin and
   4.0.4 by another, and minimatch at 3.1.4 and 10.2.3; "lowest" and "most common" were equally
   available readings and would each have produced a different, equally undocumented score
   ([#79](https://github.com/SurveyMonkey/skills/issues/79)). Say in the PR body which versions the
@@ -932,7 +932,8 @@ git -C "$WORK/audit" commit -m "..."
 **The repository's own commit and push hooks are the repository's, and they run.** A repo with
 lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
 and *your* push, and that is correct: you are committing to that repository on its terms.
-`tacoma.fyi` ran biome on commit and vitest plus `astro check` on push through the audit run.
+The Astro field-test repository ran biome on commit and vitest plus `astro check` on push through
+the audit run.
 Three rules follow, and none of them is a judgment call:
 
 - **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
@@ -991,10 +992,11 @@ Refs: https://github.com/<nwo>/security/dependabot/93
 The `Refs:` lines are phase 3's provenance, one per line: the PR or commit that introduced each
 removed pin and the fixed alerts for its package. **A pin introduced by a direct commit with no
 pull request uses the `/commit/<sha>` form**, with the full 40-character sha, which is why it has
-its own template line: on `tacoma.fyi#77` that was the provenance for one removed pin and the
-line was improvised ([#79](https://github.com/SurveyMonkey/skills/issues/79)). Use the PR URL when
-there is a PR and the commit URL when there is not; never both for the same pin. **Omit the trailer entirely when phase 3 found
-none.** A trailer naming the tool that wrote the commit tells a reader nothing they cannot see; a
+its own template line: in a field-test audit run that was the provenance for one
+removed pin and the line was improvised ([#79](https://github.com/SurveyMonkey/skills/issues/79)).
+Use the PR URL when there is a PR and the commit URL when there is not; never both
+for the same pin. **Omit the trailer entirely when phase 3 found none.** A trailer
+naming the tool that wrote the commit tells a reader nothing they cannot see; a
 trailer pointing at the PR that added the pin is the other half of this one's story.
 
 Then create the PR. The `gh` calls carry `--repo`, so they are location-independent and take no
@@ -1243,7 +1245,7 @@ End your final message with exactly one fenced JSON block:
   delta was empty. A collateral package's advisory result lives in `collateral_verdict`, never
   folded into these.
 - `provenance` is phase 3's, and `provenance.fixed_alerts` is an **array of alert numbers as bare
-  integers** (`[93, 148]`), never objects. `arsenalamerica/app#303` populated it with
+  integers** (`[93, 148]`), never objects. The field test's audit PR populated it with
   `{number, ghsa, range}` elements, a defensible reading of a field only ever shown by example
   ([#81](https://github.com/SurveyMonkey/skills/issues/81)). It is `[]` when the provenance commit
   referenced no alert. The GHSA ids and ranges belong to the advisory verdict fields, not here.
@@ -1274,9 +1276,9 @@ End your final message with exactly one fenced JSON block:
   `findings[]` and in the findings table, and they were never candidates for removal in the first
   place. `left_behind` is exclusively the attempt-2 case — a candidate that would have passed on
   its own but was dropped from the combined attempt because a sibling admitted something unsafe.
-  Two live runs read this both ways: `arsenalamerica/app#303` listed all four `still-required` pins
-  in `left_behind` after attempt 1 passed with nothing excluded, while `tacoma.fyi#77` left the
-  section empty with `still-required` findings present
+  Two live runs read this both ways: the field test's audit PR listed all four `still-required`
+  pins in `left_behind` after attempt 1 passed with nothing excluded, while a second field-test
+  audit run left the section empty with `still-required` findings present
   ([#81](https://github.com/SurveyMonkey/skills/issues/81)). When attempt 1 passes, `left_behind`
   is `[]` however many findings the audit produced. `attempt` is `1` or `2` and names the last attempt that ran, which on a
   successful PR is the one whose combined install the body describes; `risk` is the **highest**

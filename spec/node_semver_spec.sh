@@ -253,9 +253,9 @@ End
 
 # --line, the F7 scoping fix (issue #76).
 #
-# The fixture is trimmed from arsenalamerica/app at the commit that opened its
-# PR #300: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously, five
-# parents declaring across all three lines, and a fix scoped to line 7 moving
+# The fixture is trimmed from the Yarn Berry field-test repository at the commit that
+# opened its fix PR: undici resolved at 5.29.0, 6.27.0 and 7.28.0 simultaneously,
+# five parents declaring across all three lines, and a fix scoped to line 7 moving
 # 7.28.0 -> 7.29.0. Collecting every declaration of the name regardless of
 # which copy the parent resolves to scored that minor bump as two major lines
 # crossed plus a crossed pin, on the strength of 5.x and 6.x parents a
@@ -263,7 +263,7 @@ End
 Describe 'node.sh declared_ranges --line'
   After 'cleanup_fixture'
 
-  It 'collects every line without --line, the shape that mis-scored #300'
+  It 'collects every line without --line, the shape that mis-scored the field-test fix PR'
     use_fixture yarn-line-scoped
     When call adapter_jq '{ranges, line, parents_other_lines}' declared_ranges undici
     The status should be success
@@ -308,8 +308,8 @@ Describe 'node.sh declared_ranges --line'
   # A parent in the tree at two versions is the shape the installed manifest
   # cannot describe: one file, one range, and `resolved_major_for_parent`
   # answering about the hoisted copy or (under PnP, and in the pre-install
-  # worktree a fix runs in) about nothing at all. On arsenalamerica/app the
-  # live run returned `parents_read: []`, `parents_unreadable: ["minimatch"]`
+  # worktree a fix runs in) about nothing at all. On the Yarn Berry field-test repository
+  # the live run returned `parents_read: []`, `parents_unreadable: ["minimatch"]`
   # and no ranges, while the lockfile recorded both copies and both
   # declarations ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
   Describe 'a parent resolved at more than one version'
@@ -378,7 +378,7 @@ Describe 'node.sh declared_ranges --line'
     End
   End
 
-  # The verdict, not the parse: what mattered on #300 is the number that
+  # The verdict, not the parse: what mattered on the field-test fix PR is the number that
   # reached the PR body, so both halves are scored through score-merge-risk.sh.
   Describe 'the score those ranges produce'
     score_undici() {
@@ -391,7 +391,7 @@ Describe 'node.sh declared_ranges --line'
         | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
     }
 
-    It 'reproduces the F7 of 2 the unscoped collection produced on #300'
+    It 'reproduces the F7 of 2 the unscoped collection produced on the field-test fix PR'
       use_fixture yarn-line-scoped
       When call score_undici scoped --declared-range 5.28.4 --declared-range 5.29.0 \
         --declared-range '^6.22.0' --declared-range '^6.23.0' --declared-range '^7.27.1'

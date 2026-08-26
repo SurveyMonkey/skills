@@ -2320,7 +2320,7 @@ verb_range_facts() {
 # `--line <major>` narrows the collection to the parents this fix actually
 # moves, mirroring `validate --line`. A package resolved at 5.x, 6.x and 7.x
 # concurrently has parents on each of those lines, and a major-bounded fix
-# touches exactly one of them: on arsenalamerica/app#300 a 7.28.0 -> 7.29.0
+# touches exactly one of them: on a field-test fix PR a 7.28.0 -> 7.29.0
 # bump scoped to line 7 was scored "2 major lines crossed" against the 5.x and
 # 6.x parents' declarations, because every declaration of the name anywhere in
 # the lockfile was collected regardless of which copy the parent resolves to
@@ -2387,7 +2387,7 @@ resolved_major_for_parent() {
 # manifest for a multi-version parent therefore attributes one copy's range to
 # every line the parent sits on, and asking `resolved_major_for_parent` for its
 # line answers about the hoisted copy or about nothing at all. On
-# arsenalamerica/app (Yarn Berry, no `node_modules` in the pre-install
+# the Yarn Berry field-test repository (no `node_modules` in the pre-install
 # worktree) `declared_ranges --line 5 brace-expansion` returned
 # `parents_read: []`, `parents_unreadable: ["minimatch"]` and `ranges: []`,
 # while the lockfile plainly recorded minimatch@3.1.5 -> brace-expansion@^1.1.7

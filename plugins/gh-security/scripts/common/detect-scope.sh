@@ -9,10 +9,10 @@
 # `@org/` containing several `@sub-org/` directories), so the *innermost*
 # `@`-segment is the owner and the next non-`@` segment is the repository.
 #
-#   ~/Code/@momentive_emu/@mntv-analysis/analysis-web -> repo  mntv-analysis/analysis-web
-#   ~/Code/@SurveyMonkey/skills                       -> repo  SurveyMonkey/skills
-#   ~/Code/@SurveyMonkey                              -> org   SurveyMonkey
-#   ~/Code                                            -> user  <authenticated login>
+#   ~/Code/@example-umbrella/@example-org/example-repo -> repo  example-org/example-repo
+#   ~/Code/@SurveyMonkey/skills                        -> repo  SurveyMonkey/skills
+#   ~/Code/@SurveyMonkey                               -> org   SurveyMonkey
+#   ~/Code                                             -> user  <authenticated login>
 #
 # Phase 1 consumes only repo scope. Org and user are classified now so Phase 3
 # (issue #6) inherits the mapping rather than reimplementing it.

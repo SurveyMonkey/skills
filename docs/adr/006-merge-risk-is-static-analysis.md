@@ -17,7 +17,7 @@ terms of that run: F4 said whether the tests passed, F5 said whether every scrip
 
 That definition collapses two situations a reviewer needs told apart. "This repository has no
 tests" and "one check could not start on this machine" both scored 2, and the second is not a
-property of the fix at all. `tacoma.fyi#75` is the worked example
+property of the fix at all. The tooling-only field-test case is the worked example
 ([#71](https://github.com/SurveyMonkey/skills/issues/71)): a dev-only transitive pin under a build
 tool, nothing in the repository importing it, six checks passing and `e2e` skipped for want of a
 dev server. It rated High 7/14, the highest band the system has, and CI went green on the same
@@ -94,7 +94,7 @@ prose.
 here is that no agent *chooses* to run a repository's checks in order to score them. A hook the
 repository has attached to `git commit` or `git push` — lefthook, husky, `core.hooksPath` — is a
 different mechanism: it fires automatically on the agent's own commit and push, on the
-repository's terms, and it feeds no factor. `arsenalamerica/app` and `brianespinosa/tacoma.fyi`
+repository's terms, and it feeds no factor. Two field-test repositories
 both ran their full pre-commit and pre-push suites on agent commits under this ADR, and that is
 the intended behavior. Those hooks are never bypassed (no `--no-verify`), a hook that fails the
 commit or push is a failure result at that phase quoting the hook's output, and nothing in the

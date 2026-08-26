@@ -166,7 +166,7 @@ Describe 'the rules that gate the removal PR'
   # the review itself (ADR 008), and the agent's work ends at `gh pr create`.
   # Merging is a human decision on GitHub; arming auto-merge is that same
   # decision made in advance, which is the chain that merged
-  # arsenalamerica/app#233 unread when the flow still had a promote step.
+  # a field-test fix PR unread when the flow still had a promote step.
   It 'forbids the agent from merging its own PR or arming auto-merge'
     When call rule_in "$AGENT" 'Never merge the PR, never enable auto-merge on it'
     The status should be success
@@ -253,7 +253,7 @@ Describe 'the rules that gate the removal PR'
     End
 
     # `--before` had a documented rule for the several-versions case and
-    # `--after` had none, so prusa-connect-auto-ready#40 chose one on its own.
+    # `--after` had none, so a field-test audit run chose one on its own.
     It 'defines --after when a removal admits several versions (#79a)'
       When call phrase_in "$AGENT" '--after. is the \*\*highest\*\* of them'
       The status should be success
@@ -288,8 +288,8 @@ Describe 'the rules that gate the removal PR'
       The output should equal '1'
     End
 
-    # Read both ways across two runs: app#303 put still-required findings in
-    # left_behind, tacoma.fyi#77 left the section empty with findings present.
+    # Read both ways across two runs: one audit PR put still-required findings
+    # in left_behind, another left the section empty with findings present.
     It 'keeps still-required findings out of left_behind, in the schema (#81)'
       When call phrase_in "$AGENT" 'never appears in .left_behind.'
       The status should be success
@@ -348,7 +348,7 @@ Describe 'the rules that gate the removal PR'
       The output should equal '1'
     End
 
-    # arsenalamerica/app#233 came out of THIS flow: a draft somebody armed
+    # A field-test fix PR came out of THIS flow: a draft somebody armed
     # auto-merge on, which the deleted promote step then merged unread. The
     # sentence is the only thing standing where the draft flag used to.
     It 'forbids merging its own PR or arming auto-merge'

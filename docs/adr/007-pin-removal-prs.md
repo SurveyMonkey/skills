@@ -18,7 +18,7 @@ that graduation actually decided.
 The audit does all of the work a removal needs and then stops one step short of it. For each pin it
 gathers provenance, removes the entry, installs in an isolated worktree, reads the whole-lockfile
 resolution map, and judges every version that newly resolves against every published advisory for
-its package. A real run against `brianespinosa/prusa-connect-auto-ready` found 5 of 22 pins cleanly
+its package. A real run against a field-test repository found 5 of 22 pins cleanly
 removable and 3 more removable individually, each with the advisory evidence for why. Nothing was
 done with any of it. A human then has to translate a report back into a diff by hand, re-deriving
 work that was already done and already verified, which is the step most likely to be skipped

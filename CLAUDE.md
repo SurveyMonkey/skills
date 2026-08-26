@@ -48,6 +48,14 @@ bash 3.2 because the hooks run it on stock macOS.
 - **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
   private repo into this one, which is public: internal package names, registry URLs, and the
   shape of an internal dependency graph all leak that way.
+- **Nothing names a repository, organization, account or workspace outside the public
+  `@SurveyMonkey` org.** This covers fixtures, code comments, spec data and documentation alike,
+  and it covers organization topology (umbrella and nested owner directories) as surely as it
+  covers package names: the shape of private infrastructure leaks the same way an internal
+  dependency graph does. Cite a real field case generically ("the field-test repository", "a
+  field-test fix PR") and give structural examples fictitious names (`@example-org/example-repo`,
+  `octo/app`). `spec/reference_scrub_spec.sh` gates the internal slugs; the rest is on review. A
+  doc's `owner:` frontmatter is exempt — it names an author, not a codebase or organization.
 - **Specs never hit the network or run an install.** Anything reaching for `gh` is mocked with
   shellspec's `Mock`.
 - **Assert JSON with the `adapter_jq` / `common_jq` helpers**, not string matching against

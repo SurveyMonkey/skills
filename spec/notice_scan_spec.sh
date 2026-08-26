@@ -42,9 +42,9 @@ Describe 'notice-scan.sh'
 
   Describe 'GitHub-sourced notices'
     Parameters
-      "push-time notice"        "remote: GitHub found 8 vulnerabilities on brianespinosa/app's default branch (2 critical, 3 high, 2 moderate, 1 low). To find out more, visit:"
-      "dependabot alert url"    "remote:      https://github.com/brianespinosa/app/security/dependabot/3"
-      "dependabot overview url" "remote:      https://github.com/brianespinosa/app/security/dependabot"
+      "push-time notice"        "remote: GitHub found 8 vulnerabilities on octo/app's default branch (2 critical, 3 high, 2 moderate, 1 low). To find out more, visit:"
+      "dependabot alert url"    "remote:      https://github.com/octo/app/security/dependabot/3"
+      "dependabot overview url" "remote:      https://github.com/octo/app/security/dependabot"
     End
 
     It "matches a $1 and offers resolve-alerts directly"
@@ -57,7 +57,7 @@ Describe 'notice-scan.sh'
   Describe 'BashOutput events (backgrounded commands)'
     It 'fires the GitHub nudge for a Dependabot URL surfaced via BashOutput'
       When call notice_jq '{event: .hookSpecificOutput.hookEventName, offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
-        "https://github.com/brianespinosa/app/security/dependabot/3" "BashOutput"
+        "https://github.com/octo/app/security/dependabot/3" "BashOutput"
       The status should be success
       The output should equal '{"event":"PostToolUse","offers_directly":true}'
     End
@@ -192,7 +192,7 @@ Severity: 1 low | 2 moderate"
   # pushes from its worktree, GitHub answers with this exact notice, and the
   # hook nudged the already-dispatched subagent to offer resolve-alerts and ask
   # whether to start (issue #77). The specimen is the notice block from the
-  # push that opened arsenalamerica/app#300: it names the repository and its
+  # push that opened a field-test fix PR: it names the repository and its
   # *default* branch, never the branch pushed, which is why the branch has to
   # come from the command or the cwd rather than from the text.
   Describe 'pushes from the plugin own branches'
@@ -284,7 +284,7 @@ nothing to commit, working tree clean"
       "vulnerability mentioned without count" "No known vulnerabilities found"
       "the word vulnerability with no digit"  "Checking for vulnerability disclosures policy"
       "GitHub zero-count push notice"         "remote: GitHub found 0 vulnerabilities on main's default branch."
-      "code-scanning URL, not dependabot"     "remote:      https://github.com/brianespinosa/app/security/code-scanning/3"
+      "code-scanning URL, not dependabot"     "remote:      https://github.com/octo/app/security/code-scanning/3"
     End
 
     It "emits nothing for $1"
@@ -315,7 +315,7 @@ nothing to commit, working tree clean"
 
   Describe 'tool_response envelope shapes'
     It 'matches when the signal is only in the object-shaped stdout field'
-      stdin=$(jq -n '{tool_name: "Bash", tool_response: {stdout: "https://github.com/brianespinosa/app/security/dependabot/3", stderr: ""}}')
+      stdin=$(jq -n '{tool_name: "Bash", tool_response: {stdout: "https://github.com/octo/app/security/dependabot/3", stderr: ""}}')
       When call notice_jq_raw '{matched: (.hookSpecificOutput.additionalContext != null)}' "$stdin"
       The status should be success
       The output should equal '{"matched":true}'
