@@ -109,25 +109,34 @@ carried a permissions preflight that pre-approved its whole surface in one decis
 when `auto` became the recommended default mode and the workaround was removed
 ([#86](https://github.com/SurveyMonkey/skills/issues/86)).
 
-## Directory-scoped credentials travel as `env_prefix`
+## `env_prefix` is an opaque, optional seam
 
-`direnv` loads via a shell hook, which non-interactive tool shells do not run, so a bare `gh` or
-`git` uses whatever account the shell defaults to. The contract is one optional dispatch field:
-the dispatcher — `resolve-alerts` SKILL.md phase 1 (repo scope) or phase 5 (org and user scope),
-or the `audit-pins` command's step 1 — checks whether a `.envrc` sits at or above `repo_root` and,
-when one does, resolves `env_prefix` to `direnv exec <repo_root>`, runs its own `gh`/`git`/script
-invocations for that repo under it, and carries it in the dispatch payload. Each agent then
-prepends it verbatim to every `gh`, `git`, package-manager, and adapter-script invocation —
-composed **after** the command's own `cd` locator, because `direnv exec` injects environment
-without changing directory — and runs those commands bare when the field is absent.
-`check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+`env_prefix` is **a command prefix the environment requires for repo-targeted commands**. The
+plugin knows nothing else about it: it never names, probes for, or constructs one, and it never
+assumes per-directory environments exist at all. **Where a prefix comes from is the user's
+environment's concern** — a workspace- or user-level CLAUDE.md or rules file saying commands in
+that tree need one — and the dispatcher passes verbatim whatever the session context supplies.
+Absent any such context there is no prefix and nothing extra happens, which is the ordinary
+single-login case ([#135](https://github.com/SurveyMonkey/skills/issues/135)).
 
-The failure modes are misleading rather than obvious, which is why this is a contract and not a
-tip: bare `gh` reports "please run gh auth login" on a correctly configured machine, bare
-`git fetch` reports **`repository not found`** (reads as a renamed or deleted repo, not an auth
-context), bare `git commit` fails on a missing author identity, and a bare package-manager install
-401s against the wrong registry token. Following an agent definition literally without the
-wrapping fails at phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
+The contract is one optional dispatch field. The dispatcher — `resolve-alerts` SKILL.md phase 1
+(repo scope) or phase 5 (org and user scope), or the `audit-pins` command's step 1 — resolves
+`env_prefix` from session context, runs its own `gh`/`git`/script invocations for that repo under
+it, and carries it in the dispatch payload. Each agent then prepends it verbatim to every `gh`,
+`git`, package-manager, and adapter-script invocation — composed **after** the command's own `cd`
+locator, because the prefix injects environment without changing directory — and runs those
+commands bare when the field is absent. It wraps a command, not a shell builtin, so it can never
+stand in for a `cd`. `check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+
+The failure class this guards against is manager-agnostic: per-directory environment tools load
+through interactive shell hooks that non-interactive tool shells never run, so a bare `gh`, `git`,
+or install resolves whatever identity or registry token the shell defaults to. The symptoms are
+misleading rather than obvious, which is why this is a contract and not a tip: bare `gh` reports
+"please run gh auth login" on a correctly configured machine, bare `git fetch` reports
+**`repository not found`** (reads as a renamed or deleted repo, not an auth context), bare
+`git commit` fails on a missing author identity, and a bare package-manager install 401s against
+the wrong registry token. Following an agent definition literally without the wrapping fails at
+phase 1 ([#33](https://github.com/SurveyMonkey/skills/issues/33)).
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 

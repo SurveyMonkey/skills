@@ -57,7 +57,7 @@ flowchart TD
     P1R -->|null| STOP0(["Stop: the checkout has no usable origin"])
     P1R -->|yes| P1D{"default_branch resolved?"}
     P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
-    P1D -->|yes| P1E["Resolve env_prefix at repo scope: .envrc at or above<br/>repo_root? The orchestrator's own gh/git/script<br/>calls for the repo run under it from here on"] --> P2
+    P1D -->|yes| P1E["Resolve env_prefix at repo scope: the prefix session<br/>context states for this tree, if any. The orchestrator's<br/>own gh/git/script calls for the repo run under it from here on"] --> P2
 
     P2["Phase 2: discover-alerts.sh | select-adapter.sh<br/>| classify-lines.sh (repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
     P2REP --> P2Q{"actionable groups?"}
@@ -77,7 +77,7 @@ flowchart TD
     P5Q -->|"repo scope from a local checkout"| P6
     P5Q -->|"org / user, or one named repo"| P5ASK{"ask once for the run: where new clones go —<br/>a directory the user names and keeps,<br/>or a temporary one removed in phase 7"}
     P5ASK --> P5["Phase 5: per distinct repo in the batch"]
-    P5 --> P5E["Resolve env_prefix per repo from a .envrc at or above the<br/>checkout path; clone, fetch and the calls below run under it"]
+    P5 --> P5E["Resolve env_prefix per repo from what session context states<br/>for the checkout's tree; clone, fetch and the calls below run under it"]
     P5E --> P5A{"checkout already at the destination path?"}
     P5A -->|"git repo exists"| P5F["git -C fetch origin"] --> P5B
     P5A -->|"nothing there"| P5C["gh repo clone into the chosen destination"] --> P5B
@@ -241,7 +241,7 @@ run.
 
 ```mermaid
 flowchart TD
-    CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from a .envrc<br/>at or above repo_root"] --> CMD1Q{"inside a git repository?"}
+    CMD1["/gh-security:audit-pins: detect-scope.sh,<br/>then resolve env_prefix from what session<br/>context states for this tree, if anything"] --> CMD1Q{"inside a git repository?"}
     CMD1Q -->|"no: scope null"| CMD1A["Ask which repo, or ask the user to run it from<br/>that repo's checkout, then re-run detect-scope.sh<br/>against that checkout and read the second output"] --> CMD1N
     CMD1Q -->|"yes: repo scope"| CMD1N{"nwo resolved from origin?"}
     CMD1N -->|null| CSTOPN(["Stop: the checkout has no usable origin;<br/>the removal PR has no repository to open against"])
