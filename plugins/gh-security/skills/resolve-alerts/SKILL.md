@@ -153,6 +153,16 @@ will see:
   no override bounded to the resolved line can reach the patched version. Report it with the
   context sentence the annotations carry: "only 0.2.5 is installed; the fix line is 1.x". Human
   work — a major bump of the parent that holds it, or dropping that parent.
+- `shared parent across major lines`: the package resolves on more than one major line, the
+  sibling lines share a parent (`collision_parents` names them), and the shape is one no override
+  key in that repo's syntax can scope apart: Yarn `resolutions` keys cannot carry a parent
+  version today (the exact-locator form that could is unimplemented), and under npm and pnpm a
+  single copy of the shared parent resolves the package on two majors at once, so every key
+  naming it drags a sibling line. Dispatching such groups
+  burns a worktree, install and validate cycle apiece before each fails closed on the same fact
+  ([#132](https://github.com/SurveyMonkey/skills/issues/132)). Human work: a bump of the shared
+  parent, or dropping the dependent that pins it. A shared parent whose copies version-qualified
+  keys CAN separate stays actionable; the adapter writes those keys itself.
 
 `classify-lines.sh` also annotates each still-actionable group with `resolved_majors` and a
 `line_status` (`resolved`, `line_absent`, or `unknown`); all three dispatch normally — `unknown`
@@ -298,7 +308,9 @@ For each **distinct repo** named in the approved batch:
    `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
    approval covered fixing the group, and this discovers the fix does not exist — and reported in
    phase 7 as skipped with the same `requires major version bump` reason and its
-   `resolved_majors` context. Every other `line_status`, `unknown` included, dispatches as
+   `resolved_majors` context. A group that reclassifies `cross_line_collision` is withdrawn the
+   same way and reported under `shared parent across major lines` with its `collision_parents`
+   (issue #132). Every other `line_status`, `unknown` included, dispatches as
    approved.
 
 Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
@@ -512,6 +524,13 @@ through pnpm's peer auto-install, no `pnpm.overrides` key can reach it, and the 
 bump of one of the peer parents `detail` quotes, or a real dependency declaration. Both are
 lockfile regeneration, both human work ([#103](https://github.com/SurveyMonkey/skills/issues/103)).
 
+A `phase: "apply"` failure whose `detail` names the shared-parent shape gets its own Notes label
+(`shared parent, no reachable override`) rather than the generic `failure: apply`: the root
+manifest's own spec for that parent also admits its copies on other major lines, or a pre-existing
+bare override for the package under that parent pins a different line, so the adapter wrote nothing
+and no install ran. The remedy is a bump of the shared parent, or reconciling the existing override
+by hand, both human work ([#132](https://github.com/SurveyMonkey/skills/issues/132)).
+
 A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file
 conflict` push rejection) gets its own Notes label (`branch-namespace collision (preflight
 miss)`): the namespace probe in phase 1 or phase 5 said `slash`, but this group's exact `fix/*`
@@ -554,6 +573,16 @@ the same way. And **name every repo whose batch ran under the flat branch scheme
 reason: a remote branch named `fix` occupies the `fix/*` ref namespace, so that repo's PRs came
 from `fix-dependabot-...` branches — the user reading branch names in the PRs should not have to
 guess why they differ from a neighbor repo's.
+
+**Then report every group classify-lines.sh skipped under `shared parent across major lines`,
+with its `collision_parents`.** These alerts also stay open: the group's line shares a parent
+with a sibling line in a shape no override key in that repo's syntax can scope apart, so that
+group was never dispatched. The verdict is per group, so a line of the same package whose
+parents are disjoint may still have run normally
+([#132](https://github.com/SurveyMonkey/skills/issues/132)). The remedy is human work: bumping
+the shared parent past the old line, or dropping the dependent that pins it. Like the
+requires-major-bump skips, report these whether phase 2 found them at repo scope or phase 5
+withdrew them after approval.
 
 **Then say what phase 6's reap removed and what it left.** Give the count of agents reaped, and
 name every artifact still on the user's disk: each `left_behind` entry a reap reported, every

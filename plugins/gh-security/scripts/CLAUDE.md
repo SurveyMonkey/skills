@@ -230,11 +230,36 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   record only what each copy *resolved*, never the specifier it was declared with, so a
   multi-copy pnpm parent keeps its per-copy line while its declared ranges stay unread
   (`parents_unreadable`) — under pnpm the risk score sees fewer declared ranges than under npm or
-  yarn. pnpm only: yarn's narrowing needs the full
-  resolved locator (above) and npm's nesting has its own semantics, so neither is qualified.
+  yarn. yarn stays unqualified: its narrowing needs the full resolved locator (above).
 - **npm** matches `{"parent@^10": {...}}` with `semver.intersects` on the edge's descriptor and
   `semver.satisfies` on the node's resolved version, and its nesting is transitive rather than
-  direct-child-only.
+  direct-child-only. `apply_constraint` qualifies npm parents the same way it qualifies pnpm's: a
+  multi-version parent gets one nested key per copy whose resolution of the child sits on the
+  target line, keyed by the copy's **exact resolved version**, which every edge that resolved
+  that copy admits (a version satisfying a range always intersects it) while a sibling line's
+  edges admit it only when their declared ranges span majors. The one exception is empirically
+  forced (npm 11.16.0, issue #132): npm hard-fails the install with `EOVERRIDE` on any override
+  key whose selector intersects a **direct dependency's** spec without being byte-identical to
+  it, so the copies satisfying the root manifest's own declared spec share a single key carrying
+  that spec verbatim, and that key also covers every other edge whose range admits such a copy,
+  because two ranges sharing a version always intersect. Declared-range qualifiers for the
+  general case were considered and rejected on the same evidence: two same-major ranges
+  (a grandparent's `^10.0.3` beside the root's `^10.2.5`) intersect each other, which is exactly
+  the `EOVERRIDE` shape. Same fallbacks as pnpm, in both directions: a single-version parent and
+  a parent with no qualifying copy keep the bare nested key, and the same staleness tradeoff
+  applies, since a later bump of a parent copy inertly un-matches its exact key rather than
+  dragging the new copy onto the wrong line. The carve-out's hard edges each have a fixed route:
+  a root spec that ALSO admits an off-line copy of the parent (`*`, `>=3`, a cross-major `||`)
+  is refused outright before anything is written, because no key satisfies the byte-identical
+  rule and the line separation at once; a root spec the range readers cannot judge (a dist-tag,
+  `file:`, a tarball URL, `workspace:*`, an `npm:` alias) and a parent copy whose lockfile
+  version is unreadable or not plain semver all fall back to the bare key; and a prerelease copy
+  is never counted covered by the root spec (node-semver excludes prereleases from plain ranges)
+  and takes its own exact key. A pre-existing bare nested key for the same parent and child is
+  superseded and reported in `superseded_keys` when it pins this line, because npm inserts it
+  first into the OverrideSet and it would leave the qualified keys inert, and the call refuses
+  when that key pins a DIFFERENT line, since deleting it strips that line's protection and
+  keeping it smothers this fix.
 
 So `validate --baseline` detects rather than prevents, and that ordering is deliberate: detection
 is the guard that has to exist under any of the three narrowing schemes, including the one that

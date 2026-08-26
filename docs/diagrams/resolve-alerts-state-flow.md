@@ -81,8 +81,9 @@ flowchart TD
     P5B{"detect-scope.sh default_branch?"}
     P5B -->|null| P5Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
     P5B -->|yes| P5R["Reconcile: classify-lines.sh --repo-root<br/>on that repo's approved groups"]
-    P5R --> P5RQ{"any group reclassifies<br/>requires_major_bump?"}
-    P5RQ -->|yes| P5W["Withdraw from the phase 6 queue;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
+    P5R --> P5RQ{"any group reclassifies<br/>to a skip?"}
+    P5RQ -->|requires_major_bump| P5W["Withdraw from the phase 6 queue;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
+    P5RQ -->|cross_line_collision| P5WC["Withdraw from the phase 6 queue;<br/>reported in phase 7 under 'shared parent across<br/>major lines' with collision_parents"] --> P7AGG
     P5RQ -->|"remaining groups"| P6
     P5X --> P6
     P5Y --> P6
@@ -104,7 +105,7 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then deduplicated observations split by type"] --> P8
+    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then deduplicated observations split by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}

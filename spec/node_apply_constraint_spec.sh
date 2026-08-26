@@ -163,9 +163,9 @@ Describe 'node.sh apply_constraint'
   # semver.satisfies against the copy's resolved version, so the fix —
   # proven by five shipped field PRs — is one exact-version key per parent
   # version whose resolution of the child is on the target line, read from
-  # the lockfile's snapshots. pnpm only: npm's nested overrides and yarn's
-  # `a/b` resolutions have different narrowing semantics (a version-qualified
-  # yarn key silently never matches), so neither is qualified here.
+  # the lockfile's snapshots. npm gets its own qualification (next block,
+  # issue #132); yarn `a/b` resolutions stay bare, because a
+  # version-qualified yarn key silently never matches.
   Describe 'pnpm parent keys are version-qualified across major lines'
     It 'writes one qualified key per parent version on the target line'
       use_fixture pnpm-cross-line
@@ -254,6 +254,256 @@ Describe 'node.sh apply_constraint'
       "$ADAPTER" apply_constraint minimist '>=0.0.9 <0.1' optimist >/dev/null
       When call manifest '[.pnpm.overrides | keys[]] | sort'
       The output should equal '["optimist@0.5.2>minimist","optimist@0.6.1>minimist"]'
+    End
+  End
+
+  # The same collapse in npm's nested syntax (issue #132): a bare
+  # `.overrides.minimatch["brace-expansion"]` applies to EVERY resolved copy
+  # of minimatch, so on the field run all three brace-expansion groups
+  # (1.x/2.x/5.x, majors shared under minimatch copies at two majors) failed
+  # closed at validate with fatal vanished lines, and js-yaml 4.x shipped a
+  # silent cross-major drag of the 3.x consumers. npm matches a
+  # `parent@<sel>` key with semver.intersects against each edge's declared
+  # descriptor plus semver.satisfies on the resolved copy, and hard-fails
+  # the install (EOVERRIDE) on a selector that intersects a direct
+  # dependency's spec without being byte-identical to it; both verified
+  # empirically on npm 11.16.0. So the qualifier is the copy's exact
+  # resolved version, except that copies satisfying the root manifest's own
+  # declared spec share one key carrying that spec verbatim.
+  Describe 'npm parent keys are version-qualified across major lines'
+    It 'writes one qualified key per parent copy, root spec verbatim for the direct dependency'
+      use_fixture npm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3","minimatch@^10.2.5"]'
+    End
+
+    It 'reports the qualified keys it wrote'
+      use_fixture npm-cross-line
+      When call adapter_jq '.written' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should be success
+      The output should equal '[{"parent":"minimatch","path":["overrides","minimatch@^10.2.5","brace-expansion"],"value":">=5.0.9 <6"},{"parent":"minimatch","path":["overrides","minimatch@10.0.3","brace-expansion"],"value":">=5.0.9 <6"}]'
+    End
+
+    # The 1.x line has exactly one parent copy, off the root spec, so the fix
+    # scoped there is one exact-version key and the 2.x and 5.x resolutions
+    # go unnamed.
+    It 'covers a different target line with that line parent copy only'
+      use_fixture npm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=1.1.12 <2' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch@3.1.5":{"brace-expansion":">=1.1.12 <2"}}'
+    End
+
+    # A single-version parent keeps today's bare nested key: nothing else
+    # exists for the key to leak onto, and qualifying it would churn every
+    # existing PR shape for no safety gain.
+    It 'keeps the bare nested key for a parent resolved at a single version'
+      use_fixture npm-cross-line
+      "$ADAPTER" apply_constraint minimatch '>=5.1.6 <6' filelist >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"filelist":{"minimatch":">=5.1.6 <6"}}'
+    End
+
+    # The chain to the verdict: this override state is exactly the
+    # npm-cross-line-qualified specimen, whose post-install lockfile keeps
+    # the sibling lines and passes `validate --baseline` with
+    # `other_line_moves: []`, while the bare key the verb used to write is
+    # the npm-cross-line-collapsed specimen validate fails closed on
+    # (spec/node_validate_spec.sh).
+    overrides_matching_npm_specimen() {
+      _mine=$(jq -cS '.overrides' package.json)
+      _specimen=$(jq -cS '.overrides' \
+        "$FIXTURES/npm-cross-line-qualified/package.json")
+      [ "$_mine" = "$_specimen" ] && printf '%s' "$_mine"
+    }
+
+    It 'writes the same override state the intact post-install specimen carries'
+      use_fixture npm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call overrides_matching_npm_specimen
+      The status should be success
+      The output should equal '{"minimatch@10.0.3":{"brace-expansion":">=5.0.9 <6"},"minimatch@^10.2.5":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # Zero qualifying copies falls back to the bare key, never to writing
+    # NOTHING: an unqualified entry over-covers, a missing one leaves every
+    # copy vulnerable. No minimatch copy resolves a 9.x brace-expansion.
+    It 'falls back to the bare nested key when no parent copy qualifies'
+      use_fixture npm-cross-line
+      "$ADAPTER" apply_constraint brace-expansion '>=9.0.0 <10' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=9.0.0 <10"}}'
+    End
+
+    # npm has one source for the multiplicity proof, the lockfile's
+    # `packages` object; without it nothing proves a second copy exists, so
+    # the verb keeps the documented over-cover fallback (the bare key) and
+    # `validate --baseline` stays the net that fails a collapse closed. The
+    # same missing object makes the stale-entry pass report itself unable to
+    # judge the lockfile rather than claiming the override effective.
+    It 'falls back to the bare nested key when the lockfile has no packages object'
+      use_fixture npm-cross-line
+      jq 'del(.packages)' package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # Qualified keys narrow which parent copies the override reaches, never
+    # which child line it targets, so the issue #124 stale-entry pass still
+    # deletes exactly the target-line copies that fail the range (here the
+    # hoisted 5.0.5) and nothing on the sibling lines.
+    It 'still invalidates exactly the stale target-line lockfile entries'
+      use_fixture npm-cross-line
+      When call adapter_jq '.lockfile_invalidated' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should be success
+      The output should equal '{"performed":true,"keys":["node_modules/brace-expansion"]}'
+    End
+
+    # The EOVERRIDE carve-out reads the root spec from every dependency
+    # block, not just `dependencies`: a dev-declared parent is a direct
+    # dependency to npm's conflict check all the same, and missing it here
+    # writes an exact key the install rejects.
+    It 'reads the root spec from devDependencies too'
+      use_fixture npm-cross-line
+      jq '.devDependencies = {minimatch: .dependencies.minimatch}
+          | del(.dependencies.minimatch)' package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3","minimatch@^10.2.5"]'
+    End
+
+    # A root spec that ALSO admits an off-line parent copy (`>=3.0.0` admits
+    # the 3.1.5 copy whose child is on the 1.x line) is the collapse shape
+    # no key can express: the only key npm allows beside the direct dep is
+    # the byte-identical spec, and that key drags the off-line copies. The
+    # call refuses before writing anything, so the agent fails closed at
+    # apply with no install burned.
+    refused_shape() {
+      _st=0
+      _err=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch \
+        2>&1 >/dev/null) || _st=$?
+      printf 'st=%s named=%s overrides=%s\n' "$_st" \
+        "$(printf '%s' "$_err" | grep -c 'copies on other major lines')" \
+        "$(jq -c '.overrides // "absent"' package.json)"
+    }
+
+    It 'refuses a root spec that also admits an off-line parent copy, writing nothing'
+      use_fixture npm-cross-line
+      jq '.dependencies.minimatch = ">=3.0.0"' package.json > p.tmp && mv p.tmp package.json
+      When call refused_shape
+      The status should be success
+      The output should equal 'st=1 named=1 overrides="absent"'
+    End
+
+    # A root spec the range readers cannot judge (a dist-tag here; file:,
+    # tarball and workspace: specs behave the same) must never produce exact
+    # keys: npm accepts an override for such specs unconditionally at the
+    # edge and then throws EOVERRIDE on the exact-version key at install
+    # (reproduced on npm 11.16.0). The bare key is the EOVERRIDE-clean
+    # fallback, and validate stays the net behind it.
+    It 'falls back to the bare nested key when the root spec is a dist-tag'
+      use_fixture npm-cross-line
+      jq '.dependencies.minimatch = "latest"' package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # A parent copy whose own lockfile version is unreadable is a copy no
+    # qualifier can cover; dropping it from the set under-covers, so the
+    # parent falls back to the bare key instead. The branch is shared with
+    # pnpm, which gets the same fix.
+    It 'falls back to the bare nested key when a parent copy has no readable version'
+      use_fixture npm-cross-line
+      jq 'del(.packages["node_modules/@ts-morph/common/node_modules/minimatch"].version)' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # node-semver excludes prereleases from plain ranges where the in-repo
+    # satisfies admits them; counting such a copy covered by the root spec
+    # writes no key for it at all, a silent under-cover. It takes its own
+    # exact key instead, which npm's prerelease rules keep off the direct
+    # dep's edge.
+    It 'gives a prerelease copy its own exact key rather than counting it covered'
+      use_fixture npm-cross-line
+      jq '.packages["node_modules/minimatch"].version = "10.3.0-beta.1"' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '[.overrides | keys[]] | sort'
+      The output should equal '["minimatch@10.0.3","minimatch@10.3.0-beta.1"]'
+    End
+
+    # A lockfile version that is not plain semver cannot become a key
+    # selector: semver.intersects throws on it at install time. Bare
+    # fallback, same as every other unjudgeable copy.
+    It 'falls back to the bare nested key when a parent copy version is not plain semver'
+      use_fixture npm-cross-line
+      jq '.packages["node_modules/@ts-morph/common/node_modules/minimatch"].version = "10.x-bogus"' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"minimatch":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # A pre-existing bare nested key for the same (parent, child) pair on
+    # THIS line sits first in npm's OverrideSet and wins getEdgeRule for
+    # every edge, leaving the qualified keys inert; it is superseded, the
+    # removal reported. The resulting override state is byte-identical to
+    # the qualified specimen.
+    It 'supersedes a same-line bare nested key and reports it'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=5.0.6 <6"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call adapter_jq '{superseded: .superseded_keys, keys: [.written[].path[1]]}' \
+        apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should be success
+      The output should equal '{"superseded":[{"parent":"minimatch","path":["overrides","minimatch","brace-expansion"],"value":">=5.0.6 <6"}],"keys":["minimatch@^10.2.5","minimatch@10.0.3"]}'
+    End
+
+    It 'leaves no bare pair behind after superseding it'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=5.0.6 <6"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+      When call overrides_matching_npm_specimen
+      The status should be success
+      The output should equal '{"minimatch@10.0.3":{"brace-expansion":">=5.0.9 <6"},"minimatch@^10.2.5":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # The same bare pair pinning a DIFFERENT line is a previous fix this
+    # call must not delete and cannot coexist with: refusal, nothing
+    # written, human reconciliation.
+    conflicting_bare() {
+      _st=0
+      _err=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch \
+        2>&1 >/dev/null) || _st=$?
+      printf 'st=%s named=%s overrides=%s\n' "$_st" \
+        "$(printf '%s' "$_err" | grep -c 'reconcile the existing override by hand')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    It 'refuses to write beside a bare pair that pins a different line'
+      use_fixture npm-cross-line
+      jq '.overrides = {minimatch: {"brace-expansion": ">=1.1.18 <2"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call conflicting_bare
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"minimatch":{"brace-expansion":">=1.1.18 <2"}}'
+    End
+
+    # A scoped parent name qualifies the same way: the key is the whole
+    # scoped name plus the copy's version after a second `@`.
+    It 'qualifies a scoped parent resolved at several versions'
+      use_fixture npm-scoped-cross-line
+      When call adapter_jq '{written: [.written[].path]}' \
+        apply_constraint minimatch '>=10.0.5 <11' '@npmcli/map-workspaces'
+      The status should be success
+      The output should equal '{"written":[["overrides","@npmcli/map-workspaces@4.0.2","minimatch"]]}'
     End
   End
 

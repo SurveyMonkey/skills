@@ -38,16 +38,55 @@
 #     "line_absent"         present, none on the line, at least one copy
 #                           at-or-above it (the fix would no-op; stays
 #                           actionable, annotated, for validate to settle)
+#     "cross_line_collision" resolved on the line, but the package's major
+#                           lines share a parent in a shape no override key
+#                           in this repo's syntax can scope apart (below);
+#                           `collision_parents` names the shared parents
 #     "unknown"             the adapter call failed, its reply broke the
 #                           contract, `present` is false, or `major_line` is
 #                           "none"
 #
 # Routing: `requires_major_bump` groups MOVE from `actionable` to `skipped`
 # with `reason: "requires major version bump"`, annotations kept, so the
-# report can say "only 0.2.5 is installed; the fix line is 1.x". Everything
-# else stays actionable — including "unknown", deliberately: dispatching an
-# unknown is safe (validate fail-closes later), while withholding a fixable
-# group on a broken read is the wrong direction.
+# report can say "only 0.2.5 is installed; the fix line is 1.x". So do
+# `cross_line_collision` groups, with `reason: "shared parent across major
+# lines"`. Everything else stays actionable, including "unknown",
+# deliberately: dispatching an unknown is safe (validate fail-closes later),
+# while withholding a fixable group on a broken read is the wrong direction.
+#
+# The collision check (issue #132) runs only for a multi-major package whose
+# group line is resolved, and reads two more adapter surfaces, both cached:
+# `detect` (once per adapter) for the override syntax, and `declared_ranges
+# --line <major>` (once per package line) for each line's eligible parent
+# names and its `parents_other_lines` entries. A group is withdrawn ONLY when
+# the sibling lines share an eligible parent name AND qualification cannot
+# express the separation:
+#
+#   - Yarn `resolutions` cannot version-qualify today (a range in the key's
+#     parent half parses and then silently never matches, and the
+#     exact-locator form that could express the separation is unimplemented;
+#     scripts/CLAUDE.md, "An override's key is scoped"), so any shared
+#     parent name across lines is the collapse shape there.
+#   - Under npm and pnpm, qualified keys separate the lines per parent COPY,
+#     so the inexpressible shape is a single copy (one `parent@version`)
+#     resolving the package on two majors at once: such an entry appears in
+#     `parents_other_lines` of EVERY line's query, which is the signature
+#     this check keys on. A version-less entry of a shared parent riding
+#     that same intersection is treated the same way, conservatively: a
+#     copy no version can name is a copy no qualifier can exclude. Both
+#     shapes only arise from one manifest declaring the package across a
+#     major boundary, and they poison every key naming that parent version.
+#     The verdict stays per GROUP: each group whose line shares that parent
+#     is withdrawn rather than dispatched to fail closed at validate one
+#     install apiece, while a group whose eligible parents are disjoint from
+#     every other line's stays actionable.
+#
+# Every other overlap stays actionable: `apply_constraint` writes
+# version-qualified parent keys for npm and pnpm, which is exactly the
+# separation this check verifies is available. A failed or
+# contract-breaking `detect` or `declared_ranges` read leaves the group
+# actionable and records a `classify_errors[]` entry; withdrawing on a
+# broken read is this stage's one unsafe act.
 #
 # Contract discipline: an adapter reply missing a promised field, of the wrong
 # type, or empty on exit 0 is a broken read, checked with `has()` rather than
@@ -228,6 +267,78 @@ if [ -n "$PAIRS" ]; then
   done <<< "$PAIRS"
 fi
 
+# The collision check's two cached adapter reads (issue #132; header). Both
+# follow the resolved_versions cache's rules: one call per key, a reply of
+# the wrong shape is a broken read recorded as such, and jq carries the
+# cache because bash 3.2 has no associative arrays.
+
+# Override syntax per adapter, from `detect`. loc "" records a failed or
+# contract-breaking read; err keeps its first stderr line for
+# classify_errors[]. The result lands in DETECT_ENTRY rather than on stdout,
+# because a command-substitution call would run the function in a subshell
+# and silently discard every cache update.
+DETECT_CACHE='[]'
+DETECT_ENTRY=''
+set_detect_entry() {
+  _dl_adapter=$1
+  DETECT_ENTRY=$(printf '%s' "$DETECT_CACHE" | jq -c --arg a "$_dl_adapter" \
+    '(map(select(.adapter == $a)) | first) // "__miss__"')
+  if [ "$DETECT_ENTRY" != '"__miss__"' ]; then
+    return 0
+  fi
+  _dl_err_file=$(mktemp)
+  _dl_loc=$( (cd "$REPO_ROOT" && "$_dl_adapter" detect) 2>"$_dl_err_file" \
+    | jq -r -s 'if (length == 1 and (.[0] | type == "object")
+                    and ((.[0].override_location | type) == "string"))
+                then .[0].override_location else "" end' 2>/dev/null) \
+    || _dl_loc=""
+  DETECT_ENTRY=$(jq -nc --arg a "$_dl_adapter" --arg l "$_dl_loc" \
+    --arg e "$(head -n 1 "$_dl_err_file" 2>/dev/null)" \
+    '{adapter: $a, loc: $l, err: $e}')
+  rm -f "$_dl_err_file"
+  DETECT_CACHE=$(printf '%s' "$DETECT_CACHE" \
+    | jq -c --argjson e "$DETECT_ENTRY" '. + [$e]')
+}
+
+# One `declared_ranges --line` read per (adapter, package, line). eligible is
+# the fix flow's own eligible-parent rule (parents_read + parents_without_range
+# + parents_unreadable, agents/fix-dependency.md phase 3); other is
+# parents_other_lines verbatim.
+DR_CACHE='[]'
+DR_ENTRY=''
+set_dr_entry() {
+  _dr_adapter=$1; _dr_pkg=$2; _dr_line=$3
+  DR_ENTRY=$(printf '%s' "$DR_CACHE" | jq -c --arg a "$_dr_adapter" \
+    --arg p "$_dr_pkg" --arg l "$_dr_line" \
+    '(map(select(.adapter == $a and .package == $p and .line == $l)) | first) // "__miss__"')
+  if [ "$DR_ENTRY" != '"__miss__"' ]; then
+    return 0
+  fi
+  _dr_err_file=$(mktemp)
+  _dr_reply=$( (cd "$REPO_ROOT" \
+    && "$_dr_adapter" declared_ranges --line "$_dr_line" "$_dr_pkg") \
+    2>"$_dr_err_file" ) || _dr_reply=""
+  DR_ENTRY=$(printf '%s' "$_dr_reply" | jq -c -s --arg a "$_dr_adapter" \
+    --arg p "$_dr_pkg" --arg l "$_dr_line" \
+    --arg e "$(head -n 1 "$_dr_err_file" 2>/dev/null)" '
+    if (length == 1 and (.[0] | type == "object")
+        and ((.[0].parents_read | type) == "array")
+        and ((.[0].parents_without_range | type) == "array")
+        and ((.[0].parents_unreadable | type) == "array")
+        and ((.[0].parents_other_lines | type) == "array"))
+    then {adapter: $a, package: $p, line: $l, ok: true, err: $e,
+          eligible: ((.[0].parents_read + .[0].parents_without_range
+                      + .[0].parents_unreadable) | unique),
+          other: (.[0].parents_other_lines | unique)}
+    else {adapter: $a, package: $p, line: $l, ok: false, err: $e}
+    end' 2>/dev/null) \
+    || DR_ENTRY=$(jq -nc --arg a "$_dr_adapter" --arg p "$_dr_pkg" \
+         --arg l "$_dr_line" --arg e "$(head -n 1 "$_dr_err_file" 2>/dev/null)" \
+         '{adapter: $a, package: $p, line: $l, ok: false, err: $e}')
+  rm -f "$_dr_err_file"
+  DR_CACHE=$(printf '%s' "$DR_CACHE" | jq -c --argjson e "$DR_ENTRY" '. + [$e]')
+}
+
 # Classify each group, in envelope order, into a parallel annotations array.
 CLASS='[]'
 if [ -n "$GROUP_ITEMS" ]; then
@@ -277,8 +388,82 @@ if [ -n "$GROUP_ITEMS" ]; then
       done <<< "$versions"
     fi
 
+    # The cross-line collision check (issue #132; header). Only a resolved
+    # multi-major group can collide: with no copy on the line there is
+    # nothing for a shared parent's override to reach, and validate settles
+    # the rest.
+    collision_parents=null
+    if [ "$status" = "resolved" ] \
+      && [ "$(printf '%s' "$majors" | jq 'length > 1')" = "true" ]; then
+      set_detect_entry "$adapter"
+      loc=$(printf '%s' "$DETECT_ENTRY" | jq -r '.loc')
+      rows='[]'
+      rows_ok=true
+      if [ -z "$loc" ]; then
+        rows_ok=false
+        CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
+          --arg a "$adapter" --arg p "$pkg" \
+          --arg e "$(printf '%s' "$DETECT_ENTRY" | jq -r '.err // ""')" \
+          '. + [{adapter: $a, package: $p,
+                 error: (if $e == "" then "detect failed or broke its contract; collision check skipped" else $e end)}]')
+      else
+        while IFS= read -r m; do
+          [ -n "$m" ] || continue
+          set_dr_entry "$adapter" "$pkg" "$m"
+          if [ "$(printf '%s' "$DR_ENTRY" | jq -r '.ok')" != "true" ]; then
+            rows_ok=false
+            CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
+              --arg a "$adapter" --arg p "$pkg" --arg m "$m" \
+              --arg e "$(printf '%s' "$DR_ENTRY" | jq -r '.err // ""')" \
+              '. + [{adapter: $a, package: $p,
+                     error: (if $e == "" then "declared_ranges --line \($m) failed or broke its contract; collision check skipped" else $e end)}]')
+            break
+          fi
+          rows=$(printf '%s' "$rows" | jq -c --argjson e "$DR_ENTRY" '. + [$e]')
+        done <<EOF
+$(printf '%s' "$majors" | jq -r '.[]')
+EOF
+      fi
+      if [ "$rows_ok" = "true" ]; then
+        verdict=$(printf '%s' "$rows" | jq -c --arg line "$line" --arg loc "$loc" '
+          # The parent name of a parents_other_lines entry: everything
+          # before the last "@" when one qualifies a version, the whole
+          # entry otherwise (a scoped name'\''s leading "@" is index 0 and
+          # never splits).
+          def name_of: (rindex("@") // 0) as $i
+            | if $i > 0 then .[0:$i] else . end;
+          . as $rows
+          # $mine is never null: the check runs only for line_status
+          # "resolved", so the group line is one of the queried majors.
+          | (map(select(.line == $line)) | first) as $mine
+          | ([ $mine.eligible[] | . as $n
+               | select(any($rows[];
+                   .line != $line and ((.eligible | index($n)) != null))) ]) as $overlap
+          | if ($overlap | length) == 0 then {collision: false}
+            elif $loc == "resolutions" then {collision: true, parents: $overlap}
+            else
+              # An entry in EVERY line query'\''s parents_other_lines is a
+              # copy resolving the package on more than one major (header).
+              (reduce $rows[] as $r ($rows[0].other;
+                 . as $acc
+                 | [ $r.other[] | . as $e
+                     | select(($acc | index($e)) != null) ])) as $shared
+              | ([ $shared[] | name_of | select(. as $n | ($overlap | index($n)) != null) ]
+                 | unique) as $bad
+              | if ($bad | length) > 0 then {collision: true, parents: $bad}
+                else {collision: false} end
+            end')
+        if [ "$(printf '%s' "$verdict" | jq -r '.collision')" = "true" ]; then
+          status="cross_line_collision"
+          collision_parents=$(printf '%s' "$verdict" | jq -c '.parents')
+        fi
+      fi
+    fi
+
     annotation=$(jq -nc --argjson m "$majors" --arg s "$status" \
-      '{resolved_majors: $m, line_status: $s}')
+      --argjson cp "$collision_parents" \
+      '{resolved_majors: $m, line_status: $s}
+       + (if $cp != null then {collision_parents: $cp} else {} end)')
     CLASS=$(printf '%s' "$CLASS" | jq -c --argjson a "$annotation" '. + [$a]')
   done <<< "$GROUP_ITEMS"
 fi
@@ -289,10 +474,14 @@ annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" \
   | [range($groups | length) | $groups[.] + $cls[.]] as $all
   | . as $input
   | {
-      actionable: [ $all[] | select(.line_status != "requires_major_bump") ],
+      actionable: [ $all[] | select(.line_status != "requires_major_bump"
+                                    and .line_status != "cross_line_collision") ],
       skipped: ((.skipped // []) + [
         $all[] | select(.line_status == "requires_major_bump")
                | . + {reason: "requires major version bump"}
+      ] + [
+        $all[] | select(.line_status == "cross_line_collision")
+               | . + {reason: "shared parent across major lines"}
       ]),
       classify_errors: $classify_errors
     }
