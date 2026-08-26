@@ -357,6 +357,22 @@ cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>
 The adapter picks the right syntax per package manager, merges into existing entries rather than
 replacing them, and preserves the manifest's formatting.
 
+**Under npm, the apply also invalidates the stale lockfile entries the override must move**, and
+reports them in `lockfile_invalidated` (`{performed, keys[]}`, plus a `reason` string when the
+pass could not run). npm keeps an existing
+`package-lock.json` entry over a newly added override — the locked copy stays at its vulnerable
+version, `npm ls` flags it `invalid`, and no amount of plain reinstalling moves it — so the adapter
+deletes the `packages` entries for copies of your package on the target line that do not satisfy
+the range, which is exactly what lets the next `install` re-resolve them under the override
+(issue #124). This is informational: do not repeat or undo it, and do not delete lockfile entries
+yourself. Read `performed: false` by whether a `reason` is present. Without one, the pass had
+nothing to do: no override was written (a direct bump, which npm reconciles on its own), and under
+pnpm and Yarn Berry it is always `false` with no reason, because both re-evaluate their override
+blocks on every install. With one — `"unreadable_range_floor"` or `"no_packages_object"` (a v1
+lockfile) — an npm override WAS written but the pass could not judge the lockfile, so that
+override is presumed inert against any stale entry: a fail-closed stop-and-report signal, the
+stale-lockfile case of the escalation ladder (phase 4's step 3), not a benign no-op.
+
 **Quote `written[]`, not your own arguments, when the PR body says what changed.** It carries one
 `{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
 parent reached through an `npm:` alias is written under the alias key with the protocol in the value
@@ -529,9 +545,18 @@ When `validate` fails, work through these in order:
      pin this run created and did not record there is debt no later audit can trace back.
    - A section in the PR body (phase 6).
 3. **A stale lockfile.** If validation still fails, the lockfile may hold pinned versions that
-   resist overrides. Deleting a lockfile needs interactive confirmation you cannot obtain: stop,
-   clean up, and return a failure (phase `validate`, detail noting that lockfile regeneration
-   likely required and needs a human-driven session).
+   resist overrides. Under npm, `apply_constraint` already invalidated the target line's stale
+   entries (its `lockfile_invalidated.keys`), so a copy that still resists means something that
+   pass could not judge — quote the field in your failure detail. `performed: false` carrying a
+   `reason` means the pass itself could not run even though your override was written
+   (`"no_packages_object"`: a v1 lockfile; `"unreadable_range_floor"`: the range's floor major
+   could not be read) — stop and report. `performed: true` with empty `keys` plus a persisting
+   in-line copy means the pass saw a copy it declined to judge — one it matches only by resolved
+   name, such as an aliased install key, or a version-less entry — so stop and report rather than
+   retry. Either way, deleting a whole
+   lockfile needs interactive confirmation you cannot obtain: stop, clean up, and return a
+   failure (phase `validate`, detail noting that lockfile regeneration is likely required and
+   needs a human-driven session).
 4. **`line_present` is false.** Your line is not installed at all, so there was nothing here to
    fix and the override you applied does nothing. Stop, clean up, and return a **failure** (phase
    `validate`) naming the copies in `requires_major_bump`. Never open a PR for a change with no

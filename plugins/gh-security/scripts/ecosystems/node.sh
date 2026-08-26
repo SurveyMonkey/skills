@@ -14,7 +14,9 @@
 #                                                  entries_expected, unreadable_entries,
 #                                                  package_count, resolutions{}}
 #   apply_constraint <pkg> <range> [parent...] -> {mode, parents[], written[],
-#                                                  alias_lookup, observations[]}
+#                                                  alias_lookup,
+#                                                  lockfile_invalidated,
+#                                                  observations[]}
 #   install                                    -> pass-through, exit code is the signal
 #   validate [--line <major>] [--vulnerable <range>]... [--baseline <json>]
 #            [--sibling-alerts <json>] <pkg> <range>
@@ -1814,7 +1816,7 @@ set_indent_args() {
   # and passing them as one word relies on the caller leaving the expansion
   # unquoted. bash 3.2 has indexed arrays, and this one is never empty, so the
   # empty-array-under-`set -u` trap does not apply.
-  first=$(grep -m1 '^[[:space:]][[:space:]]*"' package.json 2>/dev/null || true)
+  first=$(grep -m1 '^[[:space:]][[:space:]]*"' "${1:-package.json}" 2>/dev/null || true)
   case "$first" in
     "	"*)     INDENT_ARGS=(--tab) ;;
     "    "*) INDENT_ARGS=(--indent 4) ;;
@@ -2193,11 +2195,108 @@ verb_apply_constraint() {
   fi
   mv "$tmp" package.json
 
+  # npm records no trace of `overrides` in the lockfile — verified empirically
+  # on npm 8, 9, 10 and 11 against lockfile v3: the override is in effect (the
+  # nested copy resolves at the overridden version) while `package-lock.json`
+  # carries no `overrides` key anywhere, neither top level nor `packages[""]`.
+  # What the lockfile DOES carry is the resolution each copy already has, and
+  # on a plain `npm install` an existing `packages` entry wins over a newly
+  # added override: the copy stays at its locked, vulnerable version and
+  # `npm ls` flags it `invalid`. Reproduced both ways on the field repo behind
+  # issue #124 (npm 11.16.0, lockfile v3): entry kept, override inert; entry
+  # deleted, the next install removes it and dedupes the copy onto the patched
+  # resolution. So an override written here is silently ineffective against a
+  # lockfile that already pins the copy — the normal case, not an edge — unless
+  # the stale entry is invalidated before the install.
+  #
+  # The invalidation is scoped to what the override is entitled to move: the
+  # `packages` entries for copies of this package ON THE TARGET LINE (the major
+  # of the range's floor) that do not already satisfy the range. Copies on
+  # other major lines belong to sibling groups, and re-resolving one could move
+  # a line this fix does not own — the shape `validate --baseline` fails
+  # closed on. Copies already satisfying the range need no move, and leaving
+  # their entries keeps the lockfile diff to what had to change (and keeps the
+  # already-fixed case's empty diff empty). Identity here is resolved name
+  # ONLY (`.name` when present — an `npm:` alias install — else the last path
+  # segment), so the hoisted aliased copy an alias-key override governs is
+  # invalidated too. That is deliberately NARROWER than the read verbs'
+  # two-arm rule (resolved name OR install key, issue #46): deleting an entry
+  # that sits under this package's name while resolving to a DIFFERENT
+  # package cannot help the override and would only churn an unrelated copy.
+  # The consequence: an in-line copy `validate` counts under the key arm is
+  # one this pass declines to judge, and it fails closed at `validate` with
+  # `performed: true` and that copy absent from `keys[]`.
+  #
+  # When the whole pass cannot judge the lockfile — an unreadable range
+  # floor, or no `packages` object (a v1 lockfile) — the override just
+  # written is presumed inert against any stale entry, and the result says
+  # so: `performed: false` with a `reason` naming which, distinct from the
+  # bare nothing-to-do false a direct bump or a pnpm/yarn apply reports. A
+  # version-less entry (a workspace `link: true`) is skipped harmlessly
+  # rather than fail-closed: it carries no version, so there is no vulnerable
+  # version for it to hold the tree at — and `npm_versions` filters
+  # version==null the same way, so `validate` never counts it either.
+  #
+  # npm only, deliberately. pnpm records the active overrides in
+  # `pnpm-lock.yaml`'s own `overrides:` settings block and re-resolves on
+  # mismatch, and Yarn Berry re-evaluates `resolutions` on every install, so
+  # neither has npm's stale-entry failure. A direct dependency bump (a
+  # `dependencies`/`devDependencies` retarget with no override written) does
+  # not need it either: npm reconciles a manifest range change on its own.
+  lockfile_invalidated='{"performed":false,"keys":[]}'
+  wrote_override=$(printf '%s' "$written_and_manifest" \
+    | jq '[.written[] | select(.path[0] == "overrides")] | length > 0')
+  if [ "$loc" = "overrides" ] && [ "$wrote_override" = "true" ] \
+    && [ -f package-lock.json ]; then
+    if ! lock_result=$(jq -c --arg pkg "$pkg" --arg range "$range" \
+        "$SEMVER_JQ"'
+        ($range | range_floor_major) as $floor
+        | def stale($k; $v):
+            ($k | split("node_modules/") | last) as $base
+            | ($k | contains("node_modules/"))
+              and (($v | type) == "object")
+              and (($v.name // $base) == $pkg)
+              and (($v.version | type) == "string")
+              and ((($v.version | semver_parse).core[0] // null) == $floor)
+              and ((satisfies($v.version; $range)) | not);
+          if $floor == null then
+            {performed: false, keys: [],
+             reason: "unreadable_range_floor", lockfile: .}
+          elif (.packages | type) != "object" then
+            {performed: false, keys: [],
+             reason: "no_packages_object", lockfile: .}
+          else
+            ([ .packages | to_entries[] | select(stale(.key; .value)) | .key ]
+             | sort) as $keys
+            | {performed: true, keys: $keys,
+               lockfile: delpaths([ $keys[] | ["packages", .] ])}
+          end' package-lock.json); then
+      die "apply_constraint: cannot read package-lock.json"
+    fi
+    lockfile_invalidated=$(printf '%s' "$lock_result" | jq -c 'del(.lockfile)')
+    # The write gate reads the JSON the result will report, through an
+    # assignment whose jq exit `set -e` sees. A fresh `jq` inside the `if`
+    # condition turned a jq failure into `[ "" -gt 0 ]`, which silently
+    # skipped the write while the result still claimed the deletions.
+    stale_key_count=$(printf '%s' "$lockfile_invalidated" | jq '.keys | length')
+    if [ "$stale_key_count" -gt 0 ]; then
+      set_indent_args package-lock.json
+      tmp=$(mktemp)
+      if ! printf '%s' "$lock_result" \
+          | jq "${INDENT_ARGS[@]}" '.lockfile' > "$tmp"; then
+        rm -f "$tmp"
+        die "apply_constraint: failed to write package-lock.json"
+      fi
+      mv "$tmp" package-lock.json
+    fi
+  fi
+
   printf '%s' "$observations" \
     | jq --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" --arg pm "$pm" \
          --arg alias_source "$alias_source" \
          --argjson written "$(printf '%s' "$written_and_manifest" | jq -c '.written')" \
          --argjson unresolved "$parents_unresolved" \
+         --argjson invalidated "$lockfile_invalidated" \
          --argjson parents "$parents_json" --argjson tighten "$tighten_bare" '
       {
         pm: $pm,
@@ -2210,6 +2309,7 @@ verb_apply_constraint() {
         parents: $parents,
         written: $written,
         alias_lookup: {source: $alias_source, parents_unresolved: $unresolved},
+        lockfile_invalidated: $invalidated,
         observations: .
       }'
 }

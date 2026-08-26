@@ -1,0 +1,14 @@
+{
+  "name": "demo-stale-nested",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "^1.18.0",
+    "localtunnel": "^2.0.2",
+    "nx": "21.3.11"
+  },
+  "overrides": {
+    "follow-redirects": ">=1.15.6",
+    "tmp": ">=0.2.4"
+  },
+  "scripts": { "test": "jest" }
+}
