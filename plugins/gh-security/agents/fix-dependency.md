@@ -177,6 +177,13 @@ Hard rules). A stable in-repo path means permission rules users accept for it pe
 The line suffix is what keeps you from colliding with the agent fixing another line of the same
 package; never drop it, even when your package has only one line.
 
+`branch_name` arrives spelled either `fix/dependabot-<package>-<major_line>x` (the ordinary
+scheme) or `fix-dependabot-<package>-<major_line>x` (the flat fallback your dispatcher selects
+when a remote branch named `fix` blocks the `fix/*` ref namespace, issue #123). Use it verbatim
+wherever this document writes `<branch_name>`; you never choose or rewrite the spelling. Under
+the flat scheme the branch name can equal this worktree directory's basename, which collides with
+nothing: branches live in the ref namespace and the worktree under a `.claude/worktrees/` path.
+
 You may run `git -C <repo_root> status --short` for context at any point. Its result gates
 nothing — your worktree never touches the user's tree, and their uncommitted work is theirs —
 so never stop, warn, or clean based on it.
@@ -692,7 +699,22 @@ Alerts resolved:
 Refs: https://github.com/<nwo>/security/dependabot/<number>
 ```
 
-Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the PR. The `gh`
+Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the PR.
+
+A push the remote rejects with `(directory file conflict)` — the field specimen is
+`! [remote rejected] fix/dependabot-postcss-8x -> fix/dependabot-postcss-8x (directory file
+conflict)` (issue #123) — means the remote's ref namespace blocks `<branch_name>` itself: a
+branch named `fix` blocks every `fix/*` name, or, inversely, a pre-existing
+`<branch_name>/<anything>` branch blocks yours. That is a dispatcher preflight miss, never a
+transient push failure: do not retry, and **never rename the branch yourself** — naming belongs
+to the dispatcher, and an improvised name escapes stale-branch detection and PR deduplication on
+every later run. Fail the run (phase `push`) with `detail` naming the collision explicitly — e.g.
+`branch-namespace collision (directory file conflict): <rejection line>` — not just the quoted
+rejection line by itself, so the orchestrator's phase 7 summary can key on the collision by name
+rather than parsing git's wording. Run Cleanup as always; its unpushed-commit rule already
+preserves the branch.
+
+The `gh`
 calls below are location-independent because every one of them carries `--repo`, so they take no
 `cd` prefix. Collect **all** required labels from every source and apply them together, each via
 its own `--label` flag. This flow always requires `security` (lowercase, matching Dependabot's own

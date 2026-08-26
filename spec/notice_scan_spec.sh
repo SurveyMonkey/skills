@@ -216,6 +216,7 @@ Severity: 1 low | 2 moderate"
 
     Parameters
       "a fix-dependency push" "git push -u origin fix/dependabot-undici-7x"
+      "a flat-scheme fix push" "git push -u origin fix-dependabot-postcss-8x"
       "an audit-pins push"    "git push -u origin chore/dependabot-remove-pins"
     End
 
@@ -228,6 +229,28 @@ Severity: 1 low | 2 moderate"
     It 'still nudges on the identical notice from an unrelated branch'
       When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
         "git push -u origin feat/new-checkout"
+      The status should be success
+      The output should equal '{"offers_directly":true}'
+    End
+
+    # The flat spelling (issue #123's fallback, dispatched when a remote
+    # branch named `fix` blocks the `fix/*` namespace) is a plain substring
+    # of ordinary branch names in a way the slash spelling mostly was not, so
+    # the command-text suppression requires a boundary before the match. A
+    # user's own branch that merely contains the prefix is not the plugin
+    # reporting back, and silencing the nudge there is the over-match these
+    # two pin against. Plain Its rather than a nested Parameters block: the
+    # enclosing Describe's Parameters would combine with an inner one.
+    It 'still nudges on a hotfix/dependabot- branch of the user own'
+      When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+        "git push -u origin hotfix/dependabot-tools"
+      The status should be success
+      The output should equal '{"offers_directly":true}'
+    End
+
+    It 'still nudges on a my-fix-dependabot- branch of the user own'
+      When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+        "git push -u origin my-fix-dependabot-experiment"
       The status should be success
       The output should equal '{"offers_directly":true}'
     End
@@ -250,8 +273,29 @@ Severity: 1 low | 2 moderate"
         The output should equal ''
       End
 
+      It 'stays silent from a cwd on a flat-scheme fix branch'
+        on_branch fix-dependabot-postcss-8x
+        When call notice_cmd_jq '.' "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal ''
+      End
+
       It 'nudges from a cwd on an unrelated branch'
         on_branch feat/new-checkout
+        When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
+          "git push -u origin HEAD" "$TEST_DIR"
+        The status should be success
+        The output should equal '{"offers_directly":true}'
+      End
+
+      # The cwd-derived branch site needs the same leading-boundary anchor as
+      # the command-text site (the two `still nudges on a ...-dependabot-`
+      # cases above): a user's own branch that merely contains the flat
+      # prefix as a substring, read from the payload cwd rather than the
+      # command text, must still nudge rather than be swallowed by an
+      # unanchored match.
+      It 'nudges from a cwd on a my-fix-dependabot- branch of the user own'
+        on_branch my-fix-dependabot-experiment
         When call notice_cmd_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("resolve-alerts"))}' \
           "git push -u origin HEAD" "$TEST_DIR"
         The status should be success

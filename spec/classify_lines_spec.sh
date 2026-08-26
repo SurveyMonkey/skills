@@ -41,6 +41,8 @@ case "$verb" in
         printf '{"pm":"npm","package":"path-to-regexp","present":true,"count":1,"versions":[{"version":"0.2.5","path":"node_modules/path-to-regexp"}],"lockfile_entries":10}\n' ;;
       lodash)
         printf '{"pm":"npm","package":"lodash","present":true,"count":1,"versions":[{"version":"4.17.21","path":"node_modules/lodash"}],"lockfile_entries":10}\n' ;;
+      @babel/traverse)
+        printf '{"pm":"npm","package":"@babel/traverse","present":true,"count":1,"versions":[{"version":"7.23.2","path":"node_modules/@babel/traverse"}],"lockfile_entries":10}\n' ;;
       express)
         printf '{"pm":"npm","package":"express","present":true,"count":1,"versions":[{"version":"5.1.0","path":"node_modules/express"}],"lockfile_entries":10}\n' ;;
       minimatch)
@@ -358,6 +360,101 @@ STUB_EOF
       When call classify '.actionable[0].resolved_majors' boom 2
       The status should be success
       The output should equal '[]'
+    End
+  End
+
+  # Issue #123 at cross-repo scope: a remote branch literally named `fix`
+  # rejects every `fix/*` push with a `(directory file conflict)`, and the
+  # orchestrator learns it per repo only in phase 5, after discovery has
+  # already named every branch. This script is the one stage that runs once
+  # per repo with that repo's groups on stdin, so `--branch-style flat` here
+  # is where the flip lands: the rewritten `branch_name` is what the dispatch
+  # payload carries, and the fix agents consume it verbatim.
+  Describe 'the flat branch rewrite (issue #123)'
+    plugin_envelope() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [{package: "lodash", major_line: "4", ecosystem: "npm",
+                        adapter_path: $a,
+                        branch_name: "fix/dependabot-lodash-4x"}],
+          skipped: [{package: "left-pad", reason: "no fix available",
+                     branch_name: "fix/dependabot-left-pad-unfixed"}]}'
+    }
+
+    classify_plugin() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(plugin_envelope \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    It 'rewrites actionable and skipped names under --branch-style flat'
+      When call classify_plugin '{a: [.actionable[].branch_name], s: [.skipped[].branch_name]}' --branch-style flat
+      The status should be success
+      The output should equal '{"a":["fix-dependabot-lodash-4x"],"s":["fix-dependabot-left-pad-unfixed"]}'
+    End
+
+    It 'accepts the --branch-style=flat equals-form, consistent with discover-alerts.sh'
+      When call classify_plugin '{a: [.actionable[].branch_name], s: [.skipped[].branch_name]}' --branch-style=flat
+      The status should be success
+      The output should equal '{"a":["fix-dependabot-lodash-4x"],"s":["fix-dependabot-left-pad-unfixed"]}'
+    End
+
+    # Scoped package names are not sanitized anywhere in the pipeline: the
+    # rewrite is a literal prefix substitution, so a scoped package's own `/`
+    # rides straight through in both styles. Pin what the code actually
+    # produces (discover-alerts.sh's slash-style output is the input here).
+    scoped_envelope() {
+      jq -nc --arg a "$STUB" \
+        '{actionable: [{package: "@babel/traverse", major_line: "7", ecosystem: "npm",
+                        adapter_path: $a,
+                        branch_name: "fix/dependabot-@babel/traverse-7x"}],
+          skipped: []}'
+    }
+
+    classify_scoped() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(scoped_envelope \
+        | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    It 'rewrites a scoped package name to the flat prefix without sanitizing the internal slash'
+      When call classify_scoped '[.actionable[].branch_name]' --branch-style flat
+      The status should be success
+      The output should equal '["fix-dependabot-@babel/traverse-7x"]'
+    End
+
+    # The regression pin: without the flag nothing is renamed, so the
+    # ordinary run's dispatch names stay byte-identical to discovery's.
+    It 'leaves every name untouched by default'
+      When call classify_plugin '{a: [.actionable[].branch_name], s: [.skipped[].branch_name]}'
+      The status should be success
+      The output should equal '{"a":["fix/dependabot-lodash-4x"],"s":["fix/dependabot-left-pad-unfixed"]}'
+    End
+
+    # The rewrite is targeted at the plugin's own prefix, never a general
+    # slash-flattening: another tool's branch name passes through even when
+    # the flag is set.
+    It 'passes a non-plugin branch name through unchanged under flat'
+      When call classify '[.actionable[].branch_name]' lodash 4 --branch-style flat
+      The status should be success
+      The output should equal '["sec/lodash-4"]'
+    End
+
+    It 'rejects an unknown branch style'
+      When run script "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" --branch-style diagonal
+      The status should be failure
+      The stderr should include 'Unknown branch style'
     End
   End
 
