@@ -26,6 +26,12 @@ claude plugin validate .claude-plugin/marketplace.json --strict
 claude plugin validate plugins/<name> --strict
 ```
 
+`scripts/check.sh version` is the gate on this rule: for every plugin whose files changed since
+the comparison base, the `plugin.json` version at `HEAD` must differ from the version at the base.
+It runs in CI only, on a pull request whose base is the default branch and on the push that lands
+there; a stacked pull request skips it loudly and is gated when it retargets. ADR 005 has the
+venue reasoning, including why one bump per stack means a layer below the bump fails.
+
 No git tags and no GitHub releases. Plugins are installed from the default branch and refreshed
 with `/plugin marketplace update`. Tags would also be ambiguous once this marketplace carries
 several plugins at independent versions.
@@ -35,14 +41,14 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
-All three quality gates (suite, ShellCheck, `claude plugin validate --strict`) run through one
-entry point, `scripts/check.sh` (`lint` / `validate` / `spec` / `fast` / `all` / `targets`);
-target lists live there and nowhere else, and empty discovery is a hard failure in every gate.
-Committed git
+Every quality gate (suite, ShellCheck, `claude plugin validate --strict`, and the plugin version
+gate) runs through one entry point, `scripts/check.sh`
+(`lint` / `validate` / `spec` / `version` / `fast` / `all` / `targets`); target lists live there
+and nowhere else, and empty discovery is a hard failure in every gate. Committed git
 hooks run the fast gates on commit and the suite on push, enabled once per clone with
-`git config core.hooksPath .githooks`; CI runs all three (`.github/workflows/gates.yml`).
+`git config core.hooksPath .githooks`; CI runs them all (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
-scripts, `scripts/check.sh` may assume `git`, `shellcheck`, and `shellspec`, but still targets
+scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, and `shellspec`, but still targets
 bash 3.2 because the hooks run it on stock macOS.
 
 - **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
