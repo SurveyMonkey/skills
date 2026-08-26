@@ -15,6 +15,18 @@ name: gates
 
 on:
   pull_request:
+    # `edited` is on top of the default three (opened, synchronize, reopened)
+    # and is load-bearing for the version gate, which skips a pull request
+    # whose base ref is not the default branch. Changing a base ref fires
+    # `edited` with `changes.base` and nothing else: without it a stacked
+    # layer retargeted to the default branch (by hand or by GitHub when its
+    # parent merges) keeps the green skip run it recorded under the old base
+    # and merges ungated, since nothing re-runs until someone pushes to the
+    # branch. The cost is a full run on title and body edits too, because
+    # `edited` cannot be narrowed to base changes at the trigger and the
+    # aggregate `gates` check needs every job on every run. A few minutes of
+    # runner time per description edit buys a gate that is actually reached.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -138,7 +150,10 @@ jobs:
     #                 pull request in a stack carries the bump, so a layer
     #                 below it would fail on a rule it cannot satisfy alone.
     #                 Stacked layers skip loudly here and are gated when they
-    #                 retarget to the default branch.
+    #                 retarget to the default branch, which is why the
+    #                 workflow's pull_request trigger lists `edited`: a base
+    #                 change fires that and nothing else, and without it the
+    #                 skip run stays the last word.
     #   push (main)   the sha the push moved from, so the range is exactly
     #                 what landed. This is the backstop the pull request
     #                 venue cannot be: it sees what actually merged.
@@ -182,8 +197,30 @@ jobs:
               git fetch --no-tags origin \
                 "+refs/heads/$DEFAULT_BRANCH:$CHECK_VERSION_BASE"
             fi
-          else
+          elif [ "$EVENT" = "push" ]; then
+            # `before` is all-zeros when the push created the ref, and points
+            # at a discarded commit after a force-push. Both are once-ever
+            # shapes with no comparison base to offer, and check.sh rightly
+            # refuses a base it cannot resolve; a red on the default branch
+            # for a base nobody could have supplied teaches nothing, so this
+            # says which shape it saw and stands down.
+            if ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+              echo "The push event's before sha ($PUSH_BEFORE) is not a commit"
+              echo "in this repository: the ref was just created, or history"
+              echo "moved non-linearly. There is no range to compare, so this"
+              echo "run has nothing to gate. The next push to $DEFAULT_BRANCH"
+              echo "carries a usable base."
+              exit 0
+            fi
             CHECK_VERSION_BASE="$PUSH_BEFORE"
+          else
+            # Neither venue. A trigger added to this workflow without a
+            # decision about which base it implies must not pick one by
+            # falling through.
+            echo "the version gate has no comparison base for a $EVENT event;"
+            echo "give it one in .github/workflows/gates.yml, or exclude the"
+            echo "event from this job deliberately"
+            exit 1
           fi
           export CHECK_VERSION_BASE
           ./scripts/check.sh version

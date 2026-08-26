@@ -29,8 +29,9 @@ claude plugin validate plugins/<name> --strict
 `scripts/check.sh version` is the gate on this rule: for every plugin whose files changed since
 the comparison base, the `plugin.json` version at `HEAD` must differ from the version at the base.
 It runs in CI only, on a pull request whose base is the default branch and on the push that lands
-there; a stacked pull request skips it loudly and is gated when it retargets. ADR 005 has the
-venue reasoning, including why one bump per stack means a layer below the bump fails.
+there; a stacked pull request skips it loudly and is gated when it retargets, which is why the
+workflow's `pull_request` trigger lists `edited` (a base change fires nothing else). ADR 005 has
+the venue reasoning, including why one bump per stack means a layer below the bump fails.
 
 No git tags and no GitHub releases. Plugins are installed from the default branch and refreshed
 with `/plugin marketplace update`. Tags would also be ambiguous once this marketplace carries

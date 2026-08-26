@@ -42,10 +42,13 @@
 # above the bump carries it and passes, while a layer below it does not and
 # fails. That is why the workflow runs this gate only for pull requests whose
 # base ref IS the default branch; a stacked layer skips loudly and is
-# exercised when it retargets. The bottom layer of a stack whose bump lives
-# further up is flagged, correctly: merged alone it would ship plugin changes
-# to the default branch at an already-released version. The remedies are to
-# merge the stack as a unit or to put the bump in the bottom layer.
+# exercised when it retargets, which is why that workflow's pull_request
+# trigger lists `edited`: a base change fires that and nothing else, so
+# without it the skip run would stay the last word. The bottom layer of a
+# stack whose bump lives further up is flagged, correctly: merged alone it
+# would ship plugin changes to the default branch at an already-released
+# version. The remedies are to merge the stack as a unit or to put the bump in
+# the bottom layer.
 #
 # Every gate refuses when its target discovery finds nothing. Zero shell
 # files, zero plugin manifests, or zero executed spec examples means
@@ -276,7 +279,11 @@ cmd_version() {
     base_v=$(printf '%s\n' "$base_json" | jq -r '.version // empty') \
       || die "could not read a version from $head_manifest at $short"
     if [ "$head_v" != "$base_v" ]; then
-      printf 'check: %s: %s -> %s\n' "$p" "$base_v" "$head_v"
+      # A base manifest with no version at all is a release too: whatever the
+      # base carried, users did not have this version string, which is the
+      # whole question. Only the label needs care, so an absent base version
+      # reads as (none) rather than as an empty gap in the arrow.
+      printf 'check: %s: %s -> %s\n' "$p" "${base_v:-(none)}" "$head_v"
       continue
     fi
     failed=1

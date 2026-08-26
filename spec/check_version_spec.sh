@@ -114,6 +114,47 @@ Describe 'scripts/check.sh version'
     End
   End
 
+  # Every example above branches from the tip of origin/main, where the merge
+  # base and the base tip are the same commit and the gate cannot tell them
+  # apart. Here they differ: origin/main moves on after the branch point,
+  # carrying a release of its own. Comparing against the tip instead of the
+  # merge base would attribute that release to the branch under test, so
+  # dropping the merge base is only visible from this shape.
+  Describe 'a default branch that moved on after the branch point'
+    diverged_repo() {
+      version_repo || return 1
+      git branch branch-point
+      # main advances: someone else's plugin change, released.
+      printf 'landed elsewhere\n' > plugins/example/theirs.md
+      write_plugin example 1.1.0
+      commit_all 'a release that landed on the default branch'
+      git update-ref refs/remotes/origin/main HEAD
+      git checkout -q branch-point
+    }
+    Before diverged_repo
+
+    It 'passes a docs-only branch, whose range holds no plugin change of its own'
+      # Against the tip this is 1.1.0 vs 1.1.0 over a range that includes the
+      # other release's files, which reads as a violation the branch did not
+      # commit.
+      printf 'docs\n' > README.md
+      commit_all 'docs only, from before the release'
+      When run "$CHECK" version
+      The status should be success
+      The output should include 'plugins/example: unchanged since'
+    End
+
+    It 'still fails a branch that touches a plugin without bumping it'
+      printf 'mine\n' > plugins/example/mine.md
+      commit_all 'plugin change, no bump, from before the release'
+      When run "$CHECK" version
+      The status should eq 1
+      The output should include 'comparing against'
+      The stderr should include 'still 1.0.0'
+      The stderr should include 'base: 1.0.0'
+    End
+  End
+
   # One bump per stack is the rule, so the verdict must depend on whether the
   # layer under test carries it, not on how many layers sit below.
   Describe 'a stack whose single bump sits mid-way'
@@ -223,6 +264,30 @@ Describe 'scripts/check.sh version'
       The status should eq 2
       The output should include 'comparing against'
       The stderr should include 'carries no .version'
+    End
+
+    It 'refuses a manifest that is committed but not JSON'
+      printf 'name: example\nversion: 1.1.0\n' \
+        > plugins/example/.claude-plugin/plugin.json
+      commit_all 'a manifest jq cannot parse'
+      When run "$CHECK" version
+      The status should eq 2
+      The output should include 'comparing against'
+      The stderr should include 'could not read a version'
+    End
+
+    It 'treats a base manifest with no version as a release, labelled (none)'
+      # Gaining a version IS a release act: whatever the base carried, users
+      # did not have this version string, which is the only question the gate
+      # asks. Only the label needs care, hence (none) rather than a gap.
+      printf '{"name":"example"}\n' > plugins/example/.claude-plugin/plugin.json
+      commit_all 'a base with no version'
+      git update-ref refs/remotes/origin/main HEAD
+      write_plugin example 1.1.0
+      commit_all 'give it one'
+      When run "$CHECK" version
+      The status should be success
+      The output should include 'plugins/example: (none) -> 1.1.0'
     End
 
     It 'refuses a manifest present in the tree but never committed'

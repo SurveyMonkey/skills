@@ -94,6 +94,18 @@ what landed). Where it does not run, it says so: a stacked pull request skips wi
 printed, and the skip is a step exiting 0 rather than an `if:` on the job, because `gates` needs
 that job's result and a skipped need is not a success.
 
+That skip is only safe because the workflow's `pull_request` trigger lists `edited` alongside the
+default `opened`, `synchronize` and `reopened`. Changing a pull request's base ref fires `edited`
+with `changes.base` and no other event, so without it a stacked layer retargeted to the default
+branch (by hand, or by GitHub when its parent merges) would carry the green skip run it recorded
+under its old base straight into a merge, with nothing re-running until someone happened to push
+to the branch. The cost is a full run of all four gates on title and body edits as well, since
+`edited` cannot be narrowed to base changes at the trigger and the aggregate `gates` check needs
+every job on every run; for a workflow measured in minutes that is the cheaper half of the trade.
+The push venue stays the backstop for what actually lands, and stands down loudly rather than
+failing when the push event's `before` sha is unusable (ref creation, or a force-push that
+discarded it), which are the only shapes offering no range to compare.
+
 It is deliberately absent from `fast` and from the hooks, unlike the other three. A hook's base
 would be whatever `origin/<default>` last fetched, so the verdict would turn on how recently the
 developer fetched, and fetching inside a gate is out of the question; a mid-work commit also
