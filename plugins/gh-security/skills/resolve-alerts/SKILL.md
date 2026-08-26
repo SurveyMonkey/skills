@@ -361,7 +361,8 @@ agent's fenced JSON result as it lands, keep it with the others, and present the
 queue has drained and the last agent has returned. The summary describes the whole approved batch,
 not whichever results happened to arrive together. **An unparseable or missing result block is a
 failure report** — record it as such; never guess fields, and refill its slot like any other
-completion.
+completion. Agents are instructed never to park a turn waiting on a hung verb, so a missing block
+means the agent crashed or violated that contract, not that it needs more time.
 
 Present one table for the run:
 
