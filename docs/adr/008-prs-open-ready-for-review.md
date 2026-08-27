@@ -64,7 +64,10 @@ batch, since the pin audit is no longer offered here at all)** is renumbered to 
 `AskUserQuestion` after phase 5 is about a pull request**: what remains is phase 6's per-repo
 permissions consent and the final phase's ~~two dispatch offers~~ **(amended in
 [ADR 009](009-decouple-pin-audit.md): now one — the next batch — since the pin audit is no longer
-offered here)**, none of which asks the user to decide anything about a PR that exists.
+offered here)**, ~~none of which asks the user to decide anything about a PR that exists~~
+**(amended in v0.8.9, [issue #148](https://github.com/SurveyMonkey/skills/issues/148): a third
+post-phase-5 prompt now exists — phase 7's consent to file a skill-defect report against this
+repository — and, like the first two, it is not about a pull request)**.
 `/gh-security:audit-pins` loses the same tail.
 
 **Merging and arming auto-merge are the human's, on GitHub, and are forbidden to every agent.**

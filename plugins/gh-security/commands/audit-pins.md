@@ -210,6 +210,12 @@ ordinary outcomes.
 five values is a contract violation.** Report it as a failure of the agent, quoting what came back,
 exactly as an unparseable result block is reported. Never guess which reason was meant.
 
+A contract violation like this one, or any other evidence that the audit's own logic misbehaved
+rather than the target repo's state, is checked against this repository's issues and filed or
+commented under the same scrub, consent, and identity rules
+`${CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/SKILL.md` states in its Filing a skill-defect report
+section — read that section before drafting anything, and never re-derive the rules here.
+
 Otherwise read the PR's current state once and report it as information:
 
 ```bash
