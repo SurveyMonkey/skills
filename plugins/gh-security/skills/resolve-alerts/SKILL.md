@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -733,6 +733,61 @@ Leads, not findings. Do not act on either. Without deduplication a five-package 
 report the same pre-existing bare overrides five times. Never fold a newly added pin into that
 count and call it pre-existing debt: this batch is the record of where it came from.
 
+**When this run's own evidence shows the skill itself misbehaved, file that as a defect against
+this repository, not against the target.** The signal is a fail-close, a written key, or a probe
+result that the run's own evidence contradicts: a false `baseline` or `validate` fail-close against
+a payload that plainly should have passed, an adapter writing an override key the install then
+proved ineffective, a namespace or registry probe reading the wrong verdict, or an agent visibly
+working around its own tooling rather than through it. This is a narrower claim than "something
+went wrong": a target repo's own defect — a stale lockfile, a dead registry token, a blocked branch
+namespace — is never filed here, and is reported to the user only, exactly as the phases above
+already do (`baseline` failures, registry-preflight exclusions, branch-namespace collisions). The
+test is whether the evidence indicts the skill's logic or the repo's state; when in doubt, the
+absence of a plausible repo-side explanation is what tips it toward the skill.
+
+**Check this repository for an existing issue before drafting a new one.**
+
+```bash
+gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>"
+```
+
+A hit means a second independent field sighting is confirmation, not noise: comment the new run's
+specifics onto it rather than opening a duplicate, the same way `unscoped_override` entries stay
+one line per repo instead of five. No hit means draft a new issue.
+
+**The report carries the run's own concrete evidence**: the failing payload verbatim (an
+`other_line_moves` JSON blob, a `resolved_majors` array, whatever the agent's result block or a
+probe actually printed), the shapes involved, and what distinguishes a skill defect from the target
+repo's own reality — the same distinction the paragraph above draws, made explicit for the reader
+of the issue.
+
+**Scrub the report exactly as this repository scrubs everything else.** Never name the target
+repository, its owner or org, or its internal directory topology: write "a field run" or "the field
+repository," never the real slug, and cite only public package names. This is not a different rule
+for issue reports — it is the same rule fixtures, specs, and this file's own prose already follow.
+
+**Consent gates filing, the same way it gates every action here.** Propose the drafted title and
+body and file only on the user's go-ahead, unless the user pre-authorized filing defect reports
+automatically earlier in this session — in that case file without asking again. Either way, the
+closing report in phase 8 states what was filed (or proposed), with the issue number or URL once it
+exists.
+
+**The identity that files the report is resolved separately from the identity that ran the batch,
+and is never assumed to be the same.** The credentials this run resolved for the target repo (via
+`env_prefix`, or the ambient login) may belong to an account barred from contributing to outside
+repositories — an Enterprise Managed User is the canonical case: it can push the fix branches and
+open PRs on the target, but cannot open an issue here. So:
+
+- Never file the report under the batch's own credentials without checking whether they can reach
+  this repository at all.
+- When the environment makes another, capable account discoverable — per-directory credential
+  switching, a second `gh` config the session context documents, or simply running the `gh issue`
+  call from a directory whose credentials resolve a non-restricted account — use it for the report,
+  under the same consent that covers the report itself. Switching identities is never invented
+  silently; it is only ever an account the environment already makes available.
+- When no capable account resolves, the report does not vanish: hand the drafted title and body to
+  the user in the closing summary, so they can file it from wherever they can.
+
 ## Phase 8: Offer the groups the user declined
 
 If actionable groups remain because the user chose One or a tier, those groups were never approved
@@ -790,6 +845,9 @@ observe the collision means never reporting it. GitHub's "Update branch" resolve
 case; a conflicted machine-generated fix is better regenerated than hand-resolved — close it and
 re-run this skill for that package.
 
-**This is a report, not a prompt.** Do not ask whether to mark anything ready, merge anything, arm
-auto-merge, or re-check later: there is nothing left for this skill to do to a PR that exists
-(ADR 008). Point the user at the URLs and stop.
+**This is a report, not a prompt, for what this run did to pull requests.** Do not ask whether to
+mark anything ready, merge anything, arm auto-merge, or re-check later: there is nothing left for
+this skill to do to a PR that exists (ADR 008). Point the user at the URLs and stop. This
+prohibition is scoped to PR actions; it does not withdraw phase 7's defect-report offer, which is
+consent for a different action entirely — filing or commenting on an issue in this repository, never
+a target repo's pull request.
