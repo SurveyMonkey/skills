@@ -129,4 +129,18 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
       The output should equal '1'
     End
   End
+
+  Describe 'hook commit failures route to the push phase (#89)'
+    It 'lists the failure phase enum without a commit member'
+      When call phrase_in "$AGENT" 'phase.: .input . worktree . baseline . classify . apply . install . validate . push . pr.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'routes a phase-6 hook commit failure to push, matching audit-pins'
+      When call phrase_in "$AGENT" 'which covers both.*the commit and the push here'
+      The status should be success
+      The output should equal '1'
+    End
+  End
 End

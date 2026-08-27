@@ -886,8 +886,9 @@ on push through every fix run. Three rules follow, and none of them is a judgmen
 
 - **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
   `core.hooksPath`. This is the user-level git convention as well as this flow's.
-- **A hook that fails the commit or push is a failure result** (phase `commit` or `push`
-  respectively), quoting the hook's own output. Report it and stop; do not retry the command.
+- **A hook that fails the commit or push is a failure result** (phase `push`, which covers both
+  the commit and the push here), quoting the hook's own output. Report it and stop; do not retry
+  the command.
 - **Never edit code, tests or configuration to satisfy a hook.** Your diff is the dependency fix.
   A hook failing on it is a fact about this change meeting the repository's standards, which is
   exactly what a reviewer needs to see, and editing until it passes destroys that signal.
