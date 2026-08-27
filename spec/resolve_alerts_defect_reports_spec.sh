@@ -20,7 +20,7 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
   # rewords around them does not break the spec — only removing the rule
   # itself does.
   rule_in() { grep -c -e "$2" -- "$1"; }
-  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+  phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'Phase 7 gains the defect-report sub-block'
     It 'states the check-first-then-file-or-comment practice'
@@ -31,6 +31,18 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
 
     It 'runs the search against this repository, not the target'
       When call rule_in "$SKILL" 'gh issue list --repo SurveyMonkey/skills --search'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'searches closed issues too, since a fixed-and-closed defect is still a hit'
+      When call rule_in "$SKILL" 'gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>" --state all'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the search itself as the reachability probe for the identity question'
+      When call phrase_in "$SKILL" 'This search is also the reachability probe for the identity question below'
       The status should be success
       The output should equal '1'
     End
@@ -122,6 +134,20 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
     End
   End
 
+  Describe 'Phase 8 carries the defect-report outcome in the closing report'
+    It 'states the closing report carries the filing outcome when Filing a skill-defect report applied'
+      When call phrase_in "$SKILL" 'the closing report carries its outcome too'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'covers both the filed.or-proposed issue and the hand-back-to-the-user case'
+      When call phrase_in "$SKILL" 'the filed or proposed issue.s number or URL when one exists, or, when no capable account resolved, the drafted title and body verbatim'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   Describe 'allowed-tools gains the gh issue entries'
     It 'grants gh issue list'
       When call rule_in "$SKILL" 'Bash(\*gh issue list\*)'
@@ -149,8 +175,14 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
       The output should equal '1'
     End
 
-    It 'refers to resolve-alerts Phase 7 instead of re-deriving the rules'
-      When call phrase_in "$AUDIT_CMD" 'states in its.*Phase 7 — never re-derive them here'
+    It 'gives a readable path to resolve-alerts/SKILL.md'
+      When call phrase_in "$AUDIT_CMD" 'rules .*{CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/SKILL\.md. states in its'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'refers to the named Filing a skill-defect report section, not "Phase 7" generally, and says to read it first'
+      When call phrase_in "$AUDIT_CMD" 'Filing a skill-defect report section — read that section before drafting anything, and never re-derive the rules here'
       The status should be success
       The output should equal '1'
     End

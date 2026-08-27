@@ -733,6 +733,8 @@ Leads, not findings. Do not act on either. Without deduplication a five-package 
 report the same pre-existing bare overrides five times. Never fold a newly added pin into that
 count and call it pre-existing debt: this batch is the record of where it came from.
 
+### Filing a skill-defect report
+
 **When this run's own evidence shows the skill itself misbehaved, file that as a defect against
 this repository, not against the target.** The signal is a fail-close, a written key, or a probe
 result that the run's own evidence contradicts: a false `baseline` or `validate` fail-close against
@@ -748,12 +750,21 @@ absence of a plausible repo-side explanation is what tips it toward the skill.
 **Check this repository for an existing issue before drafting a new one.**
 
 ```bash
-gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>"
+gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>" --state all
 ```
+
+`--state all` matters because a fixed-and-closed defect is still a hit: the right response to
+finding one is "the plugin needs updating again," not "no duplicate, file a new one."
 
 A hit means a second independent field sighting is confirmation, not noise: comment the new run's
 specifics onto it rather than opening a duplicate, the same way `unscoped_override` entries stay
 one line per repo instead of five. No hit means draft a new issue.
+
+**This search is also the reachability probe for the identity question below.** There is no
+separate mechanism: running it under whatever identity this phase currently holds and watching
+whether it succeeds is the check. An auth error here (not a "no results" empty list) is the signal
+that this run's credentials cannot reach this repository at all, and that the identity paragraph
+below applies before drafting or filing anything.
 
 **The report carries the run's own concrete evidence**: the failing payload verbatim (an
 `other_line_moves` JSON blob, a `resolved_majors` array, whatever the agent's result block or a
@@ -781,10 +792,16 @@ open PRs on the target, but cannot open an issue here. So:
 - Never file the report under the batch's own credentials without checking whether they can reach
   this repository at all.
 - When the environment makes another, capable account discoverable — per-directory credential
-  switching, a second `gh` config the session context documents, or simply running the `gh issue`
-  call from a directory whose credentials resolve a non-restricted account — use it for the report,
-  under the same consent that covers the report itself. Switching identities is never invented
-  silently; it is only ever an account the environment already makes available.
+  switching, or a second `gh` config or wrapper the session context documents for this repository —
+  use it for the report, under the same consent that covers the report itself. This is the same
+  `env_prefix` seam phase 1 resolves, read for a different directory: a rule stating a wrapper
+  command for `SurveyMonkey/skills` is exactly the statement phase 1 already looks for, and using it
+  here is not inventing anything. A bare `cd` into that directory is never the mechanism — the
+  failure class phase 1 documents (:74-78) is precisely that per-directory identity tools load
+  through interactive shell hooks a non-interactive tool shell never runs, so a bare `cd` followed by
+  a bare `gh issue` command silently resolves whatever account was already ambient, not the
+  directory's intended one. Switching identities is never invented silently; it is only ever an
+  account the environment already documents a seam for.
 - When no capable account resolves, the report does not vanish: hand the drafted title and body to
   the user in the closing summary, so they can file it from wherever they can.
 
@@ -796,6 +813,11 @@ question**, not as a resumption of work already approved: back to phase 3 with t
 groups.
 
 Otherwise report done, including any repos still in `skipped_repos` and what would unblock each.
+
+**When Filing a skill-defect report applied this run, the closing report carries its outcome too**,
+exactly as that section promises: the filed or proposed issue's number or URL when one exists, or,
+when no capable account resolved, the drafted title and body verbatim so the user can file it from
+wherever they can.
 
 **The closing report also points at the pin audit as separate follow-up work**, run via
 `/gh-security:audit-pins` once this batch's fix PRs have landed. This skill does not run it and
