@@ -120,6 +120,12 @@ jobs:
       # target that never existed.
       REQUIRE_BASH32: ${{ matrix.os == 'macos-latest' && '1' || '' }}
       CHECK_SPEC_SHELL: ${{ matrix.os == 'ubuntu-latest' && 'bash' || 'sh' }}
+      # .shellspec sets --format documentation, which is the right default for
+      # a human reading a local run and 1189 individually formatted lines per
+      # leg here. The failure re-run below inherits this, which is fine: it
+      # exists to produce an unreduced report, not a differently formatted
+      # one, and every formatter names the failing examples.
+      CHECK_SPEC_FORMAT: progress
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

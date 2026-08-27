@@ -175,6 +175,15 @@ cmd_spec() {
     args[${#args[@]}]=--shell
     args[${#args[@]}]=$CHECK_SPEC_SHELL
   fi
+  # CHECK_SPEC_FORMAT routes to --format, the same seam and for the same
+  # reason as the shell above: .shellspec sets --format documentation, which
+  # is what a human wants and what CI pays 1189 individually formatted lines
+  # per leg for. CI sets `progress`. The floor below reads the summary line,
+  # which every formatter emits, so this cannot weaken it.
+  if [ -n "${CHECK_SPEC_FORMAT:-}" ]; then
+    args[${#args[@]}]=--format
+    args[${#args[@]}]=$CHECK_SPEC_FORMAT
+  fi
   # ${args[@]+...}: bash 3.2's set -u rejects expanding an empty array.
   shellspec ${args[@]+"${args[@]}"} 2>&1 | tee "$report"
   # shellspec exits 0 having run zero examples, and a skipped example is

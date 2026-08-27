@@ -187,6 +187,40 @@ STUB
       The output should include '--shell bash'
     End
 
+    It 'passes CHECK_SPEC_FORMAT through as --format'
+      # Same seam as CHECK_SPEC_SHELL above, and same hazard: .shellspec sets
+      # --format, so an override that did not travel as a CLI flag would be
+      # silently ignored and CI would keep paying for the formatter it meant
+      # to turn off (issue #149).
+      cat > bin/shellspec <<'STUB'
+#!/bin/sh
+echo "argv: $*"
+cat summary.txt
+exit 0
+STUB
+      printf '5 examples, 0 failures\n' > summary.txt
+      CHECK_SPEC_FORMAT=progress
+      export CHECK_SPEC_FORMAT
+      When run "$CHECK" spec
+      The status should be success
+      The output should include '--format progress'
+    End
+
+    It 'omits --format entirely when CHECK_SPEC_FORMAT is unset'
+      # The default path must stay .shellspec's own --format documentation;
+      # an empty flag value would override it with nothing and abort.
+      cat > bin/shellspec <<'STUB'
+#!/bin/sh
+echo "argv: $*"
+cat summary.txt
+exit 0
+STUB
+      printf '5 examples, 0 failures\n' > summary.txt
+      When run "$CHECK" spec
+      The status should be success
+      The output should not include '--format'
+    End
+
     It 'reads the summary through ANSI color codes'
       # --color via .shellspec-local prefixes the summary line with escape
       # sequences; the floor must still find the count rather than refusing
