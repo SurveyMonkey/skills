@@ -1,0 +1,17 @@
+{
+  "name": "demo-npm-override-placed-parent",
+  "version": "1.0.0",
+  "dependencies": {
+    "lerna": "^9.0.0"
+  },
+  "overrides": {
+    "lerna": {
+      "nx": ">=22.7.7 <23",
+      "chalk": "^6.0.0"
+    },
+    "glob": "^13.0.0"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

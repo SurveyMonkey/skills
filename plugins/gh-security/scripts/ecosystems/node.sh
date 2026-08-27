@@ -2122,6 +2122,64 @@ verb_apply_constraint() {
     fi
   fi
 
+  # An override-placed parent: one a pre-existing override rule names as a
+  # CHILD key of another rule (`{"A": {"B": "<range>"}}`). npm scopes such a
+  # node to the rule that placed it — once an edge matches a rule, the
+  # descendants consult only that rule's children — so a sibling top-level
+  # `"B": {...}` key never matches it and a constraint written there silently
+  # never takes effect (field-verified across three clean reinstalls, issue
+  # #147). The working form nests INSIDE the existing rule, with the `"."`
+  # self key carrying the parent's own range. The map is parent -> the key
+  # paths under `.overrides` whose last segment names the parent at depth 2
+  # or more; the traversal is npm_walk's shape kept to every key rather than
+  # just the leaves, and a `"."` self key never names a parent. A parent
+  # whose only appearance is a TOP-LEVEL key is not placed: that is the
+  # ordinary merge put_nested already does.
+  #
+  # npm only, deliberately. pnpm's flat `parent>child` keys are each matched
+  # independently against the graph's edges — its overrides block is not a
+  # scoped rule tree — so a pre-existing `A>B` entry does not shadow a `B>P`
+  # key and no analogous nesting is needed there.
+  override_placed='{}'
+  if [ "$loc" = "overrides" ] \
+    && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
+    override_placed=$(jq -c --argjson parents "$parents_json" \
+      "$SEMVER_JQ$PINS_JQ"'
+      def key_paths($obj; $path):
+        [ $obj | to_entries[]
+          | .key as $k | .value as $v
+          | [{path: ($path + [$k]), value: $v}]
+            + (if ($v | type) == "object" then key_paths($v; $path + [$k])
+               else [] end)
+          | .[] ];
+      ((.overrides // {}) | if type == "object" then . else {} end) as $b
+      | [ $parents[] | . as $p
+          | { key: $p,
+              value: [ key_paths($b; [])[].path
+                       | select(length > 1)
+                       | select(last != ".")
+                       | select((last | strip_selector | .name) == $p) ] }
+          | select((.value | length) > 0) ]
+      | from_entries' package.json)
+  fi
+
+  # A parent that is BOTH override-placed and multi-major (issue #132's
+  # qualified keys) cannot be scoped apart: the qualified form is a top-level
+  # `parent@<version>` key, which an override-placed node never matches, and
+  # a version-qualified key INSIDE the existing rule is not a shape these
+  # scripts have verified npm to honor. Refuse before anything is written,
+  # like the shared-parent refusal above: that state needs human
+  # reconciliation.
+  if [ "$loc" = "overrides" ]; then
+    placed_and_qualified=$(jq -cn \
+      --argjson pverq "$qualified_parent_versions" \
+      --argjson placed "$override_placed" \
+      '[ ($pverq | keys[]) as $p | select($placed | has($p)) | $p ]')
+    if [ "$(printf '%s' "$placed_and_qualified" | jq 'length')" -gt 0 ]; then
+      die "apply_constraint: cannot scope '$pkg' on this line: parent(s) $placed_and_qualified are override-placed (a pre-existing override rule names them as a child key, so only entries nested inside that rule reach them, issue #147) AND resolve on more than one major line (which needs version-qualified top-level keys an override-placed node never matches, issue #132). No key shape satisfies both at once, so nothing was written; reconcile the existing override by hand."
+    fi
+  fi
+
   set_indent_args
   tmp=$(mktemp)
 
@@ -2136,6 +2194,7 @@ verb_apply_constraint() {
       --argjson root_keys "$root_keys" --argjson keys_by_parent "$keys_by_parent" \
       --argjson parents "$parents_json" --argjson tighten "$tighten_bare" \
       --argjson pverq "$qualified_parent_versions" \
+      --argjson placed "$override_placed" \
       "$SEMVER_JQ$PINS_JQ"'
       # Create the override container only inside set_entry, so a direct
       # dependency update never leaves an empty "resolutions": {} (or
@@ -2221,6 +2280,20 @@ verb_apply_constraint() {
                             + {($key): $value})))
         | note($parent; ["overrides", $okey, $key]; $value);
 
+      # A parent placed by a pre-existing override rule (issue #147): the new
+      # entry nests at that rule'\''s own path. A string-valued rule keeps
+      # the parent'\''s range under the `"."` self key; an object rule keeps
+      # whatever it already carries. Both writes land in `written`, the `"."`
+      # coercion included, because the manifest diff shows both.
+      def put_rule_nested($parent; $rp; $key; $value):
+        (.manifest.overrides | getpath($rp)) as $cur
+        | (if ($cur | type) == "object" then .
+           else (.manifest.overrides |= setpath($rp; {".": $cur}))
+                | note($parent; (["overrides"] + $rp + ["."]); $cur)
+           end)
+        | (.manifest.overrides |= setpath($rp + [$key]; $value))
+        | note($parent; (["overrides"] + $rp + [$key]); $value);
+
       # pnpm and npm keys carry a parent qualifier whenever $pverq names any
       # for the parent, one key per qualifier, so only the copies whose
       # resolution of the child is on the target line are moved and the
@@ -2243,8 +2316,19 @@ verb_apply_constraint() {
         elif $loc == "resolutions" then
           put_override($parent; $parent + "/" + $key; $value)
         else
-          ($pverq[$parent] // []) as $qv
-          | if ($qv | length) > 0 then
+          ($placed[$parent] // []) as $rulepaths
+          | if ($rulepaths | length) > 0 then
+              # The parent is override-placed, so the top-level scoped key
+              # never matches its node (issue #147): the constraint nests
+              # inside each rule that places it, and NO top-level key is
+              # written for it. The lockfile records no trace of which
+              # resolved copies a rule placed, so a parent that is ALSO
+              # normally resolved keeps those copies uncovered here — a
+              # state `validate` fails closed on and names, rather than
+              # papered over with a speculative duplicate top-level key.
+              reduce $rulepaths[] as $rp (.;
+                put_rule_nested($parent; $rp; $key; $value))
+            elif (($pverq[$parent] // []) | length) > 0 then
               # A pre-existing bare nested key for this same (parent, child)
               # pair is superseded, not kept: npm inserts it FIRST in the
               # OverrideSet and getEdgeRule stops on it for every edge, so
@@ -2261,7 +2345,7 @@ verb_apply_constraint() {
                          | if (.[$parent] | length) == 0
                            then del(.[$parent]) else . end))
                else . end)
-              | reduce $qv[] as $q (.;
+              | reduce ($pverq[$parent])[] as $q (.;
                   put_nested($parent; $parent + "@" + $q; $key; $value))
             else
               put_nested($parent; $parent; $key; $value)

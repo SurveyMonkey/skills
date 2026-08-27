@@ -344,7 +344,9 @@ Two consequences travel with it:
   bare name. The adapter decides key qualification internally, so under npm and pnpm the keys in
   `written[]` may come back version-qualified (`minimatch@10.0.3`, `minimatch@^10.2.5`,
   `minimatch@10.2.5>brace-expansion`): that is the adapter scoping the entry to your line's parent
-  copies, not a different parent (issues #100 and #132).
+  copies, not a different parent (issues #100 and #132). Under npm they may also come back nested
+  inside a pre-existing override rule that places the parent, a `"."` self key carrying the
+  parent's own range (issue #147, phase 4).
 - **Name every unreadable parent you scoped to in the PR body**, marking any that are also in
   `parents_malformed` as a damaged install, and say that its entry rests on a declaration no source
   could be read for. Same disclosure phase 5 requires for the risk score, and for the same reason:
@@ -460,6 +462,15 @@ cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>
 The adapter picks the right syntax per package manager, merges into existing entries rather than
 replacing them, and preserves the manifest's formatting.
 
+**The top-level scoped key is not the only npm shape.** A parent that is itself placed in the tree
+by a pre-existing override rule (the manifest already carries `{"A": {"B": "<range>"}}` and your
+package resolves under B) gets the constraint nested inside that rule —
+`{"A": {"B": {".": "<B's own range>", "P": "<fix-range>"}}}` — with no top-level key for that
+parent, because npm scopes an override-placed node to the rule that placed it and a sibling
+top-level key never matches it (issue #147). This is the adapter's own decision: do not restructure
+it, and quote `written[]` as usual — its `path` arrays carry the real nested paths, the `"."` entry
+included when the existing rule was string-valued.
+
 **Under npm, the apply also invalidates the stale lockfile entries the override must move**, and
 reports them in `lockfile_invalidated` (`{performed, keys[]}`, plus a `reason` string when the
 pass could not run). npm keeps an existing
@@ -482,7 +493,10 @@ that parent's copies on other major lines, or a pre-existing bare override for y
 such a parent pins a different major line. Nothing was written in either case. Return
 `"status": "failure"` with `failure.phase: "apply"` quoting the error verbatim, and escalate it
 exactly like a fatal cross-line move: the remedy is a bump of the shared parent, or reconciling
-the existing override by hand (issue #132).
+the existing override by hand (issue #132). An error naming an **override-placed** parent that
+also resolves on more than one major line is the same fail-closed stop (issues #147 and #132
+colliding: no key shape reaches the placed node and separates the lines at once) and takes the
+same handling.
 
 **Quote `written[]`, not your own arguments, when the PR body says what changed.** It carries one
 `{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
