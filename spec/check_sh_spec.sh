@@ -209,6 +209,13 @@ STUB
     It 'omits --format entirely when CHECK_SPEC_FORMAT is unset'
       # The default path must stay .shellspec's own --format documentation;
       # an empty flag value would override it with nothing and abort.
+      #
+      # Unset explicitly rather than trusting the ambient environment: CI sets
+      # CHECK_SPEC_FORMAT at the job level, so inheriting it makes this
+      # example assert the opposite of its own name and fail only there. That
+      # is the same trap the SHELLSPEC_JOBS pin below documents from issue
+      # #61, and it caught this example on its first CI run.
+      unset CHECK_SPEC_FORMAT
       cat > bin/shellspec <<'STUB'
 #!/bin/sh
 echo "argv: $*"
