@@ -614,9 +614,12 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
 
     # The agent must not read the reap as a safety net under the one judgment
-    # this section refuses to make: an unpushed tip is left at both ends.
-    It 'tells the agent the reap applies the same tip test it does'
-      When call rule_in "$AGENT" 'It applies the same tip test'
+    # this section refuses to make: an unpushed tip is left at both ends. The
+    # reap's test is narrower than the agent's three safe cases — it re-checks
+    # only origin/<branch_name> — and the agent is told so rather than told
+    # the two tests are the same (#152).
+    It 'tells the agent the reap re-checks only the origin tip, a narrower test'
+      When call phrase_in "$AGENT" 'a narrower test than your three safe cases'
       The status should be success
       The output should equal '1'
     End

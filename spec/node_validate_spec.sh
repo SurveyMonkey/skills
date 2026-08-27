@@ -266,7 +266,7 @@ End
 Describe 'node.sh validate --baseline'
   After 'cleanup_fixture'
 
-  # `resolved_versions` in the pre-fix worktree, verbatim, as phase 2 records it.
+  # `resolved_versions` in the pre-fix worktree, verbatim, as phase 3 records it.
   BASELINE='{"pm":"yarn","package":"brace-expansion","present":true,"count":2,"versions":[{"version":"1.1.18","path":"brace-expansion@npm:1.1.18"},{"version":"5.0.6","path":"brace-expansion@npm:5.0.6"}],"lockfile_entries":10}'
 
   It 'passes the collapsed tree when no baseline is supplied'
@@ -455,7 +455,7 @@ End
 Describe 'node.sh validate --sibling-alerts'
   After 'cleanup_fixture'
 
-  # Phase 2's `resolved_versions picomatch` in the pre-fix worktree: two 2.x
+  # Phase 3's `resolved_versions picomatch` in the pre-fix worktree: two 2.x
   # copies and the 4.0.1 the fix targets.
   DEDUP_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.1","path":"picomatch@2.3.1"},{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
 
@@ -665,5 +665,85 @@ Describe 'node.sh validate --sibling-alerts'
       --sibling-alerts '[]' picomatch '>=4.0.3 <5'
     The status should not equal 0
     The output should equal '{"ok":false,"classes":["fatal"]}'
+  End
+End
+
+# ---------------------------------------------------------------------------
+# Stale-lockfile drift vs the control-install baseline (issue #146)
+#
+# The field shape: a default-branch lockfile stale relative to its manifests,
+# where ANY install re-resolves entries — a within-major ADDITION on a line the
+# group does not own (js-yaml 3.x ["3.15.1"] -> ["3.15.1","3.15.2"], minimatch
+# 10.x ["10.2.5"] -> ["10.2.5","10.2.6"]), reproduced identically by a plain
+# no-change install — the same account agents/fix-dependency.md phase 3 gives
+# of the specimen. The two-survivors fixture already carries the post-install
+# tree for it: picomatch at 2.3.9, 2.3.10 and 4.0.3.
+#
+# The adapter deliberately does NOT loosen for this shape — an addition is not
+# a dedup, so the carve-out's exactly-one-survivor conjunct keeps it fatal even
+# with --sibling-alerts '[]'. The fix lives in the agent's sequencing
+# (agents/fix-dependency.md phase 3): a no-change control install runs before
+# the baseline snapshot, so the ambient re-resolution is already in the
+# baseline and the diff measures only what the fix moved.
+#
+# The field defect was npm, twice, so the same shape is also carried as an npm
+# lockfile-v3 specimen (spec/fixtures/npm-ambient-drift): the fixture lockfile
+# is the post-install tree, and comparing the stale baseline against the
+# post-control one shows the within-major addition on the unowned 2.x line.
+# ---------------------------------------------------------------------------
+Describe 'stale-lockfile drift vs the control-install baseline (issue #146)'
+  After 'cleanup_fixture'
+
+  # `resolved_versions picomatch` against the STALE default-branch lockfile,
+  # i.e. a phase 3 snapshot taken before any install had run: line 2 carried
+  # only 2.3.9, and the install (any install) added 2.3.10 beside it.
+  STALE_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":2,"versions":[{"version":"2.3.9","path":"picomatch@2.3.9"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
+
+  # The same snapshot taken AFTER the no-change control install: line 2 already
+  # holds both copies, because the drift is ambient, not the fix's.
+  CONTROL_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.9","path":"picomatch@2.3.9"},{"version":"2.3.10","path":"picomatch@2.3.10"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":6}'
+
+  It 'fails closed against a stale pre-install baseline, blaming the ambient addition on the fix'
+    use_fixture pnpm-benign-dedup-two-survivors
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$STALE_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":2,"before":["2.3.9"],"after":["2.3.10","2.3.9"],"status":"moved","class":"fatal"}]}'
+  End
+
+  It 'passes the identical tree against the post-control-install baseline'
+    use_fixture pnpm-benign-dedup-two-survivors
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$CONTROL_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
+  End
+
+  # The npm mirror of the two verdicts above, against the npm-ambient-drift
+  # lockfile-v3 specimen. Paths are npm's node_modules keys; the shape is the
+  # field's: the stale lockfile pinned 4.0.1 and carried only 2.3.9 on the
+  # unowned 2.x line, and the control install both bumped the target in range
+  # and added 2.3.10 beside 2.3.9.
+  NPM_STALE_BASELINE='{"pm":"npm","package":"picomatch","present":true,"count":2,"versions":[{"version":"2.3.9","path":"node_modules/anymatch/node_modules/picomatch"},{"version":"4.0.1","path":"node_modules/picomatch"}],"lockfile_entries":5}'
+  NPM_CONTROL_BASELINE='{"pm":"npm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.10","path":"node_modules/readdirp/node_modules/picomatch"},{"version":"2.3.9","path":"node_modules/anymatch/node_modules/picomatch"},{"version":"4.0.1","path":"node_modules/picomatch"}],"lockfile_entries":6}'
+
+  It 'fails closed against a stale pre-install baseline under npm, blaming the ambient addition on the fix'
+    use_fixture npm-ambient-drift
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$NPM_STALE_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":2,"before":["2.3.9"],"after":["2.3.10","2.3.9"],"status":"moved","class":"fatal"}]}'
+  End
+
+  It 'passes the identical npm tree against the post-control-install baseline'
+    use_fixture npm-ambient-drift
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$NPM_CONTROL_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
   End
 End

@@ -389,8 +389,10 @@ pm_of() { verb_detect | jq -r '.pm'; }
 # resolved_versions
 #
 # Parses the lockfile rather than querying the package manager. The lockfile is
-# the artifact the PR commits, and parsing works before any install, which the
-# pre-fix merge-risk baseline needs.
+# the artifact the PR commits, and parsing needs no package manager at all: the
+# verb reads committed state and answers the same before or after an install,
+# which is what lets the fix flow take its pre-drift snapshot and its
+# post-control-install baseline through one code path.
 #
 # `lockfile_entries` exists so callers can distinguish "this package is absent"
 # from "the parser is broken". v0.1.0 could not make that distinction: its yarn
@@ -1620,7 +1622,7 @@ verb_validate() {
                                     and (.version | type) == "string")))' 2>/dev/null) \
       || baseline_json=""
     if [ -z "$baseline_json" ]; then
-      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 2 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
+      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 3 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
     fi
   fi
 

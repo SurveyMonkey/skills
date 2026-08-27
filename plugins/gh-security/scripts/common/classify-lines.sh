@@ -302,7 +302,7 @@ set_detect_entry() {
 
 # One `declared_ranges --line` read per (adapter, package, line). eligible is
 # the fix flow's own eligible-parent rule (parents_read + parents_without_range
-# + parents_unreadable, agents/fix-dependency.md phase 3); other is
+# + parents_unreadable, agents/fix-dependency.md phase 2); other is
 # parents_other_lines verbatim.
 DR_CACHE='[]'
 DR_ENTRY=''

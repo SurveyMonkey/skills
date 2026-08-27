@@ -55,6 +55,22 @@ Describe 'the fix branch lifecycle in fix-dependency (#84)'
       The output should equal '1'
     End
 
+    # The third safe case (#146, #152): a branch whose only commit is the
+    # drift commit carries nothing a rerun cannot derive again. Grounded in
+    # machine-derivability, not identity — hooks and timestamps make byte
+    # identity a promise the flow cannot keep.
+    It 'treats a drift-commit-only branch as safe to delete'
+      When call phrase_in "$AGENT" "Your only commit is Phase 3's drift commit"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'grounds that safety in an equivalent regenerated commit, not an identical one'
+      When call phrase_in "$AGENT" 'regenerates an equivalent commit from the same manifests'
+      The status should be success
+      The output should not equal '0'
+    End
+
     # Anything else is unpushed work, and the way out of a cleanup is not the
     # place to adjudicate it.
     It 'leaves an unaccounted branch in place and reports it'
@@ -116,10 +132,25 @@ Describe 'the fix branch lifecycle in fix-dependency (#84)'
       The output should equal '1'
     End
 
+    # The guard's third recognized tip (#152): a leftover carrying only this
+    # flow's own drift commit, identified by both its subject and its
+    # lockfile/install-artifact-only paths, never by either alone.
+    It 'recognizes a drift-commit-only tip as this flow.s own leftover'
+      When call phrase_in "$AGENT" 'form a single drift commit'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'requires both the subject check and the paths check'
+      When call phrase_in "$AGENT" 'Recognize it by both checks, not either alone'
+      The status should be success
+      The output should equal '1'
+    End
+
     # The guard still has to stop for the case it was written for, or the fix
     # has traded a deadlock for a discarded commit.
-    It 'still stops on a tip that is neither'
-      When call phrase_in "$AGENT" 'is neither is someone'
+    It 'still stops on a tip that matches none of the recognized cases'
+      When call phrase_in "$AGENT" 'is none of these is someone'
       The status should be success
       The output should equal '1'
     End

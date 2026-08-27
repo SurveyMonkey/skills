@@ -143,8 +143,11 @@ writing the PR prose. Do not reimplement what the scripts do.
   it, say exactly what you did.
 - **Run every adapter verb in the foreground with an explicit Bash timeout, never the tool's
   default.** Pass `timeout: 600000` (10 minutes) on `install`, the only verb here that reaches a
-  registry or a package manager: a healthy install can run several minutes long (one field run's
-  four install cycles averaged roughly four minutes each, ~17 minutes total — see Phase 3), and
+  registry or a package manager — and this flow invokes it at two sites, Phase 3's control install
+  and Phase 4's fix install (whose remediation ladder can re-run it), each invocation under the
+  same timeout: a healthy install can run several minutes
+  long (one field run's
+  four install cycles averaged roughly four minutes each, ~17 minutes total — see Phase 2), and
   the Bash tool's 120-second default would fail it indistinguishably from a hang. Pass
   `timeout: 120000` (2 minutes) on every other verb this flow calls — `why`, `resolved_versions`,
   `declared_ranges`, `apply_constraint`, and `shim`, plus `validate`, which only reads the
@@ -152,10 +155,11 @@ writing the PR prose. Do not reimplement what the scripts do.
   guess. **Adapter verbs are expected to terminate.** A verb that has not returned within its
   timeout is not still working; it has failed the phase that called it, and so has one that OOMs
   or exits non-zero twice on the same inputs with no remediation in between. Neither loosens a
-  phase's own stop-on-first-failure instruction — the lockfile-parse stop (Phase 2) and the fatal
+  phase's own stop-on-first-failure instruction — the lockfile-parse stop (Phase 3) and the fatal
   `other_line_moves` stop (Phase 4) still stop on the first failure — and neither authorizes any
-  retry beyond Phase 4's remediation ladder or the one sanctioned install retry on a registry
-  timeout, each of which follows an actual remediation step, never a bare repeat of the same
+  retry beyond Phase 4's remediation ladder or the one sanctioned retry per install invocation on
+  a registry timeout — the control install and the fix install each get their own, and each
+  follows an actual remediation step, never a bare repeat of the same
   command. A verb that hit its timeout is presumed still running: kill it and fail closed. A verb
   that already OOMed or exited non-zero is already dead; there is nothing left to kill, only the
   failure to report. Never background a hung verb, never attach a
@@ -234,7 +238,18 @@ remote-tracking ref `origin/<branch_name>`, which is what the `rev-parse` above 
 `branch --list`, or a `rev-parse` on a ref the previous command reported as existing may fail the
 run (phase `worktree`, quoting git).
 
-**A local tip that is neither is someone's unpushed work.** Stop and return a failure (phase
+**A third tip is also this flow's own leftover: one whose only commits beyond
+`origin/<default_branch>` form a single drift commit.** Recognize it by both checks, not either
+alone: `git -C <repo_root> log --format=%s origin/<default_branch>..<branch_name>` lists exactly
+one subject, `chore(deps): refresh lockfile (control install, no manifest change)`, and
+`git -C <repo_root> diff --name-only origin/<default_branch> <branch_name>` names only the
+lockfile and tracked install artifacts (`.pnp.cjs`, `.pnp.loader.mjs`, `.yarn/cache/` paths) —
+never `package.json`, source, or anything else. That is phase 3's drift commit from a run that
+ended before pushing, and a rerun's own control install derives an equivalent commit from the
+same manifests, so delete and recreate it like the other two cases. A tip that fails either check
+is not this case.
+
+**A local tip that is none of these is someone's unpushed work.** Stop and return a failure (phase
 `worktree`) naming the branch and quoting the three shas, so the user can inspect it. Never delete
 that one, and never reuse it: your commit would land on top of theirs and your push would carry it.
 
@@ -254,7 +269,7 @@ git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_br
 
 No `cd` of its own follows the worktree creation, here or anywhere in this document: cwd does not
 survive to the next call, so every later command carries its own location instead (see Hard
-rules). Worktrees do not share installed dependencies, so your install in phase 4 is a full one.
+rules). Worktrees do not share installed dependencies, so phase 3's control install is a full one.
 
 **Never combine `cd` with `git` in one command — no exceptions.** Every git invocation uses
 `git -C <literal path>`. The compound form (`cd "$WORK/fix" && git diff`) trips a per-command
@@ -263,26 +278,12 @@ per invocation, while the `-C` form is covered by the standing rules and runs si
 commands (the adapter, the risk scorer) take the `cd "$WORK/fix" && ` prefix instead, which is
 covered too; only git needs the `-C` form.
 
-## Phase 2: Record the pre-fix baseline
+## Phase 2: Classify the dependency
 
-```bash
-cd "$WORK/fix" && $ADAPTER resolved_versions <package>
-```
-
-**Keep this output verbatim; you pass it back to `validate` in phase 4.** It has two consumers,
-and once you install it is gone: the merge-risk rating needs the version resolved *before* the fix,
-and validate's cross-line collateral check needs every copy that existed before it — including the
-copies on major lines your group does not own, which no other check in this flow ever looks at.
-
-If `present` is false the package is not currently in the lockfile, which is legitimate for a new
-direct dependency. Record that there is no baseline and continue; phase 5 handles it. Pass the
-`present: false` output to phase 4's `--baseline` anyway: nothing existed to be moved, so the
-collateral check answers `[]` honestly rather than going unasked.
-
-If the script errors about parsing zero entries, the lockfile is unreadable. Stop and return a
-failure (phase `baseline`). Do not treat a failed parse as an empty result.
-
-## Phase 3: Classify the dependency
+This phase runs on the never-installed tree, before Phase 3's control install, and that order is
+deliberate: `why` and `declared_ranges` parse the lockfile and need no install, so a dead end
+this phase can name — the peer-only stop below — costs no install at all, which is exactly the
+cost [#103](https://github.com/SurveyMonkey/skills/issues/103) exists to avoid.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER why <package>
@@ -349,6 +350,97 @@ Two consequences travel with it:
   could be read for. Same disclosure phase 5 requires for the risk score, and for the same reason:
   a reviewer must be able to see which entries were written against a partial view.
 
+## Phase 3: Control install and the pre-fix baseline
+
+This phase sits immediately before the apply on purpose: Phase 2's classification needed no
+install, and the baseline recorded here must describe the tree Phase 4's fix install starts from.
+
+First, record the **pre-drift snapshot** — the lockfile exactly as `origin/<default_branch>`
+committed it, parsed before any install:
+
+```bash
+cd "$WORK/fix" && $ADAPTER resolved_versions <package>
+```
+
+Keep it verbatim, separate from the baseline below. It has two consumers: Phase 4's drift-cleared
+test, which compares your line's resolved versions across the drift commit to tell a true no-op
+from a fix whose content is the drift commit, and — only on that `lockfile-refresh` path — Phase
+5's `--before`.
+
+Then run a **control install** — the manifest exactly as the default branch declares it, no fix
+applied — with the same 10-minute timeout Phase 4's install carries (Hard rules):
+
+```bash
+cd "$WORK/fix" && $ADAPTER install
+```
+
+Then check what it changed:
+
+```bash
+git -C "$WORK/fix" status --porcelain
+```
+
+**Empty output means the committed lockfile was current: there is no drift, no drift commit is
+made, and you go straight to the baseline snapshot below.**
+
+Non-empty output means the default branch's lockfile is stale relative to its manifests, so *any*
+install re-resolves entries — within-major additions, dedups — with zero manifest edits. Commit
+that drift as its own first commit, so it never rides in the fix's diff. Stage the lockfile and
+the tracked install artifacts the install regenerates, and nothing else: the lockfile always; the
+regenerated `.pnp.cjs` and `.pnp.loader.mjs` in a Yarn PnP repository; and, in a zero-install
+Yarn Berry repository, every `.yarn/cache/` path that `status --porcelain` reports as modified,
+added or deleted — those archives are the lockfile's committed state, and a commit that moves one
+without the other does not install. **Never stage `package.json`**: the control install had no
+manifest edit to make, so a modified `package.json` here is itself the anomaly the residual check
+below exists to catch, not something to absorb.
+
+```bash
+git -C "$WORK/fix" add <lockfile> [.pnp.cjs .pnp.loader.mjs] [<each changed .yarn/cache path>]
+git -C "$WORK/fix" commit -m "chore(deps): refresh lockfile (control install, no manifest change)"
+```
+
+If porcelain is **still** non-empty after that staging and commit, the install touched something
+other than the lockfile and its tracked install artifacts. Stop and return a failure (phase
+`baseline`) reporting exactly what remains — never clean it up, delete it, or fold it into a
+commit; what an install writes outside those paths is evidence the user needs to see, not noise
+to absorb.
+
+A control install that fails is a failure with phase `baseline`, **not** `install` — that phase
+name stays reserved for Phase 4's fix-attributable install, and the two must not be confusable in
+a triage table: this one fails before any fix exists, so it is ambient and will hit every group
+dispatched against the repo. Its `detail` names the control install (no manifest change) and
+quotes the package manager's error. A hook that fails the drift commit is also phase `baseline`,
+quoting the hook's own output; the hook rules in Phase 6 apply here unchanged — never bypass one,
+never edit anything to satisfy one.
+
+Only then record the baseline:
+
+```bash
+cd "$WORK/fix" && $ADAPTER resolved_versions <package>
+```
+
+The ordering is the point (issue #146). The snapshot now describes the **post-control-install**
+tree, so validate's `other_line_moves` measures only movement the fix itself causes: a stale
+lockfile's ambient re-resolution has already landed in the drift commit instead of being blamed
+on the fix. Snapshotting before any install attributed exactly that ambient drift to the fix — a
+field run fail-closed two of eight groups on within-major additions (`js-yaml` 3.15.1 →
+3.15.1+3.15.2, `minimatch` 10.2.5 → 10.2.5+10.2.6) that a plain no-change install reproduced
+identically.
+
+**Keep this output verbatim; you pass it back to `validate` in phase 4.** It has two consumers,
+and once the fix install runs it is gone: the merge-risk rating needs the version resolved
+*before* the fix,
+and validate's cross-line collateral check needs every copy that existed before it — including the
+copies on major lines your group does not own, which no other check in this flow ever looks at.
+
+If `present` is false the package is not currently in the lockfile, which is legitimate for a new
+direct dependency. Record that there is no baseline and continue; phase 5 handles it. Pass the
+`present: false` output to phase 4's `--baseline` anyway: nothing existed to be moved, so the
+collateral check answers `[]` honestly rather than going unasked.
+
+If the script errors about parsing zero entries, the lockfile is unreadable. Stop and return a
+failure (phase `baseline`). Do not treat a failed parse as an empty result.
+
 ## Phase 4: Apply the fix, install, validate
 
 Derive a **major-bounded** range from `highest_fixed_version`: `3.1.2` becomes `>=3.1.2 <4`,
@@ -360,7 +452,7 @@ is your `major_line` and the one above it.
 # direct dependency
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>'
 
-# transitive: pass phase 3's eligible set (parents_read + parents_unreadable
+# transitive: pass phase 2's eligible set (parents_read + parents_unreadable
 # + parents_without_range), and only those — never parents_other_lines
 cd "$WORK/fix" && $ADAPTER apply_constraint <package> '>=<version> <<next_major>' <parent-a> <parent-b>
 ```
@@ -384,8 +476,8 @@ lockfile) — an npm override WAS written but the pass could not judge the lockf
 override is presumed inert against any stale entry: a fail-closed stop-and-report signal, the
 stale-lockfile case of the escalation ladder (phase 4's step 3), not a benign no-op.
 
-**An `apply_constraint` error naming the shared-parent shape is a fail-closed stop, before any
-install.** Two states produce it: the root manifest's own spec for a shared parent also admits
+**An `apply_constraint` error naming the shared-parent shape is a fail-closed stop, before the
+fix install.** Two states produce it: the root manifest's own spec for a shared parent also admits
 that parent's copies on other major lines, or a pre-existing bare override for your package under
 such a parent pins a different major line. Nothing was written in either case. Return
 `"status": "failure"` with `failure.phase: "apply"` quoting the error verbatim, and escalate it
@@ -406,7 +498,8 @@ and the last `@` — is not the package you passed, the adapter has retargeted a
 merely *collides* with your package's name: a repository installing `underscore` under the key
 `lodash` gets `"npm:underscore@^4.17.21"` written when you asked for `lodash`, a version of
 `underscore` that does not exist. Neither the adapter nor you can disambiguate the two senses of
-that name, so stop: quote the offending entry verbatim, do not install, and do not open a PR.
+that name, so stop: quote the offending entry verbatim, do not run the fix install, and do not
+open a PR.
 Escalate it as a repository that needs the collision resolved by hand
 ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
@@ -432,7 +525,7 @@ what tells a bare override you *tightened* from one you *added*.
 
 ```bash
 cd "$WORK/fix" && $ADAPTER install
-cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 2 resolved_versions JSON>' --sibling-alerts '<group sibling_alerts JSON>' <package> '>=<version> <<next_major>'
+cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 3 resolved_versions JSON>' --sibling-alerts '<group sibling_alerts JSON>' <package> '>=<version> <<next_major>'
 ```
 
 Pass **one `--vulnerable` per distinct `vulnerable_range` in your group's `alerts[]`**, copied
@@ -442,7 +535,8 @@ hard error, because without the ranges validate cannot tell a finished fix from 
 Copy each range exactly: a range validate cannot parse is also a hard error naming it, since an
 unreadable range would otherwise mark every resolved copy not vulnerable.
 
-**`--baseline` takes phase 2's `resolved_versions` output verbatim, single-quoted.** It is JSON
+**`--baseline` takes phase 3's post-control-install `resolved_versions` output verbatim,
+single-quoted.** It is JSON
 from the adapter and never contains a quote character. It is checked, not trusted: a payload that
 is truncated, or captured for a different package, is a hard error naming itself, because a
 baseline nobody could read would report no collateral at all — the clean-looking answer produced by
@@ -501,25 +595,51 @@ instead: say which line moved, from what to what, and which parent carries it.
 Install failures are yours to diagnose: a peer conflict needing a wider range, a registry timeout
 worth one retry, a version that does not exist.
 
-### The already-fixed case: stop here and return `no-op`
+### The empty-diff case: a true no-op, or a fix whose content is the drift commit
 
 ```bash
 git -C "$WORK/fix" status --porcelain
 ```
 
 **Empty output after `apply_constraint` and `install`, with `validate` returning `ok: true`,
-`violations: []`, `unresolved_alerts: []` and `other_line_moves: []`, means the fix is already on
-the default branch.**
+`violations: []`, `unresolved_alerts: []` and `other_line_moves: []`, means the fix install itself
+changed nothing.**
 `apply_constraint` merged into entries that already carried the right range, the install changed no
-lockfile entry, and validate confirms every alert in your group is already cleared by what is
-installed. Nothing is wrong and nothing needs doing.
+lockfile entry, and validate confirms every alert in your group is cleared by what is installed.
+Phase 3's control-install commit has already absorbed any ambient drift a stale lockfile produces,
+so empty porcelain here means exactly what it says (issue #146). What it does **not** yet say is
+*which* install cleared the alerts, and the drift commit answers that.
+
+**Compare your line across the drift commit**: phase 3's pre-drift snapshot against its
+post-control-install baseline, restricted to the resolved versions on your `major_line`.
+
+- **No drift commit exists, or your line's resolved versions are identical in both snapshots**:
+  the default branch already resolves the fixed versions, nothing is wrong and nothing needs
+  doing. This is the true no-op below (Dependabot re-scan lag).
+- **A drift commit exists and your line's resolved versions differ across it**: the control
+  install itself resolved the vulnerable copy away — the manifest already admits the fixed
+  version, and only the stale committed lockfile pinned the vulnerable one, so the default branch
+  still resolves it and the alerts are genuinely open. The field specimen is an in-range
+  `js-yaml` 3.15.1 → 3.15.2 bump a control install produced on its own. **This is a real fix
+  whose content is the drift commit, not a no-op**: reporting it as "already fixed" and
+  discarding the branch leaves the alerts open with nothing to review. Proceed through the
+  normal success path — the commit already exists, so phase 6 has nothing further to commit —
+  score merge risk as usual (phase 5: the version delta is the refresh's own delta, `--before`
+  from the pre-drift snapshot), push, and open the PR. `action` is `"lockfile-refresh"`, and the
+  PR body's `## Changes` section states the fix is a no-change lockfile refresh (phase 6).
+
+**A true no-op still opens no PR even when an unrelated drift commit exists** — one whose
+re-resolutions left your line where the stale lockfile had it. A lone lockfile refresh that
+clears none of your alerts is not this agent's mandate — you were dispatched to fix alerts, and
+there is no fix to review — so the branch is cleaned up like any other no-op, drift commit and
+all.
 
 This happens without anything being broken anywhere: Dependabot re-scans on its own schedule, so
 GitHub reports alerts as open for a window after the fix has merged. Discovery is right to surface
 them and you are right to find nothing to do. (Open-PR dedup does not catch it — that PR is
 **merged**, not open.)
 
-**Stop at this point.** Do not score merge risk, do not commit, push, or open a PR: there is no
+**On the true no-op, stop at this point.** Do not score merge risk, do not commit, push, or open a PR: there is no
 change to score or review. Clean up and return
 `"status": "no-op"` with its required `no_op` object — the reason plus validate's own evidence
 (schema at the end). If you can identify the merged PR that landed the fix cheaply, name it in the
@@ -660,7 +780,7 @@ such, so a reviewer knows the distance was measured against a partial view;
 ```bash
 cd "$WORK/fix" && <scripts_dir>/score-merge-risk.sh \
   --package <package> \
-  --before <lowest version from phase 2, omit entirely if there was no baseline> \
+  --before <lowest version from phase 3's baseline (pre-drift snapshot on a lockfile-refresh); omit entirely if there was no baseline> \
   --after <resolved version now> \
   --adapter $ADAPTER \
   --why-json "$WORK/why-<package>.json" \
@@ -687,7 +807,11 @@ unreachable no matter how far the fix actually jumped.
 
 The script computes F1 (version delta), F2 (runtime exposure), F3 (usage surface), F4 (test
 coverage of the affected surface), F5 (CI presence) and F7 (distance from the declared ranges),
-all of them from the worktree it runs in. You supply the one factor only you know:
+all of them from the worktree it runs in. F1's `--before` comes from the **post-control-install**
+baseline deliberately: the delta it measures is fix-attributable, the same attribution discipline
+the collateral check rests on — except on a `lockfile-refresh`, where the refresh IS the change,
+so `--before` comes from phase 3's pre-drift snapshot and the delta is the refresh's own. You
+supply the one factor only you know:
 
 - **F6 override blast radius** (phase 4), via `--override-scope`: `none` you updated the direct
   dependency and added no override; `scoped` parent-scoped entries only; `bare-tightened` you
@@ -716,6 +840,11 @@ counts and the workflow the score rests on, if the PR body needs to cite them.
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
 first: the PR is the review artifact, and it opens **ready for review** precisely so it reaches
 the reviewers and CODEOWNERS who decide it. Opening it is not merging it (ADR 008).
+
+**On a `lockfile-refresh` there is nothing left to commit**: the branch already holds its only
+commit, phase 3's drift commit, and the commit-message template below does not apply. Skip
+straight to the push and the PR, whose body carries the refresh statement described under
+`## Changes` below.
 
 **The repository's own commit and push hooks are the repository's, and they run.** A repo with
 lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
@@ -868,7 +997,7 @@ PR body:
 ## Dependency chain
 
 ```
-<raw from phase 3>
+<raw from phase 2>
 ```
 
 ## Changes
@@ -876,6 +1005,10 @@ PR body:
 ```json
 <the exact JSON added or modified in package.json>
 ```
+
+<the one-sentence drift note whenever phase 3 committed a drift commit, and the
+lockfile-refresh statement on that action — both defined below this template; on a
+lockfile-refresh the JSON block above is omitted, there being no manifest edit to quote>
 
 ## Not fixed by this PR
 
@@ -890,7 +1023,9 @@ PR body:
 - [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
       `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
 - [x] No collateral: every copy of `<package>` on the other major lines resolves exactly as it did
-      before this change (`other_line_moves: []`, against the pre-fix baseline)
+      before this change (`other_line_moves: []`, against the baseline recorded after a no-change
+      control install, so the comparison excludes stale-lockfile drift and measures only this
+      change)
 - CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
@@ -900,6 +1035,18 @@ PR body:
 
 EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
+
+**Whenever Phase 3 committed a drift commit, the branch carries two commits — drift, then fix —
+and the `## Changes` section must say so in one sentence**, so a reviewer reading the diff knows
+which commit is the fix. For example: "The first commit is a no-change lockfile refresh — the
+default branch's lockfile is stale relative to its manifests, so any install re-resolves these
+entries; the second commit is the fix." Omit the sentence when there was no drift commit.
+
+**On a `lockfile-refresh` the drift commit is the only commit, and `## Changes` states the fix is
+a no-change lockfile refresh**, in place of the JSON block: the manifest already admits the fixed
+version, the stale committed lockfile pinned the vulnerable one, and re-resolving the lockfile
+against the unchanged manifests is the entire fix. Say which resolved versions on this group's
+line the refresh moved, from what to what.
 
 **Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
 `## Collateral` section placed immediately before `## Verification`.** Three situations reach it,
@@ -987,6 +1134,12 @@ Two cases are safe, and nothing else is:
   need a local branch to exist.
 - **You committed nothing.** On any failure path whose branch tip still equals
   `origin/<default_branch>`, there is nothing on the branch to lose.
+- **Your only commit is Phase 3's drift commit.** The commit is machine-derived: a rerun's
+  no-change control install regenerates an equivalent commit from the same manifests, so nothing
+  unrecoverable is on the branch. Without this case every
+  no-op against a stale lockfile leaves a branch the next run's stale-branch guard must read as
+  someone's unpushed work — the deadlock of
+  [#84](https://github.com/SurveyMonkey/skills/issues/84), reintroduced (issue #146).
 
 **Otherwise leave the branch and say so in `detail`** (in your prose, when the result is a success
 and `failure` is `null`), naming it and its tip: a branch carrying a
@@ -1003,9 +1156,10 @@ either shipped or already failed for its own reason.
 **You are the first line of defense here, not the only one.** After your result lands, the
 orchestrator verifies your pull request is open and then reaps this group's worktree directory and
 local branch itself. What that adds is narrow, and worth knowing exactly: a success that crashed
-before reaching this section, and a `branch -D` that errored here. **It applies the same tip test
-you do**, so a branch you left because its tip is not on origin is left there too and reported,
-never deleted; the judgment above is not made for you at the other end either.
+before reaching this section, and a `branch -D` that errored here. **It re-checks only
+`origin/<branch_name>`** — a narrower test than your three safe cases — so a branch you left
+because its tip is not on origin is left there too and reported, never deleted; the judgment
+above is not made for you at the other end either.
 
 That never licenses skipping this section: the reap runs only on a verified open PR, so every
 other exit path (a failure, an abort on a hung verb, a crash) is cleaned up here or not at all.
@@ -1030,7 +1184,7 @@ End your final message with exactly one fenced JSON block:
   "repo": "<nwo>",
   "branch": "<branch_name>",
   "pr_url": "https://github.com/<nwo>/pull/<n>",
-  "action": "direct-update | scoped-override | bare-override",
+  "action": "direct-update | scoped-override | bare-override | lockfile-refresh",
   "resolved_version": "<post-fix resolved version>",
   "risk": {"band": "Low", "score": 3, "f4": 0, "f5": 0},
   "observations": [],
@@ -1044,7 +1198,10 @@ End your final message with exactly one fenced JSON block:
 - `action` is `direct-update` when you changed the dependency's own version, `scoped-override`
   when every override entry you wrote names a parent, and `bare-override` whenever you wrote or
   tightened an unscoped entry. The widest shape wins, so scoped entries alongside a bare one are
-  still `bare-override`.
+  still `bare-override`. `lockfile-refresh` is phase 4's drift-cleared case: the change is phase
+  3's drift commit alone — the manifest already admitted the fixed version and the control
+  install resolved the vulnerable copy away — so there is no manifest edit, `bare_override` is
+  `none`, and the PR is the pushed drift commit.
 - `bare_override` is `none`, `added`, or `tightened`, and it must agree with `action`: anything
   other than `none` means `action` is `bare-override`, and `bare-override` never pairs with
   `none`. `tightened` requires a matching pre-fix observation (`targets_this_package` true);
@@ -1082,7 +1239,7 @@ End your final message with exactly one fenced JSON block:
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
   `null`, and `failure` is `{"phase": "input | worktree | baseline | classify | apply | install | validate | push | pr", "detail": "..."}`.
   Everything you completed before stopping still gets reported (`observations`).
-- On a no-op (phase 4's already-fixed case): `"status": "no-op"`, `pr_url`, `action` and `risk`
+- On a no-op (phase 4's true-no-op case): `"status": "no-op"`, `pr_url`, `action` and `risk`
   are `null`, `resolved_version` is what is installed, and
   `no_op` carries the reason and the evidence. Both fields are required; a reason without the
   evidence is an assertion, and the evidence is what a reader checks it against:
