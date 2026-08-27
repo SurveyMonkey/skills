@@ -525,12 +525,12 @@ Describe 'node.sh apply_constraint'
       The output should equal '{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"}'
     End
 
-    # The chosen behavior for a parent that may ALSO be normally resolved:
-    # the lockfile records no trace of which resolved copies a rule placed,
-    # so no top-level key is written at all — a normally-resolved copy left
-    # uncovered fails closed at `validate`, rather than being papered over
-    # with a speculative duplicate top-level key. Sibling entries at every
-    # level survive the merge.
+    # Placement is judged per parent copy against the lockfile's logical
+    # ancestry (the placing rule's chain must actually reach the copy), and
+    # here every copy is placed, so no top-level key is written — one would
+    # match nothing. A parent with BOTH placed and normally-resolved copies
+    # gets both shapes (see the grounding Describe below). Sibling entries
+    # at every level survive the merge.
     It 'writes no top-level key for the placed parent and preserves every sibling'
       use_fixture npm-override-placed-parent
       "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx >/dev/null
@@ -540,12 +540,15 @@ Describe 'node.sh apply_constraint'
 
     # Both writes the manifest diff shows land in written[]: the "." coercion
     # carrying the parent's pre-existing range, and the new child key, each
-    # with its real nested path.
-    It 'reports the "." coercion and the nested key it wrote'
+    # with its real nested path. The "." entry carries `preserved: true`: it
+    # quotes a value the restructure kept, not one this call chose, so the
+    # agent's written[]-value checks (the npm: alias abort among them) can
+    # exempt it.
+    It 'reports the "." coercion, marked preserved, and the nested key it wrote'
       use_fixture npm-override-placed-parent
       When call adapter_jq '.written' apply_constraint brace-expansion '>=5.0.9 <6' nx
       The status should be success
-      The output should equal '[{"parent":"nx","path":["overrides","lerna","nx","."],"value":">=22.7.7 <23"},{"parent":"nx","path":["overrides","lerna","nx","brace-expansion"],"value":">=5.0.9 <6"}]'
+      The output should equal '[{"parent":"nx","path":["overrides","lerna","nx","."],"value":">=22.7.7 <23","preserved":true},{"parent":"nx","path":["overrides","lerna","nx","brace-expansion"],"value":">=5.0.9 <6"}]'
     End
 
     # An already-object rule keeps its "." and its siblings and only gains
@@ -601,12 +604,12 @@ Describe 'node.sh apply_constraint'
       The output should equal '{"nx":{"minimist":"^1.2.8","brace-expansion":">=5.0.9 <6"}}'
     End
 
-    # The issue #132 interaction: a parent that is BOTH override-placed and
-    # resolved on more than one major line needs version-qualified top-level
-    # keys an override-placed node never matches, and a version-qualified
-    # key inside the existing rule is not a shape verified to work. No key
-    # shape satisfies both at once, so the call refuses before writing,
-    # like the shared-parent refusal.
+    # The issue #132 interaction, grounded (#153 review): a second nx major
+    # line resolving OUTSIDE the placing rule is not the placing rule's
+    # problem. The placed on-line copy takes the nested write; the off-line
+    # copy belongs to a sibling group and gets nothing — its qualifier is
+    # dropped rather than written as a top-level key no placed copy matches,
+    # and the old blanket placed-and-multi-major refusal does not fire.
     seed_second_nx_line() {
       jq '.packages["node_modules/foo"] =
             {version: "1.0.0", dependencies: {nx: "^21.0.0"}}
@@ -617,21 +620,368 @@ Describe 'node.sh apply_constraint'
         package-lock.json > lock.tmp && mv lock.tmp package-lock.json
     }
 
-    placed_refusal() {
+    second_line_outside_rule() {
+      _out=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx)
+      printf 'overrides=%s invalidated=%s\n' \
+        "$(jq -c '.overrides' package.json)" \
+        "$(printf '%s' "$_out" | jq -c '.lockfile_invalidated.keys')"
+    }
+
+    It 'nests without refusing when a second major line resolves outside the placing rule'
+      use_fixture npm-override-placed-parent
+      seed_second_nx_line
+      When call second_line_outside_rule
+      The status should be success
+      The output should equal 'overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"},"chalk":"^6.0.0"},"glob":"^13.0.0"} invalidated=["node_modules/brace-expansion"]'
+    End
+  End
+
+  # Placement is corroborated against the lockfile's logical ancestry, never
+  # against key spelling alone (#153 review, both reproduced regressions): a
+  # rule whose chain reaches no copy of the parent places nothing, and
+  # treating it as placing withheld the working top-level key for an inert
+  # nested one — written[] reporting success over a dead fix.
+  Describe 'npm placement detection is grounded in the lockfile'
+    After 'cleanup_fixture'
+
+    set_rule() {
+      jq --argjson r "$1" '.overrides = $r' package.json > p.tmp \
+        && mv p.tmp package.json
+    }
+
+    ungrounded_write() {
+      set_rule "$1"
+      "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx >/dev/null
+      jq -c '.overrides' package.json
+    }
+
+    Parameters
+      # why the rule places nothing        the rule that spells nx as a child key
+      'rule root absent from the lockfile' '{"unrelated-pkg":{"nx":"^22"}}'
+      'nx never resolves under the root'   '{"chalk":{"nx":"^22"}}'
+    End
+
+    It "writes the ordinary top-level key when the rule matches no copy ($1)"
+      use_fixture npm-override-placed-parent
+      When call ungrounded_write "$2"
+      The status should be success
+      The output should equal "$(printf '%s' "$2" | jq -c '. + {nx: {"brace-expansion": ">=5.0.9 <6"}}')"
+    End
+
+    # The second reproduced regression: the same uncorroborated rule beside a
+    # second nx major line. The blanket refusal killed the issue #132
+    # qualified-key path that worked on base; grounded detection leaves it be.
+    seed_second_nx_line() {
+      jq '.packages["node_modules/foo"] =
+            {version: "1.0.0", dependencies: {nx: "^21.0.0"}}
+          | .packages["node_modules/foo/node_modules/nx"] =
+            {version: "21.5.0", dependencies: {"brace-expansion": "^1.1.7"}}
+          | .packages["node_modules/foo/node_modules/brace-expansion"] =
+            {version: "1.1.12"}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+    }
+
+    It 'keeps the qualified-key path working beside an uncorroborated rule'
+      use_fixture npm-override-placed-parent
+      set_rule '{"unrelated-pkg":{"nx":"^22"}}'
+      seed_second_nx_line
+      When call ungrounded_write '{"unrelated-pkg":{"nx":"^22"}}'
+      The status should be success
+      The output should equal '{"unrelated-pkg":{"nx":"^22"},"nx@22.7.9":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+
+    # A parent with BOTH a placed copy and a normally-resolved on-line copy
+    # gets both shapes: the nested write for the placed copy, the qualified
+    # top-level key for the normal one — and the placed copy's own qualifier
+    # is dropped rather than written as a key it would never match.
+    both_shapes() {
+      jq '.packages[""].dependencies.zed = "^1.0.0"
+          | .packages["node_modules/zed"] =
+            {version: "1.0.0", dependencies: {nx: "^22.0.0"}}
+          | .packages["node_modules/zed/node_modules/nx"] =
+            {version: "22.6.0", dependencies: {"brace-expansion": "^5.0.4"}}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      _out=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx)
+      printf 'paths=%s overrides=%s\n' \
+        "$(printf '%s' "$_out" | jq -c '[.written[].path]')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    It 'writes both shapes for a parent with placed and normally-resolved copies'
+      use_fixture npm-override-placed-parent
+      When call both_shapes
+      The status should be success
+      The output should equal 'paths=[["overrides","lerna","nx","."],["overrides","lerna","nx","brace-expansion"],["overrides","nx@22.6.0","brace-expansion"]] overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"},"chalk":"^6.0.0"},"glob":"^13.0.0","nx@22.6.0":{"brace-expansion":">=5.0.9 <6"}}'
+    End
+  End
+
+  # The placement states no key shape serves refuse before anything is
+  # written, each naming the rule path involved so the first error the
+  # operator sees names the real mechanism (#153 review).
+  Describe 'npm placement refusals'
+    After 'cleanup_fixture'
+
+    refusal() {
       _st=0
       _err=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx \
         2>&1 >/dev/null) || _st=$?
       printf 'st=%s named=%s overrides=%s\n' "$_st" \
-        "$(printf '%s' "$_err" | grep -c 'override-placed')" \
+        "$(printf '%s' "$_err" | grep -c "$1")" \
         "$(jq -c '.overrides' package.json)"
     }
 
-    It 'refuses a parent that is both override-placed and multi-major, writing nothing'
+    # A rule placing the parent through an npm: alias child key: the copy
+    # installs under the alias key with the real name in `.name`, so
+    # name-matched detection cannot see it, and the pre-fix behavior fell
+    # back silently to the known-ineffective top-level key. Writing through
+    # an alias-keyed rule is unverified npm behavior, so the call refuses,
+    # naming the alias rule.
+    It 'refuses a rule that places the parent through an alias child key'
       use_fixture npm-override-placed-parent
-      seed_second_nx_line
-      When call placed_refusal
+      jq '.overrides = {"lerna": {"nx-tools": "npm:nx@>=22.7.7 <23"}, "glob": "^13.0.0"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      jq 'del(.packages["node_modules/nx"])
+          | .packages["node_modules/nx-tools"] =
+            {name: "nx", version: "22.7.9",
+             dependencies: {"brace-expansion": "^5.0.4"}}
+          | .packages["node_modules/lerna"].dependencies =
+            {"nx-tools": "npm:nx@22.7.7", chalk: "^6.0.0"}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call refusal 'overrides\.lerna\.nx-tools'
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"lerna":{"nx-tools":"npm:nx@>=22.7.7 <23"},"glob":"^13.0.0"}'
+    End
+
+    # A version-qualified child key as the placing rule: nesting a new entry
+    # under a selector-carrying key is exactly the shape the code comments
+    # call unverified, so it is refused rather than written silently.
+    It 'refuses to nest under a version-qualified placing rule key'
+      use_fixture npm-override-placed-parent
+      jq '.overrides = {"lerna": {"nx@^22.0.0": ">=22.7.7 <23"}, "glob": "^13.0.0"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call refusal 'overrides\.lerna\.nx@\^22\.0\.0'
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"lerna":{"nx@^22.0.0":">=22.7.7 <23"},"glob":"^13.0.0"}'
+    End
+
+    # A placing rule whose reach spans major lines of the child: a nested key
+    # cannot be version-qualified, so nesting would drag the other line
+    # across its major boundary. Refused, naming the rule and the majors.
+    It 'refuses when the placing rule reaches parent copies on another child line'
+      use_fixture npm-override-placed-parent
+      jq '.packages["node_modules/lerna"].dependencies.baz = "^1.0.0"
+          | .packages["node_modules/baz"] =
+            {version: "1.0.0", dependencies: {nx: "^21.0.0"}}
+          | .packages["node_modules/baz/node_modules/nx"] =
+            {version: "21.5.0", dependencies: {"brace-expansion": "^1.1.7"}}
+          | .packages["node_modules/baz/node_modules/brace-expansion"] =
+            {version: "1.1.12"}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call refusal 'overrides\.lerna\.nx'
       The status should be success
       The output should equal 'st=1 named=1 overrides={"lerna":{"nx":">=22.7.7 <23","chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+
+    # A stale top-level pair for a FULLY placed parent on a DIFFERENT line:
+    # the key matches nothing, but a different-line value is the
+    # bare_conflict class and is not deleted on this call's own judgment —
+    # and the message names the placement, not the qualified-key mechanism.
+    It 'refuses a different-line dead top-level pair, naming the placement'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.nx = {"brace-expansion": "^1.1.11"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call refusal 'override-placed parent pins a DIFFERENT major line'
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"lerna":{"nx":">=22.7.7 <23","chalk":"^6.0.0"},"glob":"^13.0.0","nx":{"brace-expansion":"^1.1.11"}}'
+    End
+
+    # A pre-existing pin for the package INSIDE the placing rule, on a
+    # different line: setpath would silently strip that line's protection,
+    # so the call refuses instead.
+    It 'refuses to overwrite a different-line pin inside the placing rule'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.lerna.nx = {".": ">=22.7.7 <23", "brace-expansion": "^1.1.11"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call refusal 'INSIDE the override rule'
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":"^1.1.11"},"chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+  End
+
+  # Stale keys the placed shape supersedes, and states that compose without
+  # refusing (#153 review).
+  Describe 'npm placement supersession and composition'
+    After 'cleanup_fixture'
+
+    apply_report() {
+      _out=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx)
+      printf 'superseded=%s overrides=%s\n' \
+        "$(printf '%s' "$_out" | jq -c '.superseded_keys')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    # A re-run on a repo where the pre-fix flow already wrote the
+    # ineffective top-level pair: the corpse is deleted and reported, not
+    # silently kept beside the nested write.
+    It 'supersedes the dead same-line top-level pair a pre-fix run left'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.nx = {"brace-expansion": ">=5.0.9 <6"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call apply_report
+      The status should be success
+      The output should equal 'superseded=[{"parent":"nx","path":["overrides","nx","brace-expansion"],"value":">=5.0.9 <6"}] overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"},"chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+
+    # A same-line pin already inside the placing rule is superseded and
+    # reported, never silently replaced by setpath.
+    It 'supersedes a same-line pin inside the placing rule'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.lerna.nx = {".": ">=22.7.7 <23", "brace-expansion": "^5.0.4"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      When call apply_report
+      The status should be success
+      The output should equal 'superseded=[{"parent":"nx","path":["overrides","lerna","nx","brace-expansion"],"value":"^5.0.4"}] overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"},"chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+
+    # The placed + multi-major + stale-key pile-up (#153 review, R5): the
+    # top-level pair protects a normally-resolved OFF-line copy, so the
+    # right outcome is composition, not a refusal naming the wrong
+    # mechanism — the placed copy takes the nested write and the pair stays,
+    # still covering the line it pins.
+    It 'nests and keeps a top-level pair that still protects a normal off-line copy'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.nx = {"brace-expansion": "^1.1.11"}' \
+        package.json > p.tmp && mv p.tmp package.json
+      jq '.packages["node_modules/foo"] =
+            {version: "1.0.0", dependencies: {nx: "^21.0.0"}}
+          | .packages["node_modules/foo/node_modules/nx"] =
+            {version: "21.5.0", dependencies: {"brace-expansion": "^1.1.7"}}
+          | .packages["node_modules/foo/node_modules/brace-expansion"] =
+            {version: "1.1.12"}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call apply_report
+      The status should be success
+      The output should equal 'superseded=[] overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"},"chalk":"^6.0.0"},"glob":"^13.0.0","nx":{"brace-expansion":"^1.1.11"}}'
+    End
+
+    # A pre-existing alias (or reference) rule value survives the "."
+    # coercion verbatim and is marked preserved: without the mark, an npm:
+    # value naming the parent rather than the passed package trips the
+    # agent's mandatory written[]-alias abort and kills a correct fix.
+    It 'marks a preserved alias value under "." rather than reporting it as a new write'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.lerna.nx = "npm:nx@22.7.7"' package.json > p.tmp \
+        && mv p.tmp package.json
+      When call adapter_jq '.written' apply_constraint brace-expansion '>=5.0.9 <6' nx
+      The status should be success
+      The output should equal '[{"parent":"nx","path":["overrides","lerna","nx","."],"value":"npm:nx@22.7.7","preserved":true},{"parent":"nx","path":["overrides","lerna","nx","brace-expansion"],"value":">=5.0.9 <6"}]'
+    End
+  End
+
+  # Rule shapes the corroboration must follow: several rules placing one
+  # parent, depth beyond two, and a scoped package as the placed parent
+  # (#153 review coverage asks).
+  Describe 'npm placement rule shapes'
+    After 'cleanup_fixture'
+
+    shape_report() {
+      _out=$("$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' "$1")
+      printf 'paths=%s overrides=%s\n' \
+        "$(printf '%s' "$_out" | jq -c '[.written[].path]')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    It 'nests inside every rule when two rules place the same parent'
+      use_fixture npm-override-placed-parent
+      jq '.overrides = {"lerna": {nx: ">=22.7.7 <23"}, "top": {nx: ">=22.7.7 <23"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      jq '.packages[""].dependencies.top = "^1.0.0"
+          | .packages["node_modules/top"] =
+            {version: "1.0.0", dependencies: {nx: "^22.0.0"}}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call shape_report nx
+      The status should be success
+      The output should equal 'paths=[["overrides","lerna","nx","."],["overrides","lerna","nx","brace-expansion"],["overrides","top","nx","."],["overrides","top","nx","brace-expansion"]] overrides={"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"}},"top":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"}}}'
+    End
+
+    # Rule nesting is transitive, so a depth-3 rule corroborates through the
+    # shared hoisted copy and the write nests at the full path.
+    It 'nests at the full path of a depth-3 placing rule'
+      use_fixture npm-override-placed-parent
+      jq '.overrides = {"top": {"lerna": {nx: ">=22.7.7 <23"}}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      jq '.packages[""].dependencies.top = "^1.0.0"
+          | .packages["node_modules/top"] =
+            {version: "1.0.0", dependencies: {lerna: "^9.0.0"}}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call shape_report nx
+      The status should be success
+      The output should equal 'paths=[["overrides","top","lerna","nx","."],["overrides","top","lerna","nx","brace-expansion"]] overrides={"top":{"lerna":{"nx":{".":">=22.7.7 <23","brace-expansion":">=5.0.9 <6"}}}}'
+    End
+
+    # A scoped package as the placed parent: the key, the lockfile path
+    # segment (two segments, `@scope/name`), and the selector strip must all
+    # agree on the name.
+    It 'places a scoped package parent'
+      use_fixture npm-override-placed-parent
+      jq '.overrides = {"lerna": {"@nx/devkit": ">=17.0.0 <18"}}' \
+        package.json > p.tmp && mv p.tmp package.json
+      jq '.packages["node_modules/lerna"].dependencies =
+            {"@nx/devkit": "^17.0.0", chalk: "^6.0.0"}
+          | del(.packages["node_modules/nx"])
+          | .packages["node_modules/@nx/devkit"] =
+            {version: "17.2.0", dependencies: {"brace-expansion": "^5.0.4"}}' \
+        package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+      When call shape_report '@nx/devkit'
+      The status should be success
+      The output should equal 'paths=[["overrides","lerna","@nx/devkit","."],["overrides","lerna","@nx/devkit","brace-expansion"]] overrides={"lerna":{"@nx/devkit":{".":">=17.0.0 <18","brace-expansion":">=5.0.9 <6"}}}'
+    End
+  End
+
+  # `--tighten-bare` on a placed package (#153 review): a top-level bare key
+  # is inert by the placement mechanism itself, so the tighten lands on the
+  # placing rule's own pin — or refuses when the rule carries no pin on this
+  # line — and never writes a silently-shadowed top-level key.
+  Describe 'npm --tighten-bare and placed packages'
+    After 'cleanup_fixture'
+
+    It 'tightens the placing rule pin in place instead of writing a bare key'
+      use_fixture npm-override-placed-parent
+      "$ADAPTER" apply_constraint --tighten-bare nx '>=22.7.9 <23' >/dev/null
+      When call manifest '.overrides'
+      The output should equal '{"lerna":{"nx":">=22.7.9 <23","chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+
+    tighten_refusal() {
+      _st=0
+      _err=$("$ADAPTER" apply_constraint --tighten-bare nx '>=22.7.9 <23' \
+        2>&1 >/dev/null) || _st=$?
+      printf 'st=%s named=%s overrides=%s\n' "$_st" \
+        "$(printf '%s' "$_err" | grep -c 'overrides\.lerna\.nx')" \
+        "$(jq -c '.overrides' package.json)"
+    }
+
+    It 'refuses when the placing rule carries no pin on this line'
+      use_fixture npm-override-placed-parent
+      jq '.overrides.lerna.nx = ">=21.0.0 <22"' package.json > p.tmp \
+        && mv p.tmp package.json
+      When call tighten_refusal
+      The status should be success
+      The output should equal 'st=1 named=1 overrides={"lerna":{"nx":">=21.0.0 <22","chalk":"^6.0.0"},"glob":"^13.0.0"}'
+    End
+  End
+
+  # A present-but-malformed override block dies by name, before any pass
+  # reads it, rather than as a downstream generic jq failure (#153 review).
+  Describe 'npm malformed override block'
+    After 'cleanup_fixture'
+
+    It 'names the malformed overrides container instead of dying generically'
+      use_fixture npm-override-placed-parent
+      jq '.overrides = "oops"' package.json > p.tmp && mv p.tmp package.json
+      When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' nx
+      The status should equal 1
+      The stderr should include "'overrides' in package.json is a string"
     End
   End
 

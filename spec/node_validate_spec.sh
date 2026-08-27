@@ -437,6 +437,37 @@ Describe 'node.sh validate --baseline (npm)'
   End
 End
 
+# The safety net the override-placed write's refusal paths lean on (#153
+# review): when a nested override moved the placed copy while a
+# normally-resolved copy stayed vulnerable, the verdict must fail closed
+# naming the unmoved copy — whatever shape the manifest carries. This pins
+# the net on the state directly, independent of whether apply can still
+# produce it.
+Describe 'node.sh validate (npm override-placed shape)'
+  After 'cleanup_fixture'
+
+  placed_partial_state() {
+    jq '.overrides.lerna.nx =
+          {".": ">=22.7.7 <23", "brace-expansion": ">=5.0.9 <6"}' \
+      package.json > p.tmp && mv p.tmp package.json
+    jq '.packages["node_modules/nx"].dependencies["brace-expansion"] = ">=5.0.9 <6"
+        | .packages["node_modules/nx/node_modules/brace-expansion"] =
+          {version: "5.0.9"}
+        | .packages["node_modules/foo"] =
+          {version: "1.0.0", dependencies: {"brace-expansion": "^5.0.4"}}' \
+      package-lock.json > lock.tmp && mv lock.tmp package-lock.json
+  }
+
+  It 'fails closed naming the normally-resolved copy the nested override left behind'
+    use_fixture npm-override-placed-parent
+    placed_partial_state
+    When call adapter_jq '{ok, unresolved: [.unresolved_alerts[] | {version, path}]}' \
+      validate --line 5 --vulnerable '< 5.0.9' brace-expansion '>=5.0.9 <6'
+    The status should not equal 0
+    The output should equal '{"ok":false,"unresolved":[{"version":"5.0.5","path":"node_modules/brace-expansion"}]}'
+  End
+End
+
 # ---------------------------------------------------------------------------
 # --sibling-alerts: the benign within-major dedup carve-out (issue #105)
 #

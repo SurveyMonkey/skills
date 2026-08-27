@@ -463,13 +463,24 @@ The adapter picks the right syntax per package manager, merges into existing ent
 replacing them, and preserves the manifest's formatting.
 
 **The top-level scoped key is not the only npm shape.** A parent that is itself placed in the tree
-by a pre-existing override rule (the manifest already carries `{"A": {"B": "<range>"}}` and your
-package resolves under B) gets the constraint nested inside that rule —
-`{"A": {"B": {".": "<B's own range>", "P": "<fix-range>"}}}` — with no top-level key for that
-parent, because npm scopes an override-placed node to the rule that placed it and a sibling
-top-level key never matches it (issue #147). This is the adapter's own decision: do not restructure
-it, and quote `written[]` as usual — its `path` arrays carry the real nested paths, the `"."` entry
-included when the existing rule was string-valued.
+by a pre-existing override rule (the manifest already carries `{"A": {"B": "<range>"}}` and the
+lockfile corroborates that the rule actually reaches B's copy) gets the constraint nested inside
+that rule — `{"A": {"B": {".": "<B's own range>", "P": "<fix-range>"}}}` — because npm scopes an
+override-placed node to the rule that placed it and a sibling top-level key never matches it
+(issue #147). A parent with both placed and normally-resolved copies gets BOTH shapes: the nested
+entry for the placed copies and the ordinary scoped or qualified top-level key for the rest — the
+two never collide, since each shape only matches the copies the other cannot reach. This is the
+adapter's own decision: do not restructure it, and quote `written[]` as usual — its `path` arrays
+carry the real nested paths, the `"."` entry included when the existing rule was string-valued.
+That `"."` entry carries `preserved: true`: it quotes the pre-existing value the adapter kept
+while restructuring, not a value this call chose. `superseded_keys` may also carry a stale
+top-level pair a pre-fix run of this flow left behind, deleted because it matched nothing.
+
+**A validate failure naming an unmoved copy after a placed-shape apply is reconcile-by-hand, not
+retry.** When `written[]` carries only nested rule paths and `validate` still reports an
+unresolved copy of your package under that parent, that copy sits outside every shape the adapter
+can prove reaches it; re-running `apply_constraint` reproduces the same write. Escalate it like
+the placed refusals below: the remedy is reconciling the pre-existing override by hand.
 
 **Under npm, the apply also invalidates the stale lockfile entries the override must move**, and
 reports them in `lockfile_invalidated` (`{performed, keys[]}`, plus a `reason` string when the
@@ -493,10 +504,13 @@ that parent's copies on other major lines, or a pre-existing bare override for y
 such a parent pins a different major line. Nothing was written in either case. Return
 `"status": "failure"` with `failure.phase: "apply"` quoting the error verbatim, and escalate it
 exactly like a fatal cross-line move: the remedy is a bump of the shared parent, or reconciling
-the existing override by hand (issue #132). An error naming an **override-placed** parent that
-also resolves on more than one major line is the same fail-closed stop (issues #147 and #132
-colliding: no key shape reaches the placed node and separates the lines at once) and takes the
-same handling.
+the existing override by hand (issue #132). An error naming an **override placement** is the same
+fail-closed stop and takes the same handling; the adapter refuses when — and only when — the
+lockfile corroborates a state no key shape serves: the placing rule's reach spans major lines of
+your package, the rule places its parent through an `npm:` alias or a version-qualified child key
+(both unverified npm behavior for writes), or a pre-existing pin inside or beside the rule holds a
+different major line (issues #147 and #132 colliding). Each such error names the rule path(s)
+involved; quote them in the escalation.
 
 **Quote `written[]`, not your own arguments, when the PR body says what changed.** It carries one
 `{parent, path, value}` per entry the call actually created, and the two can differ: a dependency a
@@ -506,8 +520,12 @@ Disclose `superseded_keys` beside it when non-empty: it lists a pre-existing bar
 the same parent and child that the qualified entries replaced, which left in place would win
 npm's rule matching and leave them inert (issue #132).
 
-**Reject a written `npm:` value that names a different package, and fail the run.** If any
-`written[]` entry's value starts with `npm:` and the package it names — everything between `npm:`
+**Reject a written `npm:` value that names a different package, and fail the run.** Skip entries
+carrying `preserved: true` first: those quote a pre-existing value the adapter kept while
+restructuring a string-valued rule into its `"."` self key — an `npm:` alias or a `$reference`
+there is the manifest's own state, not a write this call chose, and failing the run on it aborts
+a correct fix. For every other entry: if the value starts with `npm:` and the package it names —
+everything between `npm:`
 and the last `@` — is not the package you passed, the adapter has retargeted a declaration that
 merely *collides* with your package's name: a repository installing `underscore` under the key
 `lodash` gets `"npm:underscore@^4.17.21"` written when you asked for `lodash`, a version of
