@@ -74,13 +74,41 @@ and 3).
 locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,
 the Claude CLI by version with `DISABLE_AUTOUPDATER=1` (without which the pin is cosmetic). The
 pins are not equivalent: the Claude installer script is fetched from a mutable URL, so for it the
-post-install `--version` assertion is the pin's only enforcement. The suite runs serial in CI:
-parallel is safe by construction (per-specfile workers, per-file workdirs, per-example scratch
-dirs), but shellspec's reducer can truncate the report when a worker crashes, and the enforcement
-boundary optimizes for a legible report over 90 saved seconds.
+post-install `--version` assertion is the pin's only enforcement. **The suite runs parallel in
+CI, and re-runs serially when it fails** (amended; see "Parallel in CI" below).
 
 **No `paths:` filters on the workflow, ever, while `gates` is a required check.** A PR touching
 no matching path would never produce the check and could never merge.
+
+**Parallel in CI, serial on failure.** *(Amended for
+[#149](https://github.com/SurveyMonkey/skills/issues/149); this decision originally read "the
+suite runs serial in CI".)* Parallel is safe by construction here: shellspec's workers are
+per-specfile, with per-file workdirs and per-example scratch dirs, and `.githooks/pre-push` has
+run it that way locally since this ADR was written. The original reservation was not safety but
+legibility, because shellspec's reducer can truncate the report when a worker crashes, and the
+enforcement boundary is where a readable report matters most.
+
+That reservation was priced at 605 examples and ~90 saved seconds. At 1189 examples it costs ~140
+seconds, and it is the *entire* wall clock of the workflow: measured on run 33007323991, the macOS
+spec leg took 220.97s while every other job finished within 20 seconds of start, and the suite
+burned `user 112.56 + sys 91.90 = 204.5s` against that 220.97s wall, i.e. it pegged ~92% of exactly
+one core while the rest of the runner idled. `sys` at 45% of CPU time is the fork/exec signature,
+which is why more cores help: the suite is process-bound, not compute-bound.
+
+The legibility concern is met rather than traded away. The suite runs parallel, and a failing run
+re-runs serially in an `if: failure()` step, so a green run is fast and a red run still produces
+the unreduced report. The first step's failure is what fails the job; the re-run is diagnostic
+only, so a truncated parallel report can never be the last word, and a parallel-only flake cannot
+turn a red job green.
+
+The job count is derived on the runner (`sysctl -n hw.ncpu`, `nproc`) rather than written into the
+workflow, so it tracks whatever GitHub provisions rather than going stale, and a count that does
+not come back as a positive integer fails the step instead of silently falling back to serial.
+
+**Sharding the suite across runners was rejected** for the same reason every gate here refuses
+empty discovery: a per-shard "executed examples" floor is weaker than a whole-suite one, and
+found-nothing-reported-as-success is this repo's signature bug class. It also loses to the simpler
+fix on its own terms, since two macOS runners at ~110s each is worse than one at ~80s.
 
 **A fourth gate, `version`, runs in CI only.** A plugin's version lives in its own `plugin.json`
 and nowhere else, so a change shipped without bumping it reaches no user while all three gates

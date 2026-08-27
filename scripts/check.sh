@@ -8,7 +8,8 @@
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
-#   spec      the shellspec suite (serial; set SHELLSPEC_JOBS=N for parallel)
+#   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
+#             pre-push hook and CI both set it, ADR 005)
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the

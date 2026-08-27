@@ -135,7 +135,38 @@ jobs:
             exit 1
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Choose a parallel job count
+        # Derived on the runner, never written into this file: the value then
+        # tracks whatever GitHub provisions rather than going stale against a
+        # constant nobody re-checks. A count that does not come back as a
+        # positive integer fails here rather than falling through to serial,
+        # because a performance fix that silently stops applying is the same
+        # shape as a gate that silently stops running.
+        run: |
+          case "$RUNNER_OS" in
+            macOS) jobs=$(sysctl -n hw.ncpu) ;;
+            Linux) jobs=$(nproc) ;;
+            *) echo "no core-count command known for RUNNER_OS=$RUNNER_OS"; exit 1 ;;
+          esac
+          case "$jobs" in
+            '' | *[!0-9]*) echo "core count was not a number: '$jobs'"; exit 1 ;;
+          esac
+          [ "$jobs" -gt 0 ] || { echo "core count was not positive: $jobs"; exit 1; }
+          echo "running the suite with --jobs $jobs on $RUNNER_OS"
+          echo "SHELLSPEC_JOBS=$jobs" >> "$GITHUB_ENV"
       - name: Run the shellspec suite
+        run: ./scripts/check.sh spec
+      - name: Re-run the suite serially for a legible report
+        # Diagnostic only. shellspec's reducer can truncate the report when a
+        # worker crashes, and this is the enforcement boundary, so a failing
+        # parallel run is repeated serially to produce the unreduced report
+        # (ADR 005, "Parallel in CI, serial on failure"). The step above is
+        # what already failed the job, so this can never turn a red job green:
+        # a parallel-only flake still lands red, and its serial pass is
+        # evidence rather than a verdict.
+        if: failure()
+        env:
+          SHELLSPEC_JOBS: ''
         run: ./scripts/check.sh spec
 
   version:
