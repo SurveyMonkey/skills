@@ -2036,9 +2036,15 @@ verb_apply_constraint() {
   # rule never reaches — places nothing, and treating it as placing hijacked
   # the write both ways on review reproduction: the working top-level key was
   # withheld for an inert nested one, and the multi-major interaction refused
-  # a state the issue #132 qualifiers handle fine (#153 review). Ancestry is
-  # transitive, matching npm rule nesting, and the walk carries a visited set
-  # so dependency cycles terminate.
+  # a state the issue #132 qualifiers handle fine (#153 review). The same
+  # hijack re-opened through the version dimension when segment selectors
+  # were dropped, so corroboration checks EVERY segment's selector (the
+  # rule root, the intermediates, and the child key itself) against the
+  # installed copy's version with the same `satisfies` the qualifiers use
+  # (#153 review round 2). Ancestry is transitive, matching npm rule
+  # nesting, and the walk is one linear level set per rule segment rather
+  # than a per-branch path enumeration, so branching graphs stay cheap and
+  # dependency cycles terminate.
   #
   # Each parent copy is classified individually: copies a corroborated rule
   # reaches are placed (served by nesting inside that rule), the rest are
@@ -2055,7 +2061,10 @@ verb_apply_constraint() {
   # Under `--tighten-bare` the subject is the package itself: a bare
   # top-level key for a package whose copies are override-placed is inert by
   # the same mechanism, so the tighten lands on the placing rule's own pin
-  # instead, or refuses when the rule carries none on this line.
+  # instead, or refuses when the rule carries none on this line. Placement
+  # shadows ONLY the placed copies: normally-resolved copies still need the
+  # top-level key, which is written alongside the rule tighten when they
+  # exist (#153 review round 2).
   override_placed='{}'
   tighten_placed='[]'
   if [ "$loc" = "overrides" ] && [ -f package-lock.json ] \
@@ -2102,19 +2111,64 @@ verb_apply_constraint() {
          | group_by(.key)
          | map({key: (.[0].key), value: ([ .[].value ] | unique)})
          | from_entries) as $pmap
-      | def up_ok($path; $rev; $seen):
-          # Does some ancestor chain of $path realize $rev — the rule
-          # segments, nearest-first — as an ordered subsequence of ancestor
-          # names? Subsequence, not adjacency: npm rule nesting is
-          # transitive.
-          if ($rev | length) == 0 then true
-          else any(($pmap[$path] // [])[]; . as $q
-            | if ($seen | index($q)) != null then false
-              else ((pname($q) == $rev[0])
-                    and up_ok($q; $rev[1:]; $seen + [$q]))
-                   or up_ok($q; $rev; $seen + [$q])
-              end)
-          end;
+      # The inverse map, for the level-set walk below: physical entry ->
+      # the physical entries whose declarations it resolves (its logical
+      # children).
+      | ([ $pmap | to_entries[] | .key as $c | .value[] | {key: ., value: $c} ]
+         | group_by(.key)
+         | map({key: (.[0].key), value: ([ .[].value ] | unique)})
+         | from_entries) as $cmap
+      | def seg_ok($q; $seg):
+          # A rule segment matches a lockfile entry when the stripped name
+          # matches AND any selector on the segment admits the entry
+          # resolved version, judged with the same `satisfies` the
+          # qualifier machinery uses. Dropping ancestor selectors re-opened
+          # the hijack through the version dimension (#153 review round 2):
+          # a rule rooted at `lerna@^8.0.0` with lerna resolved at 9.0.1
+          # places nothing, and corroborating it nested the constraint
+          # inside a dead rule while the working top-level key was
+          # withheld. A selector `satisfies` cannot read never matches,
+          # the fail-direction the range verbs share.
+          ($seg | strip_selector) as $s
+          | (pname($q) == $s.name)
+            and ($s.selector == null
+                 or (($pkgs[$q].version // null) as $qv
+                     | $qv != null and satisfies($qv; $s.selector)));
+        def down_from($seeds):
+          # Every entry below some seed: the entries whose PROPER ancestor
+          # chain through $pmap reaches a seed, computed breadth-first over
+          # $cmap. Each entry enters the set once, so the pass is linear in
+          # the graph, and a visited entry is never re-added, so dependency
+          # cycles terminate.
+          {f: [ $seeds | keys[] ], s: {}}
+          | until((.f | length) == 0;
+              . as $st
+              | ([ $st.f[] | ($cmap[.] // [])[]
+                   | select(($st.s[.] // false) | not) ] | unique) as $n
+              | {f: $n,
+                 s: ($st.s + ([ $n[] | {key: ., value: true} ]
+                              | from_entries))})
+          | .s;
+        def realizers($rev):
+          # The set of entries from which some ancestor chain realizes
+          # $rev (the rule segments above the child key, nearest-first)
+          # as an ordered subsequence. Subsequence, not adjacency: npm
+          # rule nesting is transitive. Whether a chain from an entry
+          # realizes a suffix of $rev is a function of (entry, suffix)
+          # alone, so the answer is one level set per segment, outermost
+          # segment first, each a linear down_from pass. The prior form
+          # kept its visited set path-local and enumerated every simple
+          # ancestor path, which is exponential on a branching graph that
+          # spells but does not corroborate the rule (#153 review
+          # round 2: 25 packages took 38.6s, 300 never finished).
+          reduce range(($rev | length) - 1; -1; -1) as $i (
+            null;   # null: the empty suffix, realized from every entry
+            . as $next
+            | down_from(
+                [ ($pkgs | keys[])
+                  | select(seg_ok(.; $rev[$i]))
+                  | select($next == null or ($next[.] // false))
+                  | {key: ., value: true} ] | from_entries));
         ([ key_paths($overrides; [])[]
            | select((.path | length) > 1)
            | select((.path | last) != ".") ]) as $nested
@@ -2153,11 +2207,25 @@ verb_apply_constraint() {
              end) as $copies
           | ([ $cands[]
                | .path as $rp
-               | (($rp[0:-1] | map(strip_selector | .name)) | reverse) as $rev
-               | ([ $copies[] | select(up_ok(.path; $rev; [.path])) ]) as $pc
+               | (($rp | last) | strip_selector) as $ls
+               # The child key own selector names WHICH copies of the
+               # parent the rule places, checked with the same `satisfies`
+               # as the segments above it: a key whose selector matches no
+               # installed copy places nothing and is no candidate, so the
+               # ordinary write serves the parent instead of a spurious
+               # qualified_rule refusal blocking a fix that works on base
+               # (#153 review round 2).
+               | ([ $copies[]
+                    | select($ls.selector == null
+                             or (.pver != null
+                                 and satisfies(.pver; $ls.selector))) ]) as $sc
+               | select(($sc | length) > 0)
+               | (($rp[0:-1]) | reverse) as $rev
+               | realizers($rev) as $rl
+               | ([ $sc[] | select($rl[.path] // false) ]) as $pc
                | select(($pc | length) > 0)
                | {rp: $rp,
-                  qualified: (((($rp | last) | strip_selector) | .selector) != null),
+                  qualified: ($ls.selector != null),
                   placed: [ $pc[].path ]} ]) as $corr
           | ([ $acands[]
                | (.path | last) as $ak
@@ -2747,13 +2815,20 @@ verb_apply_constraint() {
           covering_bare_keys as $covering
           # $tplaced (issue #147): placing-rule paths whose own pin covers
           # this line — tightened in place beside any covering top-level
-          # keys. The plain-key fallback fires only when NOTHING covers,
-          # placement included: a plain key written under a placement would
-          # be silently shadowed, and that state refused before this pass.
+          # keys. A placement only shadows the copies its rule places, so
+          # when the package ALSO has normally-resolved copies and no
+          # covering top-level key exists, the plain key is written IN
+          # ADDITION to tightening the rule pin: suppressing it stripped
+          # coverage from the normal copies, a gap validate caught but
+          # apply must not create (#153 review round 2). The plain-key
+          # fallback alone fires only when NOTHING covers.
           | if ($covering | length) == 0 and ($tplaced | length) == 0
             then put_override(null; $pkg; $range)
             else (reduce $covering[] as $k (.; put_override(null; $k; $range)))
                  | (reduce $tplaced[] as $rp (.; tighten_rule($rp)))
+                 | (if ($covering | length) == 0 and ($tplaced | length) > 0
+                       and ((($placed[$pkg] // {}) | .has_normal) // false)
+                    then put_override(null; $pkg; $range) else . end)
             end
         elif ($parents | length) == 0 then
           # Direct dependency. The root declares it by name, through one or
