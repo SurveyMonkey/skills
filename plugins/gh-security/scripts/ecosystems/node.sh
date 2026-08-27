@@ -1888,6 +1888,24 @@ verb_apply_constraint() {
   pm=$(pm_of)
   loc=$(verb_detect | jq -r '.override_location')
 
+  # A present-but-malformed override block (a string, an array, a number, or
+  # an unreadable container) dies here, by name, before any pass reads it.
+  # Previously it surfaced as a downstream jq failure whose generic message
+  # named nothing the operator could act on (#153 review).
+  block_type=$(jq -r --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
+    override_block($loc)
+    | if . == "__invalid__" then "unreadable" else type end' package.json) \
+    || die "apply_constraint: cannot read package.json"
+  case "$block_type" in
+    object|null) ;;
+    unreadable)
+      die "apply_constraint: the container holding '$loc' in package.json is not an object, so the override block cannot be read. Refusing to merge a constraint into a manifest this script cannot read."
+      ;;
+    *)
+      die "apply_constraint: '$loc' in package.json is a $block_type, not an object of override entries. Refusing to merge a constraint into a block this script cannot read."
+      ;;
+  esac
+
   # Observations: unscoped global entries in the override block. A lead for the
   # pin audit (issue #7), not a finding: removability needs a real test.
   #
@@ -2000,6 +2018,363 @@ verb_apply_constraint() {
   # silently never matches, and the exact-locator form that could express
   # the separation is unimplemented here (see "An override's key is scoped"
   # in scripts/CLAUDE.md).
+  # An override-placed parent: one a pre-existing override rule names as a
+  # CHILD key of another rule (`{"A": {"B": "<range>"}}`). npm scopes such a
+  # node to the rule that placed it — once an edge matches a rule, the
+  # descendants consult only that rule's children — so a sibling top-level
+  # `"B": {...}` key never matches it and a constraint written there silently
+  # never takes effect (field-verified across three clean reinstalls, issue
+  # #147). The working form nests INSIDE the existing rule, with the `"."`
+  # self key carrying the parent's own range.
+  #
+  # A rule path counts as placing ONLY when the lockfile corroborates it: a
+  # parent copy hosting this package must carry the rule's root and every
+  # intermediate segment, in order, in its logical ancestor chain, read from
+  # the same `packages` entries and upward resolution walk `npm_copy_rows`
+  # uses. A key path that merely SPELLS the parent name — the rule root
+  # absent from the tree, or the parent's actual copies resolving where the
+  # rule never reaches — places nothing, and treating it as placing hijacked
+  # the write both ways on review reproduction: the working top-level key was
+  # withheld for an inert nested one, and the multi-major interaction refused
+  # a state the issue #132 qualifiers handle fine (#153 review). The same
+  # hijack re-opened through the version dimension when segment selectors
+  # were dropped, so corroboration checks EVERY segment's selector (the
+  # rule root, the intermediates, and the child key itself) against the
+  # installed copy's version with the same `satisfies` the qualifiers use
+  # (#153 review round 2). Ancestry is transitive, matching npm rule
+  # nesting, and the walk is one linear level set per rule segment rather
+  # than a per-branch path enumeration, so branching graphs stay cheap and
+  # dependency cycles terminate.
+  #
+  # Each parent copy is classified individually: copies a corroborated rule
+  # reaches are placed (served by nesting inside that rule), the rest are
+  # normal (served by the ordinary top-level key, qualified or bare). BOTH
+  # shapes are written when a parent has both, because a top-level key never
+  # matches a placed copy and a rule never matches a normal one, so the two
+  # writes cannot collide.
+  #
+  # npm only, deliberately. pnpm's flat `parent>child` keys are each matched
+  # independently against the graph's edges — its overrides block is not a
+  # scoped rule tree — so a pre-existing `A>B` entry does not shadow a `B>P`
+  # key and no analogous nesting is needed there.
+  #
+  # Under `--tighten-bare` the subject is the package itself: a bare
+  # top-level key for a package whose copies are override-placed is inert by
+  # the same mechanism, so the tighten lands on the placing rule's own pin
+  # instead, or refuses when the rule carries none on this line. Placement
+  # shadows ONLY the placed copies: normally-resolved copies still need the
+  # top-level key, which is written alongside the rule tighten when they
+  # exist (#153 review round 2).
+  override_placed='{}'
+  tighten_placed='[]'
+  if [ "$loc" = "overrides" ] && [ -f package-lock.json ] \
+    && { [ "$tighten_bare" = "true" ] \
+         || [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; }; then
+    ov_block=$(jq -c '.overrides // {}' package.json) \
+      || die "apply_constraint: cannot read package.json"
+    placement_target=$(jq -rn --arg range "$range" \
+      "$SEMVER_JQ"'($range | range_floor_major) // empty')
+    override_placed=$(jq -c \
+      --argjson overrides "$ov_block" --argjson parents "$parents_json" \
+      --arg pkg "$pkg" --arg target "$placement_target" \
+      --argjson tighten "$tighten_bare" \
+      "$SEMVER_JQ$PINS_JQ$NPM_PATH_JQ"'
+      # Every key path in the override block, computed once for all parents.
+      def key_paths($obj; $path):
+        [ $obj | to_entries[]
+          | .key as $k | .value as $v
+          | [{path: ($path + [$k]), value: $v}]
+            + (if ($v | type) == "object" then key_paths($v; $path + [$k])
+               else [] end)
+          | .[] ];
+      (.packages // {}) as $pkgs
+      | def pname($p):
+          if $p == "" then ""
+          else ($pkgs[$p].name // ($p | split("node_modules/") | last)) end;
+        def deps($v):
+          ([ ($v.dependencies // {}), ($v.optionalDependencies // {}),
+             ($v.peerDependencies // {}) ] | add // {});
+        def resolve($path; $dk):
+          ([ $path | candidates($dk)[] | select(in($pkgs)) ] | first // null);
+        # The logical parent map: physical entry -> the physical entries
+        # whose declarations resolve to it. This is dependency ancestry, not
+        # directory nesting: a hoisted `node_modules/nx` is still a child of
+        # `node_modules/lerna` when lerna declares it, which is exactly the
+        # chain an override rule scopes by.
+        ([ $pkgs | to_entries[]
+           | .key as $pp | .value as $pv
+           | (deps($pv) | to_entries[])
+           | select(.value | type == "string")
+           | (resolve($pp; .key)) as $t
+           | select($t != null)
+           | {key: $t, value: $pp} ]
+         | group_by(.key)
+         | map({key: (.[0].key), value: ([ .[].value ] | unique)})
+         | from_entries) as $pmap
+      # The inverse map, for the level-set walk below: physical entry ->
+      # the physical entries whose declarations it resolves (its logical
+      # children).
+      | ([ $pmap | to_entries[] | .key as $c | .value[] | {key: ., value: $c} ]
+         | group_by(.key)
+         | map({key: (.[0].key), value: ([ .[].value ] | unique)})
+         | from_entries) as $cmap
+      | def seg_ok($q; $seg):
+          # A rule segment matches a lockfile entry when the stripped name
+          # matches AND any selector on the segment admits the entry
+          # resolved version, judged with the same `satisfies` the
+          # qualifier machinery uses. Dropping ancestor selectors re-opened
+          # the hijack through the version dimension (#153 review round 2):
+          # a rule rooted at `lerna@^8.0.0` with lerna resolved at 9.0.1
+          # places nothing, and corroborating it nested the constraint
+          # inside a dead rule while the working top-level key was
+          # withheld. A selector `satisfies` cannot read never matches,
+          # the fail-direction the range verbs share.
+          ($seg | strip_selector) as $s
+          | (pname($q) == $s.name)
+            and ($s.selector == null
+                 or (($pkgs[$q].version // null) as $qv
+                     | $qv != null and satisfies($qv; $s.selector)));
+        def down_from($seeds):
+          # Every entry below some seed: the entries whose PROPER ancestor
+          # chain through $pmap reaches a seed, computed breadth-first over
+          # $cmap. Each entry enters the set once, so the pass is linear in
+          # the graph, and a visited entry is never re-added, so dependency
+          # cycles terminate.
+          {f: [ $seeds | keys[] ], s: {}}
+          | until((.f | length) == 0;
+              . as $st
+              | ([ $st.f[] | ($cmap[.] // [])[]
+                   | select(($st.s[.] // false) | not) ] | unique) as $n
+              | {f: $n,
+                 s: ($st.s + ([ $n[] | {key: ., value: true} ]
+                              | from_entries))})
+          | .s;
+        def realizers($rev):
+          # The set of entries from which some ancestor chain realizes
+          # $rev (the rule segments above the child key, nearest-first)
+          # as an ordered subsequence. Subsequence, not adjacency: npm
+          # rule nesting is transitive. Whether a chain from an entry
+          # realizes a suffix of $rev is a function of (entry, suffix)
+          # alone, so the answer is one level set per segment, outermost
+          # segment first, each a linear down_from pass. The prior form
+          # kept its visited set path-local and enumerated every simple
+          # ancestor path, which is exponential on a branching graph that
+          # spells but does not corroborate the rule (#153 review
+          # round 2: 25 packages took 38.6s, 300 never finished).
+          reduce range(($rev | length) - 1; -1; -1) as $i (
+            null;   # null: the empty suffix, realized from every entry
+            . as $next
+            | down_from(
+                [ ($pkgs | keys[])
+                  | select(seg_ok(.; $rev[$i]))
+                  | select($next == null or ($next[.] // false))
+                  | {key: ., value: true} ] | from_entries));
+        ([ key_paths($overrides; [])[]
+           | select((.path | length) > 1)
+           | select((.path | last) != ".") ]) as $nested
+      | (if $tighten then [$pkg] else $parents end) as $subjects
+      | [ $subjects[] | . as $p
+          | ([ $nested[]
+               | select(((.path | last) | strip_selector | .name) == $p) ]) as $cands
+          | ([ $nested[]
+               | select((.value | type) == "string")
+               | select((.value | value_facts)
+                        | (.kind == "alias" and .alias_package == $p)) ]) as $acands
+          | (if $tighten then
+               # The subject copies are the package'\''s own entries.
+               [ $pkgs | to_entries[]
+                 | .key as $cp | .value as $cv
+                 | select($cp != "" and pname($cp) == $p)
+                 | {path: $cp, pver: ($cv.version // null), cm: null} ]
+             else
+               # The subject copies are the parent entries hosting this
+               # package, each with the major line of the child copy it
+               # resolves (`cm`), read exactly as npm_copy_rows reads it.
+               [ $pkgs | to_entries[]
+                 | .key as $cp | .value as $cv
+                 | select($cp != "" and pname($cp) == $p)
+                 | (deps($cv) | to_entries[])
+                 | select(.value | type == "string")
+                 | select(.key == $pkg
+                          or (.value | startswith("npm:" + $pkg + "@")))
+                 | (resolve($cp; .key)) as $t
+                 | {path: $cp, pver: ($cv.version // null),
+                    cm: (if $t == null then null
+                         else (($pkgs[$t].version // "") | ltrimstr("v")
+                               | split(".")[0]
+                               | if test("^[0-9]+$") then . else null end)
+                         end)} ]
+             end) as $copies
+          | ([ $cands[]
+               | .path as $rp
+               | (($rp | last) | strip_selector) as $ls
+               # The child key own selector names WHICH copies of the
+               # parent the rule places, checked with the same `satisfies`
+               # as the segments above it: a key whose selector matches no
+               # installed copy places nothing and is no candidate, so the
+               # ordinary write serves the parent instead of a spurious
+               # qualified_rule refusal blocking a fix that works on base
+               # (#153 review round 2).
+               | ([ $copies[]
+                    | select($ls.selector == null
+                             or (.pver != null
+                                 and satisfies(.pver; $ls.selector))) ]) as $sc
+               | select(($sc | length) > 0)
+               | (($rp[0:-1]) | reverse) as $rev
+               | realizers($rev) as $rl
+               | ([ $sc[] | select($rl[.path] // false) ]) as $pc
+               | select(($pc | length) > 0)
+               | {rp: $rp,
+                  qualified: ($ls.selector != null),
+                  placed: [ $pc[].path ]} ]) as $corr
+          | ([ $acands[]
+               | (.path | last) as $ak
+               | select(any($pkgs | to_entries[];
+                   .key != ""
+                   and ((.key | split("node_modules/") | last) == $ak)
+                   and ((.value.name // "") == $p)))
+               | .path ]) as $alias_rps
+          | select((($corr | length) > 0) or (($alias_rps | length) > 0))
+          | ([ $corr[].placed[] ] | unique) as $pp
+          | {key: $p,
+             value: {
+               rulepaths: [ $corr[] | select(.qualified | not) | .rp ],
+               qualified_rulepaths: [ $corr[] | select(.qualified) | .rp ],
+               alias_rulepaths: $alias_rps,
+               placed_pvers: ([ $copies[]
+                                | select(.path as $x | ($pp | index($x)) != null)
+                                | .pver | select(. != null) ] | unique),
+               normal_pvers: ([ $copies[]
+                                | select(.path as $x | ($pp | index($x)) == null)
+                                | .pver | select(. != null) ] | unique),
+               has_normal:
+                 (([ $copies[]
+                     | select(.path as $x | ($pp | index($x)) == null) ]
+                   | length) > 0),
+               has_normal_online:
+                 (([ $copies[]
+                     | select(.path as $x | ($pp | index($x)) == null)
+                     | select($target == "" or .cm == null or .cm == $target) ]
+                   | length) > 0),
+               placed_offline:
+                 ([ $copies[]
+                    | select(.path as $x | ($pp | index($x)) != null)
+                    | select($target != "" and .cm != null and .cm != $target)
+                    | .cm ] | unique)
+             }} ]
+      | from_entries' package-lock.json) \
+      || die "apply_constraint: cannot read package-lock.json"
+
+    # Placement-derived refusals, computed before the issue #132 checks so
+    # the first error the operator sees names the placement mechanism when
+    # placement is the real state (#153 review). One refusal at a time, in
+    # priority order; every message quotes the rule path(s) involved.
+    placed_refusal=$(jq -cn \
+      --argjson placed "$override_placed" --argjson overrides "$ov_block" \
+      --arg pkg "$pkg" --arg range "$range" \
+      --argjson tighten "$tighten_bare" \
+      "$SEMVER_JQ"'
+      def dotted: ["overrides"] + . | join(".");
+      ($range | range_floor_major) as $tf
+      # An alias-keyed child rule placing the parent: the copy installs
+      # under the alias key with the real name in `.name`, so name-matched
+      # detection cannot see it and writing through the alias-keyed rule is
+      # unverified npm behavior. Corroborated by the alias-installed copy
+      # in the lockfile.
+      | ([ $placed | to_entries[] | .key as $p | .value.alias_rulepaths[]
+           | {parent: $p, rule: dotted} ]) as $alias
+      # A version-qualified child key as the placing rule: nesting under a
+      # selector-carrying key is not a shape these scripts have verified
+      # npm to honor. Tighten mode is exempt: it only retargets the value
+      # the key already carries.
+      | (if $tighten then [] else
+           [ $placed | to_entries[] | .key as $p | .value.qualified_rulepaths[]
+             | {parent: $p, rule: dotted} ] end) as $qualified
+      # A placing rule whose reach spans major lines of the child: a key
+      # nested inside a rule cannot be version-qualified, so nesting would
+      # drag the other line across its major boundary.
+      | (if $tighten then [] else
+           [ $placed | to_entries[]
+             | select((.value.placed_offline | length) > 0)
+             | {parent: .key,
+                rules: [ .value.rulepaths[] | dotted ],
+                other_line_majors: .value.placed_offline} ] end) as $offline
+      # A stale top-level pair for a FULLY placed parent on a different
+      # line: the key matches no copy (every copy is rule-scoped), but a
+      # different-line value is the bare_conflict class and is not deleted
+      # on this call'\''s own judgment.
+      | (if $tighten then [] else
+           [ $placed | to_entries[] | .key as $p
+             | select(.value.has_normal | not)
+             | ($overrides[$p]? // null) as $v
+             | select(($v | type) == "object" and ($v | has($pkg)))
+             | ((($v[$pkg] | tostring) | range_floor_major)) as $bf
+             | select($bf == null or $tf == null or $bf != $tf)
+             | {parent: $p, key: ("overrides." + $p + "." + $pkg),
+                value: $v[$pkg]} ] end) as $dead
+      # A pre-existing pin for this package INSIDE the placing rule, on a
+      # different line: overwriting it strips that line'\''s protection,
+      # keeping it smothers this fix.
+      | (if $tighten then [] else
+           [ $placed | to_entries[] | .key as $p | .value.rulepaths[] | . as $rp
+             | ($overrides | getpath($rp)) as $cur
+             | select(($cur | type) == "object" and ($cur | has($pkg)))
+             | ((($cur[$pkg] | tostring) | range_floor_major)) as $bf
+             | select($bf == null or $tf == null or $bf != $tf)
+             | {parent: $p, rule: ($rp | dotted), value: $cur[$pkg]} ]
+         end) as $rulepin
+      | if ($alias | length) > 0 then {code: "alias", detail: $alias}
+        elif ($qualified | length) > 0 then {code: "qualified_rule", detail: $qualified}
+        elif ($offline | length) > 0 then {code: "offline", detail: $offline}
+        elif ($dead | length) > 0 then {code: "dead_key", detail: $dead}
+        elif ($rulepin | length) > 0 then {code: "rule_pin", detail: $rulepin}
+        else empty end')
+    if [ -n "$placed_refusal" ]; then
+      p_code=$(printf '%s' "$placed_refusal" | jq -r '.code')
+      p_detail=$(printf '%s' "$placed_refusal" | jq -c '.detail')
+      case "$p_code" in
+        alias)
+          die "apply_constraint: cannot scope '$pkg': a pre-existing override rule places its parent through an npm: ALIAS child key, and the lockfile carries the alias-installed copy: $p_detail. A top-level key never matches an override-placed copy (issue #147), and writing through an alias-keyed rule is not a shape these scripts have verified npm to honor, so nothing was written; reconcile the existing override by hand." ;;
+        qualified_rule)
+          die "apply_constraint: cannot scope '$pkg': the override rule placing its parent uses a version-qualified child key: $p_detail. Nesting a new entry under a selector-carrying rule key is not a shape these scripts have verified npm to honor, and a top-level key never matches an override-placed copy (issues #147 and #132), so nothing was written; reconcile the existing override by hand." ;;
+        offline)
+          die "apply_constraint: cannot scope '$pkg' on this line: the override rule(s) placing its parent also reach parent copies whose resolution of '$pkg' sits on other major line(s): $p_detail. A key nested inside a rule cannot be version-qualified to separate the lines, and nothing top-level reaches a placed copy (issues #147 and #132), so nothing was written; reconcile the existing override by hand." ;;
+        dead_key)
+          die "apply_constraint: a pre-existing top-level override for '$pkg' under an override-placed parent pins a DIFFERENT major line: $p_detail. Every copy of that parent is placed by a rule, so the key matches nothing (issue #147), but a different-line value is not deleted on this call's own judgment (issue #132 semantics); nothing was written, reconcile the existing override by hand." ;;
+        rule_pin)
+          die "apply_constraint: a pre-existing pin for '$pkg' INSIDE the override rule placing its parent pins a DIFFERENT major line: $p_detail. Overwriting it would strip that line's protection and keeping it would smother this fix (issues #147 and #132), so nothing was written; reconcile the existing override by hand." ;;
+      esac
+    fi
+
+    # `--tighten-bare` on a placed package: tighten the placing rule's own
+    # covering pin in place (string rule, or the `"."` self key of an object
+    # rule) instead of writing a top-level bare key the placement shadows.
+    # A placement with no covering pin refuses: a silently-shadowed
+    # top-level key is the exact failure this whole pass exists to prevent.
+    if [ "$tighten_bare" = "true" ]; then
+      tp_all=$(printf '%s' "$override_placed" | jq -c --arg pkg "$pkg" \
+        '((.[$pkg].rulepaths // []) + (.[$pkg].qualified_rulepaths // []))')
+      if [ "$(printf '%s' "$tp_all" | jq 'length')" -gt 0 ]; then
+        tighten_placed=$(jq -c --argjson rps "$tp_all" --arg range "$range" \
+          "$SEMVER_JQ"'
+          ($range | range_floor_major) as $tf
+          | (.overrides // {}) as $b
+          | [ $rps[] | . as $rp
+              | ($b | getpath($rp)) as $cur
+              | (if ($cur | type) == "object" then $cur["."]? else $cur end) as $pin
+              | select(($pin | type) == "string"
+                       and $tf != null
+                       and (($pin | range_floor_major) == $tf)) ]' package.json) \
+          || die "apply_constraint: cannot read package.json"
+        if [ "$(printf '%s' "$tighten_placed" | jq 'length')" -eq 0 ]; then
+          tp_named=$(printf '%s' "$tp_all" \
+            | jq -c '[ .[] | ["overrides"] + . | join(".") ]')
+          die "apply_constraint: --tighten-bare cannot reach '$pkg': its copies are placed by pre-existing override rule(s) $tp_named, none of which carries a pin on this line to tighten, and a top-level bare key never matches an override-placed copy (issue #147) — writing one would be silently inert. Nothing was written; reconcile the existing override by hand."
+        fi
+      fi
+    fi
+  fi
+
   qualified_parent_versions='{}'
   if { [ "$loc" = "pnpm.overrides" ] || [ "$loc" = "overrides" ]; } \
     && [ "$(printf '%s' "$parents_json" | jq 'length')" -gt 0 ]; then
@@ -2090,11 +2465,38 @@ verb_apply_constraint() {
                     | select((.refused or .bare) | not)
                     | select((.qv | length) > 0)
                     | {key: .parent, value: .qv} ] | from_entries) }' package.json)
-    refused=$(printf '%s' "$qual_result" | jq -c '.refused')
+    # A refused parent whose every relevant copy is override-placed gets no
+    # top-level key at all — the nested write serves it (issue #147) — so
+    # the EOVERRIDE shape this refusal guards against never materializes
+    # for it and the refusal would name a mechanism not in play.
+    refused=$(printf '%s' "$qual_result" \
+      | jq -c --argjson placed "$override_placed" '
+      [ .refused[]
+        | select((($placed[.parent] // null)) as $pl
+                 | ($pl != null and ($pl.has_normal_online | not)) | not) ]')
     if [ "$(printf '%s' "$refused" | jq 'length')" -gt 0 ]; then
       die "apply_constraint: cannot scope '$pkg' on this line: the root manifest's own declared spec for a shared parent also admits that parent's copies on other major lines, so every key npm's EOVERRIDE rule allows would drag those lines across their major boundary (issue #132). Detail: $refused. Nothing was written. This is the shared-parent shape: escalate it like a fatal cross-line move; the remedy is a bump of the shared parent or dropping the dependent that pins it."
     fi
     qualified_parent_versions=$(printf '%s' "$qual_result" | jq -c '.quals')
+
+    # A qualifier that covers only PLACED copies of its parent would write a
+    # top-level key no placed copy ever matches (issue #147): drop it, and
+    # drop the parent entirely when nothing remains, so the bare-conflict
+    # check below and the write pass both see only the qualifiers the
+    # normally-resolved copies actually need.
+    if [ "$(printf '%s' "$override_placed" | jq 'length')" -gt 0 ]; then
+      qualified_parent_versions=$(jq -cn \
+        --argjson pverq "$qualified_parent_versions" \
+        --argjson placed "$override_placed" '
+        [ $pverq | to_entries[] | .key as $p
+          | (($placed[$p] // null)) as $pl
+          | (if $pl == null then .
+             else .value = [ .value[] | . as $q
+                             | select((($pl.placed_pvers | index($q)) == null)
+                                      or (($pl.normal_pvers | index($q)) != null)) ]
+             end)
+          | select((.value | length) > 0) ] | from_entries')
+    fi
   fi
 
   # A pre-existing bare nested key for the same (parent, child) pair decides
@@ -2109,6 +2511,7 @@ verb_apply_constraint() {
   if [ "$loc" = "overrides" ] \
     && [ "$(printf '%s' "$qualified_parent_versions" | jq 'length')" -gt 0 ]; then
     bare_conflict=$(jq -c --argjson pverq "$qualified_parent_versions" \
+      --argjson placed "$override_placed" \
       --arg pkg "$pkg" --arg range "$range" "$SEMVER_JQ"'
       ($range | range_floor_major) as $tf
       | [ ($pverq | keys[]) as $p
@@ -2116,9 +2519,11 @@ verb_apply_constraint() {
           | select(($v | type) == "object" and ($v | has($pkg)))
           | (($v[$pkg] | tostring | range_floor_major)) as $bf
           | select($bf == null or $tf == null or $bf != $tf)
-          | {parent: $p, value: $v[$pkg]} ] | first // empty' package.json)
+          | {parent: $p, value: $v[$pkg],
+             parent_also_override_placed: (($placed[$p] // null) != null)} ]
+        | first // empty' package.json)
     if [ -n "$bare_conflict" ]; then
-      die "apply_constraint: a pre-existing bare override for '$pkg' under a parent this call must version-qualify pins a DIFFERENT major line: $bare_conflict. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132)."
+      die "apply_constraint: a pre-existing bare override for '$pkg' under a parent this call must version-qualify pins a DIFFERENT major line: $bare_conflict. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147)."
     fi
   fi
 
@@ -2136,6 +2541,8 @@ verb_apply_constraint() {
       --argjson root_keys "$root_keys" --argjson keys_by_parent "$keys_by_parent" \
       --argjson parents "$parents_json" --argjson tighten "$tighten_bare" \
       --argjson pverq "$qualified_parent_versions" \
+      --argjson placed "$override_placed" \
+      --argjson tplaced "$tighten_placed" \
       "$SEMVER_JQ$PINS_JQ"'
       # Create the override container only inside set_entry, so a direct
       # dependency update never leaves an empty "resolutions": {} (or
@@ -2221,6 +2628,51 @@ verb_apply_constraint() {
                             + {($key): $value})))
         | note($parent; ["overrides", $okey, $key]; $value);
 
+      # A parent placed by a pre-existing override rule (issue #147): the new
+      # entry nests at that rule'\''s own path. A string-valued rule keeps
+      # the parent'\''s range under the `"."` self key; an object rule keeps
+      # whatever it already carries. Both writes land in `written`, the `"."`
+      # coercion included, because the manifest diff shows both — but the
+      # `"."` entry is marked `preserved: true`: it quotes a pre-existing
+      # value the restructure kept, not a new write, so report readers can
+      # exempt it from checks on values this call chose (an alias or a
+      # `$reference` there is the manifest'\''s own state). A pre-existing
+      # SAME-line pin for this child inside the rule is superseded and
+      # reported, never silently replaced; a different-line pin refused
+      # before this pass ran.
+      def put_rule_nested($parent; $rp; $key; $value):
+        (.manifest.overrides | getpath($rp)) as $cur
+        | (if ($cur | type) == "object" then .
+           else (.manifest.overrides |= setpath($rp; {".": $cur}))
+                | (.written += [{parent: $parent,
+                                 path: (["overrides"] + $rp + ["."]),
+                                 value: $cur, preserved: true}])
+           end)
+        | (if ($cur | type) == "object" and ($cur | has($key))
+              and ($cur[$key] != $value)
+           then .superseded += [{parent: $parent,
+                                 path: (["overrides"] + $rp + [$key]),
+                                 value: $cur[$key]}]
+           else . end)
+        | (.manifest.overrides |= setpath($rp + [$key]; $value))
+        | note($parent; (["overrides"] + $rp + [$key]); $value);
+
+      # `--tighten-bare` on a placed package (issue #147): the placing
+      # rule'\''s own pin is the covering key, so the tighten lands there —
+      # on the string value itself, or on the `"."` self key of an object
+      # rule. Only rules whose pin covers this line arrive here; a
+      # placement with none refused before this pass ran.
+      def tighten_rule($rp):
+        (.manifest.overrides | getpath($rp)) as $cur
+        | if ($cur | type) == "object"
+          then (spec($cur["."])) as $v
+               | (.manifest.overrides |= setpath($rp + ["."]; $v))
+               | note(null; (["overrides"] + $rp + ["."]); $v)
+          else (spec($cur)) as $v
+               | (.manifest.overrides |= setpath($rp; $v))
+               | note(null; (["overrides"] + $rp); $v)
+          end;
+
       # pnpm and npm keys carry a parent qualifier whenever $pverq names any
       # for the parent, one key per qualifier, so only the copies whose
       # resolution of the child is on the target line are moved and the
@@ -2243,29 +2695,61 @@ verb_apply_constraint() {
         elif $loc == "resolutions" then
           put_override($parent; $parent + "/" + $key; $value)
         else
-          ($pverq[$parent] // []) as $qv
-          | if ($qv | length) > 0 then
-              # A pre-existing bare nested key for this same (parent, child)
-              # pair is superseded, not kept: npm inserts it FIRST in the
-              # OverrideSet and getEdgeRule stops on it for every edge, so
-              # beside it the qualified keys are inert. Only a same-line key
-              # reaches here (a different-line one refused before this
-              # pass), and the removal is reported in superseded_keys.
-              (if ((.manifest.overrides[$parent]? | type) == "object")
-                  and (.manifest.overrides[$parent] | has($key))
-               then (.superseded += [{parent: $parent,
-                                      path: ["overrides", $parent, $key],
-                                      value: .manifest.overrides[$parent][$key]}])
-                    | (.manifest.overrides |=
-                        (del(.[$parent][$key])
-                         | if (.[$parent] | length) == 0
-                           then del(.[$parent]) else . end))
-               else . end)
-              | reduce $qv[] as $q (.;
-                  put_nested($parent; $parent + "@" + $q; $key; $value))
-            else
-              put_nested($parent; $parent; $key; $value)
-            end
+          ($placed[$parent] // null) as $pl
+          # Placed copies first (issue #147): the constraint nests inside
+          # each corroborated rule that places the parent, because no
+          # top-level key ever matches a placed copy. A stale top-level pair
+          # left by a pre-fix run of this very flow is deleted and reported
+          # in superseded_keys when the parent has NO normally-resolved
+          # copies (the key provably matches nothing; a different-line value
+          # refused before this pass); with normal copies present the key
+          # still governs them and the ordinary branch below owns it.
+          | (if $pl != null then
+               (if ($pl.has_normal | not)
+                   and ((.manifest.overrides[$parent]? | type) == "object")
+                   and (.manifest.overrides[$parent] | has($key))
+                then (.superseded += [{parent: $parent,
+                                       path: ["overrides", $parent, $key],
+                                       value: .manifest.overrides[$parent][$key]}])
+                     | (.manifest.overrides |=
+                         (del(.[$parent][$key])
+                          | if (.[$parent] | length) == 0
+                            then del(.[$parent]) else . end))
+                else . end)
+               | reduce ($pl.rulepaths)[] as $rp (.;
+                   put_rule_nested($parent; $rp; $key; $value))
+             else . end)
+          # Then the normally-resolved copies, when any sit on this line:
+          # the ordinary top-level shape, qualified or bare. Both shapes
+          # compose: a top-level key never matches a placed copy and a
+          # rule never matches a normal one. $pverq already carries only
+          # the qualifiers the normal copies need (placed-only qualifiers
+          # were dropped where it was computed).
+          | (if ($pl == null) or $pl.has_normal_online then
+               (if (($pverq[$parent] // []) | length) > 0 then
+                  # A pre-existing bare nested key for this same (parent,
+                  # child) pair is superseded, not kept: npm inserts it
+                  # FIRST in the OverrideSet and getEdgeRule stops on it for
+                  # every edge, so beside it the qualified keys are inert.
+                  # Only a same-line key reaches here (a different-line one
+                  # refused before this pass), and the removal is reported
+                  # in superseded_keys.
+                  (if ((.manifest.overrides[$parent]? | type) == "object")
+                      and (.manifest.overrides[$parent] | has($key))
+                   then (.superseded += [{parent: $parent,
+                                          path: ["overrides", $parent, $key],
+                                          value: .manifest.overrides[$parent][$key]}])
+                        | (.manifest.overrides |=
+                            (del(.[$parent][$key])
+                             | if (.[$parent] | length) == 0
+                               then del(.[$parent]) else . end))
+                   else . end)
+                  | reduce ($pverq[$parent])[] as $q (.;
+                      put_nested($parent; $parent + "@" + $q; $key; $value))
+                else
+                  put_nested($parent; $parent; $key; $value)
+                end)
+             else . end)
         end;
 
       # `--tighten-bare` targets a package major line, not just a package. A
@@ -2329,8 +2813,22 @@ verb_apply_constraint() {
       {manifest: ., written: [], superseded: []}
       | if $tighten then
           covering_bare_keys as $covering
-          | if ($covering | length) == 0 then put_override(null; $pkg; $range)
-            else reduce $covering[] as $k (.; put_override(null; $k; $range))
+          # $tplaced (issue #147): placing-rule paths whose own pin covers
+          # this line — tightened in place beside any covering top-level
+          # keys. A placement only shadows the copies its rule places, so
+          # when the package ALSO has normally-resolved copies and no
+          # covering top-level key exists, the plain key is written IN
+          # ADDITION to tightening the rule pin: suppressing it stripped
+          # coverage from the normal copies, a gap validate caught but
+          # apply must not create (#153 review round 2). The plain-key
+          # fallback alone fires only when NOTHING covers.
+          | if ($covering | length) == 0 and ($tplaced | length) == 0
+            then put_override(null; $pkg; $range)
+            else (reduce $covering[] as $k (.; put_override(null; $k; $range)))
+                 | (reduce $tplaced[] as $rp (.; tighten_rule($rp)))
+                 | (if ($covering | length) == 0 and ($tplaced | length) > 0
+                       and ((($placed[$pkg] // {}) | .has_normal) // false)
+                    then put_override(null; $pkg; $range) else . end)
             end
         elif ($parents | length) == 0 then
           # Direct dependency. The root declares it by name, through one or
@@ -2712,7 +3210,12 @@ resolved_major_for_parent() {
 # these scripts support) gives the other one, so on Linux every lockfile-read
 # parent came back `parents_unreadable` while macOS was green. Bind first,
 # always: every other `//`-defaulted binding in these scripts is parenthesized.
-NPM_COPY_ROWS_JQ=$(cat <<'JQLIB'
+# The upward walk npm itself resolves declarations with, shared by the
+# copy-row reader below and apply_constraint's override-placement
+# corroboration: both must agree on which physical entry a declaration
+# reaches, or the placement map would describe a different tree than the
+# rows the qualifiers are computed from.
+NPM_PATH_JQ=$(cat <<'JQLIB'
 def prefixes:
   if . == "" then [""]
   else . as $path
@@ -2723,6 +3226,10 @@ def prefixes:
   end;
 def candidates($dk):
   prefixes | map((if . == "" then "" else . + "/" end) + "node_modules/" + $dk);
+JQLIB
+)
+
+NPM_COPY_ROWS_JQ="$NPM_PATH_JQ"$(cat <<'JQLIB'
 (.packages // {}) as $pkgs
 | [ $pkgs | to_entries[]
     | .key as $path

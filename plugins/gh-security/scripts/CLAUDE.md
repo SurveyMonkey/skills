@@ -285,6 +285,26 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   when that key pins a DIFFERENT line, since deleting it strips that line's protection and
   keeping it smothers this fix.
 
+  One shape sits outside that whole top-level algorithm: an override-placed parent, one a
+  pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
+  such a node to the rule that placed it, so a top-level key never matches it, qualified or bare,
+  and a constraint written there is silently inert (field-verified across three clean reinstalls,
+  issue #147). `apply_constraint` therefore nests the new entry inside the placing rule, the
+  `"."` self key carrying the parent's own range, and only when the lockfile corroborates the
+  rule: its root and every intermediate segment must appear, in order, in a parent copy's logical
+  ancestor chain, with each segment's selector (the child key's own included) checked against the
+  installed copy's version by the same `satisfies` the qualifiers use, so a rule that merely
+  spells the parent's name, or whose selector cannot match the installed chain, places nothing
+  and the ordinary top-level write proceeds. A parent with both placed and normally-resolved
+  copies composes both shapes, which cannot collide since each matches only its own copies, and
+  `--tighten-bare` composes the same way: the placing rule's pin tightens in place, plus the
+  covering top-level key when normal copies exist. The shapes no verified key form serves are
+  refused outright, naming the rule: a rule placing the parent through an `npm:` alias child key,
+  a version-qualified child key as the placing rule (when its selector does match installed
+  copies), a rule whose reach also spans other major lines of the child, a dead different-line
+  top-level pair for a fully placed parent, and a different-line pin already inside the placing
+  rule.
+
 So `validate --baseline` detects rather than prevents, and that ordering is deliberate: detection
 is the guard that has to exist under any of the three narrowing schemes, including the one that
 fails open. `other_line_moves` is `null` when no baseline was passed and `[]` when one was and
