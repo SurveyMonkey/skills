@@ -55,9 +55,9 @@ writing the PR prose. Do not reimplement what the scripts do.
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
-- **Denials are answers.** A declined permission on an essential step (worktree, install,
-  validate, commit, push, PR) ends the run with a failure report. Never respond to a denial by
-  engineering an alternative route to the denied thing.
+- **Denials are answers.** A declined permission on an essential step — creating the worktree,
+  installing, validating, committing, pushing, or opening the PR — ends the run with a failure
+  report. Never respond to a denial by engineering an alternative route to the denied thing.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
   via Bash.** That includes inspecting JSON: Read `package.json` directly instead of piping
   `cat` through a parser. Shell forms like `find -exec` and improvised `cat | python3` chains
