@@ -143,7 +143,9 @@ writing the PR prose. Do not reimplement what the scripts do.
   it, say exactly what you did.
 - **Run every adapter verb in the foreground with an explicit Bash timeout, never the tool's
   default.** Pass `timeout: 600000` (10 minutes) on `install`, the only verb here that reaches a
-  registry or a package manager: a healthy install can run several minutes long (one field run's
+  registry or a package manager — and this flow invokes it twice, Phase 2's control install and
+  Phase 4's fix install, each under the same timeout: a healthy install can run several minutes
+  long (one field run's
   four install cycles averaged roughly four minutes each, ~17 minutes total — see Phase 3), and
   the Bash tool's 120-second default would fail it indistinguishably from a hang. Pass
   `timeout: 120000` (2 minutes) on every other verb this flow calls — `why`, `resolved_versions`,
@@ -154,8 +156,9 @@ writing the PR prose. Do not reimplement what the scripts do.
   or exits non-zero twice on the same inputs with no remediation in between. Neither loosens a
   phase's own stop-on-first-failure instruction — the lockfile-parse stop (Phase 2) and the fatal
   `other_line_moves` stop (Phase 4) still stop on the first failure — and neither authorizes any
-  retry beyond Phase 4's remediation ladder or the one sanctioned install retry on a registry
-  timeout, each of which follows an actual remediation step, never a bare repeat of the same
+  retry beyond Phase 4's remediation ladder or the one sanctioned retry per install invocation on
+  a registry timeout — the control install and the fix install each get their own, and each
+  follows an actual remediation step, never a bare repeat of the same
   command. A verb that hit its timeout is presumed still running: kill it and fail closed. A verb
   that already OOMed or exited non-zero is already dead; there is nothing left to kill, only the
   failure to report. Never background a hung verb, never attach a
@@ -254,7 +257,7 @@ git -C <repo_root> worktree add "$WORK/fix" -b <branch_name> "origin/<default_br
 
 No `cd` of its own follows the worktree creation, here or anywhere in this document: cwd does not
 survive to the next call, so every later command carries its own location instead (see Hard
-rules). Worktrees do not share installed dependencies, so your install in phase 4 is a full one.
+rules). Worktrees do not share installed dependencies, so phase 2's control install is a full one.
 
 **Never combine `cd` with `git` in one command — no exceptions.** Every git invocation uses
 `git -C <literal path>`. The compound form (`cd "$WORK/fix" && git diff`) trips a per-command
@@ -263,11 +266,57 @@ per invocation, while the `-C` form is covered by the standing rules and runs si
 commands (the adapter, the risk scorer) take the `cd "$WORK/fix" && ` prefix instead, which is
 covered too; only git needs the `-C` form.
 
-## Phase 2: Record the pre-fix baseline
+## Phase 2: Control install and the pre-fix baseline
+
+Before any snapshot, run a **control install** — the manifest exactly as the default branch
+declares it, no fix applied — with the same 10-minute timeout Phase 4's install carries (Hard
+rules):
+
+```bash
+cd "$WORK/fix" && $ADAPTER install
+```
+
+Then check what it changed:
+
+```bash
+git -C "$WORK/fix" status --porcelain
+```
+
+Non-empty output means the default branch's lockfile is stale relative to its manifests, so *any*
+install re-resolves entries — within-major additions, dedups — with zero manifest edits. Commit
+that drift as its own first commit, so it never rides in the fix's diff:
+
+```bash
+git -C "$WORK/fix" add <lockfile>
+git -C "$WORK/fix" commit -m "chore(deps): refresh lockfile (control install, no manifest change)"
+```
+
+If porcelain is **still** non-empty after that commit, the install touched something other than
+the lockfile. Stop and return a failure (phase `baseline`) reporting exactly what remains — never
+clean it up, delete it, or fold it into a commit; what an install writes outside its lockfile is
+evidence the user needs to see, not noise to absorb.
+
+A control install that fails is a failure with phase `baseline`, **not** `install` — that phase
+name stays reserved for Phase 4's fix-attributable install, and the two must not be confusable in
+a triage table: this one fails before any fix exists, so it is ambient and will hit every group
+dispatched against the repo. Its `detail` names the control install (no manifest change) and
+quotes the package manager's error. A hook that fails the drift commit is also phase `baseline`,
+quoting the hook's own output; the hook rules in Phase 6 apply here unchanged — never bypass one,
+never edit anything to satisfy one.
+
+Only then record the baseline:
 
 ```bash
 cd "$WORK/fix" && $ADAPTER resolved_versions <package>
 ```
+
+The ordering is the point (issue #146). The snapshot now describes the **post-control-install**
+tree, so validate's `other_line_moves` measures only movement the fix itself causes: a stale
+lockfile's ambient re-resolution has already landed in the drift commit instead of being blamed
+on the fix. Snapshotting before any install attributed exactly that ambient drift to the fix — a
+field run fail-closed two of eight groups on within-major additions (`js-yaml` 3.15.1 →
+3.15.1+3.15.2, `minimatch` 10.2.5 → 10.2.5+10.2.6) that a plain no-change install reproduced
+identically.
 
 **Keep this output verbatim; you pass it back to `validate` in phase 4.** It has two consumers,
 and once you install it is gone: the merge-risk rating needs the version resolved *before* the fix,
@@ -512,7 +561,13 @@ git -C "$WORK/fix" status --porcelain
 the default branch.**
 `apply_constraint` merged into entries that already carried the right range, the install changed no
 lockfile entry, and validate confirms every alert in your group is already cleared by what is
-installed. Nothing is wrong and nothing needs doing.
+installed. Nothing is wrong and nothing needs doing. Phase 2's control-install commit has already
+absorbed any ambient drift a stale lockfile produces, so empty porcelain here means exactly what
+it says: the fix itself changed nothing (issue #146).
+
+**A no-op still opens no PR even when a drift commit exists.** A lone lockfile refresh is not this
+agent's mandate — you were dispatched to fix alerts, and there is no fix to review — so the branch
+is cleaned up like any other no-op, drift commit and all.
 
 This happens without anything being broken anywhere: Dependabot re-scans on its own schedule, so
 GitHub reports alerts as open for a window after the fix has merged. Discovery is right to surface
@@ -890,7 +945,9 @@ PR body:
 - [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
       `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
 - [x] No collateral: every copy of `<package>` on the other major lines resolves exactly as it did
-      before this change (`other_line_moves: []`, against the pre-fix baseline)
+      before this change (`other_line_moves: []`, against the baseline recorded after a no-change
+      control install, so the comparison excludes stale-lockfile drift and measures only this
+      change)
 - CI on this PR is the verifier; coverage and CI presence are scored above
 
 ## References
@@ -900,6 +957,12 @@ PR body:
 
 EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
 vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
+
+**Whenever Phase 2 committed a drift commit, the branch carries two commits — drift, then fix —
+and the `## Changes` section must say so in one sentence**, so a reviewer reading the diff knows
+which commit is the fix. For example: "The first commit is a no-change lockfile refresh — the
+default branch's lockfile is stale relative to its manifests, so any install re-resolves these
+entries; the second commit is the fix." Omit the sentence when there was no drift commit.
 
 **Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
 `## Collateral` section placed immediately before `## Verification`.** Three situations reach it,
@@ -987,6 +1050,11 @@ Two cases are safe, and nothing else is:
   need a local branch to exist.
 - **You committed nothing.** On any failure path whose branch tip still equals
   `origin/<default_branch>`, there is nothing on the branch to lose.
+- **Your only commit is Phase 2's drift commit.** A no-change control install regenerates it
+  identically on any rerun, so nothing unrecoverable is on the branch. Without this case every
+  no-op against a stale lockfile leaves a branch the next run's stale-branch guard must read as
+  someone's unpushed work — the deadlock of
+  [#84](https://github.com/SurveyMonkey/skills/issues/84), reintroduced (issue #146).
 
 **Otherwise leave the branch and say so in `detail`** (in your prose, when the result is a success
 and `failure` is `null`), naming it and its tip: a branch carrying a

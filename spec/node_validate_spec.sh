@@ -667,3 +667,51 @@ Describe 'node.sh validate --sibling-alerts'
     The output should equal '{"ok":false,"classes":["fatal"]}'
   End
 End
+
+# ---------------------------------------------------------------------------
+# Stale-lockfile drift vs the control-install baseline (issue #146)
+#
+# The field shape: a default-branch lockfile stale relative to its manifests,
+# where ANY install re-resolves entries — a within-major ADDITION on a line the
+# group does not own (js-yaml 3.x ["3.15.1"] -> ["3.15.1","3.15.2"], minimatch
+# 10.x ["10.2.5"] -> ["10.2.5","10.2.6"]), reproduced by a sibling group's
+# no-change install. The two-survivors fixture already carries the post-install
+# tree for it: picomatch at 2.3.9, 2.3.10 and 4.0.3.
+#
+# The adapter deliberately does NOT loosen for this shape — an addition is not
+# a dedup, so the carve-out's exactly-one-survivor conjunct keeps it fatal even
+# with --sibling-alerts '[]'. The fix lives in the agent's sequencing
+# (agents/fix-dependency.md phase 2): a no-change control install runs before
+# the baseline snapshot, so the ambient re-resolution is already in the
+# baseline and the diff measures only what the fix moved.
+# ---------------------------------------------------------------------------
+Describe 'stale-lockfile drift vs the control-install baseline (issue #146)'
+  After 'cleanup_fixture'
+
+  # `resolved_versions picomatch` against the STALE default-branch lockfile,
+  # i.e. a phase 2 snapshot taken before any install had run: line 2 carried
+  # only 2.3.9, and the install (any install) added 2.3.10 beside it.
+  STALE_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":2,"versions":[{"version":"2.3.9","path":"picomatch@2.3.9"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
+
+  # The same snapshot taken AFTER the no-change control install: line 2 already
+  # holds both copies, because the drift is ambient, not the fix's.
+  CONTROL_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.9","path":"picomatch@2.3.9"},{"version":"2.3.10","path":"picomatch@2.3.10"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":6}'
+
+  It 'fails closed against a stale pre-install baseline, blaming the ambient addition on the fix'
+    use_fixture pnpm-benign-dedup-two-survivors
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$STALE_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should not equal 0
+    The output should equal '{"ok":false,"other_line_moves":[{"major":2,"before":["2.3.9"],"after":["2.3.10","2.3.9"],"status":"moved","class":"fatal"}]}'
+  End
+
+  It 'passes the identical tree against the post-control-install baseline'
+    use_fixture pnpm-benign-dedup-two-survivors
+    When call adapter_jq '{ok, other_line_moves}' \
+      validate --line 4 --vulnerable '< 4.0.3' --baseline "$CONTROL_BASELINE" \
+      --sibling-alerts '[]' picomatch '>=4.0.3 <5'
+    The status should be success
+    The output should equal '{"ok":true,"other_line_moves":[]}'
+  End
+End

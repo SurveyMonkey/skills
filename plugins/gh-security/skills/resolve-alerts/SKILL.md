@@ -603,6 +603,13 @@ bare override for the package under that parent pins a different line, so the ad
 and no install ran. The remedy is a bump of the shared parent, or reconciling the existing override
 by hand, both human work ([#132](https://github.com/SurveyMonkey/skills/issues/132)).
 
+A `phase: "baseline"` failure whose `detail` names the control install gets its own Notes label
+(`repo does not install cleanly (ambient, affects every group)`) rather than the generic
+`failure: baseline`: the agent's no-change control install failed before any fix existed, so the
+condition is a fact about the repository, not the group, and every group dispatched against that
+repo hits the same wall until the repo installs cleanly
+([#146](https://github.com/SurveyMonkey/skills/issues/146)).
+
 A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file
 conflict` push rejection) gets its own Notes label (`branch-namespace collision (preflight
 miss)`): the namespace probe in phase 1 or phase 5 said `slash`, but this group's exact `fix/*`

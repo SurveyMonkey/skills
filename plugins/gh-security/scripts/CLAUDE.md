@@ -222,7 +222,10 @@ broken adapter otherwise turned every pin in the audit inconclusive with nothing
 The pin audit already knows this on the removal side. The fix side learned it the hard way: a
 scoped entry can move a copy of the package on a major line the group does not own, and every
 check in the fix flow was scoped to `--line` and structurally unable to notice
-([#83](https://github.com/SurveyMonkey/skills/issues/83)).
+([#83](https://github.com/SurveyMonkey/skills/issues/83)). The fix flow's `--baseline` is
+snapshotted after a no-change control install, so the diff measures only apply-attributable
+movement; snapshotted before any install, a stale default-branch lockfile's ambient re-resolution
+gets attributed to the fix ([#146](https://github.com/SurveyMonkey/skills/issues/146)).
 
 The mechanism is per-manager, and Yarn's is the one that bites. Verified empirically against a
 throwaway worktree of a real repository, and against Yarn's `reduceDependency` hook:
@@ -288,7 +291,11 @@ fails open. `other_line_moves` is `null` when no baseline was passed and `[]` wh
 nothing moved — the same "not checked" versus "checked and clean" distinction the audit draws with
 `collateral_changes: null`, and for the same reason. Only majors **present in the baseline** are
 compared; a major that first appears after the install is the install adding a copy, not this fix
-moving one. Each entry also carries a `class`, `"fatal"` or `"benign_dedup"` (with
+moving one. Detection is only as honest as its baseline: `agents/fix-dependency.md` snapshots it
+after a no-change control install precisely because a stale default-branch lockfile otherwise
+attributes ambient re-resolution to the fix
+([#146](https://github.com/SurveyMonkey/skills/issues/146)) — the adapter deliberately does not
+loosen for it. Each entry also carries a `class`, `"fatal"` or `"benign_dedup"` (with
 `--sibling-alerts`, a within-major dedup no sibling alert can reach); `validate`'s own `ok` keys on
 whether any entry's `class` is `"fatal"`, not on the array being non-empty.
 

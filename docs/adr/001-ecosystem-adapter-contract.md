@@ -170,7 +170,12 @@ because `[]` is documented as the stronger claim than `null`
 
 **Adapters parse lockfiles rather than querying the package manager.** `npm ls --json` and
 `yarn info --json` are available and would be less code, but the lockfile is the artifact the PR
-commits, and parsing it works before any install has run, which the pre-fix baseline requires.
+commits, and parsing it needs no package manager at all — no `node_modules`, no registry. The fix
+flow's pre-fix baseline is nevertheless read after a deliberate no-change control install, so that
+a stale default-branch lockfile's ambient re-resolution lands before the snapshot rather than
+being attributed to the fix
+([#146](https://github.com/SurveyMonkey/skills/issues/146)); "no install has run yet" is not a
+property callers rely on, only "no package manager is required to parse".
 
 **Version comparison stays inside the adapter.** `compare_versions` is a verb, not a shared helper
 in `common/`. The node adapter implements semver in jq; Phase 6's Python adapter will implement
