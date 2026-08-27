@@ -98,8 +98,11 @@ repository's terms, and it feeds no factor. Two field-test repositories
 both ran their full pre-commit and pre-push suites on agent commits under this ADR, and that is
 the intended behavior. Those hooks are never bypassed (no `--no-verify`), a hook that fails the
 commit or push is a failure result at that phase quoting the hook's output, and nothing in the
-repository is edited to make one pass. The agent definitions carry the rule at their commit/push
-phases ([#78](https://github.com/SurveyMonkey/skills/issues/78)); it is recorded here because the
+repository is edited to make one pass. The agent definitions carry the rule at their
+~~commit/push phases~~ **(amended: `fix-dependency.md` routes a failing pre-commit hook to phase
+`push` too, since `commit` was never in the result enum —
+[#89](https://github.com/SurveyMonkey/skills/issues/89))**
+([#78](https://github.com/SurveyMonkey/skills/issues/78)); it is recorded here because the
 gap that let it go unstated was this section reading as though ADR 006 had settled every question
 about the repository's checks running.
 

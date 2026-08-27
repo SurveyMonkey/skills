@@ -199,8 +199,7 @@ flowchart TD
 
     D5["Phase 5: declared_ranges --line, then score-merge-risk.sh<br/>(F1-F7 as the scorer defines them today;<br/>F6 from --override-scope; no repo scripts run)"] --> D6
     D6["Phase 6: commit and push from the worktree"] --> D6Q{"repo hooks"}
-    D6Q -->|"pre-commit fails"| FCOM["failure: phase commit,<br/>quoting the hook (never --no-verify)"]
-    D6Q -->|"pre-push fails"| FPUSH["failure: phase push"]
+    D6Q -->|"pre-commit or pre-push fails"| FPUSH["failure: phase push,<br/>quoting the hook (never --no-verify)"]
     D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>--label merge-risk:&lt;band&gt; (ready for review; the agent<br/>never merges it or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
     D6PRQ -->|no| FPR["failure: phase pr"]
@@ -218,7 +217,6 @@ flowchart TD
     FCOLL --> CL
     FVAL --> CL
     FVAL2 --> CL
-    FCOM --> CL
     FPUSH --> CL
     FPR --> CL
     NOOP --> CL
@@ -231,12 +229,11 @@ PR-body section, and it is also what rung 4's failure names when the group's lin
 installed. Either way the orchestrator re-reports it in phase 7; copies below the group's line
 cannot be fixed from here and are never attempted.
 
-Two things in this diagram follow the source's prose where its own schema disagrees, and are worth
-fixing in the agent definition rather than here
-([#89](https://github.com/SurveyMonkey/skills/issues/89)): a commit-hook failure is `phase commit`
-in the prose while `commit` is absent from the result enum, and the inline comment beside
-`apply_constraint` still says to pass `parents_read` "and only those", which the eligible-set rule
-above it contradicts.
+Both defects [#89](https://github.com/SurveyMonkey/skills/issues/89) named are fixed in the agent
+definition: a commit-hook failure now reports `phase push`, matching the result enum's absence of a
+`commit` phase, and the `apply_constraint` comment now matches the eligible-set rule (`parents_read`
+plus `parents_unreadable` plus `parents_without_range`), fixed by
+[#112](https://github.com/SurveyMonkey/skills/issues/112).
 
 ## Diagram 3: audit-pins
 

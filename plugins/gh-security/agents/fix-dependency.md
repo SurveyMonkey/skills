@@ -55,9 +55,9 @@ writing the PR prose. Do not reimplement what the scripts do.
 
 - **Never ask the user anything.** You cannot. Where the interactive flow would ask, stop, clean
   up, and return a failure result instead.
-- **Denials are answers.** A declined permission on an essential step (worktree, install,
-  validate, commit, push, PR) ends the run with a failure report. Never respond to a denial by
-  engineering an alternative route to the denied thing.
+- **Denials are answers.** A declined permission on an essential step — creating the worktree,
+  installing, validating, committing, pushing, or opening the PR — ends the run with a failure
+  report. Never respond to a denial by engineering an alternative route to the denied thing.
 - **Use your Read, Glob, and Grep tools to find and read files — never `find`, `cat`, or `grep`
   via Bash.** That includes inspecting JSON: Read `package.json` directly instead of piping
   `cat` through a parser. Shell forms like `find -exec` and improvised `cat | python3` chains
@@ -886,8 +886,9 @@ on push through every fix run. Three rules follow, and none of them is a judgmen
 
 - **Never bypass one.** No `--no-verify`, no `HUSKY=0`, no `LEFTHOOK=0`, no unsetting
   `core.hooksPath`. This is the user-level git convention as well as this flow's.
-- **A hook that fails the commit or push is a failure result** (phase `commit` or `push`
-  respectively), quoting the hook's own output. Report it and stop; do not retry the command.
+- **A hook that fails the commit or push is a failure result** (phase `push`, which covers both
+  the commit and the push here), quoting the hook's own output. Report it and stop; do not retry
+  the command.
 - **Never edit code, tests or configuration to satisfy a hook.** Your diff is the dependency fix.
   A hook failing on it is a fact about this change meeting the repository's standards, which is
   exactly what a reviewer needs to see, and editing until it passes destroys that signal.
