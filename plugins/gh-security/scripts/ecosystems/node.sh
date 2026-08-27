@@ -389,8 +389,10 @@ pm_of() { verb_detect | jq -r '.pm'; }
 # resolved_versions
 #
 # Parses the lockfile rather than querying the package manager. The lockfile is
-# the artifact the PR commits, and parsing works before any install, which the
-# pre-fix merge-risk baseline needs.
+# the artifact the PR commits, and parsing needs no package manager at all: the
+# verb reads committed state and answers the same before or after an install,
+# which is what lets the fix flow take its pre-drift snapshot and its
+# post-control-install baseline through one code path.
 #
 # `lockfile_entries` exists so callers can distinguish "this package is absent"
 # from "the parser is broken". v0.1.0 could not make that distinction: its yarn

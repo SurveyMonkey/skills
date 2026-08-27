@@ -157,13 +157,23 @@ flowchart TD
     D1B -->|"tip is neither"| FWT2["failure: phase worktree,<br/>quoting the three shas (unpushed work)"]
     D1C["worktree add $WORK/fix -b branch_name origin/default_branch"] --> D2
 
-    D2["Phase 2: ADAPTER resolved_versions (baseline)"] --> D2Q{"result"}
-    D2Q -->|"the adapter errors on<br/>an unreadable lockfile"| FBASE["failure: phase baseline<br/>(a failed parse is never an empty result)"]
-    D2Q -->|"present: false"| D3["No baseline to record; the output is still<br/>passed to validate --baseline"]
-    D2Q -->|present| D3
-    D3["Phase 3: ADAPTER why"] --> D3Q{"relationship"}
-    D3Q -->|direct| D4
-    D3Q -->|transitive| D3E["declared_ranges --line, to narrow parents:<br/>eligible = parents_read + parents_unreadable +<br/>parents_without_range, minus parents_other_lines"] --> D4
+    D2["Phase 2: ADAPTER why (no install needed)"] --> D2Q{"relationship"}
+    D2Q -->|direct| D3
+    D2Q -->|transitive| D2E["declared_ranges --line, to narrow parents:<br/>eligible = parents_read + parents_unreadable +<br/>parents_without_range, minus parents_other_lines"] --> D3
+
+    D3["Phase 3: pre-drift snapshot (resolved_versions<br/>on the never-installed tree), then control install"] --> D3I{"control install"}
+    D3I -->|fails| FBASE0["failure: phase baseline<br/>(ambient: fails before any fix exists)"]
+    D3I -->|installed| D3P{"status --porcelain"}
+    D3P -->|empty| D3S
+    D3P -->|non-empty| D3D["drift commit: lockfile, .pnp.cjs/.pnp.loader.mjs,<br/>changed .yarn/cache paths; never package.json"]
+    D3D --> D3DQ{"drift commit"}
+    D3DQ -->|"hook fails the commit"| FBASE1["failure: phase baseline,<br/>quoting the hook"]
+    D3DQ -->|"porcelain still non-empty"| FBASE2["failure: phase baseline<br/>(residual non-lockfile changes:<br/>evidence, never cleaned up)"]
+    D3DQ -->|clean| D3S
+    D3S["baseline snapshot: ADAPTER resolved_versions<br/>(post-control-install)"] --> D3SQ{"result"}
+    D3SQ -->|"the adapter errors on<br/>an unreadable lockfile"| FBASE["failure: phase baseline<br/>(a failed parse is never an empty result)"]
+    D3SQ -->|"present: false"| D3N["No baseline to record; the output is still<br/>passed to validate --baseline"] --> D4
+    D3SQ -->|present| D4
 
     D4["Phase 4: apply_constraint with a major-bounded range"] --> D4A{"written[] npm: value<br/>names another package?"}
     D4A -->|yes| FALIAS["failure: alias collision,<br/>no install, no PR (#49)"]
@@ -177,7 +187,9 @@ flowchart TD
     D4C -->|"null: no baseline passed,<br/>the question went unasked"| D4V
     D4C -->|"[]"| D4V
     D4V{"validate ok?"}
-    D4V -->|"ok, git status --porcelain empty,<br/>other_line_moves []"| NOOP(["no-op: already fixed on the default branch;<br/>no commit, no PR, reason + evidence"])
+    D4V -->|"ok, git status --porcelain empty,<br/>other_line_moves []"| D4DR{"group's line moved across<br/>the drift commit?<br/>(pre-drift snapshot vs baseline)"}
+    D4DR -->|"no drift commit,<br/>or line identical"| NOOP(["no-op: already fixed on the default branch;<br/>no commit, no PR, reason + evidence"])
+    D4DR -->|"line changed: the drift<br/>commit IS the fix"| D4LR["action lockfile-refresh: nothing more to commit;<br/>PR body states the no-change refresh"] --> D5
     D4V -->|"ok, diff non-empty"| D5
     D4V -->|"fails"| D4L{"remediation ladder"}
     D4L -->|"1. uncovered parents"| D4I
@@ -197,6 +209,9 @@ flowchart TD
     FIN --> CL
     FWT --> CL
     FWT2 --> CL
+    FBASE0 --> CL
+    FBASE1 --> CL
+    FBASE2 --> CL
     FBASE --> CL
     FALIAS --> CL
     FINST --> CL
@@ -208,7 +223,7 @@ flowchart TD
     FPR --> CL
     NOOP --> CL
     SUCC --> CL
-    CL["Cleanup on every path: worktree remove --force, rm -rf $WORK,<br/>then branch -D only when pushed or nothing was committed;<br/>a cleanup error goes in detail, never silenced<br/>(no git worktree prune, ever)"] --> RES(["One fenced JSON result:<br/>success | no-op | failure"])
+    CL["Cleanup on every path: worktree remove --force, rm -rf $WORK,<br/>then branch -D only when pushed, nothing was committed,<br/>or the only commit is the drift commit;<br/>a cleanup error goes in detail, never silenced<br/>(no git worktree prune, ever)"] --> RES(["One fenced JSON result:<br/>success | no-op | failure"])
 ```
 
 `requires_major_bump[]` is not a state of its own. It rides on a `success` result, with its own

@@ -254,7 +254,10 @@ repos at once still saturate the same laptop. Show the plan for the chosen batch
 
 Omit the `Repo` column at repo scope, as in phase 3. "Likely action" comes from the alerts'
 `relationship` field (direct → version bump, transitive → scoped override) and is best-effort: the
-subagent's own `why` classification is authoritative. `Branch` shows each group's `branch_name`;
+subagent's own `why` classification is authoritative. An agent can also come back with
+`action: "lockfile-refresh"` — its control install alone resolved the fix, because the manifest
+already admitted the fixed version and only the stale lockfile pinned the vulnerable one — which
+no prediction here anticipates. `Branch` shows each group's `branch_name`;
 at repo scope it is final (phase 1's namespace probe already ran — say so when the batch runs
 flat), while at org and user scope it is provisional until phase 5's per-repo probe, which can
 flip a repo's names to the flat `fix-dependabot-...` scheme; say that too.
@@ -491,7 +494,8 @@ branch exactly where they are, for phase 7 to report.
 
 The agent's own Cleanup is the first line of defense, and what this step adds to it is narrow:
 **a success that crashed before its Cleanup ran, and a `branch -D` that errored there.** It
-applies the same tip test the agent does, so a branch the agent deliberately left because its tip
+re-checks only `origin/<branch_name>` — a narrower test than the agent's three safe cases — so a
+branch the agent deliberately left because its tip
 is not on origin is left here too and reported, never deleted. Neither end ever discards an
 unpushed commit.
 
@@ -581,7 +585,9 @@ needing attention and buries the genuine failures beside it (issue #34).
 Failures get their `phase` and `detail`. A result whose `action` is `bare-override` says so in
 Notes (`bare override added` or `bare override tightened`, from `bare_override`): it is the one
 action whose blast radius reaches past the alerts being fixed, and the table is where a user
-comparing PRs will see it.
+comparing PRs will see it. A result whose `action` is `lockfile-refresh` also says so in Notes:
+the PR is a no-change lockfile refresh whose only commit is the agent's control-install drift
+commit, so its diff carries no manifest edit.
 
 A `phase: "validate"` failure whose `detail` quotes `other_line_moves` means any fatal move: the
 install moved a copy of the package on a major line the group does not own, and the agent
@@ -603,11 +609,13 @@ bare override for the package under that parent pins a different line, so the ad
 and no install ran. The remedy is a bump of the shared parent, or reconciling the existing override
 by hand, both human work ([#132](https://github.com/SurveyMonkey/skills/issues/132)).
 
-A `phase: "baseline"` failure whose `detail` names the control install gets its own Notes label
-(`repo does not install cleanly (ambient, affects every group)`) rather than the generic
-`failure: baseline`: the agent's no-change control install failed before any fix existed, so the
-condition is a fact about the repository, not the group, and every group dispatched against that
-repo hits the same wall until the repo installs cleanly
+A `phase: "baseline"` failure gets its own Notes label
+(`baseline could not be established (ambient, affects every group)`) rather than the generic
+`failure: baseline`, whichever of its three shapes `detail` names — the agent's no-change control
+install failed, the control install left residual changes outside the lockfile and tracked
+install artifacts, or a repo hook failed the drift commit. Each happens before any fix exists, so
+the condition is a fact about the repository, not the group, and every group dispatched against
+that repo hits the same wall until it is resolved
 ([#146](https://github.com/SurveyMonkey/skills/issues/146)).
 
 A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file

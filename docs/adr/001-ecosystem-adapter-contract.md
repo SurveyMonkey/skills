@@ -205,9 +205,10 @@ failing, so every `has()` check downstream is skipped instead of tripped. A repl
 a JSON object before any field of it is read.
 
 **`apply_constraint` reads every declaration it needs out of the lockfile, and reports what it
-wrote.** It runs *before* `install`, in a fresh worktree where `node_modules` is gitignored and
-absent — and Yarn PnP never has one at all, while pnpm links only direct dependencies into one — so
-the key a parent declares an aliased dependency under comes from the lockfile
+wrote.** The property relied on is lockfile-only reading, never installed manifests: in the fix
+flow it runs after the control install, so the worktree does have a `node_modules` by then — and
+Yarn PnP never has one at all, while pnpm links only direct dependencies into one — but whatever
+the install state, the key a parent declares an aliased dependency under comes from the lockfile
 (`.packages["node_modules/<parent>"]` for npm, each `resolution:` entry for Berry, reading
 `dependencies`, `optionalDependencies` and `peerDependencies` in both), never from a parent's
 installed manifest. A parent whose declaration
