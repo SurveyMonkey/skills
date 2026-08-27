@@ -611,9 +611,10 @@ by hand, both human work ([#132](https://github.com/SurveyMonkey/skills/issues/1
 
 A `phase: "baseline"` failure gets its own Notes label
 (`baseline could not be established (ambient, affects every group)`) rather than the generic
-`failure: baseline`, whichever of its three shapes `detail` names — the agent's no-change control
+`failure: baseline`, whichever of its four shapes `detail` names — the agent's no-change control
 install failed, the control install left residual changes outside the lockfile and tracked
-install artifacts, or a repo hook failed the drift commit. Each happens before any fix exists, so
+install artifacts, a repo hook failed the drift commit, or the lockfile itself could not be
+parsed for the snapshot. Each happens before any fix exists, so
 the condition is a fact about the repository, not the group, and every group dispatched against
 that repo hits the same wall until it is resolved
 ([#146](https://github.com/SurveyMonkey/skills/issues/146)).

@@ -1622,7 +1622,7 @@ verb_validate() {
                                     and (.version | type) == "string")))' 2>/dev/null) \
       || baseline_json=""
     if [ -z "$baseline_json" ]; then
-      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 2 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
+      die "validate: --baseline is not a usable pre-fix baseline for '$pkg'. Pass the phase 3 'resolved_versions $pkg' output verbatim: a JSON object whose .package is '$pkg' and whose .versions is an array of objects each carrying a string .version. A baseline that is truncated, or captured for another package, would report no cross-line moves at all (issue #83)."
     fi
   fi
 
