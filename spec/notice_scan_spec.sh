@@ -357,6 +357,26 @@ nothing to commit, working tree clean"
     The output should equal '{"offers_directly":true}'
   End
 
+  # A payload larger than the pipe buffer is the shape that proved the scan
+  # could lose a match it had already made: `grep -q` exited at the match
+  # while `printf` was still writing, `printf` took SIGPIPE, and `pipefail`
+  # turned the *matched* pipeline non-zero, so the hook silently did not fire
+  # ([#157](https://github.com/SurveyMonkey/skills/issues/157)).
+  #
+  # This asserts the verdict rather than the parse, which is the whole point:
+  # against the pre-fix script this example gets no output at all, while every
+  # short-payload example above stayed green throughout, because at three
+  # lines printf almost always wins the race. Parallel CI is what made it
+  # observable, and only as a stderr warning.
+  It 'still offers directly when the payload is larger than the pipe buffer'
+    filler=$(awk 'BEGIN { while (i++ < 2000) print "filler line pushing this payload past the 64KB pipe buffer" }')
+    big="remote: GitHub found 8 vulnerabilities on main's default branch.
+$filler"
+    When call notice_jq '{offers_directly: (.hookSpecificOutput.additionalContext | test("Offer to run"))}' "$big"
+    The status should be success
+    The output should equal '{"offers_directly":true}'
+  End
+
   Describe 'tool_response envelope shapes'
     It 'matches when the signal is only in the object-shaped stdout field'
       stdin=$(jq -n '{tool_name: "Bash", tool_response: {stdout: "https://github.com/octo/app/security/dependabot/3", stderr: ""}}')

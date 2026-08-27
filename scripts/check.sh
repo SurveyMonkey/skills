@@ -8,7 +8,8 @@
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
-#   spec      the shellspec suite (serial; set SHELLSPEC_JOBS=N for parallel)
+#   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
+#             pre-push hook and CI both set it, ADR 005)
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
@@ -173,6 +174,15 @@ cmd_spec() {
   if [ -n "${CHECK_SPEC_SHELL:-}" ]; then
     args[${#args[@]}]=--shell
     args[${#args[@]}]=$CHECK_SPEC_SHELL
+  fi
+  # CHECK_SPEC_FORMAT routes to --format, the same seam and for the same
+  # reason as the shell above: .shellspec sets --format documentation, which
+  # is what a human wants and what CI pays 1189 individually formatted lines
+  # per leg for. CI sets `progress`. The floor below reads the summary line,
+  # which every formatter emits, so this cannot weaken it.
+  if [ -n "${CHECK_SPEC_FORMAT:-}" ]; then
+    args[${#args[@]}]=--format
+    args[${#args[@]}]=$CHECK_SPEC_FORMAT
   fi
   # ${args[@]+...}: bash 3.2's set -u rejects expanding an empty array.
   shellspec ${args[@]+"${args[@]}"} 2>&1 | tee "$report"
