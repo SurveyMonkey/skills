@@ -72,18 +72,35 @@ output=$(printf '%s' "$input" | jq -r '
   end
 ')
 
+# grep is fed from a heredoc, never `printf ... | grep -q`. `grep -q` exits at
+# its first match while printf is still writing, printf takes SIGPIPE, and
+# `set -euo pipefail` above then makes the *matched* pipeline non-zero: the
+# `if` takes the false branch and a real notice never fires, silently. It is a
+# scheduling race on a short payload and deterministic once the payload
+# exceeds the pipe buffer, which is why the suite was green over it for so
+# long ([#157](https://github.com/SurveyMonkey/skills/issues/157)). A heredoc
+# has no reader to exit early and no second process to kill.
 github_match=false
 pm_match=false
 
-if printf '%s' "$output" | grep -Eqi 'github found [1-9][0-9]* vulnerabilit'; then
+if grep -Eqi 'github found [1-9][0-9]* vulnerabilit' <<SCAN_INPUT
+$output
+SCAN_INPUT
+then
   github_match=true
 fi
 
-if printf '%s' "$output" | grep -Eq 'https://github\.com/[^/[:space:]]+/[^/[:space:]]+/security/dependabot(/[0-9]+)?'; then
+if grep -Eq 'https://github\.com/[^/[:space:]]+/[^/[:space:]]+/security/dependabot(/[0-9]+)?' <<SCAN_INPUT
+$output
+SCAN_INPUT
+then
   github_match=true
 fi
 
-if printf '%s' "$output" | grep -Eqi '[1-9][0-9]* vulnerabilit(y|ies)'; then
+if grep -Eqi '[1-9][0-9]* vulnerabilit(y|ies)' <<SCAN_INPUT
+$output
+SCAN_INPUT
+then
   pm_match=true
 fi
 
@@ -118,7 +135,10 @@ fi
 # Classic yarn (v1) `audit --json` emits NDJSON (one JSON object per line,
 # not one parseable document) shaped `{"type":"auditAdvisory", ...}`, so it
 # is matched as a literal marker rather than parsed as a whole.
-if [ "$pm_match" = false ] && printf '%s' "$output" | grep -q '"auditAdvisory"'; then
+if [ "$pm_match" = false ] && grep -q '"auditAdvisory"' <<SCAN_INPUT
+$output
+SCAN_INPUT
+then
   pm_match=true
 fi
 
@@ -196,7 +216,10 @@ command_text=$(printf '%s' "$input" | jq -r '
   if (.tool_input | type) == "object" then (.tool_input.command // "") else "" end
 ')
 
-if printf '%s' "$command_text" | grep -Eq "(^|[^[:alnum:]_.-])$PLUGIN_BRANCH_RE"; then
+if grep -Eq "(^|[^[:alnum:]_.-])$PLUGIN_BRANCH_RE" <<SCAN_INPUT
+$command_text
+SCAN_INPUT
+then
   exit 0
 fi
 
@@ -208,7 +231,10 @@ if [ -n "$payload_cwd" ] && [ -d "$payload_cwd" ] && command -v git >/dev/null 2
   # every Bash call.
   current_branch=$(git -C "$payload_cwd" branch --show-current 2>/dev/null || true)
   if [ -n "$current_branch" ] \
-    && printf '%s' "$current_branch" | grep -Eq "^$PLUGIN_BRANCH_RE"; then
+    && grep -Eq "^$PLUGIN_BRANCH_RE" <<SCAN_INPUT
+$current_branch
+SCAN_INPUT
+then
     exit 0
   fi
 fi
