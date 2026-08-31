@@ -1,0 +1,74 @@
+# Derived from the pnpm-optional-parent specimen (a real `pnpm install
+# --lockfile-only` emission, pnpm 10.33.2, lockfileVersion 9.0) by adding a
+# second, real parent line: `jspdf-invoice-template@1.4.4` genuinely declares
+# `jspdf: ^2.3.1` (registry-verified), and `jspdf@2.5.2` genuinely reaches
+# `dompurify` through `optionalDependencies:` (`^2.5.4`), exactly as
+# `jspdf@4.2.1` reaches its 3.x copy. The result is one parent NAME resolved
+# at two majors whose copies each resolve their own major of `dompurify`
+# (2.x and 3.x) with EVERY edge optional — the shape that forces
+# `apply_constraint`'s version qualification (issue #100) to read
+# `optionalDependencies:` edges (issue #160). Entries kept from the specimen
+# are verbatim; added entries are hand-modeled on it, dummy hashes per the
+# suite's hand-authored fixtures. Public names only.
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      jspdf:
+        specifier: 4.2.1
+        version: 4.2.1
+      jspdf-invoice-template:
+        specifier: ^1.4.4
+        version: 1.4.4
+
+packages:
+
+  dompurify@2.5.8:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  dompurify@3.4.14:
+    resolution: {integrity: sha512-dVoH9z+MY+C9IilgGCk3YfFqjLi3fChm2OiKJMzh6axrJ5qwxqWaZamgmHrpv22CN/KdbZJuGEGgfQoL00LTdg==}
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
+  jspdf@2.5.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  jspdf@4.2.1:
+    resolution: {integrity: sha512-YyAXyvnmjTbR4bHQRLzex3CuINCDlQnBqoSYyjJwTP2x9jDLuKDzy7aKUl0hgx3uhcl7xzg32agn5vlie6HIlQ==}
+
+  jspdf-invoice-template@1.4.4:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+snapshots:
+
+  dompurify@2.5.8:
+    optional: true
+
+  dompurify@3.4.14:
+    optional: true
+
+  fflate@0.8.3: {}
+
+  jspdf@2.5.2:
+    dependencies:
+      fflate: 0.8.3
+    optionalDependencies:
+      dompurify: 2.5.8
+
+  jspdf@4.2.1:
+    dependencies:
+      fflate: 0.8.3
+    optionalDependencies:
+      dompurify: 3.4.14
+
+  jspdf-invoice-template@1.4.4:
+    dependencies:
+      jspdf: 2.5.2

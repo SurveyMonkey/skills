@@ -200,6 +200,36 @@ Describe 'node.sh apply_constraint'
       The output should equal '["filelist>minimatch"]'
     End
 
+    # The issue #160 end shape: dompurify's only parent reaches it through
+    # `optionalDependencies:`, an edge the dependencies-only walk discarded,
+    # so `why`/`declared_ranges` answered zero parents and the field agent
+    # had to read the lockfile by hand to name jspdf. This case pins only
+    # the written key's shape — the parent arrives as an argument, and a
+    # single-version parent gets a bare key whether or not the optional
+    # edge was read; the discriminating assertion is the qualified case
+    # below (and the `why`/`declared_ranges` specs).
+    It 'scopes to a parent that reaches the package only through optionalDependencies'
+      use_fixture pnpm-optional-parent
+      When call adapter_jq '.written' apply_constraint dompurify '>=3.4.13 <4' jspdf
+      The status should be success
+      The output should equal '[{"parent":"jspdf","path":["pnpm","overrides","jspdf>dompurify"],"value":">=3.4.13 <4"}]'
+    End
+
+    # The discriminating write: jspdf resolved at two majors, each copy
+    # resolving its own major of dompurify, with EVERY parent->child edge
+    # inside `optionalDependencies:`. Version qualification reads those
+    # edges through the same walk the dependencies-only filter starved, so
+    # on the unfixed code the copy rows are empty, qualification falls back
+    # to the bare `jspdf>dompurify` key, and the bare key collapses the
+    # 2.x sibling line onto the 3.x range — the exact issue #100 hazard the
+    # qualifiers exist for. This spec fails on that code for that reason.
+    It 'version-qualifies a multi-major parent whose every edge is optional'
+      use_fixture pnpm-optional-qualified
+      When call adapter_jq '.written' apply_constraint dompurify '>=3.4.13 <4' jspdf
+      The status should be success
+      The output should equal '[{"parent":"jspdf","path":["pnpm","overrides","jspdf@4.2.1>dompurify"],"value":">=3.4.13 <4"}]'
+    End
+
     # The chain to the verdict: this override state is exactly the
     # pnpm-cross-line-qualified specimen, whose post-install lockfile keeps
     # the sibling lines and passes `validate --baseline` with

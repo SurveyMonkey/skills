@@ -1082,8 +1082,8 @@ npm_parents() {
 
 # Parent -> child resolution edges out of pnpm's `snapshots:` section:
 # `parent<TAB>parent_version<TAB>child_resolved_version`, one row per snapshot
-# whose `dependencies:` block names $1. A field either parser cannot split
-# out is `-`, never a guess.
+# whose `dependencies:` or `optionalDependencies:` block names $1. A field
+# either parser cannot split out is `-`, never a guess.
 #
 # The snapshots record what each dependency *resolved to*, never the specifier
 # it was declared with — so this reader yields no declared range, and nothing
@@ -1207,12 +1207,20 @@ pnpm_scan_rows() {
   ' pnpm-lock.yaml
 }
 
-# Unchanged signature and output: `dependencies:` edges only, three columns.
-# Every existing caller (`pnpm_parents`, `apply_constraint`'s version
-# qualification, `pnpm_copy_rows`) reads exactly this.
+# Three columns per resolution edge, `dependencies:` and
+# `optionalDependencies:` alike. An optional edge is an ordinary declaration
+# a `pnpm.overrides` key can reach — the field-verified `next > sharp` shape
+# — and reading only `dependencies:` returned ZERO parents for a package
+# whose single parent reaches it optionally: the risk score lost its parent
+# chain, and an empty parent set with the package genuinely present is the
+# shape that steers a fix toward the bare global override the scoped keys
+# exist to avoid ([#160](https://github.com/SurveyMonkey/skills/issues/160)).
+# Every caller (`pnpm_parents`, `apply_constraint`'s version qualification,
+# `pnpm_copy_rows`) reads the same widened view; peer classification is
+# unaffected, since `why`'s verdict conjuncts read `pnpm_scan_rows` directly.
 pnpm_edge_rows() {
   pnpm_scan_rows "$1" \
-    | awk -F'\t' '$1 == "edge" && $5 == "dependencies" { print $2"\t"$3"\t"$4 }'
+    | awk -F'\t' '$1 == "edge" && ($5 == "dependencies" || $5 == "optionalDependencies") { print $2"\t"$3"\t"$4 }'
 }
 
 pnpm_parents() {
@@ -1319,11 +1327,12 @@ verb_why() {
     npm)  parents=$(npm_parents "$pkg")  ;;
     pnpm)
       # One lockfile pass answers parents AND the peer_only conjuncts below.
-      # The projection here is exactly `pnpm_parents` (`dependencies:` edges,
+      # The projection here is exactly `pnpm_parents` (`dependencies:` and
+      # `optionalDependencies:` edges — see `pnpm_edge_rows` on issue #160 —
       # parent names, sorted unique), taken off the shared scan.
       scan_rows=$(pnpm_scan_rows "$pkg")
       parents=$(printf '%s\n' "$scan_rows" \
-        | awk -F'\t' '$1 == "edge" && $5 == "dependencies" { print $2 }' \
+        | awk -F'\t' '$1 == "edge" && ($5 == "dependencies" || $5 == "optionalDependencies") { print $2 }' \
         | sort -u | jq -Rs 'split("\n") | map(select(length > 0))')
       ;;
     yarn) parents=$(yarn_parents "$pkg") ;;
