@@ -142,7 +142,9 @@ it is what pins the classification to the same tree the fix agents will branch f
 fetches that branch, reads the lockfile from a short-lived detached worktree at the fetched ref,
 and cleans the worktree up itself, so whatever branch the user happens to have checked out — and
 whatever uncommitted lockfile edits it carries — cannot silently reclassify a group
-(issue #158).
+(issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it as
+blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`, which
+would judge the user's checkout and reintroduce the defect the flag exists to close.
 
 Wherever there is no local checkout yet — org and user scope, and a repo the user named when
 phase 1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation
@@ -381,7 +383,10 @@ For each **distinct repo** named in the approved batch:
    `default_branch`, exactly as phase 2 does at repo scope: the script fetches that branch and
    classifies against a short-lived detached worktree at the fetched ref, so a checkout step 2
    reused — whatever branch it sits on — classifies the same as a fresh clone
-   (issue #158). A group that reclassifies
+   (issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it
+   as blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`,
+   which would judge the user's checkout and reintroduce the defect the flag exists to close.
+   A group that reclassifies
    `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
    approval covered fixing the group, and this discovers the fix does not exist — and reported in
    phase 7 as skipped with the same `requires major version bump` reason and its

@@ -124,7 +124,11 @@
 # `classify_errors[]` (adapter, package, the call's first stderr line),
 # mirroring `check-advisories.sh`'s `adapter_errors[]`: the group still
 # classifies "unknown", but the reply names what broke instead of leaving
-# every unknown group looking identical.
+# every unknown group looking identical. Under --base-ref each entry also
+# carries `base_ref`, because the verbs then run in the detached base-ref
+# tree: a tree-level failure there (the base branch predating the lockfile,
+# say) fails once per package, and without the field every entry reads as a
+# package problem reproducible in the user's own checkout, where it is not.
 #
 # --branch-style flat rewrites every group's `branch_name` from the slash
 # scheme (`fix/dependabot-...`) to the flat one (`fix-dependabot-...`), and
@@ -138,6 +142,14 @@
 
 set -euo pipefail
 
+# Every hard error speaks the {"error": ...} contract through jq, never a
+# printf interpolation: a double quote in a caller-supplied value (--base-ref,
+# --repo-root) or in git's own stderr would otherwise emit invalid JSON at
+# exactly the moment the caller needs to parse the failure (issue #158 review).
+err_json() {
+  jq -nc --arg m "$1" '{error: $m}' >&2
+}
+
 REPO_ROOT=""
 BRANCH_STYLE="slash"
 BASE_REF=""
@@ -150,24 +162,24 @@ while [ $# -gt 0 ]; do
     --branch-style) BRANCH_STYLE="${2:?--branch-style requires a value}"; shift 2 ;;
     --branch-style=*) BRANCH_STYLE="${1#--branch-style=}"; shift ;;
     *)
-      printf '{"error":"Unknown argument: %s"}\n' "$1" >&2
+      err_json "Unknown argument: $1"
       exit 1
       ;;
   esac
 done
 
 if [ -z "$REPO_ROOT" ]; then
-  printf '{"error":"Usage: classify-lines.sh --repo-root <path> < routed-discovery.json"}\n' >&2
+  err_json 'Usage: classify-lines.sh --repo-root <path> [--base-ref origin/<branch>] [--branch-style slash|flat] < routed-discovery.json'
   exit 1
 fi
 if [ ! -d "$REPO_ROOT" ]; then
-  printf '{"error":"--repo-root is not a directory: %s"}\n' "$REPO_ROOT" >&2
+  err_json "--repo-root is not a directory: $REPO_ROOT"
   exit 1
 fi
 case "$BRANCH_STYLE" in
   slash|flat) ;;
   *)
-    printf '{"error":"Unknown branch style: %s (expected slash or flat)"}\n' "$BRANCH_STYLE" >&2
+    err_json "Unknown branch style: $BRANCH_STYLE (expected slash or flat)"
     exit 1
     ;;
 esac
@@ -177,7 +189,7 @@ esac
 case "$BASE_REF" in
   ""|origin/?*) ;;
   *)
-    printf '{"error":"--base-ref must name a remote-tracking ref as origin/<branch>: %s"}\n' "$BASE_REF" >&2
+    err_json "--base-ref must name a remote-tracking ref as origin/<branch>: $BASE_REF"
     exit 1
     ;;
 esac
@@ -218,13 +230,29 @@ CONTRACT_JQ='
 ERR_FILE=$(mktemp)
 BASE_DIR=""
 cleanup() {
-  rm -f "$ERR_FILE"
+  # Every command here tolerates its own failure: this trap runs on the
+  # success path too, and a cleanup hiccup flipping a good run's exit 0 to an
+  # unexplained 1 breaks the contract in the confusing direction.
+  rm -f "$ERR_FILE" || true
   if [ -n "$BASE_DIR" ]; then
     # `worktree remove` drops exactly this script's own registration; never
     # `worktree prune`, which walks every entry in the repository and can
-    # delete a sibling agent's live registration (scripts/CLAUDE.md).
-    git -C "$REPO_ROOT" worktree remove --force "$BASE_DIR/tree" >/dev/null 2>&1 || true
-    rm -rf "$BASE_DIR"
+    # delete a sibling agent's live registration (scripts/CLAUDE.md). When
+    # the remove fails, KEEP the directory: deleting it anyway would orphan
+    # the registration in the user's repository as a path nothing can name
+    # again (the mktemp dir is anonymous), which is the exact state
+    # scripts/CLAUDE.md documents as blocking later worktree adds — so leave
+    # the pair intact and say how to remove it.
+    if git -C "$REPO_ROOT" worktree remove --force "$BASE_DIR/tree" >/dev/null 2>&1; then
+      rm -rf "$BASE_DIR" || true
+    elif [ -e "$BASE_DIR/tree" ]; then
+      printf 'classify-lines.sh: could not remove base-ref worktree %s; remove it with: git -C %s worktree remove --force %s\n' \
+        "$BASE_DIR/tree" "$REPO_ROOT" "$BASE_DIR/tree" >&2 || true
+    else
+      # `worktree add` never ran or failed before creating the tree; there is
+      # no registration to protect, only the empty temp dir.
+      rm -rf "$BASE_DIR" || true
+    fi
   fi
 }
 trap cleanup EXIT
@@ -233,25 +261,45 @@ trap cleanup EXIT
 # without --base-ref, the detached base-ref worktree with it (header).
 ADAPTER_ROOT="$REPO_ROOT"
 if [ -n "$BASE_REF" ]; then
-  if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    printf '{"error":"--base-ref requires --repo-root to be a git repository: %s"}\n' "$REPO_ROOT" >&2
+  # --repo-root must be the repository's own top level, not merely a
+  # directory inside one: `rev-parse --git-dir` succeeds anywhere in a repo,
+  # and accepting a subdirectory would silently retarget the fetch, the
+  # worktree, and every adapter verb at the enclosing repository — judging
+  # against a tree the caller never named, the defect class this flag exists
+  # to close. Both sides resolve through pwd -P so a symlinked path (macOS
+  # /tmp -> /private/tmp) cannot fail a genuine root; a linked worktree's own
+  # root passes, since --show-toplevel answers per worktree.
+  repo_top=$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null) || repo_top=""
+  if [ -z "$repo_top" ]; then
+    err_json "--base-ref requires --repo-root to be a git repository: $REPO_ROOT"
+    exit 1
+  fi
+  if [ "$(cd "$REPO_ROOT" && pwd -P)" != "$(cd "$repo_top" && pwd -P)" ]; then
+    err_json "--base-ref requires --repo-root to be the repository top level, not a subdirectory: $REPO_ROOT (top level: $repo_top)"
     exit 1
   fi
   base_branch="${BASE_REF#origin/}"
-  if ! git -C "$REPO_ROOT" fetch -q origin "$base_branch" 2>"$ERR_FILE"; then
-    printf '{"error":"git fetch for --base-ref %s failed: %s"}\n' \
-      "$BASE_REF" "$(head -n 1 "$ERR_FILE")" >&2
+  # The refspec is explicit and forced, never `fetch origin <branch>` bare: a
+  # narrowed remote.origin.fetch (a --single-branch clone, `git remote
+  # set-branches`) makes the bare form exit 0 while updating only FETCH_HEAD,
+  # so a stale refs/remotes/origin/<branch> from an earlier full fetch would
+  # pass the verify below and classify against stale state reported as fresh.
+  if ! git -C "$REPO_ROOT" fetch -q origin \
+      "+refs/heads/$base_branch:refs/remotes/origin/$base_branch" 2>"$ERR_FILE"; then
+    err_json "git fetch for --base-ref $BASE_REF failed: $(head -n 1 "$ERR_FILE")"
     exit 1
   fi
   if ! git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/$BASE_REF" >/dev/null 2>&1; then
-    printf '{"error":"--base-ref not found after fetch: %s"}\n' "$BASE_REF" >&2
+    err_json "--base-ref not found after fetch: $BASE_REF"
     exit 1
   fi
-  BASE_DIR=$(mktemp -d)
+  BASE_DIR=$(mktemp -d) || {
+    err_json '--base-ref could not create a temporary directory for the detached worktree (mktemp -d failed)'
+    exit 1
+  }
   if ! git -C "$REPO_ROOT" worktree add -q --detach "$BASE_DIR/tree" \
       "refs/remotes/$BASE_REF" 2>"$ERR_FILE"; then
-    printf '{"error":"git worktree add for %s failed: %s"}\n' \
-      "$BASE_REF" "$(head -n 1 "$ERR_FILE")" >&2
+    err_json "git worktree add for $BASE_REF failed: $(head -n 1 "$ERR_FILE")"
     exit 1
   fi
   ADAPTER_ROOT="$BASE_DIR/tree"
@@ -259,7 +307,7 @@ fi
 
 GROUP_ITEMS=$(printf '%s' "$input" \
   | jq -c '(.actionable // []) | .[]' 2>"$ERR_FILE") || {
-  printf '{"error":"Failed to read actionable groups: %s"}\n' "$(cat "$ERR_FILE")" >&2
+  err_json "Failed to read actionable groups: $(cat "$ERR_FILE")"
   exit 1
 }
 
@@ -271,12 +319,11 @@ GROUP_ITEMS=$(printf '%s' "$input" \
 # only names one of them.
 REPOS=$(printf '%s' "$input" \
   | jq -c '[(.actionable // [])[].repo // empty] | unique' 2>"$ERR_FILE") || {
-  printf '{"error":"Failed to read repo scope from actionable groups: %s"}\n' "$(cat "$ERR_FILE")" >&2
+  err_json "Failed to read repo scope from actionable groups: $(cat "$ERR_FILE")"
   exit 1
 }
 if [ "$(printf '%s' "$REPOS" | jq 'length')" -gt 1 ]; then
-  printf '{"error":"classify-lines.sh: actionable groups span more than one repo (%s); pass one repo'\''s groups per invocation"}\n' \
-    "$(printf '%s' "$REPOS" | jq -r 'join(", ")')" >&2
+  err_json "classify-lines.sh: actionable groups span more than one repo ($(printf '%s' "$REPOS" | jq -r 'join(", ")')); pass one repo's groups per invocation"
   exit 1
 fi
 
@@ -289,7 +336,7 @@ PAIRS=$(printf '%s' "$input" | jq -r '
   | map({a: (.adapter_path // ""), p: (.package // "")})
   | map(select(.a != "" and .p != ""))
   | unique | .[] | [.a, .p] | @tsv' 2>"$ERR_FILE") || {
-  printf '{"error":"Failed to read adapter routing from groups: %s"}\n' "$(cat "$ERR_FILE")" >&2
+  err_json "Failed to read adapter routing from groups: $(cat "$ERR_FILE")"
   exit 1
 }
 
@@ -326,7 +373,9 @@ if [ -n "$PAIRS" ]; then
     if [ "$(printf '%s' "$entry" | jq -r '.ok')" != "true" ]; then
       CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
         --arg a "$adapter" --arg p "$pkg" --arg e "$(head -n 1 "$ADAPTER_ERR" 2>/dev/null)" \
-        '. + [{adapter: $a, package: $p, error: $e}]')
+        --arg br "$BASE_REF" \
+        '. + [{adapter: $a, package: $p, error: $e}
+              + (if $br != "" then {base_ref: $br} else {} end)]')
     fi
     rm -f "$ADAPTER_ERR"
     CACHE=$(printf '%s' "$CACHE" | jq -c --argjson e "$entry" '. + [$e]')
@@ -447,7 +496,9 @@ if [ -n "$GROUP_ITEMS" ]; then
             status="unknown"
             CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
               --arg a "$adapter" --arg p "$pkg" --arg e "$(head -n 1 "$CMP_ERR" 2>/dev/null)" \
-              '. + [{adapter: $a, package: $p, error: $e}]')
+              --arg br "$BASE_REF" \
+              '. + [{adapter: $a, package: $p, error: $e}
+                    + (if $br != "" then {base_ref: $br} else {} end)]')
             ;;
         esac
         rm -f "$CMP_ERR"
@@ -470,8 +521,10 @@ if [ -n "$GROUP_ITEMS" ]; then
         CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
           --arg a "$adapter" --arg p "$pkg" \
           --arg e "$(printf '%s' "$DETECT_ENTRY" | jq -r '.err // ""')" \
+          --arg br "$BASE_REF" \
           '. + [{adapter: $a, package: $p,
-                 error: (if $e == "" then "detect failed or broke its contract; collision check skipped" else $e end)}]')
+                 error: (if $e == "" then "detect failed or broke its contract; collision check skipped" else $e end)}
+                + (if $br != "" then {base_ref: $br} else {} end)]')
       else
         while IFS= read -r m; do
           [ -n "$m" ] || continue
@@ -481,8 +534,10 @@ if [ -n "$GROUP_ITEMS" ]; then
             CLASSIFY_ERRORS=$(printf '%s' "$CLASSIFY_ERRORS" | jq -c \
               --arg a "$adapter" --arg p "$pkg" --arg m "$m" \
               --arg e "$(printf '%s' "$DR_ENTRY" | jq -r '.err // ""')" \
+              --arg br "$BASE_REF" \
               '. + [{adapter: $a, package: $p,
-                     error: (if $e == "" then "declared_ranges --line \($m) failed or broke its contract; collision check skipped" else $e end)}]')
+                     error: (if $e == "" then "declared_ranges --line \($m) failed or broke its contract; collision check skipped" else $e end)}
+                    + (if $br != "" then {base_ref: $br} else {} end)]')
             break
           fi
           rows=$(printf '%s' "$rows" | jq -c --argjson e "$DR_ENTRY" '. + [$e]')
@@ -565,7 +620,7 @@ annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" \
         else . end)
     else . end
   ' 2>"$ERR_FILE") || {
-  printf '{"error":"Failed to classify discovery JSON: %s"}\n' "$(cat "$ERR_FILE")" >&2
+  err_json "Failed to classify discovery JSON: $(cat "$ERR_FILE")"
   exit 1
 }
 printf '%s\n' "$annotated"
