@@ -94,6 +94,12 @@ case "$verb" in
         printf '{"pm":"npm","package":"duplo","present":true,"count":1,"versions":[{"version":"1.0.0"}],"lockfile_entries":10}\n' ;;
       vbuild)
         printf '{"pm":"npm","package":"vbuild","present":true,"count":1,"versions":[{"version":"v6.2.0+build.99"}],"lockfile_entries":10}\n' ;;
+      treeread)
+        # The resolved version comes from the tree the verb runs in, exactly
+        # like a real lockfile read: which file answers is which tree was
+        # consulted, and that is the whole --base-ref question (issue #158).
+        tv=$(cat ./resolved-version 2>/dev/null || printf 'absent')
+        printf '{"pm":"npm","package":"treeread","present":true,"count":1,"versions":[{"version":"%s","path":"node_modules/treeread"}],"lockfile_entries":10}\n' "$tv" ;;
       duped)
         printf '{"pm":"npm","package":"duped","present":true,"count":2,"versions":[{"version":"1.5.0"},{"version":"2.5.0"}],"lockfile_entries":10}\n' ;;
       sep-ok)
@@ -614,6 +620,115 @@ STUB_EOF
     End
   End
 
+  # Issue #158: which tree the classification is judged against. The stub's
+  # `treeread` package resolves whatever ./resolved-version says in the tree
+  # the adapter verb runs from, exactly like a real lockfile read, so the
+  # verdict names the consulted tree: the checkout's feature branch says
+  # 1.9.0 (line 1 resolved, dispatch) while origin/main says 0.2.5 (major 0,
+  # requires_major_bump, withdraw). Every assertion runs through the routing,
+  # like the issue #101 examples, because the hazard is a group silently
+  # withdrawn or dispatched off the wrong tree. The origin is a local bare
+  # repository, so the script's fetch stays off the network.
+  Describe 'judging against --base-ref origin/<default_branch> (issue #158)'
+    base_ref_repo() {
+      TEST_DIR=$(mktemp -d)
+      git init -q --bare "$TEST_DIR/origin.git"
+      git -C "$TEST_DIR/origin.git" symbolic-ref HEAD refs/heads/main
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/checkout" 2>/dev/null
+      RR="$TEST_DIR/checkout"
+      git -C "$RR" config user.email 'spec@example.invalid'
+      git -C "$RR" config user.name 'spec'
+      printf '0.2.5\n' > "$RR/resolved-version"
+      git -C "$RR" add resolved-version
+      git -C "$RR" commit -q -m base
+      git -C "$RR" push -q -u origin HEAD:main
+      git -C "$RR" checkout -q -b feature
+      printf '1.9.0\n' > "$RR/resolved-version"
+      git -C "$RR" commit -q -am feature
+    }
+
+    # A push from a second clone, so the first checkout's remote-tracking
+    # origin/main goes stale: only the script's own fetch can see it.
+    advance_origin() {
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/other" 2>/dev/null
+      git -C "$TEST_DIR/other" config user.email 'spec@example.invalid'
+      git -C "$TEST_DIR/other" config user.name 'spec'
+      printf '3.0.0\n' > "$TEST_DIR/other/resolved-version"
+      git -C "$TEST_DIR/other" commit -q -am bump
+      git -C "$TEST_DIR/other" push -q origin HEAD:main
+    }
+
+    Before 'base_ref_repo'
+    After 'cleanup_fixture'
+
+    classify_at() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(envelope treeread 1 \
+        | "$COMMON/classify-lines.sh" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    It 'withdraws the group per origin/main while the checkout sits on a divergent branch'
+      When call classify_at '{actionable_count: (.actionable | length), moved: [.skipped[] | select(.package == "treeread") | {reason, resolved_majors}]}' --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '{"actionable_count":0,"moved":[{"reason":"requires major version bump","resolved_majors":["0"]}]}'
+    End
+
+    # The regression pin for the flag's absence: the bare invocation still
+    # reads the checkout as-is, which is what keeps the plain-directory stub
+    # setup above (and any caller without a git repo) working.
+    It 'reads the checkout as-is without --base-ref'
+      When call classify_at '[.actionable[] | {line_status, resolved_majors}]' --repo-root "$RR"
+      The status should be success
+      The output should equal '[{"line_status":"resolved","resolved_majors":["1"]}]'
+    End
+
+    It 'fetches before judging, so a stale remote-tracking ref cannot answer'
+      advance_origin
+      When call classify_at '[.actionable[].line_status]' --repo-root "$RR" --base-ref=origin/main
+      The status should be success
+      The output should equal '["line_absent"]'
+    End
+
+    worktrees_after_run() {
+      envelope treeread 1 \
+        | "$COMMON/classify-lines.sh" --repo-root "$RR" --base-ref origin/main >/dev/null
+      git -C "$RR" worktree list --porcelain | grep -c '^worktree '
+    }
+
+    It 'removes its detached worktree on exit'
+      When call worktrees_after_run
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'hard-errors when --base-ref names a repo-root outside any git repository'
+      plain_dir=$(mktemp -d)
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$plain_dir' --base-ref origin/main"
+      The status should not equal 0
+      The stderr should include 'git repository'
+      rm -rf "$plain_dir"
+    End
+
+    It 'hard-errors on a branch origin does not have'
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$RR' --base-ref origin/nope"
+      The status should not equal 0
+      The stderr should include '"error"'
+      The stderr should include 'origin/nope'
+    End
+
+    It 'rejects a base ref without the origin/ prefix'
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$RR' --base-ref main"
+      The status should not equal 0
+      The stderr should include 'origin/<branch>'
+    End
+  End
+
   # The orchestration halves of the fix: the sentences SKILL.md acts on,
   # pinned the way spec/audit_pins_rules_spec.sh pins agent prose.
   Describe 'the SKILL.md prose that consumes the classification'
@@ -623,6 +738,14 @@ STUB_EOF
 
     It 'pipes phase 2 discovery through classify-lines.sh at repo scope'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root>'
+      The status should be success
+      The output should equal '2'
+    End
+
+    # Issue #158: both classify invocations carry the base ref, or the
+    # orchestration quietly falls back to judging the user's checkout.
+    It 'pins classification to origin/<default_branch> at both venues'
+      When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>'
       The status should be success
       The output should equal '2'
     End

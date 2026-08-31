@@ -4,12 +4,26 @@
 #
 # Usage:
 #   ... | select-adapter.sh --from-discovery | classify-lines.sh --repo-root <path> \
-#         [--branch-style slash|flat]
+#         [--base-ref origin/<branch>] [--branch-style slash|flat]
 #
 # Input:  the routed discovery JSON select-adapter.sh emits on stdout
 #         ({actionable, skipped, ...}); actionable groups carry `adapter_path`.
 # Output: the same envelope with every actionable group annotated, and groups
 #         whose only possible fix crosses a major moved into `skipped`.
+#
+# --base-ref names the tree the adapter verbs are judged against. Without it
+# they read whatever is checked out at --repo-root, which is only correct when
+# that checkout happens to sit clean on the default branch; a feature branch
+# or a dirty lockfile silently reclassifies groups against a tree no fix agent
+# will ever see (issue #158). With `--base-ref origin/<branch>` (the `origin/`
+# prefix is required), this script fetches that branch, adds a short-lived
+# detached worktree at the fetched ref, runs every adapter verb from that
+# tree, and removes the worktree on exit — the same base the fix and audit
+# agents pin their own worktrees to. The classification then matches the tree
+# the dispatched work will actually branch from, whatever the user has checked
+# out. The worktree is the deliberate trade against teaching every adapter to
+# read lockfile blobs from a named ref; if the per-run add/remove overhead
+# ever matters, blob reads are the direction to revisit.
 #
 # Discovery groups an alert by the major of its *patched* version, which is
 # where the fix lands, not where the repository is. When every resolved copy
@@ -126,10 +140,13 @@ set -euo pipefail
 
 REPO_ROOT=""
 BRANCH_STYLE="slash"
+BASE_REF=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="${2:?--repo-root requires a value}"; shift 2 ;;
+    --base-ref) BASE_REF="${2:?--base-ref requires a value}"; shift 2 ;;
+    --base-ref=*) BASE_REF="${1#--base-ref=}"; shift ;;
     --branch-style) BRANCH_STYLE="${2:?--branch-style requires a value}"; shift 2 ;;
     --branch-style=*) BRANCH_STYLE="${1#--branch-style=}"; shift ;;
     *)
@@ -151,6 +168,16 @@ case "$BRANCH_STYLE" in
   slash|flat) ;;
   *)
     printf '{"error":"Unknown branch style: %s (expected slash or flat)"}\n' "$BRANCH_STYLE" >&2
+    exit 1
+    ;;
+esac
+# The `origin/` prefix is required, not conventional: the fetch below derives
+# the branch to refresh from it, and a local branch name here would classify
+# against a ref the fetch never updated.
+case "$BASE_REF" in
+  ""|origin/?*) ;;
+  *)
+    printf '{"error":"--base-ref must name a remote-tracking ref as origin/<branch>: %s"}\n' "$BASE_REF" >&2
     exit 1
     ;;
 esac
@@ -189,7 +216,46 @@ CONTRACT_JQ='
 # (`"actionable":"oops"`) fails inside jq, and unwrapped that leaves raw jq
 # noise where the contract requires a non-zero exit carrying {"error": ...}.
 ERR_FILE=$(mktemp)
-trap 'rm -f "$ERR_FILE"' EXIT
+BASE_DIR=""
+cleanup() {
+  rm -f "$ERR_FILE"
+  if [ -n "$BASE_DIR" ]; then
+    # `worktree remove` drops exactly this script's own registration; never
+    # `worktree prune`, which walks every entry in the repository and can
+    # delete a sibling agent's live registration (scripts/CLAUDE.md).
+    git -C "$REPO_ROOT" worktree remove --force "$BASE_DIR/tree" >/dev/null 2>&1 || true
+    rm -rf "$BASE_DIR"
+  fi
+}
+trap cleanup EXIT
+
+# ADAPTER_ROOT is the tree every adapter verb runs from: the checkout itself
+# without --base-ref, the detached base-ref worktree with it (header).
+ADAPTER_ROOT="$REPO_ROOT"
+if [ -n "$BASE_REF" ]; then
+  if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    printf '{"error":"--base-ref requires --repo-root to be a git repository: %s"}\n' "$REPO_ROOT" >&2
+    exit 1
+  fi
+  base_branch="${BASE_REF#origin/}"
+  if ! git -C "$REPO_ROOT" fetch -q origin "$base_branch" 2>"$ERR_FILE"; then
+    printf '{"error":"git fetch for --base-ref %s failed: %s"}\n' \
+      "$BASE_REF" "$(head -n 1 "$ERR_FILE")" >&2
+    exit 1
+  fi
+  if ! git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/$BASE_REF" >/dev/null 2>&1; then
+    printf '{"error":"--base-ref not found after fetch: %s"}\n' "$BASE_REF" >&2
+    exit 1
+  fi
+  BASE_DIR=$(mktemp -d)
+  if ! git -C "$REPO_ROOT" worktree add -q --detach "$BASE_DIR/tree" \
+      "refs/remotes/$BASE_REF" 2>"$ERR_FILE"; then
+    printf '{"error":"git worktree add for %s failed: %s"}\n' \
+      "$BASE_REF" "$(head -n 1 "$ERR_FILE")" >&2
+    exit 1
+  fi
+  ADAPTER_ROOT="$BASE_DIR/tree"
+fi
 
 GROUP_ITEMS=$(printf '%s' "$input" \
   | jq -c '(.actionable // []) | .[]' 2>"$ERR_FILE") || {
@@ -234,7 +300,7 @@ if [ -n "$PAIRS" ]; then
     [ -n "$adapter" ] || continue
     reply=""
     ADAPTER_ERR=$(mktemp)
-    if reply=$( (cd "$REPO_ROOT" && "$adapter" resolved_versions "$pkg") 2>"$ADAPTER_ERR" ) \
+    if reply=$( (cd "$ADAPTER_ROOT" && "$adapter" resolved_versions "$pkg") 2>"$ADAPTER_ERR" ) \
        && [ -n "$reply" ]; then
       # `-s` (slurp) plus a length check is deliberate: an adapter reply of
       # two JSON documents on one exit-0 stdout (a stray extra print, a
@@ -287,7 +353,7 @@ set_detect_entry() {
     return 0
   fi
   _dl_err_file=$(mktemp)
-  _dl_loc=$( (cd "$REPO_ROOT" && "$_dl_adapter" detect) 2>"$_dl_err_file" \
+  _dl_loc=$( (cd "$ADAPTER_ROOT" && "$_dl_adapter" detect) 2>"$_dl_err_file" \
     | jq -r -s 'if (length == 1 and (.[0] | type == "object")
                     and ((.[0].override_location | type) == "string"))
                 then .[0].override_location else "" end' 2>/dev/null) \
@@ -315,7 +381,7 @@ set_dr_entry() {
     return 0
   fi
   _dr_err_file=$(mktemp)
-  _dr_reply=$( (cd "$REPO_ROOT" \
+  _dr_reply=$( (cd "$ADAPTER_ROOT" \
     && "$_dr_adapter" declared_ranges --line "$_dr_line" "$_dr_pkg") \
     2>"$_dr_err_file" ) || _dr_reply=""
   DR_ENTRY=$(printf '%s' "$_dr_reply" | jq -c -s --arg a "$_dr_adapter" \
