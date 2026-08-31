@@ -449,6 +449,72 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
       The stderr should include 'jq is required'
     End
   End
+
+  # A scoped package name carries a `/`, and the worktree path template
+  # interpolates it (issue #161). Sanitized as the template now says, with
+  # every `/` in <package> replaced by `-`, the group is one flat directory
+  # this script can name. Interpolated verbatim, the `/` becomes a directory
+  # separator, and the field run that surfaced this reaped `left_behind: []`
+  # in two repositories while leaving an empty `fix-dependabot-@scope/` behind
+  # in each. Both halves are asserted below, because only the pair shows the
+  # sanitization is what does the work: the script's own behavior is identical
+  # and correct in both.
+  Describe 'a scoped package name in the worktree path (issue #161)'
+    SCOPED_BRANCH='fix/dependabot-@example-scope/example-pkg-2x'
+
+    # The reap's own verdict, then everything the caller left under
+    # `.claude/worktrees/`: the consuming rule is the orchestrator's summary,
+    # which is built from `left_behind` and reports a clean sweep when it is
+    # empty, so the pair of lines is the hazard itself — a clean verdict
+    # printed above a residue the verdict never named. A failed reap returns
+    # its own status before the survey, so `The status should be success`
+    # asserts the reap, not the `printf`.
+    reap_and_survey() {
+      common_jq reap-agent-artifacts.sh '{l: .left_behind, e: .errors}' \
+        --repo-root "$REPO" --branch "$SCOPED_BRANCH" --work "$1" || return $?
+      find "$REPO/.claude/worktrees" -mindepth 1 | sed "s|^$REPO/.claude/worktrees/||" | sort
+      printf 'end\n'
+    }
+
+    scoped_group() {
+      make_repo
+      SCOPED_WORK="$REPO/.claude/worktrees/$1"
+      git -C "$REPO" worktree add -q "$SCOPED_WORK/fix" -b "$SCOPED_BRANCH" origin/main >/dev/null 2>&1
+      git -C "$SCOPED_WORK/fix" commit -q --allow-empty -m 'fix' >/dev/null 2>&1
+      git -C "$SCOPED_WORK/fix" push -q -u origin "$SCOPED_BRANCH" >/dev/null 2>&1
+    }
+
+    It 'reports a clean reap and leaves nothing under .claude/worktrees when the path is sanitized'
+      scoped_group 'fix-dependabot-@example-scope-example-pkg-2x'
+      When call reap_and_survey "$SCOPED_WORK"
+      The status should be success
+      The output should equal '{"l":[],"e":[]}
+end'
+    End
+
+    It 'still deletes the branch, whose own slash is never sanitized'
+      scoped_group 'fix-dependabot-@example-scope-example-pkg-2x'
+      When call common_jq reap-agent-artifacts.sh \
+        '{b: .branch_ref.action, r: .branch_ref.reason, l: .left_behind, e: .errors}' \
+        --repo-root "$REPO" --branch "$SCOPED_BRANCH" --work "$SCOPED_WORK"
+      The status should be success
+      The output should equal '{"b":"deleted","r":"tip-on-origin","l":[],"e":[]}'
+    End
+
+    # The defect itself, reproduced against the same script: handed the
+    # unsanitized path, it removes the leaf it was given, reports a clean
+    # sweep, and the interposed scope directory survives unnamed. This is not
+    # dead code — it is what the caller does when it forgets the replacement,
+    # and the reap cannot detect it.
+    It 'reports the same clean sweep over an interposed directory when the path is not sanitized'
+      scoped_group 'fix-dependabot-@example-scope/example-pkg-2x'
+      When call reap_and_survey "$SCOPED_WORK"
+      The status should be success
+      The output should equal '{"l":[],"e":[]}
+fix-dependabot-@example-scope
+end'
+    End
+  End
 End
 
 # The script is only half of the fix. Nothing executable decides *when* it runs
@@ -480,6 +546,94 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     It 'keeps the allowed-tools list accurate'
       When call rule_in "$SKILL" 'allowed-tools:.*reap-agent-artifacts.sh'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The sanitized path template (issue #161). Nothing computes this path:
+    # the fix agent builds it from its own prose and the orchestrator rebuilds
+    # it from this step's, so the two sentences ARE the implementation and a
+    # divergence between them is the defect returning. Both files are pinned
+    # for every clause, in this one place, so neither can be edited alone.
+    # The template's own token carries the rule: every path site writes
+    # `<package_path>`, defined as `<package>` with every `/` replaced by
+    # `-`, so a site that copies the template cannot interpolate the raw name.
+    It 'defines <package_path> in the phase 6 step and again in the phase 7 rebuild'
+      When call phrase_in "$SKILL" '.<package_path>. is .<package>. with every ./. replaced by .-.'
+      The status should be success
+      The output should equal '2'
+    End
+
+    It 'defines <package_path> the same way in the agent workspace definition'
+      When call phrase_in "$AGENT" '.<package_path>. is .<package>. with every ./. replaced by .-.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Every path template site uses the token; the raw name never appears in
+    # a worktree path. The counts are the fence, the phase 6 rebuild sentence,
+    # and the phase 7 rebuild in SKILL.md, and the workspace definition in the
+    # agent.
+    It 'writes the token into every worktree path template in SKILL.md'
+      When call phrase_in "$SKILL" 'fix-dependabot-<package_path>-<major_line>x'
+      The status should be success
+      The output should equal '3'
+    End
+
+    It 'writes the token into the agent workspace template'
+      When call phrase_in "$AGENT" 'fix-dependabot-<package_path>-<major_line>x'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never interpolates the raw package name into a worktree path in either document'
+      raw_path_sites() {
+        grep -c 'worktrees/fix-dependabot-<package>' "$SKILL" "$AGENT" | awk -F: '{ s += $NF } END { print s }'
+      }
+      When call raw_path_sites
+      The status should be success
+      The output should equal '0'
+    End
+
+    # The worked example, identical in both, so a reader who skims the clause
+    # still cannot build the two-level path.
+    It 'works the scoped example the same way in both documents'
+      When call phrase_in "$SKILL" 'fix-dependabot-@scope-pkg-2x'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'works that scoped example in the agent too'
+      When call phrase_in "$AGENT" 'fix-dependabot-@scope-pkg-2x'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # And the hazard named, in both: the residue is silent precisely because
+    # the reap is handed the leaf and reports honestly on it.
+    It 'names the interposed directory the unsanitized path leaves behind'
+      When call phrase_in "$SKILL" 'interposed .fix-dependabot-@scope/. directory'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names that interposed directory in the agent too'
+      When call phrase_in "$AGENT" 'interposed .fix-dependabot-@scope/. directory'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The half that must NOT change with it. A branch name carries the slash
+    # verbatim in either spelling, and a run that "fixed" it to match the path
+    # would rename branches nothing else in the flow expects.
+    It 'keeps branch_name out of the sanitization in SKILL.md'
+      When call phrase_in "$SKILL" 'is passed through untouched'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps branch_name out of the sanitization in the agent'
+      When call phrase_in "$AGENT" 'The sanitization is the \*\*path.s alone\*\*'
       The status should be success
       The output should equal '1'
     End
