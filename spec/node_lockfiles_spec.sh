@@ -757,9 +757,10 @@ Describe 'node.sh why'
 
   # Regression on PR #103's predecessor (issue #100): `pnpm_edge_rows`'s
   # output and every existing caller's reading of it (`parents`,
-  # `relationship`) must be byte-for-byte unchanged now that the same scan
-  # also feeds the peer_only conjuncts. lodash here has an ordinary
-  # non-suffixed dependencies: edge, so it is not peer-only.
+  # `relationship`) must be byte-for-byte unchanged for `dependencies:`
+  # edges now that the same scan also feeds the peer_only conjuncts. lodash
+  # here has an ordinary non-suffixed dependencies: edge, so it is not
+  # peer-only.
   It "does not regress PR 3's dependency-edge reader (#100)"
     use_fixture pnpm-v9
     When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why lodash
@@ -777,11 +778,14 @@ Describe 'node.sh why'
   # (optional peer, optionalDependencies:). Required peers order first, and
   # the optional one is repeated in optional_peer_parents so remedy prose
   # never steers a human at a parent that merely tolerates the package.
+  # Since issue #160 the parent walk reads optionalDependencies: edges too,
+  # so @vitest/mocker's suffixed optional edge counts in `parents` exactly
+  # as @vitejs/plugin-react's suffixed dependencies: edge always has.
   It 'classifies a peer-auto-installed package from its suffixed-key edges'
     use_fixture pnpm-peer-only
     When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why vite
     The status should be success
-    The output should equal '{"relationship":"transitive","parents":["@vitejs/plugin-react"],"peer_only":true,"peer_parents":["@vitejs/plugin-react","@vitest/mocker"],"optional_peer_parents":["@vitest/mocker"]}'
+    The output should equal '{"relationship":"transitive","parents":["@vitejs/plugin-react","@vitest/mocker"],"peer_only":true,"peer_parents":["@vitejs/plugin-react","@vitest/mocker"],"optional_peer_parents":["@vitest/mocker"]}'
   End
 
   # Multi-peer and nested suffixes: next's key is
@@ -801,12 +805,29 @@ Describe 'node.sh why'
   # a field-test PR): next's snapshot reaches sharp through
   # an ordinary `optionalDependencies:` edge and next's key carries no
   # `(sharp@`, so an override CAN reach the copy. One such edge defeats
-  # peer_only — this subsumes the old optional-edge veto.
+  # peer_only — this subsumes the old optional-edge veto. Since issue #160
+  # that reachable copy's parent is also REPORTED: `parents` names next,
+  # the exact parent a scoped override key needs, where the
+  # dependencies-only walk answered [] for a package it just called
+  # reachable.
   It 'never classifies a package reached by a non-suffixed optionalDependencies edge'
     use_fixture pnpm-peer-only
     When call adapter_jq '{relationship, parents, peer_only, peer_parents}' why sharp
     The status should be success
-    The output should equal '{"relationship":"transitive","parents":[],"peer_only":false,"peer_parents":[]}'
+    The output should equal '{"relationship":"transitive","parents":["next"],"peer_only":false,"peer_parents":[]}'
+  End
+
+  # The issue #160 specimen: dompurify's ONLY route into the tree is
+  # jspdf's plain `optionalDependencies:` edge. The dependencies-only walk
+  # returned zero parents for it, the risk score lost the whole parent
+  # chain (`--declared-range none`), and an empty parent set with the
+  # package genuinely present is the shape that steers a fix toward the
+  # bare global override the scoped keys exist to avoid.
+  It 'reads a parent that reaches the package only through optionalDependencies'
+    use_fixture pnpm-optional-parent
+    When call adapter_jq '{relationship, parents, peer_only, peer_parents, optional_peer_parents}' why dompurify
+    The status should be success
+    The output should equal '{"relationship":"transitive","parents":["jspdf"],"peer_only":false,"peer_parents":[],"optional_peer_parents":[]}'
   End
 
   # Same conjunct, scoped-name variant: `@babel/core` IS peer-instantiated by

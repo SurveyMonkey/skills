@@ -1,0 +1,45 @@
+# Regenerated from a real `pnpm install --lockfile-only` run (pnpm 10.33.2,
+# lockfileVersion 9.0) and trimmed to the principal entries; every kept entry
+# is verbatim pnpm emission. The issue #160 specimen: `dompurify` is reached
+# exactly once, through `jspdf`'s `optionalDependencies:` block — a plain,
+# non-suffixed edge no importer duplicates. The parent walk read only
+# `dependencies:` edges, so `why` and `declared_ranges` answered zero parents
+# for a package that demonstrably has one, and `apply_constraint` had no key
+# to write ([#160](https://github.com/SurveyMonkey/skills/issues/160)).
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      jspdf:
+        specifier: 4.2.1
+        version: 4.2.1
+
+packages:
+
+  dompurify@3.4.14:
+    resolution: {integrity: sha512-dVoH9z+MY+C9IilgGCk3YfFqjLi3fChm2OiKJMzh6axrJ5qwxqWaZamgmHrpv22CN/KdbZJuGEGgfQoL00LTdg==}
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
+  jspdf@4.2.1:
+    resolution: {integrity: sha512-YyAXyvnmjTbR4bHQRLzex3CuINCDlQnBqoSYyjJwTP2x9jDLuKDzy7aKUl0hgx3uhcl7xzg32agn5vlie6HIlQ==}
+
+snapshots:
+
+  dompurify@3.4.14:
+    optional: true
+
+  fflate@0.8.3: {}
+
+  jspdf@4.2.1:
+    dependencies:
+      fflate: 0.8.3
+    optionalDependencies:
+      dompurify: 3.4.14

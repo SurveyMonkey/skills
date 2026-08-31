@@ -647,6 +647,30 @@ Describe 'node.sh declared_ranges --line (pnpm, lockfile snapshots)'
     The status should be success
     The output should equal '{"root_range":"^10.2.5","parents_unreadable":["@ts-morph/common"],"parents_other_lines":["filelist@1.0.4","glob@7.2.3"]}'
   End
+
+  # The issue #160 specimen: dompurify is reached ONLY through jspdf's
+  # `optionalDependencies:` edge, which the dependencies-only walk skipped —
+  # zero parents, so `apply_constraint` had no key to write. The parent is
+  # now filed exactly where an on-line pnpm copy with no manifest belongs:
+  # `parents_unreadable` (the snapshots record what resolved, never the
+  # declared specifier), NOT absent.
+  It 'classifies an optionalDependencies-only parent on its line'
+    use_fixture pnpm-optional-parent
+    When call adapter_jq '{ranges, parents_read, parents_unreadable, parents_other_lines, parents_without_range}' \
+      declared_ranges --line 3 dompurify
+    The status should be success
+    The output should equal '{"ranges":[],"parents_read":[],"parents_unreadable":["jspdf"],"parents_other_lines":[],"parents_without_range":[]}'
+  End
+
+  # The same edge classifies AWAY from a line the copy does not serve, named
+  # with the parent's own version like every other off-line pnpm copy.
+  It 'files an optionalDependencies-only parent off-line by its own version'
+    use_fixture pnpm-optional-parent
+    When call adapter_jq '{parents_unreadable, parents_other_lines}' \
+      declared_ranges --line 2 dompurify
+    The status should be success
+    The output should equal '{"parents_unreadable":[],"parents_other_lines":["jspdf@4.2.1"]}'
+  End
 End
 
 # Peer-variant snapshot keys: one parent VERSION, several edges. pnpm keys

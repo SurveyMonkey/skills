@@ -1,0 +1,7 @@
+{
+  "name": "demo-pnpm-optional-parent",
+  "packageManager": "pnpm@10.33.2",
+  "dependencies": {
+    "jspdf": "4.2.1"
+  }
+}

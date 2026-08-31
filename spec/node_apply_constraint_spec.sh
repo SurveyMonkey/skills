@@ -200,6 +200,19 @@ Describe 'node.sh apply_constraint'
       The output should equal '["filelist>minimatch"]'
     End
 
+    # The issue #160 chain to the write: dompurify's only parent reaches it
+    # through `optionalDependencies:`, an edge the dependencies-only walk
+    # discarded, so `why`/`declared_ranges` answered zero parents and the
+    # field agent had to read the lockfile by hand to name jspdf. With the
+    # optional edge readable, the single-version parent gets the ordinary
+    # bare scoped key.
+    It 'scopes to a parent that reaches the package only through optionalDependencies'
+      use_fixture pnpm-optional-parent
+      When call adapter_jq '.written' apply_constraint dompurify '>=3.4.13 <4' jspdf
+      The status should be success
+      The output should equal '[{"parent":"jspdf","path":["pnpm","overrides","jspdf>dompurify"],"value":">=3.4.13 <4"}]'
+    End
+
     # The chain to the verdict: this override state is exactly the
     # pnpm-cross-line-qualified specimen, whose post-install lockfile keeps
     # the sibling lines and passes `validate --baseline` with
