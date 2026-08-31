@@ -32,6 +32,52 @@ Describe 'node.sh detect'
     The output should equal '{"pm":"npm","override_location":"overrides","override_syntax":"nested"}'
   End
 
+  # Where the live pnpm override block sits (issue #159): pnpm 11 no longer
+  # reads package.json's `pnpm` field, so an override written there is
+  # silently inert and validate fail-closes on the adapter's own write. A
+  # pre-existing workspace block wins at any major — it is where the repo
+  # demonstrably keeps its live overrides — and a pnpm 11 pin routes there
+  # even before the file exists. yarn and npm always answer package.json.
+  Describe 'override_file'
+    Parameters
+      'a pnpm 11 repo with a workspace overrides block' pnpm11-workspace-overrides 'pnpm-workspace.yaml'
+      'a pnpm 10 repo with no workspace file'           pnpm-cross-line            'package.json'
+      'a yarn repo'                                     yarn-berry                 'package.json'
+      'an npm repo'                                     npm-v3                     'package.json'
+    End
+
+    It "names the live override file for $1"
+      use_fixture "$2"
+      When call adapter_jq '.override_file' detect
+      The status should be success
+      The output should equal "\"$3\""
+    End
+
+    It 'routes a pnpm 11 repo without a workspace file to pnpm-workspace.yaml'
+      use_fixture pnpm-cross-line
+      jq '.packageManager = "pnpm@11.9.0"' package.json > p.json && mv p.json package.json
+      When call adapter_jq '.override_file' detect
+      The status should be success
+      The output should equal '"pnpm-workspace.yaml"'
+    End
+
+    It 'prefers an existing workspace overrides block on pnpm 10 too'
+      use_fixture pnpm11-workspace-overrides
+      jq '.packageManager = "pnpm@10.2.1"' package.json > p.json && mv p.json package.json
+      When call adapter_jq '.override_file' detect
+      The status should be success
+      The output should equal '"pnpm-workspace.yaml"'
+    End
+
+    It 'keeps package.json for a workspace file that carries no overrides block'
+      use_fixture pnpm-cross-line
+      printf 'packages:\n  - packages/*\n' > pnpm-workspace.yaml
+      When call adapter_jq '.override_file' detect
+      The status should be success
+      The output should equal '"package.json"'
+    End
+  End
+
   # Whether pm_exec is a bare binary or a corepack invocation depends on the
   # machine. What must hold is that install_cmd is built from pm_exec, so the
   # emitted command is actually runnable wherever the adapter runs.

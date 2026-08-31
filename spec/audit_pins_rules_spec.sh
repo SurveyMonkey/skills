@@ -276,10 +276,12 @@ Describe 'the rules that gate the removal PR'
 
     # A trailing comma left by removing the last entry in an override block
     # produced an invalid manifest that only `jq` would have caught cleanly.
+    # The third occurrence is the workspace-override-file note (issue #159)
+    # saying the check does not apply to pnpm-workspace.yaml.
     It 'validates the manifest after the edit, before list_pins (#79c)'
       When call rule_in "$AGENT" 'jq \. package\.json'
       The status should be success
-      The output should equal '2'
+      The output should equal '3'
     End
 
     It 'templates a direct-commit provenance ref (#79d)'
@@ -624,5 +626,26 @@ Describe 'the env_prefix dispatch contract (#106)'
     When call rule_in "$COMMAND" "an OPTIONAL .env_prefix., plus the"
     The status should be success
     The output should equal '1'
+  End
+End
+
+# The override_file guidance in both agent definitions (issue #159 review):
+# the adapter reports which file the live block is, and each definition tells
+# its agent to act on that field by name. Losing either sentence silently
+# reverts the agent to package.json habits on a pnpm 11 repository.
+Describe 'the override_file guidance both agents carry (issue #159)'
+  AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+  FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+
+  It 'is stated in the audit agent'
+    When call grep -c 'override_file' "$AGENT"
+    The status should be success
+    The output should not equal 0
+  End
+
+  It 'is stated in the fix agent'
+    When call grep -c 'override_file' "$FIX_AGENT"
+    The status should be success
+    The output should not equal 0
   End
 End

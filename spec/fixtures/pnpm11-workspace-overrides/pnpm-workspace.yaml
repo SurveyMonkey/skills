@@ -1,0 +1,11 @@
+# Mirrors the field shape behind issue #159: a repository pinned to pnpm 11
+# whose live overrides sit in pnpm-workspace.yaml's top-level block, while
+# package.json carries no `pnpm` field at all. Public names only.
+packages:
+  - packages/*
+
+overrides:
+  undici: '>=6.23.0'
+  form-data: '>=4.0.4'
+  js-yaml: '>=4.1.1'
+  ws: '>=8.17.1'

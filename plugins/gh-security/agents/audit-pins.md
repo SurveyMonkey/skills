@@ -339,6 +339,15 @@ they could not parse, and that refusal is the answer.
 Then, for each `range` pin, in priority order — **bare pins first** (they constrain every consumer
 in the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
 
+> **Which file holds the pins**: `list_pins` reports it as `override_file`. It is `package.json`
+> everywhere except pnpm repositories whose live overrides sit in `pnpm-workspace.yaml`'s
+> top-level `overrides:` block (pnpm 11, or any repo already keeping them there — issue #159).
+> When `override_file` is `pnpm-workspace.yaml`, every step below that names `package.json` for a
+> pin edit, a `log -S` archaeology, a checkout/restore, a diff, or a staging list applies to
+> `pnpm-workspace.yaml` instead (or in addition, for restore and staging), and the
+> `jq . package.json` syntax check does not apply to the YAML file — rely on `list_pins`
+> re-reading it, which refuses loudly on a block it cannot parse.
+
 1. Remove exactly that entry from `package.json` with Edit. Remove the whole override block if it
    is the last entry, and nothing else. Then **verify the edit landed before installing**, in two
    steps and in this order:

@@ -1,0 +1,13 @@
+{
+  "name": "demo-pnpm11-workspace-overrides",
+  "packageManager": "pnpm@11.9.0",
+  "dependencies": {
+    "@ts-morph/common": "^0.26.0",
+    "filelist": "^1.0.4",
+    "glob": "^7.2.3",
+    "minimatch": "^10.2.5"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

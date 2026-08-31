@@ -295,3 +295,69 @@ Describe 'node.sh list_pins'
     End
   End
 End
+
+# The live pnpm override block can sit in pnpm-workspace.yaml (issue #159:
+# pnpm 11 no longer reads package.json's `pnpm` field). The audit reads
+# nothing but list_pins to learn what a repository has pinned, so pins read
+# from the dead field would be audited — and removed — as if they were in
+# effect, and pins in the workspace block would be invisible.
+Describe 'node.sh list_pins workspace override file (issue #159)'
+  After 'cleanup_fixture'
+
+  It 'reads the pins from the workspace overrides block and names the file'
+    use_fixture pnpm11-workspace-overrides
+    When call adapter_jq '{override_file, block_present, keys: [.pins[].key] | sort}' list_pins
+    The status should be success
+    The output should equal '{"override_file":"pnpm-workspace.yaml","block_present":true,"keys":["form-data","js-yaml","undici","ws"]}'
+  End
+
+  # A dead entry is not a pin the repository has: pnpm does not read it, so
+  # reporting it would send the audit off to test an override with no effect.
+  It 'does not report package.json pnpm.overrides entries the pnpm major ignores'
+    use_fixture pnpm11-workspace-overrides
+    jq '.pnpm = {overrides: {"left-pad": ">=1.3.0"}}' package.json > p.json && mv p.json package.json
+    When call adapter_jq '[.pins[].key] | sort' list_pins
+    The status should be success
+    The output should equal '["form-data","js-yaml","undici","ws"]'
+  End
+
+  It 'reports no block on a pnpm 11 repo whose workspace file has no overrides'
+    use_fixture pnpm-cross-line
+    jq '.packageManager = "pnpm@11.9.0"' package.json > p.json && mv p.json package.json
+    When call adapter_jq '{override_file, block_present, count}' list_pins
+    The status should be success
+    The output should equal '{"override_file":"pnpm-workspace.yaml","block_present":false,"count":0}'
+  End
+End
+
+# Hardening from the #159 review: the shapes above must be as visible to the
+# audit's read path as to the fix's write path, and the dropped manifest
+# entries must be named rather than silently absent.
+Describe 'node.sh list_pins workspace overrides hardening (issue #159 review)'
+  After 'cleanup_fixture'
+
+  It 'refuses adjacent duplicate top-level overrides blocks'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  ws: 1\noverrides:\n  undici: 2\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" list_pins
+    The status should equal 1
+    The stderr should include 'duplicate top-level overrides'
+  End
+
+  # The keys the merged view drops are still reported, so the audit can say
+  # they exist: dead on pnpm 11, live-but-shadowed on an older major.
+  It 'names the manifest pnpm.overrides keys it does not report as pins'
+    use_fixture pnpm11-workspace-overrides
+    jq '.pnpm = {overrides: {"left-pad": ">=1.3.0"}}' package.json > p.json && mv p.json package.json
+    When call adapter_jq '{manifest_pnpm_overrides, keys: [.pins[].key] | sort}' list_pins
+    The status should be success
+    The output should equal '{"manifest_pnpm_overrides":["left-pad"],"keys":["form-data","js-yaml","undici","ws"]}'
+  End
+
+  It 'reports manifest_pnpm_overrides as empty when package.json carries none'
+    use_fixture pnpm11-workspace-overrides
+    When call adapter_jq '{manifest_pnpm_overrides}' list_pins
+    The status should be success
+    The output should equal '{"manifest_pnpm_overrides":[]}'
+  End
+End

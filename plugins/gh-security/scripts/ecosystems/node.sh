@@ -13,7 +13,8 @@
 #   resolution_map                             -> {pm, lockfile_entries, entries_read,
 #                                                  entries_expected, unreadable_entries,
 #                                                  package_count, resolutions{}}
-#   apply_constraint <pkg> <range> [parent...] -> {mode, parents[], written[],
+#   apply_constraint <pkg> <range> [parent...] -> {mode, override_file,
+#                                                  parents[], written[],
 #                                                  alias_lookup,
 #                                                  lockfile_invalidated,
 #                                                  observations[]}
@@ -40,8 +41,9 @@
 #                                                  parents_malformed[],
 #                                                  parents_other_lines[], line}
 #   shim <dir> [runner]                        -> {created, pm, shim?, path_prefix?}
-#   list_pins                                  -> {pm, override_location, block_present,
-#                                                  count, bare_count, pins[]}
+#   list_pins                                  -> {pm, override_location, override_file,
+#                                                  block_present, count, bare_count,
+#                                                  manifest_pnpm_overrides[], pins[]}
 #
 # Exit codes: 0 ok | 1 error | 2 not implemented | 3 unsupported toolchain
 #
@@ -342,15 +344,76 @@ pm_runner() {
   fi
 }
 
+# Where the active pnpm override block LIVES, as distinct from the key syntax
+# it uses (`override_location`, unchanged). pnpm 11 stopped reading the
+# `pnpm` field in package.json — an override written there is silently inert
+# and pnpm prints "The \"pnpm\" field in package.json is no longer read by
+# pnpm" on install — and keeps its overrides in pnpm-workspace.yaml's
+# top-level `overrides:` block instead (issue #159, two field agents burned).
+#
+# The decision, in precedence order:
+#   1. pnpm-workspace.yaml already carries a top-level `overrides:` block ->
+#      that file, whatever the pnpm major: it is where the repository
+#      demonstrably keeps its live overrides, and pnpm 10 reads it too.
+#   2. `packageManager` pins pnpm >= 11 -> pnpm-workspace.yaml (created on
+#      first write), because package.json's field is dead there.
+#   3. Otherwise -> package.json's `pnpm.overrides`, the pre-11 shape.
+# `pnpm --version` is deliberately not consulted: `packageManager` is what
+# the repository declares and what corepack runs, and probing a binary makes
+# the answer depend on the auditing machine rather than the repo.
+pnpm_manifest_major() {
+  # A malformed package.json dies here rather than routing silently: an
+  # unreadable manifest answering "no packageManager" sent a pnpm 11 repo's
+  # override to the dead file with nothing naming the cause (#159 review).
+  jq -r '.packageManager // ""
+         | (capture("^pnpm@(?<m>[0-9]+)") // {m: ""}) | .m' package.json \
+    || die "detect: cannot read package.json's packageManager field"
+}
+
+# The top-level `overrides:` key, in the plain form pnpm emits or the quoted
+# forms YAML also allows. The quoted forms matter: a `'overrides':` key that
+# a plain `grep '^overrides:'` misses would get a second, unquoted block
+# appended beside it — duplicate top-level keys, silently (#159 review).
+has_workspace_overrides_block() {
+  [ -f pnpm-workspace.yaml ] \
+    && grep -Eq "^['\"]?overrides['\"]?:" pnpm-workspace.yaml
+}
+
+pnpm_override_file() {
+  if has_workspace_overrides_block; then
+    printf 'pnpm-workspace.yaml\n'
+    return 0
+  fi
+  maj=$(pnpm_manifest_major)
+  case "$maj" in
+    ''|*[!0-9]*) printf 'package.json\n' ;;
+    *)
+      if [ "$maj" -ge 11 ]; then
+        printf 'pnpm-workspace.yaml\n'
+      else
+        printf 'package.json\n'
+      fi
+      ;;
+  esac
+}
+
 verb_detect() {
   pm=$(detect_raw)
   case "$pm" in
     pnpm)
       run=$(pm_runner pnpm)
-      jq -n --arg run "$run" \
+      ofile=$(pnpm_override_file)
+      maj=$(pnpm_manifest_major)
+      # `pnpm_major: null` means the manifest does not pin pnpm, so the
+      # routing above could not tell 10 from 11. The agent reads it as a
+      # signal to watch the install output for pnpm 11's "The \"pnpm\" field
+      # in package.json is no longer read" warning, which names an override
+      # written to a file that pnpm ignores.
+      jq -n --arg run "$run" --arg ofile "$ofile" --arg maj "$maj" \
              '{pm:"pnpm", pm_exec:$run, lockfile:"pnpm-lock.yaml",
                install_cmd:"\($run) install", why_cmd:"\($run) why",
-               override_location:"pnpm.overrides",
+               override_location:"pnpm.overrides", override_file:$ofile,
+               pnpm_major: ($maj | if test("^[0-9]+$") then tonumber else null end),
                override_syntax:"parent>dep", supports_scoping:true}'
       ;;
     yarn-berry)
@@ -358,7 +421,7 @@ verb_detect() {
       jq -n --arg run "$run" \
              '{pm:"yarn", pm_exec:$run, lockfile:"yarn.lock",
                install_cmd:"\($run) install", why_cmd:"\($run) why",
-               override_location:"resolutions",
+               override_location:"resolutions", override_file:"package.json",
                override_syntax:"parent/dep", supports_scoping:true}'
       ;;
     npm)
@@ -366,7 +429,7 @@ verb_detect() {
       jq -n --arg run "$run" \
              '{pm:"npm", pm_exec:$run, lockfile:"package-lock.json",
                install_cmd:"\($run) install", why_cmd:"\($run) explain",
-               override_location:"overrides",
+               override_location:"overrides", override_file:"package.json",
                override_syntax:"nested", supports_scoping:true}'
       ;;
     bun)
@@ -384,6 +447,246 @@ verb_detect() {
 }
 
 pm_of() { verb_detect | jq -r '.pm'; }
+
+# ---------------------------------------------------------------------------
+# pnpm-workspace.yaml `overrides:` block — constrained reader and writer
+#
+# The same idiom as the lockfile parsers: a narrow awk over exactly the YAML
+# shapes pnpm documents for this block, refusing loudly on anything else
+# rather than guessing. The block this handles is a flat map of scalar
+# entries at one indent level:
+#
+#   overrides:
+#     undici: '>=6.23.0'
+#     'minimatch@10.2.5>brace-expansion': '>=5.0.9 <6'
+#
+# Anything richer — nested maps, flow style (`overrides: {a: b}`), sequence
+# items, anchors/aliases, block scalars, a tab on a block line, duplicate
+# keys, a duplicate or quoted top-level `overrides:` key, or an entry
+# carrying an inline comment — dies with the shape named and the line
+# numbered, because a wrong parse here writes a wrong override, and a wrong
+# WRITE corrupts a file pnpm reads on every install. Full-line comments and
+# blank lines inside the block are tolerated on read and preserved on write:
+# the writer edits entry lines and appends new ones, never regenerates the
+# block. Inline entry comments are refused rather than parsed, since the
+# writer would silently drop them on rewrite.
+#
+# The parse helpers are shared by reader and writer so the two cannot
+# disagree about what an entry line means. `parse_entry` communicates
+# through globals (`ekey`, `evalue`, `err`), awk having no other way to
+# return a pair.
+WORKSPACE_OVERRIDES_FUNCS=$(cat <<'AWKLIB'
+  function strip_scalar(s) {
+    sub(/[[:space:]]+$/, "", s)
+    if (s ~ /^'.*'$/) {
+      s = substr(s, 2, length(s) - 2)
+      gsub(/''/, "'", s)
+      return s
+    }
+    if (s ~ /^".*"$/) {
+      s = substr(s, 2, length(s) - 2)
+      if (s ~ /\\/) { err = "a double-quoted scalar with backslash escapes"; return "" }
+      return s
+    }
+    return s
+  }
+  function parse_entry(line,   rest, key, val, i) {
+    err = ""
+    rest = substr(line, 3)
+    if (rest ~ /^['"]/) {
+      i = index(substr(rest, 2), substr(rest, 1, 1) ": ")
+      if (i == 0) { err = "an entry whose quoted key never closes"; return }
+      key = strip_scalar(substr(rest, 1, i + 1))
+      val = substr(rest, i + 3)
+    } else {
+      i = index(rest, ":")
+      if (i == 0) { err = "a line inside the block that is not a key: value entry"; return }
+      key = substr(rest, 1, i - 1)
+      val = substr(rest, i + 1)
+    }
+    sub(/^[[:space:]]+/, "", val)
+    if (val ~ /^#/ || val ~ /[[:space:]]#/) { err = "an entry carrying an inline comment"; return }
+    val = strip_scalar(val)
+    if (err != "") return
+    if (val == "") { err = "an entry with no scalar value (a nested map or sequence)"; return }
+    if (val ~ /^[&*{[!]/) { err = "an anchor, alias, tag or flow-style value"; return }
+    if (val ~ /^[|>][+-]?$/) { err = "a block-scalar value"; return }
+    if (key == "") { err = "an entry with an empty key"; return }
+    ekey = key; evalue = val
+  }
+  function yaml_quote(s) { gsub(/'/, "''", s); return "'" s "'" }
+AWKLIB
+)
+
+# Scanner over pnpm-workspace.yaml: `KV<TAB>key<TAB>value` per entry (quotes
+# stripped), or one `ERR<TAB>reason` row and exit 1 on a refused shape.
+WORKSPACE_OVERRIDES_READER=$(cat <<'AWKLIB'
+  function refuse(reason) {
+    print "ERR\t" reason " (pnpm-workspace.yaml line " FNR ")"; exit 1
+  }
+  BEGIN { inblk = 0; seen = 0 }
+  # Block exit falls through WITHOUT consuming the line: a top-level key that
+  # terminates the block may itself be a second `overrides:` key, and eating
+  # it here is what let adjacent duplicate blocks slip past the `seen` guard
+  # while the second block silently vanished from the parse (#159 review).
+  inblk && /^[^[:space:]]/ { inblk = 0 }
+  # Two patterns, not a bracket class: bash 3.2's $() scanner miscounts a
+  # heredoc bracket mixing quote kinds, and this file must parse there
+  # (spec/bash32_parse_spec.sh).
+  !inblk && ($0 ~ /^'overrides':/ || $0 ~ /^"overrides":/) {
+    refuse("a quoted top-level overrides: key (write it unquoted so every reader of this file agrees on where the block is)")
+  }
+  !inblk && /^overrides:[[:space:]]*($|#)/ {
+    if (seen) refuse("a duplicate top-level overrides: key")
+    inblk = 1; seen = 1; next
+  }
+  !inblk && /^overrides:/ {
+    refuse("an overrides: key carrying an inline (flow-style) value")
+  }
+  inblk {
+    if ($0 ~ /^[[:space:]]*(#|$)/) next
+    if ($0 ~ /\t/) refuse("a tab character on a line of the overrides block (this reader handles space-indented YAML only)")
+    if ($0 !~ /^  [^[:space:]]/) {
+      refuse("a line of the overrides block not indented with exactly two spaces (the form pnpm emits and the only one this reader accepts)")
+    }
+    parse_entry($0)
+    if (err != "") refuse(err)
+    if (ekey in kseen) refuse("duplicate keys in the block ('" ekey "'), which YAML readers resolve inconsistently")
+    kseen[ekey] = 1
+    print "KV\t" ekey "\t" evalue
+  }
+AWKLIB
+)
+
+# The block as a JSON object. A missing file, or a file with no block, is
+# `{}`. Dies on any shape the scanner refuses, duplicate keys included (YAML
+# readers disagree on which wins, so neither reading is safe to act on). An
+# awk failure with no ERR row is not a shape refusal — an unreadable file,
+# most likely — and gets its own message rather than a remediation for a
+# problem the operator does not have (#159 review).
+workspace_overrides_json() {
+  if [ ! -f pnpm-workspace.yaml ]; then
+    printf '{}\n'
+    return 0
+  fi
+  if ! rows=$(awk "$WORKSPACE_OVERRIDES_FUNCS$WORKSPACE_OVERRIDES_READER" pnpm-workspace.yaml); then
+    reason=$(printf '%s\n' "$rows" | awk -F'\t' '$1 == "ERR" { print $2; exit }')
+    [ -n "$reason" ] \
+      || die "pnpm-workspace.yaml overrides: cannot read the file at all (not a shape problem; check that it exists and is readable from $(pwd))."
+    die "pnpm-workspace.yaml overrides: cannot safely read the block: it contains $reason. Refusing to route overrides through a block this script cannot round-trip; simplify it to flat 'key: value' entries or edit it by hand."
+  fi
+  printf '%s\n' "$rows" | jq -Rs '
+    split("\n") | map(select(length > 0) | split("\t") | select(.[0] == "KV"))
+    | map({key: .[1], value: .[2]}) | from_entries' \
+    || die "pnpm-workspace.yaml overrides: cannot parse the scanned entries as JSON."
+}
+
+# The manifest view the workspace-file mode reads: package.json with
+# `.pnpm.overrides` replaced by the workspace block, so every jq pass keeps
+# operating on one document. When the file has no block yet, the view
+# instead DROPS package.json's own `pnpm.overrides` — pnpm 11 does not read
+# those entries, and reasoning from overrides that are not in effect is the
+# original defect. Prints the view's temp path; the caller removes it.
+workspace_manifest_view() {
+  # A refusal inside the command substitution exits only the subshell, so it
+  # is re-raised here as a bare `return 1` — the die below it already put the
+  # one contract envelope on stderr, and the callers' `|| exit 1` must not
+  # add a second one on top of raw jq noise (#159 review).
+  ws_overrides=$(workspace_overrides_json) || return 1
+  block_on_disk=false
+  if has_workspace_overrides_block; then
+    block_on_disk=true
+  fi
+  view=$(mktemp) || { printf '{"error":"workspace_manifest_view: mktemp failed"}\n' >&2; return 1; }
+  if ! jq --argjson ov "$ws_overrides" --argjson blk "$block_on_disk" '
+      if $blk then (.pnpm //= {}) | .pnpm.overrides = $ov
+      elif (.pnpm | type) == "object" then del(.pnpm.overrides)
+      else . end' package.json > "$view" 2>/dev/null; then
+    rm -f "$view"
+    printf '{"error":"workspace_manifest_view: cannot merge the pnpm-workspace.yaml overrides into package.json'"'"'s view (is package.json valid JSON?)"}\n' >&2
+    return 1
+  fi
+  printf '%s\n' "$view"
+}
+
+# Applies `$1` (the desired final map, JSON) to pnpm-workspace.yaml by
+# line-level upsert: entries whose value changed are rewritten in place, new
+# entries are appended at the end of the block in the final map's key order,
+# and every untouched line — other entries, comments, the rest of the file —
+# passes through byte-for-byte. A key present on disk but absent from the
+# final map is a state no caller produces (apply_constraint only adds and
+# updates), so it dies rather than deleting. The result is re-read and
+# compared to the requested map, so a formatting edge the writer mishandles
+# fails loudly instead of shipping a file pnpm reads differently.
+workspace_overrides_write() {
+  final_map="${1:?workspace_overrides_write requires the final overrides map}"
+  current=$(workspace_overrides_json)
+  deleted=$(jq -n -r --argjson a "$current" --argjson b "$final_map" \
+    '(($a | keys) - ($b | keys)) | first // empty')
+  [ -z "$deleted" ] \
+    || die "pnpm-workspace.yaml overrides: refusing to delete pre-existing entry '$deleted'; this write path only adds or updates entries."
+  delta_file=$(mktemp)
+  jq -n -r --argjson a "$current" --argjson b "$final_map" \
+    '$b | to_entries[] | select(($a[.key] // null) != .value)
+     | .key + "\t" + .value' > "$delta_file"
+  if [ ! -s "$delta_file" ]; then
+    rm -f "$delta_file"
+    return 0
+  fi
+
+  if [ ! -f pnpm-workspace.yaml ]; then
+    printf 'overrides:\n' > pnpm-workspace.yaml \
+      || die "pnpm-workspace.yaml overrides: cannot create pnpm-workspace.yaml in $(pwd)"
+  elif ! has_workspace_overrides_block; then
+    # Repair a missing trailing newline so the appended key starts its own
+    # line ($(...) strips a trailing newline, so empty means one was there).
+    [ -z "$(tail -c 1 pnpm-workspace.yaml)" ] || printf '\n' >> pnpm-workspace.yaml \
+      || die "pnpm-workspace.yaml overrides: cannot append to pnpm-workspace.yaml in $(pwd)"
+    printf 'overrides:\n' >> pnpm-workspace.yaml \
+      || die "pnpm-workspace.yaml overrides: cannot append to pnpm-workspace.yaml in $(pwd)"
+  fi
+
+  # `ws_tmp`, not `tmp`: verb_apply_constraint holds its own `tmp` across
+  # this call, and clobbering it leaked the outer temp file and rerouted the
+  # later package.json write through a dead path (#159 review).
+  ws_tmp=$(mktemp)
+  if ! awk "$WORKSPACE_OVERRIDES_FUNCS"'
+    function emit_pending(   j) {
+      for (j = 1; j <= n; j++)
+        if (!(order[j] in done)) {
+          print "  " yaml_quote(order[j]) ": " yaml_quote(want[order[j]])
+          done[order[j]] = 1
+        }
+    }
+    NR == FNR {
+      i = index($0, "\t")
+      if (i > 0) { n++; order[n] = substr($0, 1, i - 1); want[order[n]] = substr($0, i + 1) }
+      next
+    }
+    !inblk && /^overrides:[[:space:]]*($|#)/ { inblk = 1; print; next }
+    inblk && /^[^[:space:]]/ { emit_pending(); inblk = 0 }
+    inblk && /^  [^[:space:]]/ {
+      parse_entry($0)
+      if (err == "" && (ekey in want)) {
+        print "  " yaml_quote(ekey) ": " yaml_quote(want[ekey])
+        done[ekey] = 1
+        next
+      }
+    }
+    { print }
+    END { if (inblk) emit_pending() }
+  ' "$delta_file" pnpm-workspace.yaml > "$ws_tmp"; then
+    rm -f "$ws_tmp" "$delta_file"
+    die "pnpm-workspace.yaml overrides: failed to rewrite the block"
+  fi
+  rm -f "$delta_file"
+  mv "$ws_tmp" pnpm-workspace.yaml \
+    || die "pnpm-workspace.yaml overrides: cannot replace pnpm-workspace.yaml in $(pwd)"
+
+  roundtrip=$(workspace_overrides_json)
+  jq -n -e --argjson a "$roundtrip" --argjson b "$final_map" '$a == $b' >/dev/null \
+    || die "pnpm-workspace.yaml overrides: the block read back after writing does not match what was written. The file was left as rewritten for inspection, but treat the apply as failed."
+}
 
 # ---------------------------------------------------------------------------
 # resolved_versions
@@ -1894,8 +2197,30 @@ verb_apply_constraint() {
   shift 2
   parents_json=$(printf '%s\n' "$@" | jq -Rs 'split("\n") | map(select(length > 0))')
 
-  pm=$(pm_of)
-  loc=$(verb_detect | jq -r '.override_location')
+  det=$(verb_detect)
+  pm=$(printf '%s' "$det" | jq -r '.pm')
+  loc=$(printf '%s' "$det" | jq -r '.override_location')
+  ofile=$(printf '%s' "$det" | jq -r '.override_file')
+
+  # When the live override block is pnpm-workspace.yaml (issue #159: pnpm 11
+  # no longer reads package.json's `pnpm` field), every pass below still runs
+  # against ONE manifest document: a temp view of package.json with
+  # `.pnpm.overrides` replaced by the workspace block. The merge/supersede/
+  # scoping logic is untouched — only where the block is read from and
+  # written back to changes. Whatever legacy entries sit in package.json's
+  # own dead `pnpm.overrides` are deliberately NOT merged in: pnpm does not
+  # read them, so treating them as live state would reason from overrides
+  # that are not in effect. After the main pass the block is written back to
+  # the workspace file and package.json keeps its original `pnpm` field.
+  msrc=package.json
+  orig_pnpm=null
+  if [ "$ofile" = "pnpm-workspace.yaml" ]; then
+    orig_pnpm=$(jq -c '.pnpm // null' package.json) \
+      || die "apply_constraint: cannot read package.json"
+    # The view already spoke its one error envelope; a second die here would
+    # double it (#159 review).
+    msrc=$(workspace_manifest_view) || exit 1
+  fi
 
   # A present-but-malformed override block (a string, an array, a number, or
   # an unreadable container) dies here, by name, before any pass reads it.
@@ -1903,7 +2228,7 @@ verb_apply_constraint() {
   # named nothing the operator could act on (#153 review).
   block_type=$(jq -r --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
     override_block($loc)
-    | if . == "__invalid__" then "unreadable" else type end' package.json) \
+    | if . == "__invalid__" then "unreadable" else type end' "$msrc") \
     || die "apply_constraint: cannot read package.json"
   case "$block_type" in
     object|null) ;;
@@ -1938,7 +2263,33 @@ verb_apply_constraint() {
         | select(is_bare(.key))
         | {type: "unscoped_override", key: .key, range: .value,
            targets_this_package: (.key == $pkg or (.key | startswith($pkg + "@")))} ]
-    ' package.json)
+    ' "$msrc")
+
+  # Two more observation shapes, both from the #159 review, both about
+  # overrides this pass deliberately does not act on but must not hide:
+  # - manifest_pnpm_overrides_ignored: the live block is the workspace file,
+  #   yet package.json still carries `pnpm.overrides` entries. On pnpm 11
+  #   they are dead; on pnpm 10 (or an unpinned major) both files are live
+  #   and can disagree. Either way the agent needs to know they exist,
+  #   because nothing else will ever report them.
+  # - pnpm_major_unknown: pnpm routing fell back to package.json only
+  #   because `packageManager` does not pin pnpm. If the repo actually runs
+  #   pnpm 11, this write is inert; the install prints "The \"pnpm\" field in
+  #   package.json is no longer read by pnpm", and that warning is the signal
+  #   to trust over this routing.
+  if [ "$pm" = "pnpm" ]; then
+    pnpm_major_json=$(printf '%s' "$det" | jq -c '.pnpm_major')
+    manifest_ov_keys=$(jq -c '(.pnpm.overrides // {}) | keys' package.json) \
+      || die "apply_constraint: cannot read package.json"
+    observations=$(printf '%s' "$observations" \
+      | jq --arg ofile "$ofile" --argjson maj "$pnpm_major_json" \
+           --argjson mkeys "$manifest_ov_keys" '
+        . + (if $ofile == "pnpm-workspace.yaml" and ($mkeys | length) > 0
+             then [{type: "manifest_pnpm_overrides_ignored", keys: $mkeys,
+                    pnpm_major: $maj}] else [] end)
+          + (if $ofile == "package.json" and $maj == null
+             then [{type: "pnpm_major_unknown"}] else [] end)')
+  fi
 
   # The keys the dependents declare this package under, when they declare it
   # through an `npm:` alias. An override entry has to name the key the
@@ -2852,17 +3203,45 @@ verb_apply_constraint() {
             | reduce $ks[] as $k (.;
                 put_scoped($parent; $k;
                            (if $k == $pkg then $range else alias_value end))))
-        end' package.json); then
+        end' "$msrc"); then
     rm -f "$tmp"
     die "apply_constraint: failed to rewrite package.json"
   fi
 
-  if ! printf '%s' "$written_and_manifest" \
-      | jq "${INDENT_ARGS[@]}" '.manifest' > "$tmp"; then
-    rm -f "$tmp"
-    die "apply_constraint: failed to write package.json"
+  # In workspace mode the rewritten block leaves through pnpm-workspace.yaml
+  # and package.json gets its original `pnpm` field back (dead to pnpm 11,
+  # but not this script's to rewrite); everything else the pass wrote —
+  # a direct dependency retarget — still lands in package.json.
+  if [ "$ofile" = "pnpm-workspace.yaml" ]; then
+    workspace_overrides_write "$(printf '%s' "$written_and_manifest" \
+      | jq -c '.manifest.pnpm.overrides // {}')"
+    rm -f "$msrc"
+    manifest_out=$(printf '%s' "$written_and_manifest" \
+      | jq -c --argjson orig "$orig_pnpm" \
+          '.manifest | if $orig == null then del(.pnpm) else .pnpm = $orig end') \
+      || die "apply_constraint: failed to restore the manifest pnpm field"
+  else
+    manifest_out=$(printf '%s' "$written_and_manifest" | jq -c '.manifest') \
+      || die "apply_constraint: failed to rewrite package.json"
   fi
-  mv "$tmp" package.json
+
+  # A rewrite that changes nothing still normalizes: jq re-encodes escapes
+  # and re-indents, so a workspace-mode apply whose only edit went to
+  # pnpm-workspace.yaml would land unrelated package.json churn in the fix
+  # PR's diff. Skip the write when the document is semantically unchanged
+  # (#159 review).
+  if jq -e -n --argjson a "$manifest_out" \
+       --argjson b "$(jq -c . package.json)" '$a == $b' >/dev/null; then
+    rm -f "$tmp"
+  else
+    if ! printf '%s' "$manifest_out" \
+        | jq "${INDENT_ARGS[@]}" '.' > "$tmp"; then
+      rm -f "$tmp"
+      die "apply_constraint: failed to write package.json"
+    fi
+    mv "$tmp" package.json \
+      || die "apply_constraint: cannot replace package.json in $(pwd)"
+  fi
 
   # npm records no trace of `overrides` in the lockfile — verified empirically
   # on npm 8, 9, 10 and 11 against lockfile v3: the override is in effect (the
@@ -2965,7 +3344,7 @@ verb_apply_constraint() {
 
   printf '%s' "$observations" \
     | jq --arg pkg "$pkg" --arg range "$range" --arg loc "$loc" --arg pm "$pm" \
-         --arg alias_source "$alias_source" \
+         --arg ofile "$ofile" --arg alias_source "$alias_source" \
          --argjson written "$(printf '%s' "$written_and_manifest" | jq -c '.written')" \
          --argjson superseded "$(printf '%s' "$written_and_manifest" | jq -c '.superseded')" \
          --argjson unresolved "$parents_unresolved" \
@@ -2976,6 +3355,7 @@ verb_apply_constraint() {
         package: $pkg,
         range: $range,
         override_location: $loc,
+        override_file: $ofile,
         mode: (if $tighten then "tighten-bare"
                elif ($parents | length) == 0 then "direct"
                else "scoped" end),
@@ -3753,8 +4133,21 @@ JQLIB
 )
 
 verb_list_pins() {
-  loc=$(verb_detect | jq -r '.override_location')
-  pm=$(pm_of)
+  det=$(verb_detect)
+  loc=$(printf '%s' "$det" | jq -r '.override_location')
+  pm=$(printf '%s' "$det" | jq -r '.pm')
+  ofile=$(printf '%s' "$det" | jq -r '.override_file')
+
+  # Same manifest view as apply_constraint (issue #159): when the live block
+  # is pnpm-workspace.yaml, the pins are read from there, and package.json's
+  # dead `pnpm.overrides` entries — which pnpm 11 does not consult — are not
+  # reported as pins the repository has.
+  msrc=package.json
+  if [ "$ofile" = "pnpm-workspace.yaml" ]; then
+    # The view already spoke its one error envelope; a second die here would
+    # double it (#159 review).
+    msrc=$(workspace_manifest_view) || exit 1
+  fi
 
   # Three states, not two. An override block that is present but is not an
   # object (a string, an array, a number) is a broken manifest, and coercing it
@@ -3764,7 +4157,7 @@ verb_list_pins() {
   # (scripts/CLAUDE.md), so it fails loudly here instead.
   block_type=$(jq -r --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
     override_block($loc)
-    | if . == "__invalid__" then "unreadable" else type end' package.json) \
+    | if . == "__invalid__" then "unreadable" else type end' "$msrc") \
     || die "list_pins: cannot read package.json"
   case "$block_type" in
     object|null) ;;
@@ -3776,7 +4169,20 @@ verb_list_pins() {
       ;;
   esac
 
-  jq --arg pm "$pm" --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
+  # Keys sitting in package.json's own `pnpm.overrides` while the live block
+  # is the workspace file. Dead on pnpm 11, live-but-shadowed on pnpm 10;
+  # either way the audit needs to see them named, because they are otherwise
+  # reported by nothing while staying visible to anyone reading package.json
+  # (#159 review). Always emitted, `[]` when not applicable, per the
+  # every-key contract in scripts/CLAUDE.md.
+  manifest_ov_keys='[]'
+  if [ "$ofile" = "pnpm-workspace.yaml" ]; then
+    manifest_ov_keys=$(jq -c '(.pnpm.overrides // {}) | keys' package.json) \
+      || die "list_pins: cannot read package.json"
+  fi
+
+  jq --arg pm "$pm" --arg loc "$loc" --arg ofile "$ofile" \
+     --argjson mkeys "$manifest_ov_keys" "$SEMVER_JQ$PINS_JQ"'
     override_block($loc) as $block
     | (if ($block | type) == "object" then $block else {} end) as $b
     | (if $loc == "overrides" then
@@ -3800,11 +4206,14 @@ verb_list_pins() {
     | {
         pm: $pm,
         override_location: $loc,
+        override_file: $ofile,
         block_present: ($block != null),
         count: ($pins | length),
         bare_count: ([$pins[] | select(.scope == "bare")] | length),
+        manifest_pnpm_overrides: $mkeys,
         pins: $pins
-      }' package.json
+      }' "$msrc"
+  [ "$msrc" = "package.json" ] || rm -f "$msrc"
 }
 
 # Some repo scripts invoke the bare package-manager name internally, which

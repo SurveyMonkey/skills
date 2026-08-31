@@ -1841,3 +1841,325 @@ Describe 'node.sh apply_constraint'
     The stderr should be present
   End
 End
+
+# Where the write lands (issue #159): the field repository pinned pnpm 11 and
+# kept its live overrides in pnpm-workspace.yaml's top-level block; the
+# adapter wrote a correctly scoped key into package.json's `pnpm.overrides`,
+# which pnpm 11 does not read, so the fix was inert and validate fail-closed
+# on the adapter's own write. These assert the verdict through the consuming
+# surfaces — the workspace file the install reads, the manifest the PR diffs,
+# and list_pins' read-back — not just apply_constraint's JSON.
+Describe 'apply_constraint pnpm override file routing (issue #159)'
+  After 'cleanup_fixture'
+
+  workspace_line() { grep -c "$1" pnpm-workspace.yaml; }
+
+  It 'writes the scoped keys into the workspace overrides block on pnpm 11'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call workspace_line "^  'minimatch@10\\.2\\.5>brace-expansion': '>=5\\.0\\.9 <6'$"
+    The status should be success
+    The output should equal 1
+  End
+
+  It 'reports the file it wrote through'
+    use_fixture pnpm11-workspace-overrides
+    When call adapter_jq '{override_file, keys: [.written[].path | join(".")] | sort}' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should be success
+    The output should equal '{"override_file":"pnpm-workspace.yaml","keys":["pnpm.overrides.minimatch@10.0.3>brace-expansion","pnpm.overrides.minimatch@10.2.5>brace-expansion"]}'
+  End
+
+  It 'preserves the pre-existing workspace entries beside the new keys'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call adapter_jq '[.pins[].key] | sort' list_pins
+    The status should be success
+    The output should equal '["form-data","js-yaml","minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion","undici","ws"]'
+  End
+
+  # The dead field is the defect: pnpm 11 ignores it and prints "The \"pnpm\"
+  # field in package.json is no longer read by pnpm" on install.
+  It 'leaves package.json without a pnpm field on pnpm 11'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call manifest '.pnpm'
+    The output should equal 'null'
+  End
+
+  It 'creates pnpm-workspace.yaml with the block on a pnpm 11 repo that has none'
+    use_fixture pnpm-cross-line
+    jq '.packageManager = "pnpm@11.9.0"' package.json > p.json && mv p.json package.json
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call workspace_line "^overrides:$"
+    The status should be success
+    The output should equal 1
+  End
+
+  # The header alone is not the fix: the created block must carry the keys,
+  # or an empty block would pass while the write went nowhere.
+  It 'lands the scoped keys in the created workspace file'
+    use_fixture pnpm-cross-line
+    jq '.packageManager = "pnpm@11.9.0"' package.json > p.json && mv p.json package.json
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call adapter_jq '[.pins[].key] | sort' list_pins
+    The status should be success
+    The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+  End
+
+  # The pre-11 shape is unchanged: same fixture family, overrides still land
+  # in package.json and no workspace file appears.
+  It 'still writes package.json pnpm.overrides on pnpm 10 with no workspace block'
+    use_fixture pnpm-cross-line
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call manifest '[.pnpm.overrides | keys[]] | sort'
+    The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+    The file pnpm-workspace.yaml should not be exist
+  End
+
+  # A block this script cannot round-trip is refused before anything is
+  # written: a wrong write here corrupts a file pnpm reads on every install.
+  It 'refuses loudly on a workspace overrides block it cannot round-trip'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  jest:\n    ws: 1\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'cannot safely read the block'
+  End
+
+  It 'refuses a workspace overrides block carrying duplicate keys'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  ws: 1\n  ws: 2\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'duplicate keys'
+  End
+End
+
+# Hardening from the #159 review: shapes the first cut of the workspace
+# reader/writer mishandled silently, each reproduced against the live adapter
+# before the fix landed. The dangerous ones are the silent wrong writes: an
+# adjacent duplicate block absorbed the new keys into the first block while
+# the second stayed live to pnpm, and a quoted top-level key got a second,
+# unquoted block appended beside it.
+Describe 'apply_constraint pnpm workspace overrides hardening (issue #159 review)'
+  After 'cleanup_fixture'
+
+  workspace_line() { grep -c "$1" pnpm-workspace.yaml; }
+  apply() { "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch; }
+
+  # The `seen` guard only fired when another top-level key separated the two
+  # blocks; adjacent blocks were read as one terminating the other, and the
+  # write landed in the first while list_pins reported half the pins.
+  It 'refuses adjacent duplicate top-level overrides blocks'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  ws: 1\noverrides:\n  undici: 2\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'duplicate top-level overrides'
+  End
+
+  It 'refuses a quoted top-level overrides key rather than appending a second block'
+    use_fixture pnpm11-workspace-overrides
+    printf "'overrides':\n  ws: '1'\n" > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'quoted top-level overrides'
+  End
+
+  # An inline comment was absorbed into the value: the pin read back garbled,
+  # and a rewrite of the entry dropped the operator's comment silently.
+  It 'refuses an entry carrying an inline comment'
+    use_fixture pnpm11-workspace-overrides
+    printf "overrides:\n  undici: '>=6.23.0' # keep until the bump\n" > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'inline comment'
+  End
+
+  # The tab refusal is scoped to the block: a tab elsewhere in the file is
+  # legal YAML and none of this reader's business.
+  It 'tolerates a tab outside the overrides block'
+    use_fixture pnpm11-workspace-overrides
+    printf 'packages:\n  - packages/*\t# tab here\noverrides:\n  ws: '"'"'>=8.17.1'"'"'\n' > pnpm-workspace.yaml
+    apply >/dev/null
+    When call workspace_line "^  'minimatch@10\\.2\\.5>brace-expansion': '>=5\\.0\\.9 <6'$"
+    The status should be success
+    The output should equal 1
+  End
+
+  Describe 'refused shapes, each by name'
+    Parameters
+      'a flow-style overrides value' 'overrides: {ws: 1}'                  'flow-style'
+      'a block-scalar value'         'overrides:\n  ws: |\n    x'          'block-scalar'
+      'an anchor value'              'overrides:\n  ws: &a x'              'anchor'
+      'an alias value'               'overrides:\n  ws: *a'                'anchor'
+      'an unclosed quoted key'       "overrides:\n  'ws: 1"                'never closes'
+      'a deeper-indented line'       "overrides:\n    ws: '1'"             'two spaces'
+      'a backslash-escaped scalar'   'overrides:\n  ws: ">=1\\\\.0"'       'backslash'
+    End
+
+    It "refuses $1"
+      use_fixture pnpm11-workspace-overrides
+      printf '%b\n' "$2" > pnpm-workspace.yaml
+      When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+      The status should equal 1
+      The stderr should include "$3"
+    End
+  End
+
+  # Exactly one error envelope: the refusal used to surface once from the
+  # reader, once from the caller, with raw jq usage noise between them.
+  It 'speaks one error envelope on a refused block, with no jq noise'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  jest:\n    ws: 1\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'cannot safely read the block'
+    The stderr should not include 'invalid JSON text'
+    The stderr should not include 'cannot merge'
+  End
+
+  # The refusal names the line, so a long block does not send the operator
+  # hunting for the shape.
+  It 'names the offending line in the refusal'
+    use_fixture pnpm11-workspace-overrides
+    printf "overrides:\n  ws: '1'\n  jest:\n    x: 1\n" > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'line 3'
+  End
+
+  # Supersede runs through the manifest view: a pre-existing scoped key for
+  # the same package is rewritten in place, never duplicated beside itself.
+  It 'tightens a pre-existing workspace key for the same package in place'
+    use_fixture pnpm11-workspace-overrides
+    printf "overrides:\n  'minimatch@10.2.5>brace-expansion': '>=5.0.0'\n" > pnpm-workspace.yaml
+    apply >/dev/null
+    When call adapter_jq '[.pins[] | select(.package == "brace-expansion") | {key, range}] | sort_by(.key)' list_pins
+    The status should be success
+    The output should equal '[{"key":"minimatch@10.0.3>brace-expansion","range":">=5.0.9 <6"},{"key":"minimatch@10.2.5>brace-expansion","range":">=5.0.9 <6"}]'
+  End
+
+  It 'writes the tightened key exactly once'
+    use_fixture pnpm11-workspace-overrides
+    printf "overrides:\n  'minimatch@10.2.5>brace-expansion': '>=5.0.0'\n" > pnpm-workspace.yaml
+    apply >/dev/null
+    When call workspace_line "minimatch@10\\.2\\.5>brace-expansion"
+    The status should be success
+    The output should equal 1
+  End
+
+  # Legacy dead entries in package.json's pnpm field: not merged into the
+  # workspace block, not treated as live by supersede, and the whole pnpm
+  # field is restored byte-for-byte, sibling keys included.
+  It 'does not copy dead manifest pnpm.overrides into the workspace block'
+    use_fixture pnpm11-workspace-overrides
+    jq '.pnpm = {overrides: {"brace-expansion": ">=1.0.0"}, onlyBuiltDependencies: ["esbuild"]}' \
+      package.json > p.json && mv p.json package.json
+    apply >/dev/null
+    When call workspace_line "^  'brace-expansion':"
+    The status should equal 1
+    The output should equal 0
+  End
+
+  It 'restores a non-null manifest pnpm field with its sibling keys intact'
+    use_fixture pnpm11-workspace-overrides
+    jq '.pnpm = {overrides: {"brace-expansion": ">=1.0.0"}, onlyBuiltDependencies: ["esbuild"]}' \
+      package.json > p.json && mv p.json package.json
+    apply >/dev/null
+    When call manifest '.pnpm'
+    The output should equal '{"overrides":{"brace-expansion":">=1.0.0"},"onlyBuiltDependencies":["esbuild"]}'
+  End
+
+  It 'names the ignored manifest entries in an observation'
+    use_fixture pnpm11-workspace-overrides
+    jq '.pnpm = {overrides: {"brace-expansion": ">=1.0.0"}}' \
+      package.json > p.json && mv p.json package.json
+    When call adapter_jq '[.observations[] | select(.type == "manifest_pnpm_overrides_ignored")]' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should be success
+    The output should equal '[{"type":"manifest_pnpm_overrides_ignored","keys":["brace-expansion"],"pnpm_major":11}]'
+  End
+
+  # pnpm 10 with a workspace block: both files are live and can disagree;
+  # the same observation carries the major so the agent can say which case
+  # it is looking at.
+  It 'observes dual live override sources on pnpm 10 with a workspace block'
+    use_fixture pnpm11-workspace-overrides
+    jq '.packageManager = "pnpm@10.33.2"
+        | .pnpm = {overrides: {undici: "<5"}}' package.json > p.json && mv p.json package.json
+    When call adapter_jq '[.observations[] | select(.type == "manifest_pnpm_overrides_ignored")]' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should be success
+    The output should equal '[{"type":"manifest_pnpm_overrides_ignored","keys":["undici"],"pnpm_major":10}]'
+  End
+
+  # No packageManager pin: routing falls back to package.json and says so,
+  # because a pnpm 11 shop without the pin gets the original inert write and
+  # only the install output can tell.
+  It 'observes an unknown pnpm major when packageManager does not pin pnpm'
+    use_fixture pnpm-cross-line
+    jq 'del(.packageManager)' package.json > p.json && mv p.json package.json
+    When call adapter_jq '{f: .override_file, o: [.observations[] | select(.type == "pnpm_major_unknown")] | length}' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should be success
+    The output should equal '{"f":"package.json","o":1}'
+  End
+
+  It 'reports pnpm_major null from detect when packageManager does not pin pnpm'
+    use_fixture pnpm-cross-line
+    jq 'del(.packageManager)' package.json > p.json && mv p.json package.json
+    When call adapter_jq '{pnpm_major, override_file}' detect
+    The status should be success
+    The output should equal '{"pnpm_major":null,"override_file":"package.json"}'
+  End
+
+  It 'dies loudly on a malformed package.json instead of routing to the dead file'
+    use_fixture pnpm-cross-line
+    printf '{ not json\n' > package.json
+    When run script "$ADAPTER" detect
+    The status should equal 1
+    The stderr should include 'packageManager'
+  End
+
+  # The append arm: a workspace file with content but no block, and no
+  # trailing newline, gains the block on its own line with the packages
+  # entry intact. Without the repair the header fused onto the last line.
+  It 'appends the block to a workspace file lacking a trailing newline'
+    use_fixture pnpm11-workspace-overrides
+    printf 'packages:\n  - packages/*' > pnpm-workspace.yaml
+    When call apply
+    The status should be success
+    The output should be present
+    The contents of file pnpm-workspace.yaml should include '  - packages/*
+overrides:'
+  End
+
+  It 'lands the scoped keys through the append arm'
+    use_fixture pnpm11-workspace-overrides
+    printf 'packages:\n  - packages/*' > pnpm-workspace.yaml
+    apply >/dev/null
+    When call adapter_jq '[.pins[].key] | sort' list_pins
+    The status should be success
+    The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+  End
+
+  # Byte preservation, asserted as bytes: the post-apply file minus the two
+  # appended keys is the fixture file, comments and ordering included.
+  It 'passes every untouched workspace line through byte-for-byte'
+    use_fixture pnpm11-workspace-overrides
+    cp pnpm-workspace.yaml before.yaml
+    apply >/dev/null
+    grep -v 'brace-expansion' pnpm-workspace.yaml > after-minus-new.yaml
+    When call diff before.yaml after-minus-new.yaml
+    The status should be success
+  End
+
+  # Workspace mode's only package.json edit here is none at all: the write
+  # is skipped when the document is unchanged, so jq re-encoding cannot
+  # land unrelated churn in the fix PR's diff.
+  It 'leaves package.json byte-identical when only the workspace file changed'
+    use_fixture pnpm11-workspace-overrides
+    cp package.json before.json
+    apply >/dev/null
+    When call diff before.json package.json
+    The status should be success
+  End
+End
