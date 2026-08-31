@@ -1,0 +1,125 @@
+# Modeled on the field run behind issue #100 (pnpm
+# 10, isolated store, no node_modules committed — exactly the state the verbs
+# run in): one parent NAME, `minimatch`, resolved at three majors, each copy
+# resolving its own major of `brace-expansion` (1.x, 2.x and 5.x), plus a
+# second 10.x copy so one target line spans two parent versions. The pre-fix
+# state: `resolved_versions brace-expansion` is ["1.1.11", "2.0.2", "5.0.5"].
+# Public names only.
+
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@ts-morph/common':
+        specifier: ^0.26.0
+        version: 0.26.1
+      filelist:
+        specifier: ^1.0.4
+        version: 1.0.4
+      glob:
+        specifier: ^7.2.3
+        version: 7.2.3
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.5
+
+packages:
+
+  '@ts-morph/common@0.26.1':
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000AAA==}
+
+  balanced-match@1.0.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000BBB==}
+
+  balanced-match@2.0.1:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000CCC==}
+
+  balanced-match@4.0.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000DDD==}
+
+  brace-expansion@1.1.11:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000EEE==}
+
+  brace-expansion@2.0.2:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000FFF==}
+
+  brace-expansion@5.0.5:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000GGG==}
+
+  concat-map@0.0.1:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000HHH==}
+
+  filelist@1.0.4:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000III==}
+
+  glob@7.2.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000JJJ==}
+
+  minimatch@10.0.3:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000KKK==}
+
+  minimatch@10.2.5:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000LLL==}
+
+  minimatch@3.1.5:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000MMM==}
+
+  minimatch@5.1.6:
+    resolution: {integrity: sha512-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000NNN==}
+
+snapshots:
+
+  '@ts-morph/common@0.26.1':
+    dependencies:
+      minimatch: 10.0.3
+
+  balanced-match@1.0.2: {}
+
+  balanced-match@2.0.1: {}
+
+  balanced-match@4.0.2: {}
+
+  brace-expansion@1.1.11:
+    dependencies:
+      balanced-match: 1.0.2
+      concat-map: 0.0.1
+
+  brace-expansion@2.0.2:
+    dependencies:
+      balanced-match: 2.0.1
+
+  brace-expansion@5.0.5:
+    dependencies:
+      balanced-match: 4.0.2
+
+  concat-map@0.0.1: {}
+
+  filelist@1.0.4:
+    dependencies:
+      minimatch: 5.1.6
+
+  glob@7.2.3:
+    dependencies:
+      minimatch: 3.1.5
+
+  minimatch@10.0.3:
+    dependencies:
+      brace-expansion: 5.0.5
+
+  minimatch@10.2.5:
+    dependencies:
+      brace-expansion: 5.0.5
+
+  minimatch@3.1.5:
+    dependencies:
+      brace-expansion: 1.1.11
+
+  minimatch@5.1.6:
+    dependencies:
+      brace-expansion: 2.0.2

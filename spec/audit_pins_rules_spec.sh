@@ -276,10 +276,12 @@ Describe 'the rules that gate the removal PR'
 
     # A trailing comma left by removing the last entry in an override block
     # produced an invalid manifest that only `jq` would have caught cleanly.
+    # The third occurrence is the workspace-override-file note (issue #159)
+    # saying the check does not apply to pnpm-workspace.yaml.
     It 'validates the manifest after the edit, before list_pins (#79c)'
       When call rule_in "$AGENT" 'jq \. package\.json'
       The status should be success
-      The output should equal '2'
+      The output should equal '3'
     End
 
     It 'templates a direct-commit provenance ref (#79d)'

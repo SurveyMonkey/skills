@@ -1841,3 +1841,85 @@ Describe 'node.sh apply_constraint'
     The stderr should be present
   End
 End
+
+# Where the write lands (issue #159): the field repository pinned pnpm 11 and
+# kept its live overrides in pnpm-workspace.yaml's top-level block; the
+# adapter wrote a correctly scoped key into package.json's `pnpm.overrides`,
+# which pnpm 11 does not read, so the fix was inert and validate fail-closed
+# on the adapter's own write. These assert the verdict through the consuming
+# surfaces — the workspace file the install reads, the manifest the PR diffs,
+# and list_pins' read-back — not just apply_constraint's JSON.
+Describe 'apply_constraint pnpm override file routing (issue #159)'
+  After 'cleanup_fixture'
+
+  workspace_line() { grep -c "$1" pnpm-workspace.yaml; }
+
+  It 'writes the scoped keys into the workspace overrides block on pnpm 11'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call workspace_line "^  'minimatch@10\\.2\\.5>brace-expansion': '>=5\\.0\\.9 <6'$"
+    The status should be success
+    The output should equal 1
+  End
+
+  It 'reports the file it wrote through'
+    use_fixture pnpm11-workspace-overrides
+    When call adapter_jq '{override_file, keys: [.written[].path | join(".")] | sort}' apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should be success
+    The output should equal '{"override_file":"pnpm-workspace.yaml","keys":["pnpm.overrides.minimatch@10.0.3>brace-expansion","pnpm.overrides.minimatch@10.2.5>brace-expansion"]}'
+  End
+
+  It 'preserves the pre-existing workspace entries beside the new keys'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call adapter_jq '[.pins[].key] | sort' list_pins
+    The status should be success
+    The output should equal '["form-data","js-yaml","minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion","undici","ws"]'
+  End
+
+  # The dead field is the defect: pnpm 11 ignores it and prints "The \"pnpm\"
+  # field in package.json is no longer read by pnpm" on install.
+  It 'leaves package.json without a pnpm field on pnpm 11'
+    use_fixture pnpm11-workspace-overrides
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call manifest '.pnpm'
+    The output should equal 'null'
+  End
+
+  It 'creates pnpm-workspace.yaml with the block on a pnpm 11 repo that has none'
+    use_fixture pnpm-cross-line
+    jq '.packageManager = "pnpm@11.9.0"' package.json > p.json && mv p.json package.json
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    When call workspace_line "^overrides:$"
+    The status should be success
+    The output should equal 1
+  End
+
+  # The pre-11 shape is unchanged: same fixture family, overrides still land
+  # in package.json and no workspace file appears.
+  It 'still writes package.json pnpm.overrides on pnpm 10 with no workspace block'
+    use_fixture pnpm-cross-line
+    "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch >/dev/null
+    test -f pnpm-workspace.yaml && return 1
+    When call manifest '[.pnpm.overrides | keys[]] | sort'
+    The output should equal '["minimatch@10.0.3>brace-expansion","minimatch@10.2.5>brace-expansion"]'
+  End
+
+  # A block this script cannot round-trip is refused before anything is
+  # written: a wrong write here corrupts a file pnpm reads on every install.
+  It 'refuses loudly on a workspace overrides block it cannot round-trip'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  jest:\n    ws: 1\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'cannot safely read the block'
+  End
+
+  It 'refuses a workspace overrides block carrying duplicate keys'
+    use_fixture pnpm11-workspace-overrides
+    printf 'overrides:\n  ws: 1\n  ws: 2\n' > pnpm-workspace.yaml
+    When run script "$ADAPTER" apply_constraint brace-expansion '>=5.0.9 <6' minimatch
+    The status should equal 1
+    The stderr should include 'duplicate keys'
+  End
+End

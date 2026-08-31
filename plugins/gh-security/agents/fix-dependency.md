@@ -917,6 +917,14 @@ git -C "$WORK/fix" add package.json <lockfile>
 git -C "$WORK/fix" commit -m "..."
 ```
 
+When `apply_constraint`'s result reported `override_file: "pnpm-workspace.yaml"` (a pnpm 11
+repository, or one whose live overrides already sit there — issue #159), the override landed in
+that file, so stage it too:
+
+```bash
+git -C "$WORK/fix" add package.json pnpm-workspace.yaml <lockfile>
+```
+
 Commit message:
 
 ```
@@ -1051,7 +1059,9 @@ PR body:
 ## Changes
 
 ```json
-<the exact JSON added or modified in package.json>
+<the exact JSON added or modified in the override file — package.json, or
+pnpm-workspace.yaml when apply_constraint reported override_file:
+"pnpm-workspace.yaml" (quote its written[] entries; the file itself is YAML)>
 ```
 
 <the one-sentence drift note whenever phase 3 committed a drift commit, and the
