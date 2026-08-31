@@ -481,6 +481,14 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr_url>
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x
 ```
 
+**Build that `--work` path with every `/` in `<package>` replaced by `-`**, exactly as the fix
+agent built it: `@scope/pkg` line 2 is `.claude/worktrees/fix-dependabot-@scope-pkg-2x`. Verbatim,
+a scoped name's `/` becomes a directory separator, and the reap then removes the leaf it was
+handed and reports `left_behind: []` while the interposed `fix-dependabot-@scope/` directory
+survives every clean run ([#161](https://github.com/SurveyMonkey/skills/issues/161)). `<branch_name>`
+is the opposite case and is passed through untouched, in whichever spelling it arrived: a slash in
+a ref is ordinary and nothing here rewrites it.
+
 **The reap takes no `env_prefix`, and the asymmetry with step 2 is deliberate.** Step 2 reads a
 pull request, which needs the account the repo's credentials resolve to; the reap only removes a
 directory and a local ref in a repository whose path it is handed, reaching no remote and no
@@ -511,9 +519,10 @@ pool. **A reap that exits without printing a report at all** (a rejected argumen
 did nothing and reported nothing, so take the branch from that agent's own result block (or from
 the dispatch payload for that group when there is no block to read) and **rebuild** the worktree
 path from the template in step 3,
-`<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x`, with that group's own
-package and major line: no result field carries the path, so it is derived, never copied. Carry
-both to phase 7 instead.
+`<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x` with every `/` in
+`<package>` replaced by `-`, using that group's own package and major line: no result field
+carries the path, so it is derived, never copied, and a scoped package rebuilt without that
+replacement names a path no agent ever created. Carry both to phase 7 instead.
 
 Each queued group is **one Task tool call**:
 

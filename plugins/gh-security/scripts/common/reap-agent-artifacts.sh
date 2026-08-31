@@ -9,7 +9,16 @@
 #                `fix/dependabot-<package>-<line>x` or the flat fallback
 #                `fix-dependabot-<package>-<line>x` (issue #123)
 #   --work       that group's `$WORK` directory,
-#                `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<line>x`.
+#                `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<line>x`
+#                with every `/` in `<package>` replaced by `-`, so a scoped
+#                package is one flat directory (`fix-dependabot-@scope-pkg-2x`)
+#                and not two. Interpolated verbatim, the `/` of a scoped name
+#                becomes a directory separator, and this script then removes
+#                the leaf it was handed and reports `left_behind: []` while the
+#                interposed `fix-dependabot-@scope/` directory survives every
+#                clean run: it is not part of the path it was given, so it is
+#                never seen and never reported (issue #161). Sanitizing is the
+#                CALLER's job; nothing here can recover a name already split.
 #                The git worktree itself sits at `<work>/fix`; this is its parent.
 #
 # Output: {repo_root, branch, work, worktree, work_dir, branch_ref,
@@ -20,6 +29,13 @@
 #     --repo-root /src/@example-org/example-repo \
 #     --branch fix/dependabot-example-pkg-6x \
 #     --work /src/@example-org/example-repo/.claude/worktrees/fix-dependabot-example-pkg-6x
+#
+# And the same group for a scoped package, where the branch keeps the `/` and
+# only the path replaces it:
+#   reap-agent-artifacts.sh \
+#     --repo-root /src/@example-org/example-repo \
+#     --branch fix/dependabot-@example-scope/example-pkg-2x \
+#     --work /src/@example-org/example-repo/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x
 #
 # **Verifying the pull request is the CALLER's job, and this script cannot do
 # it.** It makes no network call and asks `gh` nothing. The orchestrator runs

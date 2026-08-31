@@ -4,7 +4,7 @@ description: Fix agents work in per-major-line worktrees under .claude/worktrees
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5, 35, 84, 94]
+related_issues: [5, 35, 84, 94, 161]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
@@ -102,6 +102,16 @@ summary tells the user which branch to inspect or delete; that judgment stays hu
 keeps two agents fixing different lines of one package from colliding, and it is applied to every
 group so a package that grows a second line later does not rename the branch of the line it
 already had.
+
+[Issue #161](https://github.com/SurveyMonkey/skills/issues/161) amended the *path* half of that
+template: the worktree is `.claude/worktrees/fix-dependabot-<package>-<major_line>x` **with every
+`/` in `<package>` replaced by `-`**. A scoped package interpolated verbatim turns its `/` into a
+directory separator, so the workspace lands a level deeper and the orchestrator's reap, handed the
+leaf, removes the leaf and reports `left_behind: []` while the interposed
+`fix-dependabot-@scope/` directory survives every clean run, in every repository, forever. The
+branch template is untouched and stays `fix/dependabot-<package>-<major_line>x` verbatim: refs are
+a namespace git handles, and the field run that surfaced this pushed and deleted scoped branches
+cleanly.
 
 ## Amendment: repo-global git state is the orchestrator's, not the agent's
 

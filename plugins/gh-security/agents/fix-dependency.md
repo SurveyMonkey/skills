@@ -181,11 +181,22 @@ writing the PR prose. Do not reimplement what the scripts do.
 
 ## Phase 1: Create the isolated worktree
 
-Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x` — written
-`$WORK` in this document as shorthand, but **substitute the literal path in every command** (see
-Hard rules). A stable in-repo path means permission rules users accept for it persist across runs.
-The line suffix is what keeps you from colliding with the agent fixing another line of the same
-package; never drop it, even when your package has only one line.
+Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x`, **with
+every `/` in `<package>` replaced by `-`**, written `$WORK` in this document as shorthand, but
+**substitute the literal path in every command** (see Hard rules). A stable in-repo path means
+permission rules users accept for it persist across runs. The line suffix is what keeps you from
+colliding with the agent fixing another line of the same package; never drop it, even when your
+package has only one line.
+
+**The replacement is not cosmetic and it is not optional.** A scoped package interpolated verbatim
+turns its `/` into a directory separator, so `@scope/pkg` line 2 would put your workspace at
+`.claude/worktrees/fix-dependabot-@scope/pkg-2x` and leave the interposed
+`fix-dependabot-@scope/` directory behind forever: the orchestrator's reap is handed the leaf, so
+it removes the leaf, reports `left_behind: []`, and the run claims a clean sweep over a directory
+it created ([#161](https://github.com/SurveyMonkey/skills/issues/161)). Sanitized, that same group
+works at `.claude/worktrees/fix-dependabot-@scope-pkg-2x`, a single flat directory the reap can
+name. The sanitization is the **path's alone**: `branch_name` below keeps the package name
+verbatim, slash and all, and nothing about it needs escaping.
 
 `branch_name` arrives spelled either `fix/dependabot-<package>-<major_line>x` (the ordinary
 scheme) or `fix-dependabot-<package>-<major_line>x` (the flat fallback your dispatcher selects
