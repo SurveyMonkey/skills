@@ -40,7 +40,14 @@ case "$verb" in
       printf '{"error":"detect: no lockfile found"}\n' >&2
       exit 1
     fi
-    printf '{"pm":"npm","ecosystem":"npm","override_location":"%s"}\n' "${STUB_LOC:-overrides}" ;;
+    # Tree-read variant (issue #158): when the tree the verb runs in carries
+    # ./override-location, that file answers — like a real detect reading the
+    # tree's manifest — so which tree was consulted is observable.
+    if [ -f ./override-location ]; then
+      printf '{"pm":"npm","ecosystem":"npm","override_location":"%s"}\n' "$(cat ./override-location)"
+    else
+      printf '{"pm":"npm","ecosystem":"npm","override_location":"%s"}\n' "${STUB_LOC:-overrides}"
+    fi ;;
   declared_ranges)
     # $1 is --line, $2 the major, $3 the package.
     case "$3 $2" in
@@ -64,6 +71,16 @@ case "$verb" in
         printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch"]}\n' ;;
       "null-copy 1")
         printf '{"parents_read":["minimatch"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":["minimatch"]}\n' ;;
+      "treecoll "*)
+        # Tree-read variant (issue #158): the eligible-parent answer comes
+        # from the tree the verb runs in. With ./dr-shared present both lines
+        # share an eligible parent (the resolutions collapse shape); without
+        # it the lines are disjoint and no collision exists.
+        if [ -f ./dr-shared ]; then
+          printf '{"parents_read":["shared"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":[]}\n'
+        else
+          printf '{"parents_read":["solo-%s"],"parents_without_range":[],"parents_unreadable":[],"parents_other_lines":[]}\n' "$2"
+        fi ;;
       "dr-broken "*)
         printf '{"error":"declared_ranges: parser refused the lockfile"}\n' >&2
         exit 1 ;;
@@ -94,6 +111,14 @@ case "$verb" in
         printf '{"pm":"npm","package":"duplo","present":true,"count":1,"versions":[{"version":"1.0.0"}],"lockfile_entries":10}\n' ;;
       vbuild)
         printf '{"pm":"npm","package":"vbuild","present":true,"count":1,"versions":[{"version":"v6.2.0+build.99"}],"lockfile_entries":10}\n' ;;
+      treeread)
+        # The resolved version comes from the tree the verb runs in, exactly
+        # like a real lockfile read: which file answers is which tree was
+        # consulted, and that is the whole --base-ref question (issue #158).
+        tv=$(cat ./resolved-version 2>/dev/null || printf 'absent')
+        printf '{"pm":"npm","package":"treeread","present":true,"count":1,"versions":[{"version":"%s","path":"node_modules/treeread"}],"lockfile_entries":10}\n' "$tv" ;;
+      treecoll)
+        printf '{"pm":"npm","package":"treecoll","present":true,"count":2,"versions":[{"version":"1.5.0"},{"version":"2.5.0"}],"lockfile_entries":10}\n' ;;
       duped)
         printf '{"pm":"npm","package":"duped","present":true,"count":2,"versions":[{"version":"1.5.0"},{"version":"2.5.0"}],"lockfile_entries":10}\n' ;;
       sep-ok)
@@ -614,6 +639,228 @@ STUB_EOF
     End
   End
 
+  # Issue #158: which tree the classification is judged against. The stub's
+  # `treeread` package resolves whatever ./resolved-version says in the tree
+  # the adapter verb runs from, exactly like a real lockfile read, so the
+  # verdict names the consulted tree: the checkout's feature branch says
+  # 1.9.0 (line 1 resolved, dispatch) while origin/main says 0.2.5 (major 0,
+  # requires_major_bump, withdraw). Every assertion runs through the routing,
+  # like the issue #101 examples, because the hazard is a group silently
+  # withdrawn or dispatched off the wrong tree. The origin is a local bare
+  # repository, so the script's fetch stays off the network.
+  Describe 'judging against --base-ref origin/<default_branch> (issue #158)'
+    base_ref_repo() {
+      TEST_DIR=$(mktemp -d)
+      git init -q --bare "$TEST_DIR/origin.git"
+      git -C "$TEST_DIR/origin.git" symbolic-ref HEAD refs/heads/main
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/checkout" 2>/dev/null
+      RR="$TEST_DIR/checkout"
+      git -C "$RR" config user.email 'spec@example.invalid'
+      git -C "$RR" config user.name 'spec'
+      printf '0.2.5\n' > "$RR/resolved-version"
+      # The collision oracle for the cached detect / declared_ranges reads:
+      # on main both files exist, so `treecoll` collides (shared eligible
+      # parent under the resolutions syntax); on the feature branch neither
+      # answer collides. Which verdict comes back names which tree the two
+      # cached verbs ran from, exactly as ./resolved-version does for
+      # resolved_versions.
+      printf 'resolutions\n' > "$RR/override-location"
+      printf 'shared\n' > "$RR/dr-shared"
+      git -C "$RR" add resolved-version override-location dr-shared
+      git -C "$RR" commit -q -m base
+      git -C "$RR" push -q -u origin HEAD:main
+      git -C "$RR" checkout -q -b feature
+      printf '1.9.0\n' > "$RR/resolved-version"
+      printf 'overrides\n' > "$RR/override-location"
+      git -C "$RR" rm -q dr-shared
+      git -C "$RR" commit -q -am feature
+    }
+
+    # A push from a second clone, so the first checkout's remote-tracking
+    # origin/main goes stale: only the script's own fetch can see it.
+    advance_origin() {
+      git clone -q "$TEST_DIR/origin.git" "$TEST_DIR/other" 2>/dev/null
+      git -C "$TEST_DIR/other" config user.email 'spec@example.invalid'
+      git -C "$TEST_DIR/other" config user.name 'spec'
+      printf '%s\n' "${1:-3.0.0}" > "$TEST_DIR/other/resolved-version"
+      git -C "$TEST_DIR/other" commit -q -am bump
+      git -C "$TEST_DIR/other" push -q origin HEAD:main
+    }
+
+    Before 'base_ref_repo'
+    After 'cleanup_fixture'
+
+    classify_at() {
+      _filter=$1
+      shift
+      _st=0
+      _out=$(envelope treeread 1 \
+        | "$COMMON/classify-lines.sh" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    # Same, for an arbitrary package and line (the collision cases).
+    classify_pkg_at() {
+      _filter=$1; _pkg=$2; _line=$3
+      shift 3
+      _st=0
+      _out=$(envelope "$_pkg" "$_line" \
+        | "$COMMON/classify-lines.sh" "$@") || _st=$?
+      if [ -n "$_out" ]; then
+        printf '%s' "$_out" | jq -c "$_filter"
+      fi
+      return "$_st"
+    }
+
+    It 'withdraws the group per origin/main while the checkout sits on a divergent branch'
+      When call classify_at '{actionable_count: (.actionable | length), moved: [.skipped[] | select(.package == "treeread") | {reason, resolved_majors}]}' --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '{"actionable_count":0,"moved":[{"reason":"requires major version bump","resolved_majors":["0"]}]}'
+    End
+
+    # The regression pin for the flag's absence: the bare invocation still
+    # reads the checkout as-is, which is what keeps the plain-directory stub
+    # setup above (and any caller without a git repo) working.
+    It 'reads the checkout as-is without --base-ref'
+      When call classify_at '[.actionable[] | {line_status, resolved_majors}]' --repo-root "$RR"
+      The status should be success
+      The output should equal '[{"line_status":"resolved","resolved_majors":["1"]}]'
+    End
+
+    It 'fetches before judging, so a stale remote-tracking ref cannot answer'
+      advance_origin
+      When call classify_at '[.actionable[].line_status]' --repo-root "$RR" --base-ref=origin/main
+      The status should be success
+      The output should equal '["line_absent"]'
+    End
+
+    worktrees_after_run() {
+      envelope treeread 1 \
+        | "$COMMON/classify-lines.sh" --repo-root "$RR" --base-ref origin/main >/dev/null
+      git -C "$RR" worktree list --porcelain | grep -c '^worktree '
+    }
+
+    It 'removes its detached worktree on exit'
+      When call worktrees_after_run
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The reverse divergence direction: origin/main resolves ON the line
+    # while the checkout would withdraw. The withdraw case above cannot catch
+    # a defect that over-withdraws under the flag; this one can.
+    It 'dispatches the group per origin/main while the checkout would withdraw it'
+      advance_origin 1.9.0
+      printf '0.2.5\n' > "$RR/resolved-version"
+      git -C "$RR" commit -q -am downgrade
+      When call classify_at '[.actionable[] | {line_status, resolved_majors}]' --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '[{"line_status":"resolved","resolved_majors":["1"]}]'
+    End
+
+    # SKILL.md's claim that uncommitted lockfile edits cannot reclassify a
+    # group, pinned literally: the edit sits in the working tree, unstaged.
+    It 'ignores an uncommitted working-tree edit under --base-ref'
+      printf '9.9.9\n' > "$RR/resolved-version"
+      When call classify_at '{actionable_count: (.actionable | length), reasons: [.skipped[] | select(.package == "treeread") | .reason]}' --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '{"actionable_count":0,"reasons":["requires major version bump"]}'
+    End
+
+    # A narrowed remote.origin.fetch (a --single-branch clone, `git remote
+    # set-branches`) makes a bare `fetch origin <branch>` exit 0 while
+    # updating only FETCH_HEAD, so a stale refs/remotes/origin/main would
+    # pass the existence check and answer 0.2.5 here. Only the script
+    # fetching with an explicit forced refspec sees 3.0.0.
+    It 'refreshes the remote-tracking ref even under a narrowed fetch refspec'
+      git -C "$RR" config remote.origin.fetch '+refs/heads/other:refs/remotes/origin/other'
+      advance_origin
+      When call classify_at '[.actionable[].line_status]' --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '["line_absent"]'
+    End
+
+    # The collision check's two cached reads (detect, declared_ranges) must
+    # consult the detached tree too: origin/main's oracle files say
+    # resolutions syntax with a shared eligible parent (collision, withdraw),
+    # while the feature checkout's say overrides with disjoint parents
+    # (dispatch). Either cached read reverting to the checkout flips the
+    # routing and fails this.
+    It 'pins detect and declared_ranges to the detached tree via the collision verdict'
+      When call classify_pkg_at '{actionable_count: (.actionable | length), moved: [.skipped[] | select(.package == "treecoll") | {reason, collision_parents}]}' treecoll 1 --repo-root "$RR" --base-ref origin/main
+      The status should be success
+      The output should equal '{"actionable_count":0,"moved":[{"reason":"shared parent across major lines","collision_parents":["shared"]}]}'
+    End
+
+    It 'leaves the collision check on the checkout without --base-ref'
+      When call classify_pkg_at '[.actionable[] | {package, line_status}]' treecoll 1 --repo-root "$RR"
+      The status should be success
+      The output should equal '[{"package":"treecoll","line_status":"resolved"}]'
+    End
+
+    # Cleanup on the failure path: a contract-breaking envelope
+    # ({"actionable":"oops"}) is valid JSON, so it dies only after the
+    # detached worktree exists. The registration must still be gone.
+    worktrees_after_failed_run() {
+      if printf '{"actionable":"oops"}' \
+        | "$COMMON/classify-lines.sh" --repo-root "$RR" --base-ref origin/main >/dev/null 2>&1; then
+        echo 'script unexpectedly succeeded'
+        return 1
+      fi
+      git -C "$RR" worktree list --porcelain | grep -c '^worktree '
+    }
+
+    It 'removes its detached worktree when it dies mid-run'
+      When call worktrees_after_failed_run
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'hard-errors when --repo-root is a subdirectory of the repository'
+      mkdir -p "$RR/subdir"
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$RR/subdir' --base-ref origin/main"
+      The status should not equal 0
+      The stderr should include 'top level'
+    End
+
+    # The error contract survives a double quote in the caller's own value:
+    # the JSON is built with jq, never printf interpolation.
+    It 'emits parseable error JSON for a quote-bearing base ref'
+      err_is_json() {
+        printf '{"actionable":[],"skipped":[]}' \
+          | "$COMMON/classify-lines.sh" --repo-root "$RR" --base-ref 'origin/we"ird' 2>&1 >/dev/null \
+          | jq -r '.error'
+      }
+      When call err_is_json
+      The status should be success
+      The output should include 'we"ird'
+    End
+
+    It 'hard-errors when --base-ref names a repo-root outside any git repository'
+      plain_dir=$(mktemp -d)
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$plain_dir' --base-ref origin/main"
+      The status should not equal 0
+      The stderr should include 'git repository'
+      rm -rf "$plain_dir"
+    End
+
+    It 'hard-errors on a branch origin does not have'
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$RR' --base-ref origin/nope"
+      The status should not equal 0
+      The stderr should include '"error"'
+      The stderr should include 'origin/nope'
+    End
+
+    It 'rejects a base ref without the origin/ prefix'
+      When run sh -c "printf '{\"actionable\":[],\"skipped\":[]}' | '$COMMON/classify-lines.sh' --repo-root '$RR' --base-ref main"
+      The status should not equal 0
+      The stderr should include 'origin/<branch>'
+    End
+  End
+
   # The orchestration halves of the fix: the sentences SKILL.md acts on,
   # pinned the way spec/audit_pins_rules_spec.sh pins agent prose.
   Describe 'the SKILL.md prose that consumes the classification'
@@ -623,6 +870,23 @@ STUB_EOF
 
     It 'pipes phase 2 discovery through classify-lines.sh at repo scope'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root>'
+      The status should be success
+      The output should equal '2'
+    End
+
+    # Issue #158: both classify invocations carry the base ref, or the
+    # orchestration quietly falls back to judging the user's checkout.
+    It 'pins classification to origin/<default_branch> at both venues'
+      When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>'
+      The status should be success
+      The output should equal '2'
+    End
+
+    # A classify failure is a stop, at both venues: the dangerous recovery is
+    # an orchestrator quietly re-running without the flag, which judges the
+    # checkout and reintroduces issue #158 exactly.
+    It 'names a classify failure a stop, never a cue to drop --base-ref'
+      When call phrase_in "$SKILL" 'never re-run without .--base-ref.'
       The status should be success
       The output should equal '2'
     End

@@ -128,7 +128,7 @@ At repo scope, when phase 1 detected it from a local checkout:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target> \
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --from-discovery \
-  | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>
 ```
 
 When phase 1's namespace probe found `refs/heads/fix`, add `--branch-style flat` to the
@@ -137,11 +137,14 @@ that consumes them, the fix agents included — is born with the flat scheme. At
 no probe has run yet (there is no checkout), so discovery takes no style flag there; the per-repo
 rewrite happens in phase 5.
 
-`classify-lines.sh` reads `repo_root`'s current working tree, not the default branch by name — it
-runs whatever is actually checked out. At this point in the flow that is phase 1's checkout as the
-user left it, so it should be on `default_branch` and current; a stale or feature-branch tree can
-misclassify a group (a lockfile the fix agent will branch from `origin/<default_branch>` may
-resolve differently from one sitting on an unrelated branch).
+`--base-ref origin/<default_branch>` uses phase 1's `default_branch` and is not optional here:
+it is what pins the classification to the same tree the fix agents will branch from. The script
+fetches that branch, reads the lockfile from a short-lived detached worktree at the fetched ref,
+and cleans the worktree up itself, so whatever branch the user happens to have checked out — and
+whatever uncommitted lockfile edits it carries — cannot silently reclassify a group
+(issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it as
+blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`, which
+would judge the user's checkout and reintroduce the defect the flag exists to close.
 
 Wherever there is no local checkout yet — org and user scope, and a repo the user named when
 phase 1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation
@@ -369,17 +372,21 @@ For each **distinct repo** named in the approved batch:
    `env_prefix`, and a non-git `repo_root` all fail here too. A failed probe also prints nothing on
    stdout; never read a failed probe's empty stdout as the slash verdict. Record every repo that
    flipped to flat; phase 7 names them.
-5. **Reconcile each approved group with what that checkout actually resolves.** Once the repo's
-   `{repo, repo_root, default_branch}` triple is resolved, run:
+5. **Reconcile each approved group with what the default branch actually resolves.** Once the
+   repo's `{repo, repo_root, default_branch}` triple is resolved, run:
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root>
+   ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>
    ```
    (plus `--branch-style flat` when step 4 flipped this repo)
    with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
-   (`{actionable: <that repo's approved groups>, skipped: []}`). This reads whatever tree is
-   checked out at `repo_root` right now — step 2 just fetched or cloned it, so it should be on
-   `default_branch` and current before this call, the same expectation phase 2 states at repo
-   scope; a stale or feature-branch tree here can misclassify a group the same way. A group that reclassifies
+   (`{actionable: <that repo's approved groups>, skipped: []}`). `--base-ref` carries step 3's
+   `default_branch`, exactly as phase 2 does at repo scope: the script fetches that branch and
+   classifies against a short-lived detached worktree at the fetched ref, so a checkout step 2
+   reused — whatever branch it sits on — classifies the same as a fresh clone
+   (issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it
+   as blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`,
+   which would judge the user's checkout and reintroduce the defect the flag exists to close.
+   A group that reclassifies
    `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
    approval covered fixing the group, and this discovers the fix does not exist — and reported in
    phase 7 as skipped with the same `requires major version bump` reason and its
