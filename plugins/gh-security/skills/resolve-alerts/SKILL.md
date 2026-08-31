@@ -478,11 +478,13 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr_url>
 3. **Only when it reads `OPEN`**, reap that group's worktree directory and local branch:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x
+${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x
 ```
 
-**Build that `--work` path with every `/` in `<package>` replaced by `-`**, exactly as the fix
-agent built it: `@scope/pkg` line 2 is `.claude/worktrees/fix-dependabot-@scope-pkg-2x`. Verbatim,
+**`<package_path>` is `<package>` with every `/` replaced by `-`**, exactly as the fix agent
+built it: `@scope/pkg` line 2 is `.claude/worktrees/fix-dependabot-@scope-pkg-2x`. The template
+names `<package_path>` rather than `<package>` so that copying the command cannot interpolate the
+raw name. Verbatim,
 a scoped name's `/` becomes a directory separator, and the reap then removes the leaf it was
 handed and reports `left_behind: []` while the interposed `fix-dependabot-@scope/` directory
 survives every clean run ([#161](https://github.com/SurveyMonkey/skills/issues/161)). `<branch_name>`
@@ -519,10 +521,10 @@ pool. **A reap that exits without printing a report at all** (a rejected argumen
 did nothing and reported nothing, so take the branch from that agent's own result block (or from
 the dispatch payload for that group when there is no block to read) and **rebuild** the worktree
 path from the template in step 3,
-`<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x` with every `/` in
-`<package>` replaced by `-`, using that group's own package and major line: no result field
-carries the path, so it is derived, never copied, and a scoped package rebuilt without that
-replacement names a path no agent ever created. Carry both to phase 7 instead.
+`<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x`, using that group's
+own package and major line: no result field carries the path, so it is derived, never copied, and
+a scoped package rebuilt from the raw name instead of `<package_path>` names a path no agent ever
+created. Carry both to phase 7 instead.
 
 Each queued group is **one Task tool call**:
 
@@ -685,10 +687,11 @@ withdrew them after approval.
 name every artifact still on the user's disk: each `left_behind` entry a reap reported, every
 group whose reap exited without printing a report at all (named by the `branch` from that agent's
 own result block, or from its dispatch payload when it left no block, and by the worktree path
-rebuilt from phase 6's template with that group's package and major line, since no report exists
-to read either from), together
+rebuilt from phase 6's template with that group's package and major line —
+`fix-dependabot-<package_path>-<major_line>x`, where `<package_path>` is `<package>` with every
+`/` replaced by `-` — since no report exists to read either from), together
 with the worktree directory and branch of every group whose agent ended without a verified open
-PR, which is deliberately never reaped. A leftover under `.claude/worktrees/` sits at a stable
+PR, which is deliberately never reaped; that directory is derived from the same template. A leftover under `.claude/worktrees/` sits at a stable
 path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent
 is in flight, but only if this summary says it is there. Nothing left behind is a failure on its
 own; a run that reaped everything says so in one line.

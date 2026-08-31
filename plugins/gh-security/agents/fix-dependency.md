@@ -181,14 +181,17 @@ writing the PR prose. Do not reimplement what the scripts do.
 
 ## Phase 1: Create the isolated worktree
 
-Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<major_line>x`, **with
-every `/` in `<package>` replaced by `-`**, written `$WORK` in this document as shorthand, but
+Your workspace is `<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x`,
+where **`<package_path>` is `<package>` with every `/` replaced by `-`**, written `$WORK` in this
+document as shorthand, but
 **substitute the literal path in every command** (see Hard rules). A stable in-repo path means
 permission rules users accept for it persist across runs. The line suffix is what keeps you from
 colliding with the agent fixing another line of the same package; never drop it, even when your
 package has only one line.
 
-**The replacement is not cosmetic and it is not optional.** A scoped package interpolated verbatim
+**The replacement is not cosmetic and it is not optional**, which is why the template names
+`<package_path>` rather than `<package>`: no site that copies it can interpolate the raw name. A
+scoped package interpolated verbatim
 turns its `/` into a directory separator, so `@scope/pkg` line 2 would put your workspace at
 `.claude/worktrees/fix-dependabot-@scope/pkg-2x` and leave the interposed
 `fix-dependabot-@scope/` directory behind forever: the orchestrator's reap is handed the leaf, so
@@ -202,8 +205,9 @@ verbatim, slash and all, and nothing about it needs escaping.
 scheme) or `fix-dependabot-<package>-<major_line>x` (the flat fallback your dispatcher selects
 when a remote branch named `fix` blocks the `fix/*` ref namespace, issue #123). Use it verbatim
 wherever this document writes `<branch_name>`; you never choose or rewrite the spelling. Under
-the flat scheme the branch name can equal this worktree directory's basename, which collides with
-nothing: branches live in the ref namespace and the worktree under a `.claude/worktrees/` path.
+the flat scheme an unscoped package's branch name equals this worktree directory's basename (a
+scoped one differs by exactly the `/` replacement), which collides with nothing either way:
+branches live in the ref namespace and the worktree under a `.claude/worktrees/` path.
 
 You may run `git -C <repo_root> status --short` for context at any point. Its result gates
 nothing — your worktree never touches the user's tree, and their uncommitted work is theirs —

@@ -462,13 +462,16 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
   Describe 'a scoped package name in the worktree path (issue #161)'
     SCOPED_BRANCH='fix/dependabot-@example-scope/example-pkg-2x'
 
-    # Everything the caller left under `.claude/worktrees/` after the reap:
-    # the consuming rule is the orchestrator's summary, which is built from
-    # `left_behind` and reports a clean sweep when it is empty, so a residue
-    # invisible here is a residue nobody will ever be told about.
+    # The reap's own verdict, then everything the caller left under
+    # `.claude/worktrees/`: the consuming rule is the orchestrator's summary,
+    # which is built from `left_behind` and reports a clean sweep when it is
+    # empty, so the pair of lines is the hazard itself — a clean verdict
+    # printed above a residue the verdict never named. A failed reap returns
+    # its own status before the survey, so `The status should be success`
+    # asserts the reap, not the `printf`.
     reap_and_survey() {
       common_jq reap-agent-artifacts.sh '{l: .left_behind, e: .errors}' \
-        --repo-root "$REPO" --branch "$SCOPED_BRANCH" --work "$1" >/dev/null
+        --repo-root "$REPO" --branch "$SCOPED_BRANCH" --work "$1" || return $?
       find "$REPO/.claude/worktrees" -mindepth 1 | sed "s|^$REPO/.claude/worktrees/||" | sort
       printf 'end\n'
     }
@@ -485,7 +488,8 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
       scoped_group 'fix-dependabot-@example-scope-example-pkg-2x'
       When call reap_and_survey "$SCOPED_WORK"
       The status should be success
-      The output should equal 'end'
+      The output should equal '{"l":[],"e":[]}
+end'
     End
 
     It 'still deletes the branch, whose own slash is never sanitized'
@@ -506,7 +510,8 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
       scoped_group 'fix-dependabot-@example-scope/example-pkg-2x'
       When call reap_and_survey "$SCOPED_WORK"
       The status should be success
-      The output should equal 'fix-dependabot-@example-scope
+      The output should equal '{"l":[],"e":[]}
+fix-dependabot-@example-scope
 end'
     End
   End
@@ -550,16 +555,44 @@ Describe 'the orchestrator-side reap (issue #131)'
     # it from this step's, so the two sentences ARE the implementation and a
     # divergence between them is the defect returning. Both files are pinned
     # for every clause, in this one place, so neither can be edited alone.
-    It 'states the replacement in the phase 6 step and again in the phase 7 rebuild'
-      When call phrase_in "$SKILL" 'every ./. in .<package>. replaced by .-.'
+    # The template's own token carries the rule: every path site writes
+    # `<package_path>`, defined as `<package>` with every `/` replaced by
+    # `-`, so a site that copies the template cannot interpolate the raw name.
+    It 'defines <package_path> in the phase 6 step and again in the phase 7 rebuild'
+      When call phrase_in "$SKILL" '.<package_path>. is .<package>. with every ./. replaced by .-.'
       The status should be success
       The output should equal '2'
     End
 
-    It 'states the same replacement in the agent workspace definition'
-      When call phrase_in "$AGENT" 'every ./. in .<package>. replaced by .-.'
+    It 'defines <package_path> the same way in the agent workspace definition'
+      When call phrase_in "$AGENT" '.<package_path>. is .<package>. with every ./. replaced by .-.'
       The status should be success
       The output should equal '1'
+    End
+
+    # Every path template site uses the token; the raw name never appears in
+    # a worktree path. The counts are the fence, the phase 6 rebuild sentence,
+    # and the phase 7 rebuild in SKILL.md, and the workspace definition in the
+    # agent.
+    It 'writes the token into every worktree path template in SKILL.md'
+      When call phrase_in "$SKILL" 'fix-dependabot-<package_path>-<major_line>x'
+      The status should be success
+      The output should equal '3'
+    End
+
+    It 'writes the token into the agent workspace template'
+      When call phrase_in "$AGENT" 'fix-dependabot-<package_path>-<major_line>x'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never interpolates the raw package name into a worktree path in either document'
+      raw_path_sites() {
+        grep -c 'worktrees/fix-dependabot-<package>' "$SKILL" "$AGENT" | awk -F: '{ s += $NF } END { print s }'
+      }
+      When call raw_path_sites
+      The status should be success
+      The output should equal '0'
     End
 
     # The worked example, identical in both, so a reader who skims the clause

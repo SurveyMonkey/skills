@@ -9,8 +9,9 @@
 #                `fix/dependabot-<package>-<line>x` or the flat fallback
 #                `fix-dependabot-<package>-<line>x` (issue #123)
 #   --work       that group's `$WORK` directory,
-#                `<repo_root>/.claude/worktrees/fix-dependabot-<package>-<line>x`
-#                with every `/` in `<package>` replaced by `-`, so a scoped
+#                `<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<line>x`,
+#                where `<package_path>` is `<package>` with every `/`
+#                replaced by `-`, so a scoped
 #                package is one flat directory (`fix-dependabot-@scope-pkg-2x`)
 #                and not two. Interpolated verbatim, the `/` of a scoped name
 #                becomes a directory separator, and this script then removes
