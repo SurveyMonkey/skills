@@ -570,6 +570,20 @@ into your result JSON, where the orchestrator aggregates them across the batch. 
 array: it is the only record of what the manifest looked like before you touched it, and it is
 what tells a bare override you *tightened* from one you *added*.
 
+Two pnpm observation types carry a warning rather than a lead, and each has one required
+reaction beyond the verbatim carry (issue #159 review):
+
+- `pnpm_major_unknown` — the manifest does not pin pnpm, so the write went to package.json's
+  `pnpm.overrides` on routing alone. Watch the `install` output: if it prints `The "pnpm" field
+  in package.json is no longer read by pnpm`, the repository runs pnpm 11, the override is
+  inert, and the correct stop is the fail-closed `validate` that follows, reported with this
+  observation quoted so the reviewer sees the cause rather than an unexplained violation.
+- `manifest_pnpm_overrides_ignored` — the live block is pnpm-workspace.yaml, yet package.json
+  still carries `pnpm.overrides` keys this fix deliberately did not merge or rewrite. Name them
+  in the PR body: on pnpm 11 they are dead entries a later cleanup can remove; on an older
+  major (`pnpm_major` in the observation says which) both files are live and the reviewer
+  should know they can disagree.
+
 ```bash
 cd "$WORK/fix" && $ADAPTER install
 cd "$WORK/fix" && $ADAPTER validate --line <major_line> --vulnerable '<range>' --vulnerable '<range>' --baseline '<phase 3 resolved_versions JSON>' --sibling-alerts '<group sibling_alerts JSON>' <package> '>=<version> <<next_major>'
