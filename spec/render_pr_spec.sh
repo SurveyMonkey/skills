@@ -76,6 +76,8 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       state-drift.json             expected-body-drift.md
       state-pnpm.json              expected-body-pnpm.md
       state-major-bump.json        expected-body-major-bump.md
+      state-major-bump-pnpm.json   expected-body-major-bump-pnpm.md
+      state-major-bump-yarn.json   expected-body-major-bump-yarn.md
       state-collateral-null.json   expected-body-collateral-null.md
       state-collateral-benign.json expected-body-collateral-benign.md
     End
@@ -144,6 +146,43 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The status should be success
       The output should include '## Not fixed by this PR'
       The output should include "| 3.18.1 | GHSA-p6mc-m468-83gw | no patched release in the 3.x line; needs a major bump of \`some-tool\` or dropping it |"
+    End
+  End
+
+  # A parent name is only derivable from an npm-shaped install path
+  # (node_modules/<parent>/node_modules/<pkg>). pnpm's <pkg>@<version> and
+  # Yarn Berry's <pkg>@npm:<version> both name the violating copy itself, not
+  # a parent — so on those two managers the cell must say a major bump is
+  # needed WITHOUT naming a parent nobody could determine, never an empty or
+  # invented identifier. Mirrors fix-group.sh's parent_derivation discipline;
+  # rows land specimens for all three managers.
+  Describe 'body — Not fixed by this PR derives a parent only where the path names one'
+    Parameters
+      npm  state-major-bump.json      "needs a major bump of \`some-tool\` or dropping it"
+      pnpm state-major-bump-pnpm.json "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
+      yarn state-major-bump-yarn.json "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
+    End
+
+    It "renders the honest remediation for a $1-shaped violation path"
+      When call render_body "$2"
+      The status should be success
+      The output should include "$3"
+    End
+  End
+
+  Describe 'body — pnpm and yarn never fabricate a parent name'
+    It 'never renders an empty backtick pair for a pnpm-shaped path'
+      When call render_body state-major-bump-pnpm.json
+      The status should be success
+      The output should not include '`` or dropping it'
+      The output should not include 'of `` or'
+    End
+
+    It 'never renders an empty backtick pair for a yarn-shaped path'
+      When call render_body state-major-bump-yarn.json
+      The status should be success
+      The output should not include '`` or dropping it'
+      The output should not include 'of `` or'
     End
   End
 

@@ -264,8 +264,10 @@ judgement about which applies.
   same step unchanged.
 - **Exit 3, `"status": "failure"`** — terminal. Map `phase` and `detail` onto your result block
   verbatim, run Cleanup, and stop. The phases it emits (`worktree`, `classify`, `baseline`,
-  `apply`, `install`, `validate`) are the same vocabulary your result uses; `push` and `pr` name
-  work only you do.
+  `apply`, `validate`) are the same vocabulary your result uses. Two more phase names never come
+  from an exit 3: `push` and `pr` name work only you do, and `install` is what YOU write after an
+  `install_failure` judgment escape (exit 2, above) — the driver never emits `install` as a
+  terminal failure of its own.
   - **`cleanup` is the one exception, and the only one.** It runs after the push and the PR, so
     its exit 3 says a worktree or workspace leaked, not that the run failed. Map it by what
     actually shipped: **if you hold a `pr_url`**, your result is `"status": "success"` with that

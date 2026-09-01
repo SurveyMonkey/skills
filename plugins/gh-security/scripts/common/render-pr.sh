@@ -90,9 +90,15 @@ run_env() {
 # Shared jq helpers, inlined into every filter that needs them.
 # ---------------------------------------------------------------------------
 
-# parent_of/bare_name mirror fix-group.sh's uncovered_parents: the enclosing
-# package directory of a violation path, with a pnpm store prefix and any
-# trailing @version qualifier stripped.
+# parent_of/bare_name mirror fix-group.sh's uncovered_parents/parent_derivation
+# exactly (same shape test, same extraction): only an npm-style install path
+# names the enclosing parent, immediately before the last `node_modules`
+# segment. pnpm's `<name>@<version>` and Yarn Berry's `<name>@npm:<version>`
+# name the violating COPY, not a parent, and carry no `node_modules/` segment
+# at all, so `parent_of` returns null for them rather than inventing one — the
+# earlier `.pnpm/<parent>@<ver>/...` branch this used to strip was dead
+# (node.sh never emits that shape) and, worse, implied a pnpm derivation this
+# report cannot make.
 JQ_DEFS=$(cat <<'JQLIB'
   def bare_name:
     . as $k
@@ -102,7 +108,7 @@ JQ_DEFS=$(cat <<'JQLIB'
     ($path | split("/")) as $seg
     | ([ range(0; $seg | length) | select($seg[.] == "node_modules") ] | last) as $i
     | if $i == null or $i == 0 then null
-      else ($seg[0:$i] | last | sub("^\\.pnpm/"; "") | bare_name) end;
+      else ($seg[$i - 1] | bare_name) end;
   def major_of($v):
     ($v | sub("^[vV=]*"; "") | sub("[^0-9].*$"; ""));
 JQLIB
@@ -323,6 +329,11 @@ EOF
   if [ "$bump_count" -gt 0 ]; then
     printf '## Not fixed by this PR\n\n'
     printf '| Version | Alerts still open | Remediation |\n|---|---|---|\n'
+    # A parent name is only derivable from an npm-shaped install path
+    # (JQ_DEFS's parent_of). Under pnpm and Yarn Berry the violating copy's
+    # own path is all `validate` reports — no parent, and none is invented:
+    # the cell says a major bump of the copy's dependent is needed without
+    # naming one, rather than rendering an empty or fabricated identifier.
     printf '%s' "$state" | jq -r --argjson alerts "$(printf '%s' "$group" | jq -c '.alerts')" "$JQ_DEFS"'
       .requires_major_bump[] as $b
       | ($b.vulnerable_ranges // []) as $vr
@@ -330,9 +341,10 @@ EOF
            | (.ghsa // .cve // ("#" + (.number | tostring))) ] | join(", ")) as $open
       | (parent_of($b.path)) as $parent
       | (major_of($b.version)) as $maj
-      | [$b.version, $open,
-         "no patched release in the \($maj).x line; needs a major bump of `" +
-         ($parent // "the dependent that pins it") + "` or dropping it"]
+      | (if $parent != null then "needs a major bump of `\($parent)` or dropping it"
+         else "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
+         end) as $remedy
+      | [$b.version, $open, "no patched release in the \($maj).x line; \($remedy)"]
       | @tsv' | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
     printf '\n'
   fi
