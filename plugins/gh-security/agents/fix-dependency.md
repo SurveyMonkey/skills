@@ -306,9 +306,11 @@ You quote `detail` verbatim either way; these are the three that need a sentence
   The hook rules in phase 6 apply here unchanged — never bypass one, never edit anything to
   satisfy one.
 
-### The four decision points that reach you
+### Where judgment reaches you
 
-`needs_judgment` carries `evidence`; read it before deciding anything.
+`needs_judgment` carries `evidence`; read it before deciding anything. The driver raises it at
+three points, listed first. The fourth entry below is not a `needs_judgment` of its own: it is a
+shape you recognize *inside* a `validate_failed_after_ladder`, and it changes what you do with it.
 
 1. **`install_failure`** — an install failed for something the ladder does not cover, and
    `evidence.error` is the package manager's own output. Diagnose it: a peer conflict needing a
@@ -320,7 +322,12 @@ You quote `detail` verbatim either way; these are the three that need a sentence
    quoting the error. Never re-run the same step unchanged.
 2. **`validate_failed_after_ladder`** — the ladder ran to its end (scoped parents, then the bare
    override) and validation still fails. `evidence` carries the validate report, the entries
-   written, the parents tried and whether `--tighten-bare` was applied. **Narrowing the key
+   written, the parents tried, whether `--tighten-bare` was applied, and `parent_derivation`.
+   Read that last field before describing the ladder as exhausted: only npm's violation paths
+   name the enclosing parent of a violating copy, so on pnpm and Yarn Berry
+   `parent_derivation.possible` is `false` and the scoped-parent step never ran at all. Say so in
+   the escalation — the remaining copies were never tried under a narrower parent, and that is a
+   limitation of the report, not evidence that no parent would have worked. **Narrowing the key
    yourself is not the remedy and you must not try it**: Yarn's parent half matches the parent's
    exact resolved version and a range there parses and then silently never matches, and under
    pnpm and npm the adapter already wrote version-qualified parent keys wherever they can express
@@ -332,9 +339,11 @@ You quote `detail` verbatim either way; these are the three that need a sentence
    `apply_constraint` reproduces the same write. This is reconcile-by-hand, not retry: fail
    (`failure.phase: "validate"`) naming the pre-existing override rule the human has to reconcile
    (issue #147).
-4. **`install_budget_exhausted`** — the ladder used its four fix installs without reaching a
-   verdict. Report it as a failure (`failure.phase: "install"`) with the evidence; do not extend
-   the budget by re-running.
+4. **`install_budget_exhausted`** — this run spent its four fix installs without reaching a
+   verdict. The count is kept in `$WORK/state.json`, so it spans every `apply` call this run
+   makes: re-running `apply` resumes the count rather than resetting it, which is what makes the
+   single sanctioned re-run in point 1 bounded. Report it as a failure
+   (`failure.phase: "install"`) with the evidence; do not extend the budget by re-running.
 
 An `apply_constraint` refusal never reaches you as `needs_judgment` — the driver returns it as a
 phase `apply` failure with the adapter's error verbatim, because nothing was written. Two shapes
@@ -379,12 +388,17 @@ The driver states these; you interpret them.
 - **`observations`** is the adapter's array, carried verbatim into your result so the orchestrator
   can aggregate across the batch. Two pnpm types carry a warning rather than a lead, and each has
   one required reaction beyond the carry (issue #159 review): `pnpm_major_unknown` (the manifest
-  does not pin pnpm, so the write went to `pnpm.overrides` on routing alone — if the run reported
-  `The "pnpm" field in package.json is no longer read by pnpm`, the repository runs pnpm 11 and
-  the override is inert, and the driver's fail-closed validate is the correct stop, reported with
-  this observation quoted) and `manifest_pnpm_overrides_ignored` (the live block is
+  does not pin pnpm, so the write went to `pnpm.overrides` on routing alone — if the driver's
+  `install_signals[]` carries `pnpm_field_no_longer_read`, an install printed
+  `The "pnpm" field in package.json is no longer read by pnpm`, so the repository runs pnpm 11
+  and the override is inert; the driver's fail-closed validate is the correct stop, reported with
+  both this observation and that signal quoted) and `manifest_pnpm_overrides_ignored` (the live block is
   pnpm-workspace.yaml while package.json still carries `pnpm.overrides` keys this fix deliberately
   did not merge — name them in the PR body).
+- **`install_signals[]`** is what the installs in this run printed that a later phase has to react
+  to, detected while the output was still in hand rather than left in a discarded stream. Today it
+  carries one value, `pnpm_field_no_longer_read`; the reaction is in the `pnpm_major_unknown`
+  bullet above. An empty array means no install printed one, which is the ordinary case.
 - **`benign_moves`** are cross-line moves the adapter classed `benign_dedup` at the strictest
   policy: within-major dedups onto a version each line already resolved, on lines
   `--sibling-alerts` proves carry no open alerts (issue #105). You never make that judgement
@@ -445,6 +459,13 @@ on push through every fix run. Three rules follow, and none of them is a judgmen
 This is a different mechanism from [ADR 006](../../../docs/adr/006-merge-risk-is-static-analysis.md),
 which says you never *choose* to run a repository's checks for scoring. A hook the repository
 attached to `git commit` runs automatically, is not yours to run or skip, and feeds no factor.
+
+**Never combine `cd` with `git` in one command — no exceptions.** Every git invocation below uses
+`git -C <literal path>`. The compound form (`cd "$WORK/fix" && git add ...`) trips a per-command
+"cd before git" security review that no permission rule can silence, interrupting the user once
+per invocation, while the `-C` form is covered by the standing rules and runs silently. Non-git
+commands (the driver, the adapter) take the `cd "$WORK/fix" && ` prefix instead, which is covered
+too; only git needs the `-C` form.
 
 ```bash
 git -C "$WORK/fix" add package.json <lockfile>

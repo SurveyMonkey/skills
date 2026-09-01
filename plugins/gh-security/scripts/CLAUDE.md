@@ -66,38 +66,43 @@ bug, not a fallback. Every branch it takes was an enumerated branch of that docu
 one added to fix a field defect, and a fully enumerated decision tree is a script that has not
 been written yet ([#171](https://github.com/SurveyMonkey/skills/issues/171)).
 
-**Stepped, with a state file at `$WORK/state.json`, not one run.** `setup`, `classify`,
-`baseline`, `apply`, `score`, `cleanup`. The Bash tool's 10-minute ceiling cannot wrap a control
-install plus a fix install (field runs: ~4 minutes each, up to ~17 minutes total), and the
-remediation ladder needs a seam where judgment can escape to the agent. Only `setup` takes the
-group payload and the paths; every later step takes `--work <dir>` and reads the rest back.
+**Stepped, with a state file at `$WORK/state.json`, not one run**, because the Bash tool's
+10-minute ceiling cannot wrap a control install plus a fix install (field runs: ~4 minutes each,
+up to ~17 minutes total) and the remediation ladder needs a seam where judgment can escape to the
+agent. The subcommands, the exit-code contract and the option surface are stated once, in the
+script's own header (`common/fix-group.sh:1-50`); restating them here is how the two drift.
 
-Four exit codes, and no fifth case:
+What that header does not say, and what belongs here:
 
-| Exit | Payload | Meaning |
-|---|---|---|
-| 0 | `{"status":"ok", ...}` | the step is done; run the next one |
-| 0 | `{"status":"no_op", ...}` | terminal (from `apply`): nothing to fix, no PR |
-| 0 | `{"status":"ready_for_pr", ...}` | terminal (from `score`): everything phase 6 needs |
-| 2 | `{"status":"needs_judgment","decision_point":...,"evidence":{...}}` | a branch the tree cannot decide |
-| 3 | `{"status":"failure","phase":...,"detail":...}` | terminal failure, mapped onto the agent's result |
-| 1 | `{"error":"..."}` | usage or internal error |
-
-The `phase` vocabulary is the agent result block's: `worktree`, `classify`, `baseline`, `apply`,
-`install`, `validate`. `push` and `pr` stay agent-side, because they name work the driver never
-does.
-
-**Judgment escapes at exactly four points**, each fail-closed and none of them a retry:
-`install_failure` (an install failure outside the ladder's cover — its one sanctioned
-registry-timeout retry has already been spent), `validate_failed_after_ladder`,
-`install_budget_exhausted`, and the placed-shape reconcile-by-hand escalation the agent reads out
-of a `validate_failed_after_ladder` whose `written[]` is all nested rule paths. An
-`apply_constraint` refusal is **not** one of them: nothing was written, so it is a phase `apply`
-failure quoting the adapter verbatim.
-
-`--env-prefix` is an opaque argv prefix (see below), split on whitespace and prepended to every
-git, adapter and package-manager call the driver makes, composed after any `cd`. `--scorer` is a
-test seam for the risk scorer's path, the same shape as `node.sh shim`'s runner override.
+- **The state file is the only thing that survives between steps**, so anything a later step needs
+  is written into it and never carried in the caller's transcript. Two things it holds are load-
+  bearing rather than incidental: the **fix-install counter**, which is what makes
+  `install_budget_exhausted` reachable at all (one `apply` spends at most three of the four, and
+  the agent doc sanctions re-running `apply` — a process-local counter reset on that re-run and
+  bounded nothing), and the **`install_signals[]` union**, which carries what an install printed
+  past the point where its output is discarded.
+- **Every read of that file distinguishes "value", "absent" and "unreadable".** A discarded jq
+  status turned a truncated `state.json` into empty strings, which is how a `cleanup` came to
+  report success having removed nothing — and how `git -C ""`, which silently operates on the
+  *current* directory, became reachable with `worktree remove --force` behind it (#18's failure
+  mode).
+- **Judgment escapes at three points**, each fail-closed and none of them a retry:
+  `install_failure`, `validate_failed_after_ladder` and `install_budget_exhausted`. The
+  placed-shape reconcile-by-hand escalation is a *fourth thing the agent decides*, not a fourth
+  wire shape: it is a `validate_failed_after_ladder` whose `written[]` is all nested rule paths.
+  An `apply_constraint` refusal is not an escape either — it is a phase `apply` failure quoting
+  the adapter verbatim.
+- **The ladder's first step is npm-only, and says so rather than faking it.** It derives the
+  parents to scope from `validate`'s `violations[].path`, and only npm's path is an install path
+  naming an enclosing parent; pnpm reports `<name>@<version>` and Yarn Berry the resolution
+  locator, both of which name the violating copy. So on those two managers step 1 cannot run, and
+  the `parent_derivation` object in the result and in the escalation evidence records that
+  instead of presenting an unexhausted step as exhausted.
+- **The widest shape actually applied is read off `written[]`, never off `apply_constraint`'s
+  `mode`.** `mode` describes the call's input — `direct` means zero parents were passed — while a
+  transitive package with an empty eligible set takes that same branch and gets a **top-level bare
+  override** written for it. Keyed off `mode`, that pin was reported as `direct-update`, scored F6
+  as 0, and never reached the pin audit as an `unscoped_override_added` observation.
 
 ## One group per package major line, and validate decides completeness
 

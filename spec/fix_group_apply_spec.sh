@@ -84,8 +84,13 @@ case "$verb" in
     elif [ -f "$MOCK_DIR/install.sh" ]; then . "$MOCK_DIR/install.sh"; fi
     exit "$(cat "$MOCK_DIR/install.$n.status" 2>/dev/null || cat "$MOCK_DIR/install.status" 2>/dev/null || echo 0)" ;;
   compare_versions)
-    jq -n --arg a "$1" --arg b "$2" \
-      '{a: $a, b: $b, result: (if $a < $b then -1 elif $a > $b then 1 else 0 end)}' ;;
+    # Numeric, segment by segment. A lexical string compare — which this mock
+    # used to be — answers 4.17.9 > 4.17.10, so every example that depended on
+    # it agreed with a `lowest_on_line` that was picking the wrong version.
+    jq -n --arg a "$1" --arg b "$2" '
+      def parts: split(".") | map(tonumber? // 0);
+      ($a | parts) as $x | ($b | parts) as $y
+      | {a: $a, b: $b, result: (if $x < $y then -1 elif $x > $y then 1 else 0 end)}' ;;
   *) printf '{"error":"unknown verb"}\n' >&2; exit 1 ;;
 esac
 SH
@@ -176,11 +181,30 @@ JSON
 
   # $1 call index, $2 ok, $3 violations[], $4 other_line_moves
   validate_json() {
-    cat > "$MOCK_DIR/validate.$1.json" <<JSON
+    write_validate "$MOCK_DIR/validate.$1.json" "$2" "$3" "$4"
+  }
+
+  # The answer every unindexed validate call in a run gets, for examples that
+  # run the ladder past the indices they pinned.
+  validate_fallback() {
+    write_validate "$MOCK_DIR/validate.json" "$1" "$2" "$3"
+  }
+
+  write_validate() {
+    cat > "$1" <<JSON
 {"ok": $2, "package": "lodash", "range": ">=4.17.21 <5", "line": "4",
  "line_present": true, "checked": 1, "resolved_count": 1,
  "violations": $3, "unresolved_alerts": [], "requires_major_bump": [],
  "other_line_moves": $4, "resolved_versions": ["4.17.21"]}
+JSON
+  }
+
+  # A resolved_versions payload carrying an arbitrary versions[] array, for the
+  # multi-version shapes the single-version helper above cannot express.
+  rv_versions() {
+    cat > "$MOCK_DIR/rv.$1.json" <<JSON
+{"pm": "npm", "package": "lodash", "present": true, "count": 2,
+ "versions": $2, "lockfile_entries": 4}
 JSON
   }
 
@@ -322,6 +346,198 @@ JSON
       The stderr should include 'also admits copies on other major lines'
     End
 
+    # Both preconditions used to be checked (or not checked) too late: the
+    # baseline not at all, and the alert set only once package.json had been
+    # rewritten and a full install had run.
+    It 'refuses to run without a baseline, before anything is written'
+      make_env
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$MOCK" --scorer "$SCORER" >/dev/null
+      "$DRIVER" classify --work "$WORK" >/dev/null
+      When call drv_jq '{has_error: has("error")}' apply --work "$WORK"
+      The status should equal 1
+      The output should equal '{"has_error":true}'
+      The stderr should include "run 'baseline' first"
+    End
+
+    It 'runs no apply_constraint and no install when the baseline is missing'
+      make_env
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$MOCK" --scorer "$SCORER" >/dev/null
+      "$DRIVER" classify --work "$WORK" >/dev/null
+      "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+      When call grep -c -e '^VERB apply_constraint' -e '^VERB install' "$MOCK_LOG"
+      The status should equal 1
+      The output should equal '0'
+    End
+
+    # `--vulnerable` is what lets validate answer whether the alerts were
+    # CLEARED rather than merely whether the constraint holds. An alert whose
+    # range is dropped from the set lets `unresolved_alerts` come back empty
+    # for an alert nothing ever checked — the silent partial fix.
+    It 'fails on an alert carrying no vulnerable_range rather than dropping it'
+      make_env
+      cat > "$TEST_DIR/group.json" <<'JSON'
+{"package": "lodash", "ecosystem": "npm", "major_line": "4",
+ "highest_fixed_version": "4.17.21",
+ "branch_name": "fix/dependabot-lodash-4x",
+ "alerts": [{"number": 1, "vulnerable_range": "< 4.17.21"},
+            {"number": 2, "vulnerable_range": null}],
+ "sibling_alerts": []}
+JSON
+      through_baseline
+      When call drv_jq '{status, phase}' apply --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"apply"}'
+      The stderr should include '[2]'
+      The stderr should include 'nothing checked'
+    End
+
+    It 'writes nothing on that refusal'
+      make_env
+      cat > "$TEST_DIR/group.json" <<'JSON'
+{"package": "lodash", "ecosystem": "npm", "major_line": "4",
+ "highest_fixed_version": "4.17.21",
+ "branch_name": "fix/dependabot-lodash-4x",
+ "alerts": [{"number": 2, "vulnerable_range": null}],
+ "sibling_alerts": []}
+JSON
+      through_baseline
+      "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+      When call grep -c '^VERB apply_constraint' "$MOCK_LOG"
+      The status should equal 1
+      The output should equal '0'
+    End
+
+    # `[]` is a real answer and is passed as `[]`. The flag's VALUE is the
+    # assertion, not its presence: passed as anything else, validate's benign
+    # classification silently changes.
+    It 'passes the sibling_alerts value verbatim, not merely the flag'
+      make_env
+      write_group '[{"number": 9, "package": "lodash", "major": 3}]'
+      through_baseline
+      "$DRIVER" apply --work "$WORK" >/dev/null
+      When call grep -A1 -x -- 'ARG --sibling-alerts' "$MOCK_LOG"
+      The status should be success
+      The output should include '[{"number":9,"package":"lodash","major":3}]'
+    End
+
+    It 'passes an empty sibling_alerts array as []'
+      make_env
+      through_baseline
+      "$DRIVER" apply --work "$WORK" >/dev/null
+      When call grep -A1 -x -- 'ARG --sibling-alerts' "$MOCK_LOG"
+      The status should be success
+      The output should include 'ARG []'
+    End
+
+    # A direct dependency passes no parents at all, and the adapter retargets
+    # the manifest's own declaration. `written[]` says so — `dependencies`,
+    # not `overrides` — and that is what makes it a direct-update.
+    It 'reports a direct dependency retarget as direct-update, end to end'
+      make_env
+      cat > "$MOCK_DIR/why.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "relationship": "direct",
+ "peer_only": false, "peer_parents": [], "optional_peer_parents": [],
+ "parents": [], "raw": "lodash@4.17.20"}
+JSON
+      apply_json 1 direct '[{"parent":null,"path":["dependencies","lodash"],"value":">=4.17.21 <5"}]' '[]'
+      cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+      through_baseline
+      When call drv_jq '{action, override_scope, bare_override, applied_parents}' apply --work "$WORK"
+      The status should be success
+      The output should equal '{"action":"direct-update","override_scope":"none","bare_override":"none","applied_parents":[]}'
+    End
+
+    It 'passes no parent arguments on the direct path'
+      make_env
+      cat > "$MOCK_DIR/why.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "relationship": "direct",
+ "peer_only": false, "peer_parents": [], "optional_peer_parents": [],
+ "parents": [], "raw": "lodash@4.17.20"}
+JSON
+      through_baseline
+      "$DRIVER" apply --work "$WORK" >/dev/null
+      When call grep -A3 '^VERB apply_constraint' "$MOCK_LOG"
+      The status should be success
+      The output should not include 'ARG express'
+    End
+
+    # `mode` reports the call's INPUT — "direct" means zero parents were passed
+    # — and a TRANSITIVE package whose eligible set came back empty takes that
+    # same branch, where the adapter writes a top-level BARE override when the
+    # root declares no key for it. Keyed off `mode`, that pin was reported as
+    # `direct-update` / `--override-scope none` / `bare_override: none`: F6
+    # scored 0 instead of 2, the PR body owed no Global-override section, and
+    # the `unscoped_override_added` observation the pin audit reads was never
+    # recorded — the audit losing the record of a pin this run created.
+    Describe 'a bare override is never labelled by apply_constraint mode'
+      no_eligible_parents() {
+        cat > "$MOCK_DIR/declared_ranges.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "line": 4, "ranges": [],
+ "root_range": null, "parents_read": [], "parents_without_range": [],
+ "parents_unreadable": [], "parents_malformed": [],
+ "parents_other_lines": ["express@3.1.5"]}
+JSON
+      }
+
+      Parameters
+        'overrides'      '["overrides","lodash"]'
+        'resolutions'    '["resolutions","lodash"]'
+        'pnpm.overrides' '["pnpm","overrides","lodash"]'
+      End
+
+      It "reports a top-level $1 write as bare-added despite mode direct"
+        make_env
+        no_eligible_parents
+        apply_json 1 direct "[{\"parent\":null,\"path\":$2,\"value\":\">=4.17.21 <5\"}]" '[]'
+        cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+        through_baseline
+        When call drv_jq '{action, override_scope, bare_override}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"action":"bare-override","override_scope":"bare-added","bare_override":"added"}'
+      End
+    End
+
+    It 'reports it as bare-tightened when a pre-fix observation targeted the package'
+      make_env
+      cat > "$MOCK_DIR/declared_ranges.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "line": 4, "ranges": [],
+ "root_range": null, "parents_read": [], "parents_without_range": [],
+ "parents_unreadable": [], "parents_malformed": [], "parents_other_lines": []}
+JSON
+      apply_json 1 direct '[{"parent":null,"path":["overrides","lodash"],"value":">=4.17.21 <5"}]' \
+        '[{"type":"unscoped_override","key":"lodash","range":"^4.17.0","targets_this_package":true}]'
+      cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+      through_baseline
+      When call drv_jq '{action, override_scope, bare_override}' apply --work "$WORK"
+      The status should be success
+      The output should equal '{"action":"bare-override","override_scope":"bare-tightened","bare_override":"tightened"}'
+    End
+
+    # A nested key under the same container is scoped, however the mode reads.
+    It 'keeps a nested override key scoped'
+      make_env
+      apply_json 1 direct '[{"parent":"express","path":["overrides","express","lodash"],"value":">=4.17.21 <5"}]' '[]'
+      cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+      through_baseline
+      When call drv_jq '{action, override_scope}' apply --work "$WORK"
+      The status should be success
+      The output should equal '{"action":"scoped-override","override_scope":"scoped"}'
+    End
+
+    # A `"."` self key quotes the manifest's own pre-existing value; it is not
+    # a shape this call chose, so it never decides the widest shape either.
+    It 'ignores a preserved entry when deciding the widest shape'
+      make_env
+      apply_json 1 scoped '[{"parent":"express","path":["overrides","lodash"],"value":"^4.0.0","preserved":true},{"parent":"express","path":["overrides","express","lodash"],"value":">=4.17.21 <5"}]' '[]'
+      cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+      through_baseline
+      When call drv_jq '{action, override_scope}' apply --work "$WORK"
+      The status should be success
+      The output should equal '{"action":"scoped-override","override_scope":"scoped"}'
+    End
+
     Describe 'the remediation ladder'
       # Step 1: a violating version usually arrives via a parent not in the
       # override list. Those parents come off the violating copies' paths.
@@ -408,6 +624,177 @@ SH
       The stderr should include 'needs judgment at install_failure'
       End
 
+      # A parent on another major line never receives a scoped entry: its copy
+      # is on another major and a sibling agent owns it (#83). Delete the
+      # subtraction and this is the only example that notices.
+      It 'never derives a parent that is on another major line'
+        make_env
+        cat > "$MOCK_DIR/declared_ranges.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "line": 4, "ranges": ["^4.17.20"],
+ "root_range": null, "parents_read": ["express"],
+ "parents_without_range": [], "parents_unreadable": [],
+ "parents_malformed": [], "parents_other_lines": ["koa@1.4.0"]}
+JSON
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 2 true '[]' '[]'
+        through_baseline
+        When call drv_jq '{applied_parents, action}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"applied_parents":["express"],"action":"bare-override"}'
+      End
+
+      # Step 1 exhausted with parents still uncovered, then step 2. The whole
+      # ladder in one run, with the argv of each apply_constraint call asserted
+      # through the parents it carried.
+      It 'runs step 1 and then step 2 when the added parent is not enough'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 2 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 3 true '[]' '[]'
+        through_baseline
+        When call drv_jq '{action, applied_parents, step1: .parent_derivation.possible}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"action":"bare-override","applied_parents":["express","koa"],"step1":true}'
+      End
+
+      It 'spends exactly three fix installs across a full step1-then-step2 run'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 2 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 3 true '[]' '[]'
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null
+        When call jq -r '.fix_installs' "$WORK/state.json"
+        The status should be success
+        The output should equal '3'
+      End
+
+      # **Only npm's violation path names a parent.** node.sh emits the
+      # lockfile key `node_modules/...` for npm, `<name>@<version>` for pnpm
+      # and the resolution locator `<name>@npm:<version>` for Yarn Berry — the
+      # last two name the violating COPY. Assuming npm's shape for all three
+      # made `uncovered_parents` `[]` on every pnpm and Yarn repository, so the
+      # run escalated straight to `--tighten-bare` — the widest change the flow
+      # can make — with step 1 reported as exhausted.
+      Describe 'a violation path that names only the copy'
+        Parameters
+          'pnpm'  '"lodash@4.17.20"'
+          'yarn'  '"lodash@npm:4.17.20"'
+        End
+
+        It "records that step 1 was impossible under $1 instead of faking it"
+          make_env
+          validate_json 1 false "[{\"version\":\"4.17.20\",\"path\":$2}]" '[]'
+          validate_json 2 true '[]' '[]'
+          through_baseline
+          When call drv_jq '{p: .parent_derivation.possible, parents: .parent_derivation.parents, opaque: .parent_derivation.paths_naming_only_the_copy, named: .parent_derivation.paths_naming_a_parent}' apply --work "$WORK"
+          The status should be success
+          The output should equal '{"p":false,"parents":[],"opaque":1,"named":0}'
+        End
+
+        It "names the reason in the $1 escalation evidence"
+          make_env
+          validate_fallback false "[{\"version\":\"4.17.20\",\"path\":$2}]" '[]'
+          rm -f "$MOCK_DIR/validate.1.json"
+          through_baseline
+          When call drv_jq '{dp: .decision_point, p: .evidence.parent_derivation.possible, r: (.evidence.parent_derivation.reason | test("name the copy itself"))}' apply --work "$WORK"
+          The status should equal 2
+          The output should equal '{"dp":"validate_failed_after_ladder","p":false,"r":true}'
+          The stderr should include 'needs judgment at validate_failed_after_ladder'
+        End
+      End
+
+      It 'reports step 1 as possible on an npm install path'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        validate_json 2 true '[]' '[]'
+        through_baseline
+        When call drv_jq '{p: .parent_derivation.possible, parents: .parent_derivation.parents}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"p":true,"parents":["koa"]}'
+      End
+
+      # Step 3: the lockfile-invalidation pass cannot account for the failure,
+      # and deleting a whole lockfile needs confirmation this flow cannot get.
+      Describe 'the stale-lockfile stop'
+        Parameters
+          refused-with-a-reason  '{"performed": false, "reason": "npm only"}'
+          performed-no-keys      '{"performed": true, "keys": []}'
+        End
+
+        It "stops when the lockfile-invalidation pass was $1"
+          make_env
+          validate_fallback false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+          rm -f "$MOCK_DIR/validate.1.json"
+          apply_json 1 scoped '[]' '[]'
+          jq -c ".lockfile_invalidated = $2" "$MOCK_DIR/apply.1.json" > "$MOCK_DIR/apply.json"
+          cp "$MOCK_DIR/apply.json" "$MOCK_DIR/apply.1.json"
+          through_baseline
+          When call drv_jq '{status, phase}' apply --work "$WORK"
+          The status should equal 3
+          The output should equal '{"status":"failure","phase":"validate"}'
+          The stderr should include 'needs a human-driven session'
+        End
+      End
+
+      # The count lives in state.json, which is what makes the budget real: one
+      # `apply` spends at most three of the four, and the agent doc sanctions
+      # re-running `apply` once — a process-local counter reset on that re-run
+      # and bounded nothing, leaving `install_budget_exhausted` unreachable.
+      It 'resumes the fix-install count across a re-run rather than resetting it'
+        make_env
+        validate_fallback false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        rm -f "$MOCK_DIR/validate.1.json"
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        When call jq -r '.fix_installs' "$WORK/state.json"
+        The status should be success
+        The output should equal '4'
+      End
+
+      It 'reaches install_budget_exhausted on the re-run rather than installing a fifth time'
+        make_env
+        validate_fallback false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
+        rm -f "$MOCK_DIR/validate.1.json"
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        When call drv_jq '{status, decision_point, n: .evidence.fix_installs, b: .evidence.budget}' apply --work "$WORK"
+        The status should equal 2
+        The output should equal '{"status":"needs_judgment","decision_point":"install_budget_exhausted","n":4,"b":4}'
+        The stderr should include 'needs judgment at install_budget_exhausted'
+      End
+
+      # The contract reserves `install` for the fix-attributable install
+      # (`baseline` covers the ambient control one), and this is the value the
+      # agent copies straight into its own result block.
+      It 'names the install_failure evidence phase install, not apply'
+        make_env
+        printf '1\n' > "$MOCK_DIR/install.2.status"
+        cat > "$MOCK_DIR/install.2.sh" <<'SH'
+printf 'npm ERR! notarget No matching version found for lodash@>=4.17.21\n' >&2
+SH
+        through_baseline
+        When call drv_jq '{p: .evidence.phase, retry: .evidence.registry_timeout_retry}' apply --work "$WORK"
+        The status should equal 2
+        The output should equal '{"p":"install","retry":false}'
+        The stderr should include 'needs judgment at install_failure'
+      End
+
+      # `line_present` is a promised field: read straight, an absent one is the
+      # string "null" and the stop is simply bypassed.
+      It 'fails when validate omits line_present rather than bypassing its stop'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+        jq -c 'del(.line_present)' "$MOCK_DIR/validate.1.json" > "$MOCK_DIR/v.tmp"
+        mv "$MOCK_DIR/v.tmp" "$MOCK_DIR/validate.1.json"
+        through_baseline
+        When call drv_jq '{status, phase}' apply --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"validate"}'
+        The stderr should include "no 'line_present' field"
+      End
+
       It 'still fails validation after the ladder rather than guessing'
         make_env
         validate_json 1 false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
@@ -483,6 +870,78 @@ SH
         When call drv_jq '{status, drift_commit}' apply --work "$WORK"
         The status should be success
         The output should equal '{"status":"no_op","drift_commit":true}'
+      End
+
+      # The specimen is the field shape: an in-range patch bump the control
+      # install alone produced, with the line resolved at two versions before
+      # it, so the comparison is between ARRAYS and not two scalars. The
+      # invented single-version shape could not tell an array comparison from
+      # a string one.
+      It 'is a lockfile-refresh when a multi-version line deduped across the drift'
+        make_env
+        no_fix_change
+        rv_versions 1 '[{"version":"4.17.15","path":"node_modules/lodash"},
+                        {"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]'
+        rv_versions 2 '[{"version":"4.17.21","path":"node_modules/lodash"},
+                        {"version":"4.17.21","path":"node_modules/koa/node_modules/lodash"}]'
+        rv_versions 3 '[{"version":"4.17.21","path":"node_modules/lodash"},
+                        {"version":"4.17.21","path":"node_modules/koa/node_modules/lodash"}]'
+        through_baseline
+        When call drv_jq '{status, action, override_scope}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"status":"ok","action":"lockfile-refresh","override_scope":"none"}'
+      End
+
+      It 'is a no-op when a multi-version line resolves identically across the drift'
+        make_env
+        no_fix_change
+        rv_versions 1 '[{"version":"4.17.21","path":"node_modules/lodash"},
+                        {"version":"4.17.21","path":"node_modules/koa/node_modules/lodash"}]'
+        rv_versions 2 '[{"version":"4.17.21","path":"node_modules/koa/node_modules/lodash"},
+                        {"version":"4.17.21","path":"node_modules/lodash"}]'
+        rv 3 4.17.21
+        through_baseline
+        When call drv_jq '{status}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"status":"no_op"}'
+      End
+
+      # Two failed reads compare equal. Read through `2>/dev/null` with the
+      # status discarded, that manufactured "already fixed on the default
+      # branch" out of nothing — discarding the drift commit that WAS the fix
+      # and leaving the alerts open (#146's inversion).
+      Describe 'a snapshot that could not be read is never evidence of equality'
+        Parameters
+          'a null version'   '{"pm":"npm","package":"lodash","present":true,"count":1,"versions":[{"version":null,"path":"node_modules/lodash"}],"lockfile_entries":3}'
+          'no versions key'  '{"pm":"npm","package":"lodash","present":true,"count":1,"lockfile_entries":3}'
+          'zero versions'    '{"pm":"npm","package":"lodash","present":true,"count":0,"versions":[],"lockfile_entries":3}'
+        End
+
+        It "refuses to report no_op when the pre-drift snapshot carries $1"
+          make_env
+          no_fix_change
+          printf '%s\n' "$2" > "$MOCK_DIR/rv.1.json"
+          rv 2 4.17.21
+          rv 3 4.17.21
+          through_baseline
+          When call drv_jq '{status, phase}' apply --work "$WORK"
+          The status should equal 3
+          The output should equal '{"status":"failure","phase":"validate"}'
+          The stderr should be present
+        End
+
+        It "refuses to report no_op when the baseline snapshot carries $1"
+          make_env
+          no_fix_change
+          rv 1 4.17.21
+          printf '%s\n' "$2" > "$MOCK_DIR/rv.2.json"
+          rv 3 4.17.21
+          through_baseline
+          When call drv_jq '{status, phase}' apply --work "$WORK"
+          The status should equal 3
+          The output should equal '{"status":"failure","phase":"validate"}'
+          The stderr should be present
+        End
       End
     End
   End
@@ -605,6 +1064,150 @@ JSON
       The output should equal "$WORK/why-lodash.json"
     End
 
+    # `lowest_on_line` is a comparison, and the mock's `compare_versions` is
+    # numeric per segment: read lexically, 4.17.9 sorts above 4.17.10 and the
+    # lowest-on-line answer comes back inverted.
+    It 'reports the numerically lowest version on the line, not the lexical one'
+      make_env
+      rv_versions 3 '[{"version":"4.17.10","path":"node_modules/lodash"},
+                      {"version":"4.17.9","path":"node_modules/koa/node_modules/lodash"}]'
+      through_apply
+      When call drv_jq '{resolved_version}' score --work "$WORK"
+      The status should be success
+      The output should equal '{"resolved_version":"4.17.9"}'
+    End
+
+    # There is no fall back to the lowest version overall. That reported a
+    # version from a major line this group does not own as its `after`, which
+    # then flowed into --after, resolved_version and F1 (#76).
+    It 'fails rather than reporting an off-line version as the resolved version'
+      make_env
+      rv_versions 3 '[{"version":"3.10.1","path":"node_modules/test-exclude/node_modules/lodash"}]'
+      through_apply
+      When call drv_jq '{status, phase}' score --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include 'no comparable 4.x version'
+    End
+
+    It 'never passes an empty --after to the scorer'
+      make_env
+      rv_versions 3 '[{"version":"3.10.1","path":"node_modules/test-exclude/node_modules/lodash"}]'
+      through_apply
+      "$DRIVER" score --work "$WORK" >/dev/null 2>&1 || true
+      When call cat "$SCORER_LOG"
+      The status should be success
+      The output should equal ''
+    End
+
+    # A package absent from the pre-fix tree has no baseline, and the scorer's
+    # own no-baseline branch scores F1 as a major — the safe direction. What is
+    # never done is substituting a version from another line.
+    It 'omits --before entirely when the pre-fix snapshot reports present false'
+      make_env
+      cat > "$MOCK_DIR/rv.2.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "present": false, "count": 0,
+ "versions": [], "lockfile_entries": 3}
+JSON
+      through_apply
+      "$DRIVER" score --work "$WORK" >/dev/null
+      When call grep -c -x -- '--before' "$SCORER_LOG"
+      The status should equal 1
+      The output should equal '0'
+    End
+
+    It 'omits --before when the package is present but not on this line'
+      make_env
+      cat > "$MOCK_DIR/rv.2.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "present": true, "count": 1,
+ "versions": [{"version": "3.10.1", "path": "node_modules/lodash"}],
+ "lockfile_entries": 3}
+JSON
+      through_apply
+      "$DRIVER" score --work "$WORK" >/dev/null
+      When call grep -c -x -- '--before' "$SCORER_LOG"
+      The status should equal 1
+      The output should equal '0'
+    End
+
+    # An adapter exiting 0 with EMPTY stdout used to make `jq -n --argjson`
+    # die with exit 2 and NO stdout — and exit 2 is this contract's
+    # `needs_judgment`, so the agent read it as a judgment escape carrying no
+    # decision point and hunted for evidence fields that do not exist.
+    Describe 'an adapter answering with nothing at score'
+      Parameters
+        'why'
+        'declared_ranges'
+      End
+
+      It "fails the phase when $1 exits 0 with empty stdout"
+        make_env
+        through_apply
+        : > "$MOCK_DIR/$1.json"
+        When call drv_jq '{status, phase}' score --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"validate"}'
+        The stderr should include 'no JSON object on stdout'
+      End
+    End
+
+    It 'fails the phase when the post-fix resolved_versions omits present'
+      make_env
+      through_apply
+      rv_versions 3 '[{"version":"4.17.21","path":"node_modules/lodash"}]'
+      jq -c 'del(.present)' "$MOCK_DIR/rv.3.json" > "$MOCK_DIR/r.tmp"
+      mv "$MOCK_DIR/r.tmp" "$MOCK_DIR/rv.3.json"
+      printf '2\n' > "$MOCK_DIR/rv.n"
+      When call drv_jq '{status, phase}' score --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include "no 'present' field"
+    End
+
+    # A scorer that ran and failed is a phase failure, not this script's
+    # usage-and-internal exit 1: reported under 1 it lands in a different
+    # bucket from every other failure of the same phase.
+    It 'reports a failed risk scorer as a phase failure, not an internal error'
+      make_env
+      cat > "$SCORER" <<'SH'
+#!/bin/sh
+printf 'score-merge-risk.sh: adapter contract violation\n' >&2
+exit 1
+SH
+      chmod +x "$SCORER"
+      through_apply
+      When call drv_jq '{status, phase}' score --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include 'adapter contract violation'
+    End
+
+    It 'reports a scorer answering without a band the same way'
+      make_env
+      cat > "$SCORER" <<'SH'
+#!/bin/sh
+printf '{"package": "lodash"}\n'
+SH
+      chmod +x "$SCORER"
+      through_apply
+      When call drv_jq '{status, phase}' score --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include 'no usable report'
+    End
+
+    It 'carries the install signals through to the ready_for_pr payload'
+      make_env
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+printf '{"lockfileVersion":3,"n":%s}\n' "$n" > package-lock.json
+printf ' WARN  The "pnpm" field in package.json is no longer read by pnpm\n' >&2
+SH
+      through_apply
+      When call drv_jq '{install_signals}' score --work "$WORK"
+      The status should be success
+      The output should equal '{"install_signals":["pnpm_field_no_longer_read"]}'
+    End
+
     It 'refuses to score a run apply already terminated as a no-op'
       make_env
       cat > "$MOCK_DIR/install.2.sh" <<'SH'
@@ -619,6 +1222,90 @@ SH
       The status should equal 1
       The output should equal '{"has_error":true}'
       The stderr should include 'which is terminal'
+    End
+  End
+
+  # `env_prefix` is prepended to every git, adapter and package-manager call,
+  # composed AFTER any `cd`: it injects environment, it does not chdir. The
+  # shim records both, so the log is the verdict on the composition as well as
+  # on the reach.
+  Describe 'env_prefix reaches every adapter, install and scorer call'
+    prefixed_run() {
+      make_env
+      cat > "$BIN/prefix" <<'SH'
+#!/bin/sh
+printf '%s|%s\n' "$PWD" "$1" >> "$PREFIX_LOG"
+exec "$@"
+SH
+      chmod +x "$BIN/prefix"
+      PREFIX_LOG="$TEST_DIR/prefix.log"
+      export PREFIX_LOG
+      : > "$PREFIX_LOG"
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$MOCK" --scorer "$SCORER" \
+        --env-prefix "$BIN/prefix" >/dev/null
+      "$DRIVER" classify --work "$WORK" >/dev/null
+      "$DRIVER" baseline --work "$WORK" >/dev/null
+      "$DRIVER" apply --work "$WORK" >/dev/null
+      "$DRIVER" score --work "$WORK" >/dev/null
+    }
+
+    # The `/fix|` half is the composition assertion: the logged cwd is the
+    # worktree, so the prefix ran AFTER the `cd` rather than instead of it.
+    # (`git` locates itself with `-C` and needs no cd, so only its command is
+    # asserted.)
+    Describe 'every wrapped call'
+      Parameters
+        adapter-and-install  '/fix|MOCK'
+        risk-scorer          '/fix|SCORER'
+        git                  '|git'
+      End
+
+      It "prepends the prefix to $1"
+        prefixed_run
+        _want=$2
+        case "$_want" in
+          */fix\|MOCK)   _want="/fix|$MOCK" ;;
+          */fix\|SCORER) _want="/fix|$SCORER" ;;
+        esac
+        When call grep -c -F -- "$_want" "$PREFIX_LOG"
+        The status should be success
+        The output should not equal '0'
+      End
+    End
+
+    # A version comparison goes through the adapter too, so it takes the same
+    # wrapping — and from inside the worktree.
+    It 'wraps compare_versions from inside the worktree'
+      make_env
+      rv_versions 3 '[{"version":"4.17.10","path":"node_modules/lodash"},
+                      {"version":"4.17.9","path":"node_modules/koa/node_modules/lodash"}]'
+      cat > "$BIN/prefix" <<'SH'
+#!/bin/sh
+printf '%s|%s\n' "$PWD" "$*" >> "$PREFIX_LOG"
+exec "$@"
+SH
+      chmod +x "$BIN/prefix"
+      PREFIX_LOG="$TEST_DIR/prefix.log"
+      export PREFIX_LOG
+      : > "$PREFIX_LOG"
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$MOCK" --scorer "$SCORER" \
+        --env-prefix "$BIN/prefix" >/dev/null
+      "$DRIVER" classify --work "$WORK" >/dev/null
+      "$DRIVER" baseline --work "$WORK" >/dev/null
+      "$DRIVER" apply --work "$WORK" >/dev/null
+      "$DRIVER" score --work "$WORK" >/dev/null
+      When call grep -c -F -- "/fix|$MOCK compare_versions" "$PREFIX_LOG"
+      The status should be success
+      The output should not equal '0'
+    End
+
+    It 'never composes the prefix in front of the cd'
+      prefixed_run
+      When call grep -c -e '|cd' "$PREFIX_LOG"
+      The status should equal 1
+      The output should equal '0'
     End
   End
 End

@@ -73,8 +73,10 @@ case "$verb" in
     cat "$MOCK_DIR/validate.json"
     jq -e '.ok' "$MOCK_DIR/validate.json" >/dev/null ;;
   compare_versions)
-    jq -n --arg a "$1" --arg b "$2" \
-      '{a: $a, b: $b, result: (if $a < $b then -1 elif $a > $b then 1 else 0 end)}' ;;
+    jq -n --arg a "$1" --arg b "$2" '
+      def parts: split(".") | map(tonumber? // 0);
+      ($a | parts) as $x | ($b | parts) as $y
+      | {a: $a, b: $b, result: (if $x < $y then -1 elif $x > $y then 1 else 0 end)}' ;;
   *) printf '{"error":"unknown verb"}\n' >&2; exit 1 ;;
 esac
 SH
@@ -228,6 +230,55 @@ JSON
       The output should include 'ARG --line'
       The output should include 'ARG 4'
     End
+
+    # "A field the contract promises arrives present and of the promised type,
+    # or it is a hard error, never a default" (scripts/CLAUDE.md). Read with a
+    # bare `jq -r`, an absent field is the STRING "null": `.peer_only` stops
+    # being "true" so the #103 dead-end check silently vanishes, and
+    # `.relationship` stores "null" while `classify` still reports ok.
+    Describe 'a promised field that is absent is a hard error, not a default'
+      Parameters
+        'peer_only'      'peer_only'
+        'relationship'   'relationship'
+      End
+
+      It "fails the phase naming an absent $1 rather than branching on \"null\""
+        make_env
+        jq -c "del(.$1)" "$MOCK_DIR/why.json" > "$MOCK_DIR/w.tmp"
+        mv "$MOCK_DIR/w.tmp" "$MOCK_DIR/why.json"
+        do_setup
+        When call drv_jq '{status, phase}' classify --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"classify"}'
+        The stderr should include "no '$2' field"
+      End
+    End
+
+    # An adapter exiting 0 with EMPTY stdout is the third route to the same
+    # silent zero: jq on empty input emits nothing, so every has() check
+    # downstream is skipped rather than failed.
+    It 'fails when why exits 0 with empty stdout'
+      make_env
+      : > "$MOCK_DIR/why.json"
+      do_setup
+      When call drv_jq '{status, phase}' classify --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"classify"}'
+      The stderr should include 'no JSON object on stdout'
+    End
+
+    # Anything outside the contract enum falls off the `direct` branch, so a
+    # direct dependency would be pinned through parents it does not have.
+    It 'refuses a relationship outside the contract enum'
+      make_env
+      jq -c '.relationship = "peer"' "$MOCK_DIR/why.json" > "$MOCK_DIR/w.tmp"
+      mv "$MOCK_DIR/w.tmp" "$MOCK_DIR/why.json"
+      do_setup
+      When call drv_jq '{status, phase}' classify --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"classify"}'
+      The stderr should include 'contract enum direct|transitive'
+    End
   End
 
   Describe 'baseline (phase 3)'
@@ -324,6 +375,119 @@ SH
       The status should equal 3
       The output should equal '{"status":"failure","phase":"baseline"}'
       The stderr should include 'parsed zero entries'
+    End
+
+    # A rename keeps its destination path, and a path git quotes (one carrying
+    # bytes it escapes) is emitted verbatim so `drift_path_allowed` refuses it
+    # and it lands in the residual report rather than in a commit.
+    It 'stages a renamed lockfile under its destination path'
+      prepare
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+git mv package-lock.json npm-shrinkwrap.json
+printf '{"lockfileVersion":3,"n":1}\n' > npm-shrinkwrap.json
+SH
+      "$DRIVER" baseline --work "$WORK" >/dev/null
+      When call git -C "$WORK/fix" show --name-only --format=%s HEAD
+      The status should be success
+      The output should include 'npm-shrinkwrap.json'
+      The output should include 'chore(deps): refresh lockfile'
+    End
+
+    It 'refuses a quoted path rather than absorbing it into the drift commit'
+      prepare
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+printf 'x\n' > "$(printf 'we\xc3\xafrd.txt')"
+SH
+      When call drv_jq '{status, phase}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"baseline"}'
+      The stderr should include 'evidence, never noise to absorb'
+    End
+
+    # The repository's own hooks are the repository's, and they run. A hook
+    # that fails the drift commit is a phase `baseline` failure quoting the
+    # hook's output; never bypassed, never edited around.
+    It 'reports a pre-commit hook failing the drift commit, quoting it'
+      prepare
+      mkdir -p "$WORK/fix/.githooks"
+      cat > "$WORK/fix/.githooks/pre-commit" <<'SH'
+#!/bin/sh
+printf 'lint: 3 problems\n' >&2
+exit 1
+SH
+      chmod +x "$WORK/fix/.githooks/pre-commit"
+      git -C "$WORK/fix" config core.hooksPath .githooks
+      When call drv_jq '{status, phase}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"baseline"}'
+      The stderr should include 'lint: 3 problems'
+      The stderr should include 'never bypass a hook'
+    End
+
+    # Sanctioned exactly once, and only on a registry-timeout shape. Everything
+    # else is a verb that exited non-zero twice on the same inputs with no
+    # remediation in between, which has failed its phase (#122). `ENOTFOUND`
+    # and a bare `request to ... failed` are deliberately NOT timeout shapes:
+    # the first is a wrong registry host far more often than a DNS blip, and
+    # npm prints the second for a self-signed certificate chain and for a proxy
+    # refusing the connection.
+    Describe 'the one sanctioned install retry'
+      Parameters
+        'ETIMEDOUT'       'npm ERR! network request to https://registry.npmjs.org/lodash failed, reason: connect ETIMEDOUT'  2
+        'EAI_AGAIN'       'npm ERR! errno EAI_AGAIN'                                                                        2
+        'socket hang up'  'npm ERR! network socket hang up'                                                                 2
+        'ECONNRESET'      'npm ERR! read ECONNRESET'                                                                        2
+        'self-signed'     'npm ERR! request to https://registry.npmjs.org/lodash failed, reason: self signed certificate in certificate chain' 1
+        'ENOTFOUND'       'npm ERR! getaddrinfo ENOTFOUND registry.internal.invalid'                                        1
+        'ERESOLVE'        'npm ERR! code ERESOLVE'                                                                          1
+        'EOVERRIDE'       'npm ERR! code EOVERRIDE'                                                                         1
+      End
+
+      It "runs the install $3 time(s) on a $1 failure"
+        prepare
+        printf '1\n' > "$MOCK_DIR/install.status"
+        printf 'printf %s >&2\n' "'$2\n'" > "$MOCK_DIR/install.sh"
+        "$DRIVER" baseline --work "$WORK" >/dev/null 2>&1 || true
+        When call cat "$MOCK_DIR/install.n"
+        The status should be success
+        The output should equal "$3"
+      End
+    End
+
+    It 'says in the failure detail when the sanctioned retry was spent'
+      prepare
+      printf '1\n' > "$MOCK_DIR/install.status"
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+printf 'npm ERR! network socket hang up\n' >&2
+SH
+      When call drv_jq '{status}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure"}'
+      The stderr should include 'including one sanctioned retry'
+    End
+
+    # `run_install` used to capture the install's output and discard it on
+    # success, and no payload carried it — so the pnpm 11 reaction
+    # agents/fix-dependency.md requires was unreachable by the agent that had
+    # to make it (issue #159).
+    It 'carries the pnpm 11 signal an install printed into the state'
+      prepare
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+printf '{"lockfileVersion":3,"n":1}\n' > package-lock.json
+printf ' WARN  The "pnpm" field in package.json is no longer read by pnpm\n' >&2
+SH
+      "$DRIVER" baseline --work "$WORK" >/dev/null
+      When call jq -c '.install_signals' "$WORK/state.json"
+      The status should be success
+      The output should equal '["pnpm_field_no_longer_read"]'
+    End
+
+    It 'carries no signal when no install printed one'
+      prepare
+      "$DRIVER" baseline --work "$WORK" >/dev/null
+      When call jq -c '.install_signals' "$WORK/state.json"
+      The status should be success
+      The output should equal '[]'
     End
 
     # The ordering is the point (#146): snapshotted before the install, a stale

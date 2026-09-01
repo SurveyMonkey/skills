@@ -74,10 +74,82 @@ JSON
     printf '%s' "setup --group-json $TEST_DIR/group.json --repo-root $REPO --default-branch main --adapter $ADAPTER"
   }
 
+  # An option-parsing bug that never shifts turns `while [ $# -gt 0 ]` into an
+  # infinite loop, which as a plain example would hang the whole suite instead
+  # of failing it. macOS ships no `timeout`, so the deadline is a watchdog.
+  # The watchdog polls and exits on its own once the target is gone, rather
+  # than being killed: killing it makes the shell announce the terminated job
+  # on stderr, which every stderr assertion here would then have to tolerate.
+  with_deadline() {
+    _secs=$1
+    shift
+    "$@" &
+    _pid=$!
+    ( _n=0
+      while [ "$_n" -lt "$_secs" ]; do
+        kill -0 "$_pid" 2>/dev/null || exit 0
+        sleep 1
+        _n=$((_n + 1))
+      done
+      kill -9 "$_pid" 2>/dev/null ) &
+    _watch=$!
+    _st=0
+    wait "$_pid" || _st=$?
+    wait "$_watch" 2>/dev/null
+    return "$_st"
+  }
+
   run_setup() {
     drv_jq "$1" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
       --default-branch main --adapter "$ADAPTER"
   }
+
+  Describe 'option parsing'
+    # `--env-prefix "<value>"` cannot use the `${2:?...}` form the other options
+    # use, because `--env-prefix ""` is legal and means "no prefix". `${2-}`
+    # instead left `shift 2` to fail on a trailing `--env-prefix` — and a failed
+    # shift shifts nothing, so the loop never terminated.
+    It 'errors on --env-prefix with no value rather than looping forever'
+      make_repo
+      When call with_deadline 20 "$DRIVER" setup --group-json "$TEST_DIR/group.json" \
+        --repo-root "$REPO" --default-branch main --adapter "$ADAPTER" --env-prefix
+      The status should equal 1
+      The output should include '"error"'
+      The stderr should include 'requires a value'
+    End
+
+    It 'keeps an explicitly empty --env-prefix legal, meaning no prefix'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" --env-prefix '' >/dev/null
+      When call jq -r '.env_prefix' "$WORK/state.json"
+      The status should be success
+      The output should equal ''
+    End
+
+    # Key presence is not a value. `{"package": null}` passed the old check and
+    # the string `null` then flowed into the workspace path and the branch name.
+    Parameters
+      package               null
+      package               '""'
+      branch_name           null
+      highest_fixed_version null
+      alerts                '[]'
+      major_line            null
+    End
+
+    It "refuses a group payload whose $1 is $2"
+      make_repo
+      jq -c ".$1 = $2" "$TEST_DIR/group.json" > "$TEST_DIR/g2.json"
+      mv "$TEST_DIR/g2.json" "$TEST_DIR/group.json"
+      When call drv_jq '{has_error: has("error")}' setup --group-json "$TEST_DIR/group.json" \
+        --repo-root "$REPO" --default-branch main --adapter "$ADAPTER"
+      The status should equal 1
+      The output should equal '{"has_error":true}'
+      The stderr should include "$1"
+      The path "$REPO/.claude/worktrees" should not be exist
+    End
+  End
 
   Describe 'the crashed-run guard'
     # A surviving $WORK means a failed or crashed run, or a session that is not
@@ -259,6 +331,182 @@ JSON
       When call drv_jq '{d: (.detail | test("branch fix/dependabot-lodash-4x left in place"))}' cleanup --work "$WORK"
       The status should be success
       The output should equal '{"d":true}'
+    End
+
+    # The drift-commit exemption is recognized by BOTH checks, here as in the
+    # setup guard (#152). A commit wearing the subject while touching
+    # package.json is a manifest edit, which the drift commit never carries —
+    # and deleting it would destroy unpushed work.
+    It 'keeps a drift-subject commit that touched package.json'
+      prepare
+      printf '{"name":"app","edited":true}\n' > "$WORK/fix/package.json"
+      git -C "$WORK/fix" commit -qam 'chore(deps): refresh lockfile (control install, no manifest change)'
+      When call drv_jq '{branch_deleted, has_tip: (.branch_tip != null)}' cleanup --work "$WORK"
+      The status should be success
+      The output should equal '{"branch_deleted":false,"has_tip":true}'
+    End
+
+    # `--pushed` is the caller's statement that the push succeeded. Without it
+    # a tip matching the remote proves nothing about this run, so the
+    # remote-duplicate route stays closed.
+    It 'does not take the remote-duplicate route without --pushed'
+      prepare
+      printf '%s\n' 'x' > "$WORK/fix/package-lock.json"
+      git -C "$WORK/fix" commit -qam 'fix(deps): resolve 1 alert'
+      git -C "$WORK/fix" push -q origin "$BRANCH"
+      git -C "$REPO" fetch -q origin "$BRANCH"
+      When call drv_jq '{branch_deleted}' cleanup --work "$WORK"
+      The status should be success
+      The output should equal '{"branch_deleted":false}'
+    End
+
+    # Never silenced, and never a failure result on its own: by this point the
+    # work either shipped or already failed for its own reason. The refusal is
+    # injected through the env_prefix seam, which sits in front of every git
+    # call the driver makes.
+    It 'reports a branch -D failure in detail rather than silencing it'
+      make_repo
+      cat > "$BIN/prefix" <<'SH'
+#!/bin/sh
+_saw_branch=no
+for a in "$@"; do
+  [ "$a" = "branch" ] && _saw_branch=yes
+  if [ "$_saw_branch" = yes ] && [ "$a" = "-D" ]; then
+    printf 'error: refusing to delete (spec)\n' >&2
+    exit 1
+  fi
+done
+exec "$@"
+SH
+      chmod +x "$BIN/prefix"
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" --env-prefix "$BIN/prefix" >/dev/null
+      When call drv_jq '{branch_deleted, d: ((.detail // "") | test("branch -D"))}' cleanup --work "$WORK"
+      The status should be success
+      The output should equal '{"branch_deleted":false,"d":true}'
+    End
+  End
+
+  Describe 'cleanup refuses to act on state it could not read'
+    prepare() {
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+    }
+
+    # A zero-byte state.json is exactly what a crashed `setup` used to leave,
+    # and jq's status was discarded: every value came back empty, `[ -e "" ]`
+    # was false, `removed` kept its initialized `true`, and `rm -rf "$WORK"`
+    # ran anyway — deleting the worktree directory while its registration
+    # under <git-common-dir>/worktrees/ survived.
+    Describe 'an unreadable state file'
+      Parameters
+        'zero-byte'   ''
+        'truncated'   '{"repo_root": "'
+        'not-object'  '[]'
+      End
+
+      It "refuses a $1 state file instead of reporting a clean sweep"
+        prepare
+        printf '%s' "$2" > "$WORK/state.json"
+        When call drv_jq '{has_error: has("error")}' cleanup --work "$WORK"
+        The status should equal 1
+        The output should equal '{"has_error":true}'
+        The stderr should be present
+        The path "$WORK/fix" should be exist
+      End
+    End
+
+    # `git -C ""` is not an error and not a no-op: it operates on the CURRENT
+    # directory, so an empty repo_root would put `worktree remove --force` and
+    # `branch -D` in the user's own checkout (#18). An empty value is refused
+    # where it is read, before any git call is composed from it.
+    Describe 'an empty path value'
+      Parameters
+        '.repo_root'
+        '.worktree'
+        '.branch_name'
+        '.default_branch'
+      End
+
+      It "refuses an empty $1 rather than composing a git call from it"
+        prepare
+        jq "$1 = \"\"" "$WORK/state.json" > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        When call drv_jq '{has_error: has("error")}' cleanup --work "$WORK"
+        The status should equal 1
+        The output should equal '{"has_error":true}'
+        The stderr should include 'no usable value'
+        The path "$WORK/fix" should be exist
+      End
+    End
+
+    It 'leaves the branch alone when the repo_root was empty'
+      prepare
+      jq '.repo_root = ""' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      "$DRIVER" cleanup --work "$WORK" >/dev/null 2>&1 || true
+      When call git -C "$REPO" branch --list "$BRANCH"
+      The status should be success
+      The output should include "$BRANCH"
+    End
+  End
+
+  Describe 'a failed worktree removal never becomes a reported success'
+    # `worktree remove` is made to fail through the env_prefix seam, which is
+    # in front of every git call the driver makes. What must NOT happen then is
+    # `rm -rf "$WORK"`: a worktree directory that is gone while its
+    # registration survives blocks both a later `worktree add` on that path and
+    # any `branch -D` of its branch, and `git worktree remove` refuses to clean
+    # it up afterwards (scripts/CLAUDE.md).
+    prepare_failing_remove() {
+      make_repo
+      cat > "$BIN/prefix" <<'SH'
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "remove" ]; then
+    printf 'fatal: refusing (spec)\n' >&2
+    exit 1
+  fi
+done
+exec "$@"
+SH
+      chmod +x "$BIN/prefix"
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" --env-prefix "$BIN/prefix" >/dev/null
+    }
+
+    It 'reports removal-failed rather than worktree_removed true'
+      prepare_failing_remove
+      When call drv_jq '{worktree_removed, worktree_removal}' cleanup --work "$WORK"
+      The status should be success
+      The output should equal '{"worktree_removed":false,"worktree_removal":"removal-failed"}'
+    End
+
+    It 'leaves the workspace directory on disk while the registration is still live'
+      prepare_failing_remove
+      "$DRIVER" cleanup --work "$WORK" >/dev/null
+      When call test -d "$WORK/fix"
+      The status should be success
+    End
+
+    It 'does not delete the branch while its worktree registration survives'
+      prepare_failing_remove
+      "$DRIVER" cleanup --work "$WORK" >/dev/null
+      When call git -C "$REPO" branch --list "$BRANCH"
+      The status should be success
+      The output should include "$BRANCH"
+    End
+
+    # Nothing was there to remove is its own answer, and it is not "removed".
+    It 'reports nothing-to-remove when the worktree directory is already gone'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+      git -C "$REPO" worktree remove --force "$WORK/fix"
+      When call drv_jq '{worktree_removed, worktree_removal}' cleanup --work "$WORK"
+      The status should be success
+      The output should equal '{"worktree_removed":false,"worktree_removal":"nothing-to-remove"}'
     End
   End
 

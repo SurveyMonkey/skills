@@ -31,9 +31,12 @@
 #   exit 2  {"status":"needs_judgment","decision_point":"...","evidence":{...}}
 #           a branch the tree cannot decide. Fail closed, never guess.
 #   exit 3  {"status":"failure","phase":"worktree|classify|baseline|apply|
-#            install|validate","detail":"..."}   terminal failure, mapped
-#           verbatim onto the agent's result block. `push` and `pr` stay
-#           agent-side; they name work this driver never does.
+#            validate","detail":"..."}   terminal failure, mapped verbatim onto
+#           the agent's result block. Three of the agent's phase names never
+#           appear here: `push` and `pr` name work this driver never does, and
+#           `install` is the value the AGENT writes after an `install_failure`
+#           judgment escape — the driver hands that back as exit 2 carrying
+#           `evidence.phase: "install"`, never as an exit-3 phase of its own.
 #   exit 1  {"error":"..."}                 usage or internal error
 #
 # All JSON goes to stdout; human-readable detail goes to stderr.
@@ -43,8 +46,10 @@
 # to every git, adapter and package-manager invocation, composed **after** any
 # `cd`: it injects environment, it does not chdir. Absent means bare.
 #
-# Dependencies are bash, jq and gh only (scripts/CLAUDE.md). bash 3.2: no
-# associative arrays, no `mapfile`, no `${var,,}`.
+# Dependencies are bash, jq and git only. `gh` is in the plugin's dependency
+# set (scripts/CLAUDE.md) but this script never calls it: every remote fact it
+# needs comes from a fetched remote-tracking ref. bash 3.2: no associative
+# arrays, no `mapfile`, no `${var,,}`.
 
 set -uo pipefail
 
@@ -123,12 +128,49 @@ run_env() {
 
 STATE=""
 
+# Every read distinguishes three outcomes, because collapsing them is how a
+# `cleanup` came to report success having removed nothing: jq's status was
+# discarded under `2>/dev/null`, so a zero-byte or half-written state.json
+# passed `load_state`'s `[ -f ]` check and handed every caller the empty
+# string. `$WT` was then empty, `[ -e "" ]` false, and the run proceeded to
+# `rm -rf "$WORK"` while the worktree registration under
+# `<git-common-dir>/worktrees/` survived — the exact state scripts/CLAUDE.md
+# says blocks a later `worktree add` and `branch -D`.
+# Prints the value and returns 0; 1 when the file itself could not be read; 2
+# when the key is absent, null or empty. It reports rather than dies because
+# every caller reads it through a command substitution, and `die` there exits
+# only the SUBSHELL — its error JSON would land in the variable it was meant
+# to fill and the run would continue on it. `state_ok` does the dying, in the
+# caller's own shell.
 state_get() {
-  jq -r "$1" "$STATE" 2>/dev/null
+  local v
+  v=$(jq -r "$1" "$STATE" 2>/dev/null) || return 1
+  case "$v" in
+    ''|null) return 2 ;;
+  esac
+  printf '%s' "$v"
+}
+
+state_ok() {
+  case "$1" in
+    0) ;;
+    1) die "the state file at $STATE could not be read for '$2'. It is unparseable or truncated; nothing was removed or deleted on its say-so." ;;
+    *) die "the state file at $STATE has no usable value for '$2'. Run the earlier steps first; an absent or empty value is never read as a legitimate answer here." ;;
+  esac
+}
+
+# For a key whose empty value is legitimate (`env_prefix`), or whose absence a
+# caller checks for itself. `load_state` has already established that the file
+# parses as a JSON object, so the remaining failure mode is an absent key.
+state_get_opt() {
+  local v
+  v=$(jq -r "$1" "$STATE" 2>/dev/null) || v=""
+  case "$v" in null) v="" ;; esac
+  printf '%s' "$v"
 }
 
 state_getj() {
-  jq -c "$1" "$STATE" 2>/dev/null
+  jq -c "$1" "$STATE"
 }
 
 state_set() {
@@ -153,15 +195,17 @@ load_state() {
   WORK="${1:?--work is required}"
   STATE="$WORK/state.json"
   [ -f "$STATE" ] || die "no state file at $STATE; run 'setup' first"
-  REPO_ROOT=$(state_get '.repo_root')
-  DEFAULT_BRANCH=$(state_get '.default_branch')
-  BRANCH_NAME=$(state_get '.branch_name')
-  ADAPTER=$(state_get '.adapter')
-  SCORER=$(state_get '.scorer')
-  WT=$(state_get '.worktree')
-  PACKAGE=$(state_get '.package')
-  MAJOR_LINE=$(state_get '.major_line')
-  set_env_prefix "$(state_get '.env_prefix')"
+  jq -e 'type == "object"' "$STATE" >/dev/null 2>&1 \
+    || die "the state file at $STATE is not a readable JSON object. A crashed 'setup' can leave a zero-byte one; inspect $WORK by hand rather than rerunning, because nothing here can tell an interrupted run from a foreign directory."
+  REPO_ROOT=$(state_get '.repo_root');       state_ok $? '.repo_root'
+  DEFAULT_BRANCH=$(state_get '.default_branch'); state_ok $? '.default_branch'
+  BRANCH_NAME=$(state_get '.branch_name');   state_ok $? '.branch_name'
+  ADAPTER=$(state_get '.adapter');           state_ok $? '.adapter'
+  SCORER=$(state_get '.scorer');             state_ok $? '.scorer'
+  WT=$(state_get '.worktree');               state_ok $? '.worktree'
+  PACKAGE=$(state_get '.package');           state_ok $? '.package'
+  MAJOR_LINE=$(state_get '.major_line');     state_ok $? '.major_line'
+  set_env_prefix "$(state_get_opt '.env_prefix')"
 }
 
 # ---------------------------------------------------------------------------
@@ -173,9 +217,24 @@ load_state() {
 # write verbs stay behind require-linked-worktree.sh either way.
 # ---------------------------------------------------------------------------
 
+# `git -C ""` is not an error and it is not a no-op: git silently operates on
+# the CURRENT directory, so one empty state value would put
+# `worktree remove --force` or `branch -D` in the user's own checkout — issue
+# #18's failure mode, arriving through a path no `cd` guard covers. The
+# adapter and install seams need no equivalent guard: they compose through
+# `cd "$WT"`, and `cd ""` fails.
+#
+# Defence in depth rather than the primary defence: `load_state` refuses an
+# empty value for every path it reads, which is what makes an empty `$dir`
+# unreachable in the first place. This guard's own `die` cannot be relied on
+# to end the run — most callers wrap `git_at` in a command substitution, where
+# an exit ends only the subshell — but it does guarantee the git call is never
+# made, which is the part that matters.
 git_at() {
   local dir=$1
   shift
+  [ -n "$dir" ] \
+    || die "refusing to run 'git $*' with an empty directory: git -C '' operates on the current directory, which is how a repo-targeted write lands in the user's checkout (#18)."
   run_env git -C "$dir" "$@"
 }
 
@@ -189,6 +248,47 @@ adapter_run() {
   ADAPTER_ERR=$(cat "$errfile")
   rm -f "$errfile"
   return "$ADAPTER_STATUS"
+}
+
+# ---------------------------------------------------------------------------
+# Reading a field the adapter contract promises
+#
+# "A field the contract promises arrives present and of the promised type, or
+# it is a hard error, never a default" (scripts/CLAUDE.md). A bare `jq -r` on
+# an absent key yields the STRING `null`, which then takes a branch of its
+# own: `.peer_only` stops being `true` so the #103 dead-end check vanishes,
+# `.line_present` stops being `false` so its stop is bypassed, and
+# `targets_this_package` stops being `true` so a `tightened` bare override is
+# reported to the PR body as `added`. `score-merge-risk.sh`'s
+# `require_object`/`read_field`/`contract_error` trio is the in-repo pattern;
+# this is the same discipline with the driver's phase vocabulary.
+#
+# The value lands in ADAPTER_FIELD rather than on stdout because `fail_phase`
+# exits, and an exit inside a command substitution ends only the subshell —
+# the caller would carry on holding the failure JSON as its "value".
+# ---------------------------------------------------------------------------
+
+ADAPTER_FIELD=""
+
+adapter_field() {
+  # $1 phase, $2 payload, $3 what produced it, $4 key
+  ADAPTER_FIELD=""
+  printf '%s' "$2" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || fail_phase "$1" "$3 emitted no JSON object on stdout. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must exit non-zero, not answer with nothing and let a downstream check be skipped rather than failed."
+  printf '%s' "$2" | jq -e --arg k "$4" 'has($k)' >/dev/null 2>&1 \
+    || fail_phase "$1" "$3 emitted no '$4' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); read straight, an absent field arrives as the string \"null\" and takes a branch of its own instead of failing."
+  ADAPTER_FIELD=$(printf '%s' "$2" | jq -r --arg k "$4" '.[$k]') \
+    || fail_phase "$1" "$3: reading '$4' out of the reply failed."
+}
+
+# Same guarantee for a value about to be handed to `jq --argjson`. `jq -n
+# --argjson x ""` dies with exit 2 and NO stdout, which an agent reads as a
+# `needs_judgment` with no decision point and then hunts for evidence fields
+# that do not exist.
+require_json() {
+  # $1 phase, $2 value, $3 description
+  printf '%s' "$2" | jq -e 'true' >/dev/null 2>&1 \
+    || fail_phase "$1" "$3 is not readable JSON, so the step's own report cannot be assembled. Value: '$2'"
 }
 
 # The adapter reports failures as {"error": "..."} on stderr; quote that when
@@ -212,12 +312,34 @@ adapter_error_text() {
 # has failed its phase (#122).
 # ---------------------------------------------------------------------------
 
+# Only shapes that name a connection that timed out, reset or could not be
+# resolved *this time*. Deliberately NOT here: `ENOTFOUND` (a name that does
+# not resolve is a wrong registry host far more often than a transient DNS
+# failure — `EAI_AGAIN` is the transient one) and the bare `request to .*
+# failed`, which npm also prints for a self-signed certificate chain and for a
+# proxy refusing the connection. Retrying either burns an install step proving
+# a misconfiguration is still a misconfiguration, and the evidence's
+# `registry_timeout_retry: true` then tells the agent a network blip was ruled
+# out when nothing of the sort happened.
 registry_timeout_shaped() {
   printf '%s' "$1" | grep -Eqi \
-    'ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|network timeout|request to .* failed|Timeout awaiting|read ECONNRESET|registry.*timed? ?out'
+    'ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|network timeout|Timeout awaiting|registry.*timed? ?out'
 }
 
-# Sets INSTALL_ERR and INSTALL_RETRIED; returns the install's exit status.
+# Signals an install prints that a later phase has to react to, detected while
+# the output is still in hand. `run_install` used to capture the install's
+# output and discard it on success, and no payload carried it, so the pnpm 11
+# reaction agents/fix-dependency.md requires was unreachable by the agent that
+# had to make it (#159).
+PNPM_FIELD_IGNORED='The "pnpm" field in package.json is no longer read by pnpm'
+
+install_signals() {
+  printf '%s' "$1" | jq -Rs --arg s "$PNPM_FIELD_IGNORED" \
+    '[ if index($s) != null then "pnpm_field_no_longer_read" else empty end ]'
+}
+
+# Sets INSTALL_ERR, INSTALL_RETRIED and INSTALL_SIGNALS; returns the install's
+# exit status.
 run_install() {
   local errfile out st
   INSTALL_RETRIED=false
@@ -232,7 +354,17 @@ run_install() {
     INSTALL_ERR=$(printf '%s\n%s' "$out" "$(cat "$errfile")")
   fi
   rm -f "$errfile"
+  INSTALL_SIGNALS=$(install_signals "$INSTALL_ERR")
   return "$st"
+}
+
+# The union of every signal an install in this run printed, carried in state so
+# `apply` and `score` can both report it.
+record_install_signals() {
+  local prev
+  prev=$(state_getj '.install_signals // []')
+  state_set install_signals "$(jq -cn --argjson a "$prev" --argjson b "${INSTALL_SIGNALS:-[]}" \
+    '($a + $b) | unique')"
 }
 
 # ---------------------------------------------------------------------------
@@ -273,38 +405,60 @@ porcelain_paths() {
 # Version helpers — comparison stays behind the adapter (scripts/CLAUDE.md)
 # ---------------------------------------------------------------------------
 
-# Lowest version on the group's major line, from a `resolved_versions` payload.
-# Falls back to the lowest version overall when the line holds none, and prints
-# nothing when the payload carries no versions at all.
+# The versions of this group's line, sorted, as a compact JSON array, or a
+# non-zero status when the payload could not be read. A payload that is not an
+# object, or carries no `versions` array, or carries an entry whose `version`
+# is not a string, is an ERROR here and never an empty list: "zero resolved
+# versions is an error, never a pass" (scripts/CLAUDE.md).
+#
+# The drift-cleared test compares two of these, so a failed read must never
+# come back as `[]`: two failed reads compare equal, and the run then reports
+# `no_op` — "already fixed on the default branch" — discarding the drift
+# commit that WAS the fix and leaving the alerts open (#146's inversion).
+line_versions() {
+  printf '%s' "$1" | jq -c --arg l "$2" '
+    if (type != "object") or ((.versions | type) != "array") then
+      error("the resolved_versions payload carries no versions array")
+    elif any(.versions[]; (.version | type) != "string") then
+      error("a resolved_versions entry carries no readable version string")
+    else [ .versions[].version | select(test("^" + $l + "([.]|$)")) ] | unique
+    end'
+}
+
+# Lowest version on the group's major line, in LOWEST_ON_LINE.
+#   0  a version was found
+#   1  the payload parsed and holds no version on this line
+#   2  the payload, or a comparison, could not be read
+#
+# There is no fall back to the lowest version overall. That fallback reported
+# a version from a major line this group does not own as its `after`, which
+# then flowed into `--after`, `resolved_version` and F1 — the #76 class. And
+# `compare_versions`' status is not discarded, nor its `.result` defaulted:
+# with either, a failed comparison left `lowest` at whatever the iteration
+# order happened to produce.
 lowest_on_line() {
-  local payload=$1 line=$2 versions v lowest cmp
-  versions=$(printf '%s' "$payload" | jq -r --arg l "$line" '
-    [ .versions[]? | .version
-      | select(test("^" + $l + "([.]|$)")) ] | .[]' 2>/dev/null)
-  if [ -z "$versions" ]; then
-    versions=$(printf '%s' "$payload" | jq -r '[ .versions[]? | .version ] | .[]' 2>/dev/null)
-  fi
-  lowest=""
+  local payload=$1 line=$2 versions v cmp
+  LOWEST_ON_LINE=""
+  versions=$(line_versions "$payload" "$line" | jq -r '.[]') || return 2
+  [ -n "$versions" ] || return 1
   while IFS= read -r v; do
     [ -n "$v" ] || continue
-    if [ -z "$lowest" ]; then
-      lowest=$v
+    if [ -z "$LOWEST_ON_LINE" ]; then
+      LOWEST_ON_LINE=$v
       continue
     fi
-    cmp=$( ( cd "$WT" && run_env "$ADAPTER" compare_versions "$v" "$lowest" ) 2>/dev/null \
-           | jq -r '.result // empty')
-    if [ "$cmp" = "-1" ]; then lowest=$v; fi
+    adapter_run compare_versions "$v" "$LOWEST_ON_LINE" || return 2
+    printf '%s' "$ADAPTER_OUT" | jq -e 'type == "object" and has("result")' >/dev/null 2>&1 \
+      || return 2
+    cmp=$(printf '%s' "$ADAPTER_OUT" | jq -r '.result')
+    case "$cmp" in
+      -1) LOWEST_ON_LINE=$v ;;
+      0|1) ;;
+      *) return 2 ;;
+    esac
   done <<EOF
 $versions
 EOF
-  printf '%s' "$lowest"
-}
-
-# The versions of this group's line, sorted, as a compact JSON array. The
-# drift-cleared test compares two of these.
-line_versions() {
-  printf '%s' "$1" | jq -c --arg l "$2" \
-    '[ .versions[]? | .version | select(test("^" + $l + "([.]|$)")) ] | unique' 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -319,7 +473,14 @@ cmd_setup() {
       --repo-root)      repo_root="${2:?--repo-root requires a path}"; shift 2 ;;
       --default-branch) default_branch="${2:?--default-branch requires a name}"; shift 2 ;;
       --adapter)        adapter_path="${2:?--adapter requires a path}"; shift 2 ;;
-      --env-prefix)     env_prefix="${2-}"; shift 2 ;;
+      # `--env-prefix ""` is legal and means "no prefix", so this cannot use
+      # the `${2:?...}` form the other options use. It still has to tell an
+      # EMPTY value from an ABSENT one: `${2-}` leaves `shift 2` to fail on a
+      # trailing `--env-prefix`, and a failed `shift` shifts nothing, so the
+      # `while [ $# -gt 0 ]` loop never terminates.
+      --env-prefix)
+        [ $# -ge 2 ] || die "setup: --env-prefix requires a value; pass \"\" for no prefix"
+        env_prefix="$2"; shift 2 ;;
       # A test seam, like node.sh's shim runner override: the specs replace the
       # scorer with a shim that records its argv.
       --scorer)         scorer="${2:?--scorer requires a path}"; shift 2 ;;
@@ -337,11 +498,25 @@ cmd_setup() {
 
   local group
   group=$(jq -c '.' "$group_file") || die "setup: --group-json is not readable JSON"
-  local missing
+  local missing unusable
   missing=$(printf '%s' "$group" | jq -r '
     ["package","major_line","branch_name","highest_fixed_version","alerts"]
     - (to_entries | map(.key)) | join(", ")')
   [ -z "$missing" ] || die "setup: the group payload is missing: $missing"
+  # Presence is not enough. `{"package": null}` passes a key check, and the
+  # string `null` then flows into the worktree path and the branch name,
+  # producing a `fix-dependabot-null-nullx` workspace that every later guard
+  # reads as a legitimate run's leftover.
+  unusable=$(printf '%s' "$group" | jq -r '
+    def blank_string: (type != "string") or (length == 0);
+    [ (select(.package | blank_string) | "package"),
+      (select((.major_line | type) != "number" and (.major_line | blank_string))
+       | "major_line"),
+      (select(.branch_name | blank_string) | "branch_name"),
+      (select(.highest_fixed_version | blank_string) | "highest_fixed_version"),
+      (select((.alerts | type) != "array" or (.alerts | length) == 0) | "alerts") ]
+    | join(", ")')
+  [ -z "$unusable" ] || die "setup: the group payload carries no usable value for: $unusable"
 
   local package major_line branch_name package_path work
   package=$(printf '%s' "$group" | jq -r '.package')
@@ -431,6 +606,9 @@ EOF
   aerr=$(git_at "$repo_root" worktree add "$work/fix" -b "$branch_name" "origin/$default_branch" 2>&1) \
     || fail_phase worktree "git worktree add $work/fix failed: $aerr"
 
+  # Written through a temp file, exactly as `state_set` does: `> "$STATE"`
+  # truncates before jq runs, so a jq failure here leaves the zero-byte
+  # state.json that every later step then has to refuse.
   STATE="$work/state.json"
   jq -n \
     --argjson group "$group" \
@@ -449,8 +627,9 @@ EOF
       adapter: $adapter, scorer: $scorer, env_prefix: $env_prefix,
       work: $work, worktree: $worktree, branch_name: $branch_name,
       package: $package, package_path: $package_path, major_line: $major_line,
-      drift_commit: false}' > "$STATE" \
+      drift_commit: false, fix_installs: 0, install_signals: []}' > "$STATE.tmp" \
     || die "setup: cannot write $STATE"
+  mv "$STATE.tmp" "$STATE" || die "setup: cannot replace $STATE"
 
   jq -n --arg work "$work" --arg worktree "$work/fix" --arg branch "$branch_name" \
     --arg package "$package" --arg line "$major_line" \
@@ -479,14 +658,13 @@ cmd_classify() {
   adapter_run why "$PACKAGE" \
     || fail_phase classify "adapter why $PACKAGE failed: $(adapter_error_text)"
   local why=$ADAPTER_OUT
-  printf '%s' "$why" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || fail_phase classify "adapter why $PACKAGE did not return a JSON object"
 
   # A peer_only package is a structural dead end: every edge reaching it is
   # pnpm recording a peer resolution rather than a declaration, so no override
   # key can move it. One field run burned four install cycles proving a shape
   # `why` names before any install runs (#103).
-  if [ "$(printf '%s' "$why" | jq -r '.peer_only')" = "true" ]; then
+  adapter_field classify "$why" "adapter why $PACKAGE" peer_only
+  if [ "$ADAPTER_FIELD" = "true" ]; then
     local peers optional
     peers=$(printf '%s' "$why" | jq -c '.peer_parents')
     optional=$(printf '%s' "$why" | jq -c '.optional_peer_parents')
@@ -516,10 +694,21 @@ cmd_classify() {
       (.parents_without_range // [])[] ]
     | map(bare_name) | unique')
 
+  # Read straight, an absent `relationship` stored the string "null", which
+  # `apply`'s own "run classify first" guard then accepted as a real answer
+  # while every later reader saw a relationship that is neither `direct` nor
+  # transitive.
+  adapter_field classify "$why" "adapter why $PACKAGE" relationship
+  local relationship=$ADAPTER_FIELD
+  case "$relationship" in
+    direct|transitive) ;;
+    *) fail_phase classify "adapter why $PACKAGE answered relationship '$relationship', which is not in the contract enum direct|transitive (docs/adr/001-ecosystem-adapter-contract.md). Anything else routes the parent list by falling off the 'direct' branch, so a direct dependency would be pinned through parents it has none of." ;;
+  esac
+
   state_set why "$why"
   state_set declared "$declared"
   state_set eligible_parents "$eligible"
-  state_set_str relationship "$(printf '%s' "$why" | jq -r '.relationship')"
+  state_set_str relationship "$relationship"
 
   jq -n --argjson why "$why" --argjson declared "$declared" --argjson eligible "$eligible" \
     '{status: "ok", step: "classify",
@@ -554,6 +743,10 @@ cmd_baseline() {
   adapter_run resolved_versions "$PACKAGE" \
     || fail_phase baseline "the lockfile could not be parsed before the control install (resolved_versions $PACKAGE): $(adapter_error_text). A failed parse is never an empty result."
   local pre_drift=$ADAPTER_OUT
+  # The same object assertion the other verbs carry: an adapter exiting 0 with
+  # empty stdout otherwise sails past every later `has()` check rather than
+  # failing one (scripts/CLAUDE.md).
+  adapter_field baseline "$pre_drift" "resolved_versions $PACKAGE (before the control install)" present
   state_set pre_drift "$pre_drift"
 
   # The control install: the manifest exactly as the default branch declares
@@ -606,8 +799,10 @@ EOF
   adapter_run resolved_versions "$PACKAGE" \
     || fail_phase baseline "the lockfile could not be parsed after the control install (resolved_versions $PACKAGE): $(adapter_error_text). A failed parse is never an empty result."
   local baseline=$ADAPTER_OUT
+  adapter_field baseline "$baseline" "resolved_versions $PACKAGE (after the control install)" present
   state_set baseline "$baseline"
   state_set drift_commit "$(jbool "$drift")"
+  record_install_signals
 
   jq -n --argjson drift "$(jbool "$drift")" \
     --argjson baseline "$baseline" --argjson pre "$pre_drift" \
@@ -623,6 +818,18 @@ EOF
 # The fix installs this phase is allowed, across the whole remediation ladder.
 # The bound is the ladder's, not the retry rule's: a sanctioned registry-timeout
 # retry rides inside one invocation and does not spend a step.
+#
+# The counter is PERSISTED, and that is what makes the budget real. One `apply`
+# spends at most three (the first call, step 1, step 2), so a process-local
+# counter could never reach four and `install_budget_exhausted` was dead code
+# advertised in two documents as an escape. Meanwhile the agent doc sanctions
+# re-running `apply` once after a diagnosed `install_failure`, which reset the
+# counter to zero — so the budget bounded nothing at all. In state it bounds
+# the RUN: a re-run resumes the count, the fourth install is the last, and
+# "do not extend the budget by re-running" becomes enforced rather than asked
+# for. The ladder's own position deliberately does NOT persist: a re-run
+# happens only after the agent changed the state the failure complained about,
+# and the cheapest scoped shape is the right thing to try again first.
 FIX_INSTALL_BUDGET=4
 FIX_INSTALLS=0
 
@@ -632,6 +839,7 @@ OBSERVATIONS_FIRST='[]'
 TIGHTEN_BARE_RAN=false
 VALIDATE_JSON=''
 VALIDATE_OK=false
+PARENT_DERIVATION='null'
 
 apply_call() {
   # $1 = "--tighten-bare" or ""; remaining = parents
@@ -648,11 +856,19 @@ apply_call() {
 $(printf '%s' "$APPLIED_PARENTS_JSON" | jq -r '.[]')
 EOF
 
+  # What is known here is that the verb exited non-zero and that no install has
+  # run, so the worktree is discarded either way. What is NOT known is whether
+  # the manifest was touched: this call did not look, and asserting "nothing
+  # was written" from a non-zero status states more than was observed.
   adapter_run apply_constraint "${args[@]}" \
-    || fail_phase apply "apply_constraint refused or failed, and nothing was written. Quoting the adapter verbatim: $(adapter_error_text)"
+    || fail_phase apply "apply_constraint exited non-zero, so no fix install was run and no PR was opened. Whether it wrote anything before failing is not observed here; the worktree is discarded on cleanup either way. Quoting the adapter verbatim: $(adapter_error_text)"
   APPLY_RESULT=$ADAPTER_OUT
-  printf '%s' "$APPLY_RESULT" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || fail_phase apply "apply_constraint did not return a JSON object"
+  adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" written
+  printf '%s' "$APPLY_RESULT" | jq -e '(.written | type) == "array"' >/dev/null 2>&1 \
+    || fail_phase apply "apply_constraint answered a 'written' that is not an array. It is the only statement of what actually changed (scripts/CLAUDE.md), and every classification below reads it."
+  adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" observations
+  printf '%s' "$APPLY_RESULT" | jq -e '(.observations | type) == "array"' >/dev/null 2>&1 \
+    || fail_phase apply "apply_constraint answered an 'observations' that is not an array. A missing one silently turns every tightened bare override into an added one in the PR body."
 
   # Reject a written `npm:` value naming a different package. Entries carrying
   # `preserved: true` are skipped first: those quote a pre-existing value the
@@ -680,13 +896,13 @@ validate_call() {
     [ -n "$r" ] || continue
     args+=(--vulnerable "$r")
   done <<EOF
-$(state_getj '.group.alerts' | jq -r '[ .[].vulnerable_range | select(. != null) ] | unique | .[]')
+$(state_getj '.group.alerts' | jq -r '[ .[].vulnerable_range ] | unique | .[]')
 EOF
   args+=(--baseline "$(state_getj '.baseline')")
   # `[]` is a real answer and is passed as `[]`. When the field is ABSENT from
   # the payload the flag is omitted entirely, which makes validate class every
   # cross-line move fatal — the intended fail-safe default (#105).
-  if [ "$(state_get 'has("group") and (.group | has("sibling_alerts"))')" = "true" ]; then
+  if [ "$(state_get_opt 'has("group") and (.group | has("sibling_alerts"))')" = "true" ]; then
     args+=(--sibling-alerts "$(state_getj '.group.sibling_alerts')")
   fi
   args+=("$PACKAGE" "$RANGE")
@@ -710,21 +926,31 @@ EOF
 }
 
 fix_install_step() {
+  local vjson="${VALIDATE_JSON:-}"
+  [ -n "$vjson" ] || vjson=null
+  require_json apply "$vjson" "the validate report carried into the install-budget evidence"
   if [ "$FIX_INSTALLS" -ge "$FIX_INSTALL_BUDGET" ]; then
     needs_judgment "install_budget_exhausted" \
-      "$(jq -n --argjson n "$FIX_INSTALLS" --argjson v "${VALIDATE_JSON:-null}" \
-        '{fix_installs: $n, validate: $v}')"
+      "$(jq -n --argjson n "$FIX_INSTALLS" --argjson v "$vjson" \
+        '{fix_installs: $n, budget: '"$FIX_INSTALL_BUDGET"', validate: $v}')"
   fi
   FIX_INSTALLS=$((FIX_INSTALLS + 1))
+  state_set fix_installs "$FIX_INSTALLS"
   if ! run_install; then
+    record_install_signals
     # Everything the ladder does not cover is the agent's to diagnose: a peer
-    # conflict needing a wider range, a version that does not exist.
+    # conflict needing a wider range, a version that does not exist. `phase` is
+    # `install` and not `apply`: the contract reserves that name for the
+    # fix-attributable install (`baseline` covers the ambient control one), and
+    # it is the value the agent copies straight into its result block.
     needs_judgment "install_failure" \
       "$(jq -n --arg err "$INSTALL_ERR" --argjson retried "$INSTALL_RETRIED" \
          --argjson n "$FIX_INSTALLS" --argjson written "$(printf '%s' "$APPLY_RESULT" | jq -c '.written')" \
-         '{phase: "apply", error: $err, registry_timeout_retry: $retried,
-           fix_installs: $n, written: $written}')"
+         --argjson signals "${INSTALL_SIGNALS:-[]}" \
+         '{phase: "install", error: $err, registry_timeout_retry: $retried,
+           fix_installs: $n, install_signals: $signals, written: $written}')"
   fi
+  record_install_signals
 }
 
 cmd_apply() {
@@ -737,10 +963,39 @@ cmd_apply() {
   done
   load_state "$work"
 
-  local hfv relationship
-  hfv=$(state_get '.group.highest_fixed_version')
-  relationship=$(state_get '.relationship')
-  [ "$relationship" != "null" ] || die "apply: run 'classify' first"
+  # Every precondition is checked BEFORE anything is written, because the two
+  # that follow used to be checked after `package.json` had been rewritten and
+  # a full install had run — or, in the baseline's case, not at all.
+  local relationship
+  relationship=$(state_get_opt '.relationship')
+  [ -n "$relationship" ] || die "apply: run 'classify' first"
+
+  # An unrun `baseline` sent `--baseline null` into validate, which collapses
+  # the `null` ("not checked") and `[]` ("checked and clean") distinction
+  # `other_line_moves` draws, silently voiding the #146 protection. Only
+  # `.relationship` was guarded, so the skip was invisible.
+  local baseline_json
+  baseline_json=$(state_getj '.baseline')
+  [ "$baseline_json" != "null" ] \
+    || die "apply: run 'baseline' first. Without its post-control-install snapshot, validate is handed --baseline null, which reports every cross-line move as 'not checked' rather than as checked and clean (#146)."
+
+  # A `vulnerable_range` that is absent or null is a hard error, never an alert
+  # quietly dropped from the set: `--vulnerable` exists precisely so validate
+  # can answer whether the alerts were CLEARED, and shrinking the set lets
+  # `unresolved_alerts` come back empty for an alert nothing ever checked.
+  local unchecked
+  unchecked=$(state_getj '.group.alerts' | jq -c '
+    [ .[] | select((.vulnerable_range | type) != "string" or (.vulnerable_range | length) == 0)
+      | (.number // "<unnumbered>") ]')
+  [ "$unchecked" = "[]" ] \
+    || fail_phase apply "alert(s) $unchecked in this group carry no vulnerable_range, so validate cannot be asked whether they were cleared. Dropping them from --vulnerable would let unresolved_alerts come back empty for an alert nothing checked — the silent partial fix that flag exists to prevent (scripts/CLAUDE.md). Nothing was written."
+
+  local hfv
+  hfv=$(state_get '.group.highest_fixed_version'); state_ok $? '.group.highest_fixed_version'
+  FIX_INSTALLS=$(state_get_opt '.fix_installs')
+  case "${FIX_INSTALLS:-}" in
+    ''|*[!0-9]*) FIX_INSTALLS=0 ;;
+  esac
 
   # A major-bounded range, always: an unbounded one would auto-install future
   # majors. 3.1.2 becomes >=3.1.2 <4; 0.5.3 becomes >=0.5.3 <1.
@@ -760,7 +1015,7 @@ cmd_apply() {
   fi
 
   apply_call ""
-  OBSERVATIONS_FIRST=$(printf '%s' "$APPLY_RESULT" | jq -c '.observations // []')
+  OBSERVATIONS_FIRST=$(printf '%s' "$APPLY_RESULT" | jq -c '.observations')
   state_set observations_first "$OBSERVATIONS_FIRST"
 
   fix_install_step
@@ -771,17 +1026,21 @@ cmd_apply() {
     # `line_present` false first: the line is not installed at all, so the
     # override does nothing and no ladder step can change that. Never open a PR
     # for a change with no effect.
-    if [ "$(printf '%s' "$VALIDATE_JSON" | jq -r '.line_present')" = "false" ]; then
+    adapter_field validate "$VALIDATE_JSON" "validate --line $MAJOR_LINE $PACKAGE" line_present
+    if [ "$ADAPTER_FIELD" = "false" ]; then
       fail_phase validate "line_present is false: nothing on the ${MAJOR_LINE}.x line of $PACKAGE is installed, so there was nothing here to fix and the override applied does nothing. requires_major_bump: $(printf '%s' "$VALIDATE_JSON" | jq -c '.requires_major_bump')"
     fi
 
     if [ "$ladder_step" -eq 0 ]; then
       # Step 1: uncovered parents. A violating version usually arrives via a
       # parent not in the override list; derive those from the violating
-      # copies' paths, and never from parents_other_lines.
+      # copies' paths, and never from parents_other_lines. Under pnpm and Yarn
+      # Berry no such derivation is possible at all — see `uncovered_parents`.
       ladder_step=1
+      uncovered_parents \
+        || fail_phase validate "validate's violations[] could not be read for the ladder's first step: $(printf '%s' "$VALIDATE_JSON" | jq -c '.violations')"
       local uncovered
-      uncovered=$(uncovered_parents)
+      uncovered=$(printf '%s' "$PARENT_DERIVATION" | jq -c '.parents')
       if [ "$uncovered" != "[]" ]; then
         APPLIED_PARENTS_JSON=$(jq -cn --argjson a "$APPLIED_PARENTS_JSON" --argjson b "$uncovered" \
           '($a + $b) | unique')
@@ -795,7 +1054,10 @@ cmd_apply() {
 
     if [ "$ladder_step" -le 1 ]; then
       # Step 2: the bare global override. Widest change this flow can make, so
-      # it is the last thing reached for; step 1 is exhausted above.
+      # it is the last thing reached for; step 1 is exhausted above — or, on a
+      # pnpm or Yarn Berry repository, was never runnable, which
+      # `parent_derivation` in this step's evidence and in the result says
+      # rather than presenting an unexhausted step 1 as exhausted.
       ladder_step=2
       TIGHTEN_BARE_RAN=true
       apply_call "--tighten-bare"
@@ -818,9 +1080,10 @@ cmd_apply() {
     needs_judgment "validate_failed_after_ladder" \
       "$(jq -n --argjson v "$VALIDATE_JSON" --argjson w "$(printf '%s' "$APPLY_RESULT" | jq -c '.written')" \
          --argjson parents "$APPLIED_PARENTS_JSON" --argjson tb "$TIGHTEN_BARE_RAN" \
-         --argjson li "$li" \
+         --argjson li "$li" --argjson pd "$PARENT_DERIVATION" \
          '{validate: $v, written: $w, applied_parents: $parents,
-           tighten_bare_applied: $tb, lockfile_invalidated: $li}')"
+           tighten_bare_applied: $tb, lockfile_invalidated: $li,
+           parent_derivation: $pd}')"
   done
 
   # ---- validate passed -------------------------------------------------
@@ -829,41 +1092,96 @@ cmd_apply() {
   porcelain=$(git_at "$WT" status --porcelain 2>&1) \
     || fail_phase validate "git status --porcelain failed in the worktree: $porcelain"
 
-  local drift action override_scope bare_override
-  drift=$(state_get '.drift_commit')
+  local drift action override_scope bare_override shape
+  drift=$(state_get_opt '.drift_commit')
 
-  # The widest shape actually applied. Scoped entries plus an escalation to a
-  # bare override is bare-*, never scoped.
-  if [ "$TIGHTEN_BARE_RAN" = true ]; then
-    # `tightened` requires a matching pre-fix observation; without one, what
-    # happened was `added`. The observations captured BEFORE the first
-    # apply_constraint call are what distinguish the two.
-    if [ "$(printf '%s' "$OBSERVATIONS_FIRST" | jq -r 'any(.[]; (.targets_this_package // false) == true)')" = "true" ]; then
-      bare_override=tightened
-      override_scope=bare-tightened
-    else
-      bare_override=added
-      override_scope=bare-added
-    fi
-    action=bare-override
-  elif [ "$(printf '%s' "$APPLY_RESULT" | jq -r '.mode')" = "direct" ]; then
-    bare_override=none
-    override_scope=none
-    action=direct-update
-  else
-    bare_override=none
-    override_scope=scoped
-    action=scoped-override
-  fi
+  # The widest shape actually applied, read off what was WRITTEN rather than
+  # off `apply_constraint`'s `mode`. `mode` reports the call's INPUT — "direct"
+  # means zero parents were passed — and a transitive package whose eligible
+  # set came back empty takes exactly that branch, where the adapter writes a
+  # top-level BARE override whenever the root manifest declares no key for the
+  # package (node.sh's `($parents | length) == 0` arm). Keyed off `mode`, that
+  # bare pin was reported as `direct-update` / `--override-scope none` /
+  # `bare_override: none`: F6 scored 0 instead of 2, the PR body owed no
+  # Global-override section, and the `unscoped_override_added` observation the
+  # pin audit reads was never recorded — the audit losing the record of a pin
+  # this run created.
+  shape=$(printf '%s' "$APPLY_RESULT" | jq -r '
+    def is_bare_key($p):
+      if   $p[0] == "pnpm"        then ($p | length) == 3 and $p[1] == "overrides"
+      elif $p[0] == "overrides"
+        or $p[0] == "resolutions" then ($p | length) == 2
+      else false end;
+    [ .written[] | select((.preserved // false) != true) ] as $w
+    | if   any($w[]; (.parent == null) and is_bare_key(.path)) then "bare"
+      elif any($w[]; .path[0] == "dependencies" or .path[0] == "devDependencies") then "direct"
+      elif ($w | length) > 0 then "scoped"
+      else "none" end') \
+    || fail_phase apply "apply_constraint's written[] could not be classified: $(printf '%s' "$APPLY_RESULT" | jq -c '.written')"
+
+  # A `--tighten-bare` escalation is bare whatever it wrote: its one shape that
+  # lands nowhere near a top-level key is `tighten_rule`, which tightens the
+  # pre-existing rule pinning every copy the rule places (#147) — the widest
+  # change available on that repository. So the two tests union rather than
+  # replace one another.
+  [ "$TIGHTEN_BARE_RAN" != true ] || shape=bare
+
+  case "$shape" in
+    bare)
+      # `tightened` requires a matching pre-fix observation; without one, what
+      # happened was `added`. The observations captured BEFORE the first
+      # apply_constraint call are what distinguish the two.
+      if [ "$(printf '%s' "$OBSERVATIONS_FIRST" | jq -r 'any(.[]; (.targets_this_package // false) == true)')" = "true" ]; then
+        bare_override=tightened
+        override_scope=bare-tightened
+      else
+        bare_override=added
+        override_scope=bare-added
+      fi
+      action=bare-override ;;
+    direct)
+      bare_override=none
+      override_scope=none
+      action=direct-update ;;
+    scoped)
+      bare_override=none
+      override_scope=scoped
+      action=scoped-override ;;
+    *)
+      # Nothing was written and validate passed: the manifest already carried
+      # everything this fix needed. The empty-diff branch below decides whether
+      # that is a no-op or a lockfile-refresh; until then it is scoped, the
+      # narrowest claim available.
+      bare_override=none
+      override_scope=scoped
+      action=scoped-override ;;
+  esac
 
   if [ -z "$porcelain" ]; then
     # The empty-diff case. Phase 3's drift commit already absorbed any ambient
     # drift, so empty porcelain here means the fix install itself changed
     # nothing (#146). What it does not yet say is WHICH install cleared the
     # alerts, and the drift commit answers that.
+    #
+    # Both sides must be KNOWN to have parsed before they are compared. Read
+    # through `2>/dev/null` with the status discarded, three separate routes
+    # produced `""` or `[]` on both sides — a jq error on a null `.version`, a
+    # `state_getj` handing back the literal `null`, and a genuine zero-version
+    # parse — and every one of them compared equal and reported `no_op`. That
+    # is "already fixed on the default branch" manufactured out of two failed
+    # reads: it discards the drift commit that WAS the fix and leaves the
+    # alerts open with nothing to review (#146's inversion).
     local pre_line base_line
-    pre_line=$(line_versions "$(state_getj '.pre_drift')" "$MAJOR_LINE")
-    base_line=$(line_versions "$(state_getj '.baseline')" "$MAJOR_LINE")
+    pre_line=$(line_versions "$(state_getj '.pre_drift')" "$MAJOR_LINE") \
+      || fail_phase validate "the pre-drift lockfile snapshot could not be read, so whether the control install cleared the ${MAJOR_LINE}.x line cannot be decided. It is never assumed unchanged: that reports a real lockfile-refresh fix as 'already fixed' and leaves the alerts open (#146)."
+    base_line=$(line_versions "$(state_getj '.baseline')" "$MAJOR_LINE") \
+      || fail_phase validate "the post-control-install baseline snapshot could not be read, so whether the control install cleared the ${MAJOR_LINE}.x line cannot be decided (#146)."
+    # `[]` on either side is a parse that found no copy of this line, while
+    # validate has just reported `line_present: true` for it. The two disagree,
+    # so neither an equality nor a difference between them is evidence.
+    if [ "$pre_line" = "[]" ] || [ "$base_line" = "[]" ]; then
+      fail_phase validate "the fix install changed nothing, and telling a true no-op from a lockfile-refresh needs the ${MAJOR_LINE}.x versions on both sides of the control install. One side carries none while validate reports the line present, so the snapshots disagree and 'already fixed on the default branch' is not a conclusion this evidence supports (#146). pre_drift=$pre_line baseline=$base_line"
+    fi
     if [ "$drift" != "true" ] || [ "$pre_line" = "$base_line" ]; then
       # A true no-op: the default branch already resolves the fixed versions.
       # Dependabot re-scans on its own schedule, so alerts read as open for a
@@ -912,8 +1230,11 @@ cmd_apply() {
   jq -n --arg action "$action" --arg scope "$override_scope" --arg bare "$bare_override" \
     --argjson apply "$APPLY_RESULT" --argjson validate "$VALIDATE_JSON" \
     --argjson parents "$APPLIED_PARENTS_JSON" --argjson obs0 "$OBSERVATIONS_FIRST" \
+    --argjson pd "$PARENT_DERIVATION" \
+    --argjson signals "$(state_getj '.install_signals // []')" \
     '{status: "ok", step: "apply", action: $action, override_scope: $scope,
       bare_override: $bare, applied_parents: $parents,
+      parent_derivation: $pd, install_signals: $signals,
       written: $apply.written, superseded_keys: $apply.superseded_keys,
       alias_lookup: $apply.alias_lookup,
       lockfile_invalidated: $apply.lockfile_invalidated,
@@ -925,34 +1246,60 @@ cmd_apply() {
 }
 
 # Parents of the violating copies, minus the ones already carrying an entry and
-# minus every parent on another major line. Derived from the violation paths the
-# adapter reports — the enclosing package directory of each violating copy —
-# intersected with nothing, because a parent the lockfile places is a parent an
-# entry can name.
+# minus every parent on another major line, into PARENT_DERIVATION alongside
+# the evidence for how many paths could be read that way at all.
+#
+# **The three managers report `path` differently and only one of the three
+# names a parent.** `node.sh` emits `node_modules/...`, the lockfile key, for
+# npm (`npm_versions`); `<name>@<version>` for pnpm (`pnpm_versions`); and the
+# resolution locator `<name>@npm:<version>` for Yarn Berry (`yarn_versions`).
+# The last two name the VIOLATING COPY, not its enclosing parent, and carry no
+# parent information at all — under pnpm's isolated store and Berry's PnP there
+# is no enclosing directory to name. So this step is structurally impossible on
+# two of the three toolchains, and the honest answer is to say so rather than
+# to invent one: the previous jq assumed npm's shape for every manager and
+# yielded `null` for the other two, which made `uncovered_parents` `[]` on
+# every pnpm and Yarn repository and escalated the run straight to
+# `--tighten-bare`, the widest change the flow can make, with step 1 reported
+# as exhausted. (The `.pnpm/<parent>@<ver>/node_modules/<pkg>` branch it also
+# carried, and its `sub("^\\.pnpm/"; "")`, were dead: node.sh emits no such
+# path.)
 uncovered_parents() {
   local other applied
   other=$(state_getj '.declared.parents_other_lines // []')
   applied=$APPLIED_PARENTS_JSON
-  printf '%s' "$VALIDATE_JSON" | jq -c \
+  PARENT_DERIVATION=$(printf '%s' "$VALIDATE_JSON" | jq -c \
     --argjson other "$other" --argjson applied "$applied" --arg pkg "$PACKAGE" '
     def bare_name:
       . as $k
       | ($k | rindex("@")) as $i
       | if $i == null or $i == 0 then $k else $k[0:$i] end;
-    # node_modules/<parent>/node_modules/<pkg> (npm, hoisted yarn) and
-    # .pnpm/<parent>@<ver>/node_modules/<pkg> (pnpm) both put the enclosing
-    # parent immediately before the last node_modules segment.
+    # Only an install-path shape names the enclosing parent, immediately
+    # before the last `node_modules` segment.
     def parent_of($path):
       ($path | split("/")) as $seg
       | ([ range(0; $seg | length) | select($seg[.] == "node_modules") ] | last) as $i
-      | if $i == null or $i == 0 then null
-        else ($seg[0:$i] | last | sub("^\\.pnpm/"; "")) end;
-    ([ .violations[]? | parent_of(.path) | select(. != null) ]
-     | map(bare_name)
-     | map(select(. != $pkg and . != "node_modules"))
-     | unique)
-    - ($other | map(bare_name))
-    - $applied'
+      | if $i == null or $i == 0 then null else $seg[$i - 1] end;
+    if (.violations | type) != "array" then
+      error("validate reported no violations array")
+    else
+      [ .violations[] | .path | select(type == "string") ] as $paths
+      | [ $paths[] | select(test("(^|/)node_modules/")) ] as $shaped
+      | [ $paths[] | select(test("(^|/)node_modules/") | not) ] as $opaque
+      | { parents:
+            ((([ $shaped[] | parent_of(.) | select(. != null) ]
+               | map(bare_name)
+               | map(select(. != $pkg and . != "node_modules"))
+               | unique)
+              - ($other | map(bare_name))) - $applied),
+          paths_naming_a_parent: ($shaped | length),
+          paths_naming_only_the_copy: ($opaque | length),
+          opaque_paths: ($opaque | unique),
+          possible: (($shaped | length) > 0),
+          reason: (if ($shaped | length) > 0 then null
+                   else "no violating copy'"'"'s path names its enclosing parent: pnpm reports <name>@<version> and Yarn Berry the resolution locator <name>@npm:<version>, both of which name the copy itself. No parent can be derived from this report, and none was invented."
+                   end) }
+    end') || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -970,8 +1317,8 @@ cmd_score() {
   load_state "$work"
 
   local action
-  action=$(state_get '.action')
-  [ "$action" != "null" ] || die "score: run 'apply' first"
+  action=$(state_get_opt '.action')
+  [ -n "$action" ] || die "score: run 'apply' first"
   # A true no-op is terminal at `apply`: there is no change to score and no PR
   # to open, so scoring one would manufacture a rating for a diff that does not
   # exist (#34).
@@ -980,6 +1327,7 @@ cmd_score() {
   adapter_run resolved_versions "$PACKAGE" \
     || fail_phase validate "resolved_versions $PACKAGE failed after the fix: $(adapter_error_text)"
   local post=$ADAPTER_OUT
+  adapter_field validate "$post" "resolved_versions $PACKAGE (after the fix)" present
   state_set post_fix "$post"
 
   # The why capture gets its own package-qualified name under $WORK: a
@@ -987,11 +1335,19 @@ cmd_score() {
   # it mid-run (#133), and a scoped name substituted raw would target a
   # directory $WORK never creates (#161's sibling defect).
   local package_path why_file
-  package_path=$(state_get '.package_path')
+  package_path=$(state_get '.package_path'); state_ok $? '.package_path'
   why_file="$WORK/why-$package_path.json"
   adapter_run why "$PACKAGE" \
     || fail_phase validate "why $PACKAGE failed after the fix: $(adapter_error_text)"
-  printf '%s\n' "$ADAPTER_OUT" > "$why_file" || die "score: cannot write $why_file"
+  # Asserted before it is written, because the same bytes come back in through
+  # `--argjson why_json` at the end of this function: an adapter exiting 0 with
+  # empty stdout makes that jq die with exit 2 and NO stdout, which an agent
+  # reads as a `needs_judgment` and then hunts for a decision point that does
+  # not exist.
+  local why_out=$ADAPTER_OUT
+  adapter_field validate "$why_out" "why $PACKAGE (after the fix)" raw
+  printf '%s\n' "$why_out" > "$why_file" \
+    || fail_phase validate "the why capture could not be written to $why_file, so the risk scorer has no --why-json to read."
 
   # Always --line: without it the verb collects every declaration of the name
   # anywhere in the lockfile, and parents on lines the override never touched
@@ -999,25 +1355,40 @@ cmd_score() {
   adapter_run declared_ranges --line "$MAJOR_LINE" "$PACKAGE" \
     || fail_phase validate "declared_ranges --line $MAJOR_LINE $PACKAGE failed after the fix: $(adapter_error_text)"
   local declared_post=$ADAPTER_OUT
+  adapter_field validate "$declared_post" "declared_ranges --line $MAJOR_LINE $PACKAGE (after the fix)" ranges
   state_set declared_post "$declared_post"
 
   # F1's --before comes from the post-control-install baseline, so the delta is
   # fix-attributable — except on a lockfile-refresh, where the refresh IS the
   # change and the pre-drift snapshot is the honest before.
-  local before_src before after
+  local before_src before after st
   if [ "$action" = "lockfile-refresh" ]; then
     before_src=$(state_getj '.pre_drift')
   else
     before_src=$(state_getj '.baseline')
   fi
   before=""
-  if [ "$(printf '%s' "$before_src" | jq -r '.present // false')" = "true" ]; then
-    before=$(lowest_on_line "$before_src" "$MAJOR_LINE")
+  adapter_field validate "$before_src" "the pre-fix resolved_versions snapshot" present
+  if [ "$ADAPTER_FIELD" = "true" ]; then
+    lowest_on_line "$before_src" "$MAJOR_LINE"
+    st=$?
+    case "$st" in
+      0) before=$LOWEST_ON_LINE ;;
+      # Present, but nothing of it on this line. `--before` is then omitted and
+      # the scorer's own no-baseline branch scores F1 as a major — the safe
+      # direction. What is never done is substituting a version from another
+      # major line, which is what the old off-line fallback did (#76).
+      1) before="" ;;
+      *) fail_phase validate "the pre-fix lockfile snapshot could not be compared for the ${MAJOR_LINE}.x line, so F1's --before cannot be stated. A version taken from another line would be scored as this fix's delta (#76)." ;;
+    esac
   fi
-  after=$(lowest_on_line "$post" "$MAJOR_LINE")
+  lowest_on_line "$post" "$MAJOR_LINE" \
+    || fail_phase validate "the post-fix lockfile carries no comparable ${MAJOR_LINE}.x version of $PACKAGE, so this fix has no resolved version to report. Passed on as an empty --after, this surfaces as the risk scorer failing, which names the scorer for an unreadable lockfile (#76)."
+  after=$LOWEST_ON_LINE
 
-  local scope
-  scope=$(state_get '.override_scope')
+  local scope bare_override_final
+  scope=$(state_get '.override_scope'); state_ok $? '.override_scope'
+  bare_override_final=$(state_get '.bare_override'); state_ok $? '.bare_override'
 
   local args=(--package "$PACKAGE" --after "$after" --adapter "$ADAPTER"
               --why-json "$why_file" --override-scope "$scope")
@@ -1037,7 +1408,11 @@ $ranges
 EOF
   [ "$nranges" -gt 0 ] || args+=(--declared-range none)
 
-  local errfile risk st
+  # A failed scorer is a phase failure, not an internal error: exit 1 is this
+  # script's usage-and-internal code, and reporting a step that ran and failed
+  # under it puts it in a different bucket from every other failure of the
+  # same phase.
+  local errfile risk
   errfile=$(mktemp) || die "cannot create a temporary file"
   risk=$( ( cd "$WT" && run_env "$SCORER" "${args[@]}" ) 2>"$errfile" )
   st=$?
@@ -1045,11 +1420,11 @@ EOF
     local serr
     serr=$(cat "$errfile")
     rm -f "$errfile"
-    die "score-merge-risk.sh failed: $serr"
+    fail_phase validate "score-merge-risk.sh failed: $serr"
   fi
   rm -f "$errfile"
   printf '%s' "$risk" | jq -e 'type == "object" and has("band")' >/dev/null 2>&1 \
-    || die "score-merge-risk.sh returned no usable report"
+    || fail_phase validate "score-merge-risk.sh returned no usable report: $risk"
   state_set risk "$risk"
 
   # The `--declared-range none` sentinel has two causes and they are different
@@ -1063,20 +1438,41 @@ EOF
     fi
   fi
 
+  # Every `--argjson` source below is asserted first. `jq -n --argjson x ""`
+  # dies with exit 2 and no stdout, and exit 2 is this contract's
+  # `needs_judgment` — so one empty adapter reply here reaches the agent as a
+  # judgment escape carrying no decision point and no evidence at all.
+  local apply_json validate_json2 parents_json drift_json obs0_json signals_json
+  apply_json=$(state_getj '.apply_result')
+  validate_json2=$(state_getj '.validate')
+  parents_json=$(state_getj '.applied_parents // .eligible_parents')
+  drift_json=$(state_getj '.drift_commit')
+  obs0_json=$(state_getj '.observations_first')
+  signals_json=$(state_getj '.install_signals // []')
+  require_json validate "$risk" "the risk scorer's report"
+  require_json validate "$apply_json" "the stored apply_constraint result"
+  require_json validate "$validate_json2" "the stored validate report"
+  require_json validate "$parents_json" "the stored applied/eligible parent list"
+  require_json validate "$drift_json" "the stored drift_commit flag"
+  require_json validate "$obs0_json" "the stored pre-fix observations"
+  require_json validate "$declared_post" "declared_ranges' post-fix report"
+  require_json validate "$why_out" "why's post-fix report"
+
   jq -n \
     --arg pkg "$PACKAGE" --arg line "$MAJOR_LINE" --arg branch "$BRANCH_NAME" \
     --arg work "$WORK" --arg worktree "$WT" --arg why "$why_file" \
     --arg action "$action" --arg scope "$scope" \
-    --arg bare "$(state_get '.bare_override')" \
+    --arg bare "$bare_override_final" \
     --arg before "$before" --arg after "$after" \
     --argjson risk "$risk" \
-    --argjson apply "$(state_getj '.apply_result')" \
-    --argjson validate "$(state_getj '.validate')" \
-    --argjson why_json "$(cat "$why_file")" \
+    --argjson apply "$apply_json" \
+    --argjson validate "$validate_json2" \
+    --argjson why_json "$why_out" \
     --argjson declared "$declared_post" \
-    --argjson obs0 "$(state_getj '.observations_first')" \
-    --argjson parents "$(state_getj '.applied_parents // .eligible_parents')" \
-    --argjson drift "$(state_getj '.drift_commit')" \
+    --argjson obs0 "$obs0_json" \
+    --argjson parents "$parents_json" \
+    --argjson drift "$drift_json" \
+    --argjson signals "$signals_json" \
     --argjson ranges_cause "$ranges_cause" \
     '{status: "ready_for_pr",
       package: $pkg, major_line: $line, branch: $branch,
@@ -1096,6 +1492,7 @@ EOF
       lockfile_invalidated: $apply.lockfile_invalidated,
       observations: ($apply.observations // []),
       observations_pre_fix: $obs0,
+      install_signals: $signals,
       applied_parents: $parents,
       requires_major_bump: ($validate.requires_major_bump // []),
       other_line_moves: $validate.other_line_moves,
@@ -1123,16 +1520,23 @@ cmd_cleanup() {
   done
   load_state "$work"
 
-  local detail="" removed=true rerr
+  # Three outcomes, never a default of `true`. Initialized to `true` and only
+  # ever set false by a failed `worktree remove`, an absent `$WT` reported the
+  # worktree as removed by this cleanup when nothing had been removed at all —
+  # and an empty `$WT` from an unreadable state file made that the ordinary
+  # case (see `state_get`).
+  local detail="" removed rerr
   # `worktree remove` names this run's own path and drops its administrative
   # entry: that is the whole cleanup an agent is entitled to. Never
   # `git worktree prune` — it is repository-wide, and a sibling agent very
   # likely shares this repo_root right now (#35).
-  if [ -e "$WT" ]; then
-    rerr=$(git_at "$REPO_ROOT" worktree remove --force "$WT" 2>&1) || {
-      removed=false
-      detail="git worktree remove --force $WT failed: $rerr"
-    }
+  if [ ! -e "$WT" ]; then
+    removed=nothing-to-remove
+  elif rerr=$(git_at "$REPO_ROOT" worktree remove --force "$WT" 2>&1); then
+    removed=removed
+  else
+    removed=removal-failed
+    detail="git worktree remove --force $WT failed: $rerr"
   fi
 
   # Read every fact the branch decision needs before $WORK disappears.
@@ -1169,9 +1573,19 @@ EOF
     fi
   fi
 
-  rm -rf "$WORK"
+  # Never while the registration is still live. `rm -rf "$WORK"` used to run
+  # unconditionally, so a failed `worktree remove` left the directory deleted
+  # and its entry under `<git-common-dir>/worktrees/` intact — the exact state
+  # scripts/CLAUDE.md describes as blocking both a later `worktree add` on that
+  # path and any `branch -D` of its branch, and which `git worktree remove`
+  # itself then refuses to clean up.
+  if [ "$removed" = "removal-failed" ]; then
+    detail="${detail:+$detail; }$WORK was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of $BRANCH_NAME, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand."
+  else
+    rm -rf "$WORK"
+  fi
 
-  if [ -n "$tip" ] && [ "$safe" = true ]; then
+  if [ -n "$tip" ] && [ "$safe" = true ] && [ "$removed" != "removal-failed" ]; then
     local derr
     if derr=$(git_at "$REPO_ROOT" branch -D "$BRANCH_NAME" 2>&1); then
       deleted=true
@@ -1185,10 +1599,11 @@ EOF
     detail="${detail:+$detail; }branch $BRANCH_NAME left in place at $tip"
   fi
 
-  jq -n --argjson removed "$(jbool "$removed")" \
+  jq -n --arg removed "$removed" \
     --argjson deleted "$(jbool "$deleted")" \
     --arg branch "$BRANCH_NAME" --arg tip "$tip" --arg reason "$reason" --arg detail "$detail" \
-    '{status: "ok", step: "cleanup", worktree_removed: $removed,
+    '{status: "ok", step: "cleanup",
+      worktree_removed: ($removed == "removed"), worktree_removal: $removed,
       branch: $branch, branch_deleted: $deleted,
       branch_tip: (if $tip == "" then null else $tip end),
       reason: (if $reason == "" then null else $reason end),

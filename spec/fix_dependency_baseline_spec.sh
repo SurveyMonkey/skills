@@ -59,6 +59,10 @@ Describe 'the control-install baseline rules (#146, #171)'
       The output should equal '1'
     End
 
+    # A grep over a comment, and deliberately not the only guard: which shapes
+    # count as a registry timeout, and how many times the install then runs, is
+    # asserted behaviorally in spec/fix_group_spec.sh ("the one sanctioned
+    # install retry"). This example only keeps the reason beside the code.
     It 'sanctions one retry per install invocation, on a registry-timeout shape only'
       When call rule_in "$DRIVER" 'One sanctioned retry per install invocation'
       The status should be success
