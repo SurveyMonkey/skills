@@ -476,23 +476,41 @@ SH
         --default-branch main --adapter "$ADAPTER" --env-prefix "$BIN/prefix" >/dev/null
     }
 
-    It 'reports removal-failed rather than worktree_removed true'
+    # A populated `errors[]` is a failure, exactly as it is in the sibling that
+    # runs the same removal (`reap-agent-artifacts.sh`'s last line is
+    # `[ -z "$errors" ] || exit 1`). Reporting the fields while leaving
+    # `status: "ok"` and exit 0 above them let an orchestrator keying on either
+    # read a leaked worktree as a clean cleanup — and this example used to pin
+    # that.
+    It 'reports removal-failed as a failure, not as a success carrying a field'
       prepare_failing_remove
-      When call drv_jq '{worktree_removed, wt: .worktree.action, wd: .work_dir.action, n: (.errors | length)}' cleanup --work "$WORK"
+      When call drv_jq '{status, phase, worktree_removed, wt: .worktree.action, wd: .work_dir.action, n: (.errors | length)}' cleanup --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"worktree","worktree_removed":false,"wt":"removal-failed","wd":"kept-registration-live","n":1}'
+      The stderr should include 'cleanup failure'
+    End
+
+    # The other side of the same gate: a clean cleanup still exits 0 with an
+    # empty errors[] and no phase.
+    It 'still reports a clean cleanup as ok with no errors and no phase'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+      When call drv_jq '{status, phase: (has("phase")), n: (.errors | length)}' cleanup --work "$WORK"
       The status should be success
-      The output should equal '{"worktree_removed":false,"wt":"removal-failed","wd":"kept-registration-live","n":1}'
+      The output should equal '{"status":"ok","phase":false,"n":0}'
     End
 
     It 'leaves the workspace directory on disk while the registration is still live'
       prepare_failing_remove
-      "$DRIVER" cleanup --work "$WORK" >/dev/null
+      "$DRIVER" cleanup --work "$WORK" >/dev/null 2>&1 || true
       When call test -d "$WORK/fix"
       The status should be success
     End
 
     It 'does not delete the branch while its worktree registration survives'
       prepare_failing_remove
-      "$DRIVER" cleanup --work "$WORK" >/dev/null
+      "$DRIVER" cleanup --work "$WORK" >/dev/null 2>&1 || true
       When call git -C "$REPO" branch --list "$BRANCH"
       The status should be success
       The output should include "$BRANCH"
@@ -605,9 +623,57 @@ SH
       mkdir -p "$WORK/leftover/inner"
       printf 'x\n' > "$WORK/leftover/inner/file"
       chmod a-w "$WORK/leftover/inner"
-      When call drv_jq '{worktree_removed, wd: .work_dir.action, n: (.errors | length), d: (.detail != null)}' cleanup --work "$WORK"
+      When call drv_jq '{status, worktree_removed, wd: .work_dir.action, n: (.errors | length), d: (.detail != null)}' cleanup --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","worktree_removed":true,"wd":"removal-failed","n":1,"d":true}'
+      The stderr should include 'cleanup failure'
+      chmod u+w "$WORK/leftover/inner"
+    End
+  End
+
+  # Checking `$resolved_work` and then removing `$WORK` is a check-vs-use
+  # mismatch. With `$WORK` a symlink to a contained directory, `rm -rf` unlinks
+  # the link, `[ ! -e "$WORK" ]` is then true, and the run reports `removed`
+  # while the workspace it was asked to remove is still there.
+  Describe 'the removed path is the checked path'
+    It 'removes the directory a symlinked --work resolves to, not the link'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+      LINK="$REPO/.claude/worktrees/link-to-lodash-4x"
+      ln -s "$WORK" "$LINK"
+      "$DRIVER" cleanup --work "$LINK" >/dev/null 2>&1 || true
+      When call test -d "$WORK"
+      The status should equal 1
+    End
+
+    It 'reports the resolved path it acted on, not the link it was handed'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+      LINK="$REPO/.claude/worktrees/link-to-lodash-4x"
+      ln -s "$WORK" "$LINK"
+      When call drv_jq '{wd: .work_dir.action, named: (.work_dir.path | endswith("fix-dependabot-lodash-4x"))}' cleanup --work "$LINK"
       The status should be success
-      The output should equal '{"worktree_removed":true,"wd":"removal-failed","n":1,"d":true}'
+      The output should equal '{"wd":"removed","named":true}'
+    End
+  End
+
+  # An operator told only that a removal failed, and then told to finish it by
+  # hand, has not been told the one thing that decides how. The reap keeps the
+  # stderr (`work_err=$(rm -rf "$WORK" 2>&1)`) and names the cause.
+  Describe 'a failed removal quotes the reason'
+    It 'carries rm own message into detail and errors'
+      make_repo
+      "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+        --default-branch main --adapter "$ADAPTER" >/dev/null
+      mkdir -p "$WORK/leftover/inner"
+      printf 'x\n' > "$WORK/leftover/inner/file"
+      chmod a-w "$WORK/leftover/inner"
+      When call drv_jq '{d: ((.detail // "") | test("Permission denied")), e: ((.errors | join(" ")) | test("Permission denied"))}' cleanup --work "$WORK"
+      The status should equal 3
+      The output should equal '{"d":true,"e":true}'
+      The stderr should include 'Permission denied'
       chmod u+w "$WORK/leftover/inner"
     End
   End
@@ -638,23 +704,75 @@ SH
     It 'names the failed read in errors[] rather than reporting no branch'
       prepare_failing_revparse
       When call drv_jq '{branch_deleted, tip: .branch_tip, n: (.errors | length)}' cleanup --work "$WORK"
-      The status should be success
+      The status should equal 3
       The output should equal '{"branch_deleted":false,"tip":null,"n":1}'
+      The stderr should be present
     End
 
     It 'says in detail that the branch was neither classified nor deleted'
       prepare_failing_revparse
       When call drv_jq '{d: ((.detail // "") | test("neither classified nor deleted"))}' cleanup --work "$WORK"
-      The status should be success
+      The status should equal 3
       The output should equal '{"d":true}'
+      The stderr should be present
     End
 
     It 'leaves the branch in place on a failed read'
       prepare_failing_revparse
-      "$DRIVER" cleanup --work "$WORK" >/dev/null
+      "$DRIVER" cleanup --work "$WORK" >/dev/null 2>&1 || true
       When call git -C "$REPO" branch --list "$BRANCH"
       The status should be success
       The output should include "$BRANCH"
+    End
+
+    # All THREE reads capture the stderr, not two of them. A transient failure
+    # on origin/<branch> left `remote=""`, so the `--pushed` arm could not fire
+    # and the run asserted "the tip is not on origin and is not this flow's own
+    # leftover" about a ref nobody had managed to read, with nothing in errors[].
+    Describe 'the remote-tracking read of the fix branch'
+      prepare_failing_remote_read() {
+        make_repo
+        cat > "$BIN/prefix" <<'SH'
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "refs/remotes/origin/fix/dependabot-lodash-4x" ]; then
+    printf 'fatal: unable to read ref (spec)\n' >&2
+    exit 128
+  fi
+done
+exec "$@"
+SH
+        chmod +x "$BIN/prefix"
+        "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
+          --default-branch main --adapter "$ADAPTER" --env-prefix "$BIN/prefix" >/dev/null
+        printf '%s\n' 'x' > "$WORK/fix/package-lock.json"
+        git -C "$WORK/fix" commit -qam 'fix(deps): resolve 1 alert'
+        git -C "$WORK/fix" push -q origin "$BRANCH"
+      }
+
+      It 'records the failed read in errors[] rather than reading it as absent'
+        prepare_failing_remote_read
+        When call drv_jq '{n: (.errors | length), e: ((.errors | join(" ")) | test("refs/remotes/origin/fix/dependabot-lodash-4x"))}' cleanup --work "$WORK" --pushed
+        The status should equal 3
+        The output should equal '{"n":1,"e":true}'
+        The stderr should be present
+      End
+
+      It 'never claims the tip is not on origin when origin could not be read'
+        prepare_failing_remote_read
+        When call drv_jq '{branch_deleted, r: ((.reason // "") | test("could not be read"))}' cleanup --work "$WORK" --pushed
+        The status should equal 3
+        The output should equal '{"branch_deleted":false,"r":true}'
+        The stderr should be present
+      End
+
+      It 'leaves the branch in place on that failed read'
+        prepare_failing_remote_read
+        "$DRIVER" cleanup --work "$WORK" --pushed >/dev/null 2>&1 || true
+        When call git -C "$REPO" branch --list "$BRANCH"
+        The status should be success
+        The output should include "$BRANCH"
+      End
     End
 
     # The benign half of the same fork still reports cleanly.

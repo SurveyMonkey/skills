@@ -39,6 +39,14 @@
 #           `evidence.phase: "install"`, never as an exit-3 phase of its own.
 #   exit 1  {"error":"..."}                 usage or internal error
 #
+# `cleanup` is the one step whose failure can follow completed work: a
+# populated `errors[]` makes it exit 3 with phase `worktree`, because a
+# workspace left on disk or a registration left live blocks every later run
+# against that repository until a human clears it. The agent reports that
+# failure AND whatever it had already finished — a PR it opened is still open.
+# Its full report is emitted either way, so `work_dir`, `worktree` and
+# `errors[]` are readable on both paths.
+#
 # All JSON goes to stdout; human-readable detail goes to stderr.
 #
 # `--env-prefix` is an opaque argv prefix (scripts/CLAUDE.md, "`env_prefix` is
@@ -181,14 +189,25 @@ state_get_opt() {
   printf '%s' "$v"
 }
 
-# The JSON reader, held to the same discipline as `state_get`: it reports and
-# `state_ok` does the dying, in the caller's own shell. **There is deliberately
-# no unchecked sibling to reach for.** The one this replaced discarded jq's
-# status at all twelve of its call sites — every one of them sat in `$( )` —
-# which is how a "every --argjson source is asserted first" comment came to sit
-# above a list that had quietly missed three of them.
+# The JSON reader, held to `state_get`'s discipline in full: the SAME three
+# outcomes — 0 a value, 1 the file could not be read, 2 the key is absent or
+# null — so `state_ok` covers absence here exactly as it does there. **There is
+# deliberately no unchecked sibling to reach for.** The one this replaced
+# discarded jq's status at all twelve of its call sites, every one of them
+# inside `$( )`.
+#
+# Returning `null` at status 0, as an earlier pass did, put `state_ok` in the
+# code without the thing it checks for: absence became a *value*. `null.written`
+# is `null` rather than an error, so a `score` reading an `apply_result` that a
+# run interrupted between `state_set_str override_scope` and
+# `state_set apply_result` never wrote emitted `status: "ready_for_pr"` with
+# `written: []` at exit 0 — a PR-ready verdict naming no edit at all. Where a
+# null IS legitimate the call site says so with an explicit `// <default>`.
 state_json() {
-  jq -c "$1" "$STATE" 2>/dev/null || return 1
+  local v
+  v=$(jq -c "$1" "$STATE" 2>/dev/null) || return 1
+  [ "$v" != "null" ] || return 2
+  printf '%s' "$v"
 }
 
 state_set() {
@@ -1096,14 +1115,17 @@ cmd_apply() {
   # `baseline_json` and `alerts_json` are read once here and used again inside
   # `validate_call`, which bash's dynamic scoping makes visible to it. They are
   # read HERE rather than there so both are checked before the first write.
-  local baseline_json alerts_json
-  baseline_json=$(state_json '.baseline'); state_ok $? '.baseline'
+  local baseline_json alerts_json bst
+  baseline_json=$(state_json '.baseline'); bst=$?
+  case "$bst" in
+    0) ;;
+    2) die "apply: run 'baseline' first. Without its post-control-install snapshot, validate is handed --baseline null, which reports every cross-line move as 'not checked' rather than as checked and clean (#146)." ;;
+    *) state_ok "$bst" '.baseline' ;;
+  esac
   alerts_json=$(state_json '.group.alerts'); state_ok $? '.group.alerts'
   printf '%s' "$alerts_json" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
     || die "apply: the group payload carries no alerts array; run 'setup' with a complete group"
 
-  [ "$baseline_json" != "null" ] \
-    || die "apply: run 'baseline' first. Without its post-control-install snapshot, validate is handed --baseline null, which reports every cross-line move as 'not checked' rather than as checked and clean (#146)."
 
   # A `vulnerable_range` that is absent or null is a hard error, never an alert
   # quietly dropped from the set: `--vulnerable` exists precisely so validate
@@ -1150,10 +1172,18 @@ cmd_apply() {
   # flow has already written the override into, so `targets_this_package`
   # reads true and a bare override this run ADDED gets reported as
   # `tightened` — the pin audit then reads a global pin nobody created.
-  local stored_obs
-  stored_obs=$(state_json '.observations_first // null'); state_ok $? '.observations_first'
+  # Absence is tested for with `has()`, not read off a null: a stored `[]` is a
+  # legitimate value (this run saw no pre-fix observations) and must not be
+  # confused with never having looked.
+  local stored_obs have_obs
+  have_obs=$(state_get_opt 'has("observations_first")')
+  if [ "$have_obs" = "true" ]; then
+    stored_obs=$(state_json '.observations_first'); state_ok $? '.observations_first'
+  else
+    stored_obs=""
+  fi
   apply_call ""
-  if [ "$stored_obs" != "null" ]; then
+  if [ -n "$stored_obs" ]; then
     OBSERVATIONS_FIRST=$stored_obs
   else
     OBSERVATIONS_FIRST=$(printf '%s' "$APPLY_RESULT" | jq -c '.observations')
@@ -1179,6 +1209,16 @@ cmd_apply() {
       # copies' paths, and never from parents_other_lines. Under pnpm and Yarn
       # Berry no such derivation is possible at all — see `uncovered_parents`.
       ladder_step=1
+      # `path` is promised on every violation, and an absent one is a hard
+      # error rather than an entry quietly dropped. Dropped, it counted in
+      # neither `paths_naming_a_parent` nor `opaque_paths`, so the run reported
+      # `possible: false` carrying the pnpm-and-Yarn reason — a wrong diagnosis
+      # presented as a checked fact about a report that had simply stopped
+      # answering.
+      printf '%s' "$VALIDATE_JSON" \
+        | jq -e '(.violations | type) == "array" and all(.violations[]; (.path | type) == "string")' \
+          >/dev/null 2>&1 \
+        || fail_phase validate "validate reported a violation with no readable 'path', so the ladder's first step cannot tell which copies name a parent and which name only themselves. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); dropped instead, the entry counts in neither total and the run reports the pnpm/Yarn 'no parent in the path shape' finding about a report that simply stopped answering. violations: $(printf '%s' "$VALIDATE_JSON" | jq -c '.violations')"
       uncovered_parents \
         || fail_phase validate "validate's violations[] could not be read for the ladder's first step: $(printf '%s' "$VALIDATE_JSON" | jq -c '.violations')"
       local uncovered
@@ -1467,8 +1507,10 @@ uncovered_parents() {
         else $seg[$i - 1] end;
     if (.violations | type) != "array" then
       error("validate reported no violations array")
+    elif any(.violations[]; (.path | type) != "string") then
+      error("a validate violation carries no readable path")
     else
-      [ .violations[] | .path | select(type == "string") ] as $paths
+      [ .violations[] | .path ] as $paths
       | [ $paths[] | select(test("(^|/)node_modules/")) ] as $shaped
       | [ $paths[] | select(test("(^|/)node_modules/") | not) ] as $opaque
       | { parents:
@@ -1706,9 +1748,14 @@ cmd_cleanup() {
   done
   load_state "$work"
 
+  # One entry per error. Captured output is flattened to a single line first —
+  # the way `read_ref` flattens its own — because the report splits `errors` on
+  # newlines, so an embedded one turns a single failure into four findings.
   local errors=""
-  note_error() { errors="$errors$1
-"; }
+  note_error() {
+    errors="$errors$(printf '%s' "$1" | tr '\n' ' ')
+"
+  }
 
   # ---- the containment guard ---------------------------------------------
   #
@@ -1718,9 +1765,24 @@ cmd_cleanup() {
   # the sibling that runs the same removal on the orchestrator's side — holds
   # the path to three conditions before its own `rm -rf`, and they are adopted
   # verbatim here: both sides resolved physically first, no `..` segment, and
-  # contained under `<repo_root>/.claude/worktrees/`. A fourth is available
-  # here and not there: `setup` recorded the path it built, so `--work` has to
-  # name that same directory.
+  # contained under `<repo_root>/.claude/worktrees/`.
+  #
+  # A fourth compares `--work` against the path `setup` recorded. **It is not
+  # independent evidence**, and it should not be read as a fourth lock: both
+  # `state.work` and `REPO_ROOT` come out of `$WORK/state.json`, the file
+  # inside the very directory about to be deleted, so every one of the four is
+  # satisfiable by any directory carrying a self-consistent state file. What
+  # the set actually rules out is a path outside this repository's worktree
+  # root, a path reached through a `..` segment or a symlink, and a workspace
+  # that has been MOVED since `setup` wrote it. A deliberately forged state
+  # file is not in scope for any of them.
+  #
+  # Every check below runs on the resolved path, and every removal further
+  # down uses that same resolved string. Checking `$resolved_work` and then
+  # removing `$WORK` is a check-vs-use mismatch: with `$WORK` a symlink to a
+  # contained directory, `rm -rf` unlinks the link, `[ ! -e "$WORK" ]` is then
+  # true, and the run reports `removed` while the workspace it was asked to
+  # remove is still there.
   local state_work resolved_work resolved_root resolved_wt
   state_work=$(state_get '.work'); state_ok $? '.work'
   resolved_root=$(resolve_path "$REPO_ROOT")
@@ -1755,14 +1817,14 @@ cmd_cleanup() {
   # entry: that is the whole cleanup an agent is entitled to. Never
   # `git worktree prune` — it is repository-wide, and a sibling agent very
   # likely shares this repo_root right now (#35).
-  if [ ! -e "$WT" ]; then
+  if [ ! -e "$resolved_wt" ]; then
     removed=absent
-  elif rerr=$(git_at "$REPO_ROOT" worktree remove --force "$WT" 2>&1); then
+  elif rerr=$(git_at "$REPO_ROOT" worktree remove --force "$resolved_wt" 2>&1); then
     removed=removed
   else
     removed=removal-failed
-    detail="git worktree remove --force $WT failed: $rerr"
-    note_error "git worktree remove --force $WT failed: $rerr"
+    detail="git worktree remove --force $resolved_wt failed: $rerr"
+    note_error "git worktree remove --force $resolved_wt failed: $rerr"
   fi
 
   # Read every fact the branch decision needs before $WORK disappears.
@@ -1774,13 +1836,19 @@ cmd_cleanup() {
   # absent, skipped the whole block, and left it behind with
   # `branch_deleted: false, reason: null`. reap-agent-artifacts.sh fixed
   # exactly this (issue #131 review); this rewrite had dropped the split.
-  local tip tip_err dflt dflt_err remote subjects nsubj names
+  # All THREE reads capture the stderr, not two of them. `remote` used to take
+  # only `$REF_TIP`, so a transient failure reading
+  # `refs/remotes/origin/$BRANCH_NAME` — the same sibling-ref-lock specimen —
+  # left `remote=""`, the `--pushed` arm below could not fire, and the run
+  # asserted "the tip is not on origin and is not this flow's own leftover"
+  # about a ref nobody had managed to read, with nothing in `errors[]`.
+  local tip tip_err dflt dflt_err remote remote_err subjects nsubj names
   read_ref "$REPO_ROOT" "refs/heads/$BRANCH_NAME"
   tip=$REF_TIP; tip_err=$REF_ERR
   read_ref "$REPO_ROOT" "refs/remotes/origin/$DEFAULT_BRANCH"
   dflt=$REF_TIP; dflt_err=$REF_ERR
   read_ref "$REPO_ROOT" "refs/remotes/origin/$BRANCH_NAME"
-  remote=$REF_TIP
+  remote=$REF_TIP; remote_err=$REF_ERR
 
   local safe=false reason="" deleted=false
   if [ -n "$tip_err" ]; then
@@ -1790,7 +1858,10 @@ cmd_cleanup() {
   if [ -n "$dflt_err" ]; then
     note_error "git rev-parse refs/remotes/origin/$DEFAULT_BRANCH failed: $dflt_err"
   fi
-  if [ -n "$tip" ] && [ -z "$tip_err" ] && [ -z "$dflt_err" ]; then
+  if [ -n "$remote_err" ]; then
+    note_error "git rev-parse refs/remotes/origin/$BRANCH_NAME failed: $remote_err"
+  fi
+  if [ -n "$tip" ] && [ -z "$tip_err" ] && [ -z "$dflt_err" ] && [ -z "$remote_err" ]; then
     if [ "$pushed" = true ] && [ -n "$remote" ] && [ "$tip" = "$remote" ]; then
       safe=true
       reason="pushed: the remote carries the same commits, so the local ref is a duplicate"
@@ -1823,23 +1894,28 @@ EOF
   # scripts/CLAUDE.md describes as blocking both a later `worktree add` on that
   # path and any `branch -D` of its branch, and which `git worktree remove`
   # itself then refuses to clean up.
-  local work_action
+  local work_action work_err
   if [ "$removed" = "removal-failed" ]; then
     work_action=kept-registration-live
-    detail="${detail:+$detail; }$WORK was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of $BRANCH_NAME, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand."
-  elif [ ! -e "$WORK" ]; then
+    detail="${detail:+$detail; }$resolved_work was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of $BRANCH_NAME, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand."
+  elif [ ! -e "$resolved_work" ]; then
     work_action=absent
-  elif rm -rf "$WORK" 2>/dev/null && [ ! -e "$WORK" ]; then
-    work_action=removed
   else
-    # The status was never checked, so a removal that failed — a permission,
-    # a busy mount, a read-only parent — reported `worktree_removed: true`,
+    # The status was never checked, so a removal that failed — a permission, a
+    # busy mount, a read-only parent — reported `worktree_removed: true`,
     # `detail: null`, and no field naming `$WORK` at all. That is verbatim the
     # failure scripts/CLAUDE.md records, on the other side of the same
-    # operation.
-    work_action=removal-failed
-    detail="${detail:+$detail; }rm -rf $WORK failed or left the directory in place"
-    note_error "rm -rf $WORK failed or left the directory in place"
+    # operation. The stderr is kept and quoted, the way the reap keeps it: an
+    # operator told only that a removal failed, and then told to finish it by
+    # hand, has not been told the one thing that decides how.
+    work_err=$(rm -rf "$resolved_work" 2>&1)
+    if [ ! -e "$resolved_work" ]; then
+      work_action=removed
+    else
+      work_action=removal-failed
+      detail="${detail:+$detail; }rm -rf $resolved_work did not remove the directory${work_err:+, quoting it: $work_err}"
+      note_error "rm -rf $resolved_work did not remove the directory${work_err:+: $work_err}"
+    fi
   fi
 
   if [ -n "$tip" ] && [ -z "$tip_err" ] && [ "$safe" = true ] && [ "$removed" != "removal-failed" ]; then
@@ -1851,6 +1927,9 @@ EOF
       # the work either shipped or already failed for its own reason.
       detail="${detail:+$detail; }git branch -D $BRANCH_NAME failed: $derr"
     fi
+  elif [ -n "$tip" ] && [ -z "$tip_err" ] && [ -n "$remote_err" ]; then
+    reason="left in place: origin/$BRANCH_NAME could not be read, so whether the tip is a duplicate of pushed work is unknown and a branch is never deleted on an unknown"
+    detail="${detail:+$detail; }branch $BRANCH_NAME left in place at $tip"
   elif [ -n "$tip" ] && [ -z "$tip_err" ]; then
     reason="left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated"
     detail="${detail:+$detail; }branch $BRANCH_NAME left in place at $tip"
@@ -1860,20 +1939,37 @@ EOF
   # removals — the git registration, and the directory holding it — so each
   # reports its own action, the way reap-agent-artifacts.sh reports
   # `work_dir: {path, action}` beside `errors[]`.
+  #
+  # And, like the reap, a populated `errors[]` is a FAILURE
+  # (reap-agent-artifacts.sh's own last line is `[ -z "$errors" ] || exit 1`).
+  # Copying its reporting shape without that line put the fields in the payload
+  # and left `status: "ok"` and exit 0 above them, so an orchestrator keying on
+  # either — which every other subcommand's contract tells it to do — read a
+  # leaked worktree as a clean cleanup. `worktree` is the right phase name for
+  # it: a directory gone while its registration survives blocks every later run
+  # against this repository until a human clears it.
+  local status=ok phase_field=""
+  if [ -n "$errors" ]; then
+    status=failure
+    phase_field=worktree
+    printf 'fix-group: cleanup failure: %s\n' "$detail" >&2
+  fi
   jq -n --arg removed "$removed" --arg work_action "$work_action" \
     --argjson deleted "$(jbool "$deleted")" \
-    --arg wt "$WT" --arg workdir "$WORK" \
+    --arg wt "$resolved_wt" --arg workdir "$resolved_work" \
     --arg branch "$BRANCH_NAME" --arg tip "$tip" --arg reason "$reason" --arg detail "$detail" \
-    --arg errors "$errors" \
-    '{status: "ok", step: "cleanup",
-      worktree_removed: ($removed == "removed"),
-      worktree: {path: $wt, action: $removed},
-      work_dir: {path: $workdir, action: $work_action},
-      branch: $branch, branch_deleted: $deleted,
-      branch_tip: (if $tip == "" then null else $tip end),
-      reason: (if $reason == "" then null else $reason end),
-      detail: (if $detail == "" then null else $detail end),
-      errors: ($errors | split("\n") | map(select(length > 0)))}'
+    --arg errors "$errors" --arg status "$status" --arg phase "$phase_field" \
+    '{status: $status, step: "cleanup"}
+     + (if $phase == "" then {} else {phase: $phase} end)
+     + {worktree_removed: ($removed == "removed"),
+        worktree: {path: $wt, action: $removed},
+        work_dir: {path: $workdir, action: $work_action},
+        branch: $branch, branch_deleted: $deleted,
+        branch_tip: (if $tip == "" then null else $tip end),
+        reason: (if $reason == "" then null else $reason end),
+        detail: (if $detail == "" then null else $detail end),
+        errors: ($errors | split("\n") | map(select(length > 0)))}'
+  [ -z "$errors" ] || exit 3
 }
 
 # ---------------------------------------------------------------------------

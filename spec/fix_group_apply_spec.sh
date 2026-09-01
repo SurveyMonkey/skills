@@ -634,6 +634,23 @@ SH
       The stderr should include "no 'resolved_versions' field"
     End
 
+    # `state_json` returning `null` at status 0 put `state_ok` in the code
+    # without the thing it checks for: absence became a *value*, and a
+    # `--argjson applied null` then reached jq's `- $applied`, which refuses —
+    # reported as "validate's violations[] could not be read", blaming the
+    # adapter for a state hole.
+    It 'names the missing classify step rather than blaming the adapter'
+      make_env
+      through_baseline
+      jq -c 'del(.eligible_parents) | .relationship = "transitive"' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{has_error: has("error")}' apply --work "$WORK"
+      The status should equal 1
+      The output should equal '{"has_error":true}'
+      The stderr should include 'eligible_parents'
+      The stderr should not include 'violations'
+    End
+
     Describe 'the remediation ladder'
       # Step 1: a violating version usually arrives via a parent not in the
       # override list. Those parents come off the violating copies' paths.
@@ -898,6 +915,31 @@ JSON
           When call drv_jq '{p: .parent_derivation.possible, parents: .parent_derivation.parents, opaque: .parent_derivation.paths_naming_only_the_copy}' apply --work "$WORK"
           The status should be success
           The output should equal '{"p":false,"parents":[],"opaque":1}'
+        End
+      End
+
+      # `path` is promised on every violation. Dropped instead of failed, the
+      # entry counted in neither `paths_naming_a_parent` nor `opaque_paths`, so
+      # the run reported `possible: false` carrying the pnpm-and-Yarn reason —
+      # a wrong diagnosis presented as a checked fact about a report that had
+      # simply stopped answering.
+      Describe 'a violation with no readable path'
+        Parameters
+          absent    '[{"version":"4.17.20"}]'
+          null      '[{"version":"4.17.20","path":null}]'
+          not-text  '[{"version":"4.17.20","path":["node_modules","lodash"]}]'
+        End
+
+        It "fails the phase when a violation path is $1"
+          make_env
+          validate_json 1 false "$2" '[]'
+          validate_json 2 true '[]' '[]'
+          through_baseline
+          When call drv_jq '{status, phase}' apply --work "$WORK"
+          The status should equal 3
+          The output should equal '{"status":"failure","phase":"validate"}'
+          The stderr should include "no readable 'path'"
+          The stderr should not include 'Yarn Berry the resolution locator'
         End
       End
 
@@ -1467,6 +1509,43 @@ SH
       When call drv_jq '{install_signals}' score --work "$WORK"
       The status should be success
       The output should equal '{"install_signals":["pnpm_field_no_longer_read"]}'
+    End
+
+    # `cmd_apply` writes `override_scope` and `apply_result` three statements
+    # apart. A run interrupted in that window leaves the first present — so the
+    # `state_get` guard does not fire — and the second absent. Read as a null
+    # value, `null.written` is `null` rather than an error, so `score` emitted
+    # `status: "ready_for_pr"` with `written: []`, `override_file: null` and
+    # `observations: []` at exit 0: a PR-ready verdict naming no edit at all.
+    Describe 'a state write interrupted between override_scope and apply_result'
+      Parameters
+        apply_result       'del(.apply_result)'
+        validate           'del(.validate)'
+        observations_first 'del(.observations_first)'
+        applied_parents    'del(.applied_parents) | del(.eligible_parents)'
+      End
+
+      It "refuses to report ready_for_pr when $1 was never written"
+        make_env
+        through_apply
+        jq -c "$2" "$WORK/state.json" > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        When call drv_jq '{has_error: has("error"), s: .status}' score --work "$WORK"
+        The status should equal 1
+        The output should equal '{"has_error":true,"s":null}'
+        The stderr should include 'no usable value'
+      End
+    End
+
+    It 'never reports ready_for_pr carrying an empty written[]'
+      make_env
+      through_apply
+      jq -c 'del(.apply_result)' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      "$DRIVER" score --work "$WORK" >"$TEST_DIR/out.json" 2>/dev/null || true
+      When call grep -c 'ready_for_pr' "$TEST_DIR/out.json"
+      The status should equal 1
+      The output should equal '0'
     End
 
     It 'refuses to score a run apply already terminated as a no-op'

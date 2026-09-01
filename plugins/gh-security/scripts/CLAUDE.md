@@ -95,7 +95,12 @@ What that header does not say, and what belongs here:
   condition available only here: `--work` must name the workspace `setup` recorded. The removal's
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
   `worktree_removed: true` with no field naming `$WORK` is the failure this file records on the
-  reap's side of the same operation.
+  reap's side of the same operation. **A populated `errors[]` exits non-zero**, as it does there
+  (`reap-agent-artifacts.sh`'s last line is `[ -z "$errors" ] || exit 1`): the fields without that
+  line still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup. Note
+  what the containment conditions do *not* prove — `state.work` and `repo_root` both come out of
+  the file inside the directory being deleted, so they rule out an uncontained path, a `..` or
+  symlink path, and a moved workspace, not a forged state file.
 - **Judgment escapes at three points**, each fail-closed and none of them a retry:
   `install_failure`, `validate_failed_after_ladder` and `install_budget_exhausted`. The
   placed-shape reconcile-by-hand escalation is a *fourth thing the agent decides*, not a fourth
