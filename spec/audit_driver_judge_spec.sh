@@ -178,6 +178,16 @@ JSON
 
   do_baseline() { "$DRIVER" baseline --work "$WORK" >/dev/null; }
 
+  # A glob loop rather than `ls | wc -l`: no subshell, no external command, and
+  # nothing for a quoting rule to object to.
+  count_cache_tmp() {
+    _n=0
+    for _f in "$WORK"/advisories/*.tmp; do
+      [ -e "$_f" ] && _n=$((_n + 1))
+    done
+    printf '%s\n' "$_n"
+  }
+
   seed_findings() {
     jq --argjson f "$1" '.findings = $f' "$WORK/state.json" > "$WORK/s.tmp"
     mv "$WORK/s.tmp" "$WORK/state.json"
@@ -232,6 +242,27 @@ JSON
         The status should be success
         The output should equal "{\"av\":\"$1\",\"ac\":4}"
       End
+    End
+
+    # `advisory_count` is the package's advisory total and does not vary by
+    # version, so the FIRST answer is the verbatim value the result contract
+    # promises. A `max` across the delta is a synthesis of several readings of
+    # one number, and the two only tell themselves apart when the readings
+    # disagree — which is what this delta arranges.
+    It 'carries the first advisory_count verbatim, never the largest of them'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"tested","tested":true,"left_tree":false,
+        "resolved_with_pin":["4.17.21"],"resolved_without_pin":["4.17.19","4.16.0"],
+        "attributable_versions":["4.17.19","4.16.0"],"sibling_pins":[],
+        "collateral_changes":[],"collateral_verdict":null,"sampled_families":[],
+        "whole_tree_view":true,"advisory_verdict":null,"advisory_count":null,
+        "matched_ranges":[]}]'
+      adv_verdict 'lodash@4.17.19' safe 2 '[]'
+      adv_verdict 'lodash@4.16.0' safe 9 '[]'
+      When call drv_jq '.findings[0].advisory_count' judge --work "$WORK"
+      The status should be success
+      The output should equal '2'
     End
 
     # A pin is removable only when EVERY version in the delta comes back safe.
@@ -316,7 +347,71 @@ JSON
       When call drv_jq '{status, phase}' judge --work "$WORK"
       The status should equal 3
       The output should equal '{"status":"failure","phase":"advisories"}'
-      The stderr should include 'no JSON object on stdout'
+      The stderr should include 'is not a JSON object'
+    End
+
+    # `$WORK/advisories/` outlives the call that wrote it — test-pin and judge
+    # are separate invocations — so a run killed mid-write leaves a half-object
+    # for the next one. Read blind, it reaches `--argjson`, where jq dies exit 2
+    # with NO stdout: this contract's own needs_judgment, carrying no decision
+    # point at all.
+    It 'fails the phase on a torn cache rather than dying exit 2 with no payload'
+      prepare
+      one_tested
+      mkdir -p "$WORK/advisories"
+      printf '{"verdict":"safe","advisory_c' > "$WORK/advisories/lodash@4.17.19.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'is not a JSON object'
+      The stderr should include 'cached advisory answer'
+    End
+
+    It 'holds a cached answer to the same field contract as a fresh one'
+      prepare
+      one_tested
+      mkdir -p "$WORK/advisories"
+      jq -c 'del(.adapter_errors)' "$MOCK_DIR/adv/default.json" \
+        > "$WORK/advisories/lodash@4.17.19.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include "carries no 'adapter_errors'"
+    End
+
+    It 'leaves no half-written cache entry behind'
+      prepare
+      one_tested
+      "$DRIVER" judge --work "$WORK" >/dev/null
+      When call count_cache_tmp
+      The status should be success
+      The output should equal '0'
+    End
+
+    # `check-advisories.sh` emits exactly four verdicts, plus a JSON null when
+    # it was handed no version. Anything else fell through every verdict test
+    # into a terminal `else "safe"` — a found-nothing default in the field that
+    # decides whether a pin is deleted.
+    It 'refuses a verdict outside the four the script emits'
+      prepare
+      one_tested
+      jq -c '.verdict = "probably-fine"' "$MOCK_DIR/adv/default.json" \
+        > "$MOCK_DIR/adv/lodash@4.17.19.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'not one of safe, vulnerable, unknown or no-advisories'
+    End
+
+    It 'refuses a null verdict rather than defaulting it to safe'
+      prepare
+      one_tested
+      jq -c '.verdict = null' "$MOCK_DIR/adv/default.json" \
+        > "$MOCK_DIR/adv/lodash@4.17.19.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'cannot be allowed to be a default'
     End
 
     It 'keeps an honest unknown as the inconclusive finding the table names'
@@ -487,6 +582,27 @@ ADV readable-stream 2.3.8'
 
     # `sampled-family` is the only verdict that stands for packages not
     # individually judged, so it says exactly how far the checking went.
+    # Asserted through the rule that CONSUMES it: judge builds the collateral
+    # detail out of this field, so a reason that stopped travelling would show
+    # up as a verdict that says "no whole-tree view was available" for a parser
+    # that refused this repository's lockfile.
+    It 'reads the recorded reason into the collateral detail, rather than reconstructing one'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"tested","tested":true,"left_tree":false,
+        "resolved_with_pin":["4.17.21"],"resolved_without_pin":["4.17.19"],
+        "attributable_versions":["4.17.19"],"sibling_pins":[],
+        "collateral_changes":null,"collateral_verdict":"not-checked",
+        "collateral_not_checked_reason":"resolution_map refused this lockfile after removing lodash: parsed 0 entries",
+        "sampled_families":[],"whole_tree_view":false,"advisory_verdict":null,
+        "advisory_count":null,"matched_ranges":[]}]'
+      When call drv_jq '.findings[0].detail' judge --work "$WORK"
+      The status should be success
+      The output should include 'covers lodash only'
+      The output should include 'refused this lockfile'
+      The output should include 'parsed 0 entries'
+    End
+
     It 'reports sampled-family when a family stood for its members'
       prepare
       seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
@@ -734,6 +850,27 @@ JSON
       The stderr should include 'attempt 2 was not tried'
     End
 
+    # Every equivalent path in test-pin restores before it fails; this one has
+    # a commit at the end of it, so residue left here is residue phase 8 stages.
+    It 'restores the tree when the candidate edit itself could not be made'
+      prepare
+      seed_two_removable
+      printf 'not json at all\n' > "$WT/package.json"
+      "$DRIVER" together --work "$WORK" >/dev/null 2>&1 || true
+      When call git -C "$WT" diff --quiet HEAD -- package.json package-lock.json
+      The status should be success
+    End
+
+    It 'reports that edit failure as phase compose, quoting jq'
+      prepare
+      seed_two_removable
+      printf 'not json at all\n' > "$WT/package.json"
+      When call drv_jq '{status, phase}' together --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"compose"}'
+      The stderr should include 'could not be rewritten'
+    End
+
     It 'fails phase compose when a candidate edit did not land'
       prepare
       jq -c 'del(.override_root)' "$MOCK_DIR/list_pins.json" > "$MOCK_DIR/list_pins.override"
@@ -814,6 +951,20 @@ JSON
       The output should equal '2'
     End
 
+    # `restore_tree` reads this key with state_get + state_ok and dies on an
+    # unreadable one; the ready_for_pr payload carries the same name into phase
+    # 8, which stages the removal commit by it.
+    It 'refuses to hand phase 8 an unreadable lockfile name'
+      prepare
+      seed_two_removable
+      jq -c 'del(.lockfile)' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When run script "$DRIVER" together --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include 'no usable value'
+    End
+
     # A partial view of the tree fails the attempt closed, never into a PR.
     It 'fails an attempt closed on a partial map rather than opening a PR'
       prepare
@@ -871,17 +1022,68 @@ JSON
       The stderr should include 'not a readable JSON object'
     End
 
-    # The sibling of together's guard: with no findings recorded, an empty
-    # judgment reported as ok is indistinguishable from an audit that tested
-    # every pin and kept them all.
     It 'refuses judge before baseline has run'
       make_env
       do_list
       When run script "$DRIVER" judge --work "$WORK"
       The status should equal 1
       The stdout should include '"error"'
-      The stderr should include "run 'baseline' and 'test-pin' first"
+      The stderr should include "run 'baseline' first"
     End
+
+    # `baseline` writes findings of its own — the pins it refused on a
+    # present: false — so a healthy repository has findings: [] the moment it
+    # finishes, and baseline -> judge -> together with no test-pin at all used
+    # to answer "no removable pins found" at exit 0: the identical false claim
+    # the together guard exists to stop, reached by the route it did not cover.
+    It 'refuses judge when phase 2 found testable pins and none was tested'
+      prepare
+      When run script "$DRIVER" judge --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'test-pin' first"
+      The stderr should include 'examined nothing'
+    End
+
+    It 'never reaches no removable pins found without a single test-pin call'
+      prepare
+      "$DRIVER" judge --work "$WORK" >/dev/null 2>&1 || true
+      When run script "$DRIVER" together --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'judge' first"
+    End
+
+    # `judge_done` is not a one-way latch: a test-pin after it writes a finding
+    # that is `tested` again, and `together` selects on status, so the pin
+    # would be dropped from a candidate set the agent believes is complete.
+    It 'invalidates a judgment that a later test-pin overtook'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"removable","sibling_pins":[]}]'
+      jq -c '.judge_done = true' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      "$DRIVER" test-pin --work "$WORK" --key glob >/dev/null
+      When run script "$DRIVER" together --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'judge' first"
+    End
+
+    # Validating that a state value is JSON says almost nothing: every jq read
+    # of a parseable object yields JSON, `null` included. The shape the step
+    # that wrote it promised is the thing worth asserting.
+    It 'refuses a findings list that is not a list'
+      prepare
+      one_tested
+      jq -c '.findings = "oops"' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'not the shape the step that wrote it promised'
+    End
+
 
     It 'refuses a state file with no usable worktree'
       prepare

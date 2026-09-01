@@ -332,9 +332,14 @@ the order phase 2 returned it, one call per pin.
 
 **The steps run in order and each refuses to run early**, with an exit 1 `{"error": ...}` that is a
 bug in the call you just made rather than a finding: `test-pin` before `baseline`, `judge` before
-`baseline`, and phase 7's `together` before `judge`. That last one matters most — before `judge`
-every finding still reads `tested`, so an unguarded `together` would find an empty candidate set
-and report `no removable pins found`, a claim about work that never happened.
+`baseline` **and before any pin has actually been tested**, and phase 7's `together` before
+`judge`. The last two matter most. `baseline` writes findings of its own — the pins it refused on
+a `present: false` — so a repository with nothing wrong has `findings: []` the moment it finishes,
+and `baseline` → `judge` → `together` with no `test-pin` call in between would otherwise answer
+`no removable pins found`: a claim about work that never happened. **And `judge` is not a one-way
+latch**: a `test-pin` run after it invalidates that judgment, because the finding it writes is
+`tested` again and phase 7 selects on status, so re-run `judge` before `together`. Its advisory
+answers are cached, so re-running it is cheap.
 
 ### What `baseline` establishes, and the three ways it stops
 
@@ -376,6 +381,14 @@ was the last entry, and nothing else), check the manifest still parses, re-run `
 require both that the entry is gone and that `count` is phase 2's count **minus one**, install,
 read `resolved_versions` and `resolution_map`, compute the delta and the whole-map collateral
 diff, and restore the tree with the verification below.
+
+**A payload that found nothing is never an empty answer.** `resolved_versions` must report a
+`versions` array of readable version strings that agrees with `present` in both directions, and
+the driver fails the phase when it does not. `{"present": true}` with nothing in it is a parser
+making a claim about itself, and the empty list is the dangerous half: it becomes both the
+baseline and the after-removal list, so the delta is empty — and an empty delta is this flow's cue
+for `removable`. A parser that found nothing would otherwise recommend a deletion, and in `pr`
+mode open the PR, with no advisory query run at all.
 
 - **`{"status": "ok"}`** carries `finding`. `status` `tested` means the pin installed cleanly and
   phase 5 judges it; `status` `inconclusive` means the pin stopped for a reason the finding's
@@ -516,6 +529,9 @@ is not.
 ```bash
 <scripts_dir>/audit-pins-driver.sh judge --work "$WORK"
 ```
+
+Its `untested[]` lists any pin in `test_order` that no `test-pin` call covered, which is what you
+report as `not-tested`.
 
 For each pin the driver installed without, it takes **every version in phase 4's delta** — the
 versions that appeared only once the pin was gone, since a removal can admit more than one — and
@@ -1187,6 +1203,11 @@ End your final message with exactly one fenced JSON block:
 - `collateral_changes` is phase 4's whole-lockfile diff: one entry per **other** package
   whose resolved version set changed, `[]` when nothing else moved, and `null` when the pin was not
   tested, `resolution_map` was unavailable, or the map's `unreadable_entries` was non-zero.
+  `collateral_not_checked_reason` accompanies a `not-checked` verdict and is on every finding,
+  `null` when the tree was checked: it says whether the adapter lacks `resolution_map`, a parser
+  refused this repository's lockfile (quoting it), or the map was built and could not read N
+  entries. Only the second is a defect to chase, and "no whole-tree view was available" reads the
+  same for all three.
   `collateral_verdict` is `none`, `safe`, `vulnerable`, `inconclusive`, `sampled-family`, or
   `not-checked`, and `null` for an untested pin. Phase 4's platform-binary sample is the only
   verdict that stands for packages not individually judged; its entry names the member checked,

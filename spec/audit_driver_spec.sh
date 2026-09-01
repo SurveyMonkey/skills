@@ -419,6 +419,68 @@ SH
       The stderr should include 'present: false'
     End
 
+    # `present` being present is not the check. A payload answering
+    # `{"present": true}` with `versions` absent — or `versions` a string —
+    # yields `[]` through `[ .versions[]?.version ]`, because `?` swallows the
+    # type error by design. That `[]` becomes the baseline AND the
+    # after-removal list, so the delta is empty, and an empty delta is this
+    # flow's cue for `removable` with "no version was judged against the
+    # advisory database, because none appeared". A parser that found nothing
+    # would recommend a deletion with zero advisory queries run.
+    Describe 'a resolved_versions payload that found nothing is never an empty one'
+      Parameters
+        'versions absent'     'del(.versions)'                             'cannot read'
+        'versions a string'   '.versions = "4.17.21"'                      'cannot read'
+        'versions not a list' '.versions = {}'                             'cannot read'
+        'an entry with no version string' '.versions = [{"path":"node_modules/lodash"}]' 'cannot read'
+        'present true, nothing in it'     '.versions = []'                 'no versions at all'
+      End
+
+      It "stops the baseline on $1"
+        make_env
+        do_list
+        jq -c "$2" "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/t"
+        mv "$MOCK_DIR/t" "$MOCK_DIR/rv-lodash.json"
+        When call drv_jq '{status, phase}' baseline --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"install"}'
+        The stderr should include "$3"
+      End
+    End
+
+    It 'says why an empty versions list beside present true is the dangerous half'
+      make_env
+      do_list
+      jq -c '.versions = []' "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/rv-lodash.json"
+      When call drv_jq '{status, phase}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'removable without a single advisory query'
+    End
+
+    It 'refuses a present that is neither true nor false'
+      make_env
+      do_list
+      jq -c '.present = "yes"' "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/rv-lodash.json"
+      When call drv_jq '{status, phase}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'neither true nor false'
+    End
+
+    It 'refuses a present false that still reports versions'
+      make_env
+      do_list
+      jq -c '.present = false' "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/rv-lodash.json"
+      When call drv_jq '{status, phase}' baseline --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'contradicts itself'
+    End
+
     # `unreadable_entries` must be present and a non-negative integer: read
     # straight, an absent one arrives as the string "null" and reads as full
     # coverage on every map (#48).
@@ -436,6 +498,20 @@ SH
     # Exit 2 is the contract's "not implemented": there is no whole-tree view to
     # be had, so the audit still runs and every verdict says it covers the named
     # package only.
+    # The same split test-pin draws, at the step that first meets it: an
+    # adapter that lacks the verb and a parser that refused THIS lockfile both
+    # scope every verdict to the named package, and only the second is a defect
+    # to chase.
+    It 'names an unimplemented baseline resolution_map as unimplemented'
+      make_env
+      do_list
+      printf '2\n' > "$MOCK_DIR/map.status"
+      do_baseline
+      When call drv_jq '.finding.collateral_not_checked_reason' test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should include 'does not implement resolution_map'
+    End
+
     It 'keeps auditing when resolution_map is unimplemented, with no whole-tree view'
       make_env
       do_list
@@ -474,6 +550,47 @@ SH
       When call jq -c '.' "$MOCK_DIR/manifest-at-install.json"
       The status should be success
       The output should equal '{"name":"app"}'
+    End
+
+    # "And nothing else" is the other half of the last-entry rule: the prune
+    # stops at the override block, so an emptied `pnpm` key above
+    # `pnpm.overrides` is left exactly where the repository put it.
+    It 'takes the override block but never the key above it'
+      make_env
+      printf '%s\n' '{"name":"app","pnpm":{"overrides":{"lodash":"^4.17.21"},"peerDependencyRules":{"allowAny":["react"]}}}' > "$WT/package.json"
+      jq -c '.override_location = "pnpm.overrides" | .override_root = ["pnpm","overrides"]
+             | .pins = [.pins[0]] | .count = 1' "$MOCK_DIR/list_pins.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/list_pins.json"
+      git -C "$WT" add -A
+      git -C "$WT" -c commit.gpgsign=false commit -qm pnpm-overrides
+      do_list
+      do_baseline
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+cp package.json "$MOCK_DIR/manifest-at-install.json"
+SH
+      "$DRIVER" test-pin --work "$WORK" --key lodash >/dev/null
+      When call jq -c '.pnpm' "$MOCK_DIR/manifest-at-install.json"
+      The status should be success
+      The output should equal '{"peerDependencyRules":{"allowAny":["react"]}}'
+    End
+
+    It 'leaves an emptied pnpm key rather than widening the removal to it'
+      make_env
+      printf '%s\n' '{"name":"app","pnpm":{"overrides":{"lodash":"^4.17.21"}}}' > "$WT/package.json"
+      jq -c '.override_location = "pnpm.overrides" | .override_root = ["pnpm","overrides"]
+             | .pins = [.pins[0]] | .count = 1' "$MOCK_DIR/list_pins.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/list_pins.json"
+      git -C "$WT" add -A
+      git -C "$WT" -c commit.gpgsign=false commit -qm pnpm-only
+      do_list
+      do_baseline
+      cat > "$MOCK_DIR/install.sh" <<'SH'
+cp package.json "$MOCK_DIR/manifest-at-install.json"
+SH
+      "$DRIVER" test-pin --work "$WORK" --key lodash >/dev/null
+      When call jq -c '.' "$MOCK_DIR/manifest-at-install.json"
+      The status should be success
+      The output should equal '{"name":"app","pnpm":{}}'
     End
 
     # An edit that silently matched nothing, or that matched a similar key
@@ -540,6 +657,17 @@ SH
       The output should equal '{"status":"ok","s":"inconclusive"}'
     End
 
+    # Absent-vs-null is load-bearing everywhere else here, so the key is on
+    # every finding shape rather than only the fully-tested one.
+    It 'carries the not-checked reason on a pin its install stopped'
+      prepare
+      printf '1\n' > "$MOCK_DIR/install.status"
+      When call drv_jq '.finding | has("collateral_not_checked_reason")' \
+        test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should equal 'true'
+    End
+
     It 'never reports a pin removable off a failed install'
       prepare
       printf '1\n' > "$MOCK_DIR/install.status"
@@ -547,6 +675,37 @@ SH
       When call jq -c '[.findings[] | select(.key == "lodash") | .detail]' "$WORK/state.json"
       The status should be success
       The output should include 'nothing about the removal was observed'
+    End
+
+    # The per-pin half of the same rule, asserted where it bites: the pin must
+    # never reach a verdict at all, rather than reaching `removable` on a delta
+    # that is empty because nothing was read.
+    It 'stops the pin rather than reporting an empty delta from an unread list'
+      prepare
+      jq -c 'del(.versions)' "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/rv-lodash.2.json"
+      When call drv_jq '{status, phase}' test-pin --work "$WORK" --key lodash
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'versions list this flow cannot read'
+    End
+
+    It 'never lets that pin become a candidate for the removal PR'
+      prepare
+      jq -c 'del(.versions)' "$MOCK_DIR/rv-lodash.json" > "$MOCK_DIR/rv-lodash.2.json"
+      "$DRIVER" test-pin --work "$WORK" --key lodash >/dev/null 2>&1 || true
+      When call jq -c '[.findings[] | select(.key == "lodash")]' "$WORK/state.json"
+      The status should be success
+      The output should equal '[]'
+    End
+
+    It 'stops the pin when the baseline holds no snapshot for its package'
+      prepare
+      jq -c '.baseline_packages = []' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{status, phase}' test-pin --work "$WORK" --key lodash
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'holds no snapshot'
     End
 
     # Step 7's verification is what keeps "one pin per install" true. `HEAD` is
@@ -651,6 +810,20 @@ JSON
       When call drv_jq '.finding.collateral_not_checked_reason' test-pin --work "$WORK" --key lodash
       The status should be success
       The output should include 'could not read 3 lockfile entries'
+    End
+
+    # Zero is the STRONGEST coverage claim this flow makes — every lockfile
+    # entry was read — so reporting it for a number nobody could read
+    # fabricates exactly the reassurance the unreadable-entries rule exists to
+    # withhold (#48).
+    It 'reports an unreadable unreadable_entries as null, never as a checked zero'
+      prepare
+      jq -c 'del(.baseline_unreadable_entries)' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{u: .finding.unreadable_entries, v: .finding.collateral_verdict}' \
+        test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should equal '{"u":{"baseline":null,"without_pin":0},"v":"not-checked"}'
     End
 
     It 'falls back to the same narrow claim when resolution_map is unavailable'
@@ -967,6 +1140,29 @@ SH
       The status should be success
       The output should equal 'packages:
   - packages/*'
+    End
+
+    # awk exits 2 for "no such entry" and 1 for a block it refuses, and the two
+    # get different diagnoses. Collapsed to 1, a missing key was reported as
+    # "a wrong write corrupts a file pnpm reads on every install" — sending a
+    # reader after a parser bug that is not there.
+    It 'reports a missing workspace entry as missing, not as an unreadable block'
+      workspace_env
+      grep -v '^  undici:' "$WT/pnpm-workspace.yaml" > "$WT/ws.tmp"
+      mv "$WT/ws.tmp" "$WT/pnpm-workspace.yaml"
+      When call drv_jq '{status, phase}' test-pin --work "$WORK" --key undici
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include "carries no entry 'undici'"
+    End
+
+    It 'still reports a block it cannot read as a block it cannot read'
+      workspace_env
+      printf 'overrides:\n  undici\n  form-data: %s\n' "'>=4.0.4'" > "$WT/pnpm-workspace.yaml"
+      When call drv_jq '{status, phase}' test-pin --work "$WORK" --key undici
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"install"}'
+      The stderr should include 'could not be edited'
     End
 
     It 'restores package.json as well as the workspace file'

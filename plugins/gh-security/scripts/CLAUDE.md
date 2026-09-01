@@ -169,10 +169,37 @@ What that header does not say, and what belongs here:
   with only libc or ABI tokens after it. **And its "moved as one unit" condition is checked
   against the whole tree**: that cannot be read off the diff alone, so the driver counts the family
   in the union of both maps and refuses to sample when that count exceeds the number that moved.
+- **A `resolved_versions` payload that found nothing is a hard error, not an empty list.**
+  `adapter_field ... present` asserts the KEY, and `[ .versions[]?.version ]` turns an absent or
+  mistyped `versions` into `[]` because `?` swallows the type error by design. That `[]` becomes
+  both the baseline and the after-removal list, so the delta is empty — and an empty delta is this
+  flow's documented cue for `removable`. A parser that found nothing would recommend a deletion
+  with no advisory query run, which is the repo's headline rule inverted in the one driver whose
+  output deletes things. `fix-group.sh`'s `line_versions` hard-errors on the identical payload for
+  the identical reason.
+- **The advisory cache is a payload like any other, and it outlives the process.**
+  `$WORK/advisories/` is read by a later invocation than the one that wrote it, so it is written
+  temp-plus-`mv` (as `state_set` writes the state file) and validated on read by the same function
+  the fresh query goes through — object-ness, all five promised fields, and `verdict` being one of
+  the four values `check-advisories.sh` emits. A torn entry read blind reaches `--argjson`, where
+  jq dies exit 2 with no stdout: the checkpoint contract's own `needs_judgment`, manufactured out
+  of a half-written file.
+- **There is no `require_json` helper, deliberately.** Guarding a capture with "is this JSON?"
+  passes for `null`, for `[]`, and for every wrong-shaped value, so its call sites were
+  unreachable by construction and a suite could not tell them from `return 0`. The guarantee lives
+  instead at the three places a payload enters the script — `state_json`'s shape predicate,
+  `rv_versions`, and `advisory_validate` — each of which refuses an empty value along with every
+  other value that is not what was promised, and each of which a fixture can fire.
 - **Each step refuses to run before the one it depends on**, and the guard on `together` is the
   one that earns its keep: before `judge` every finding still reads `tested`, so an unguarded
   `together` finds an empty candidate set and terminates exit 0 with `no removable pins found` — a
-  claim about work that never happened, arriving at the agent as a successful audit.
+  claim about work that never happened, arriving at the agent as a successful audit. `judge`'s own
+  guard is on a tested pin existing, not merely on `baseline_done`: `baseline` writes findings for
+  the pins it refused, so a healthy repository has `findings: []` the moment it finishes and the
+  same false claim was reachable with no `test-pin` call at all. And `judge_done` is cleared by
+  every `record_finding`, because a `test-pin` run after a judgment leaves that pin `tested` and
+  `together` selects on status — the pin would be dropped from a candidate set the agent believes
+  is complete.
 - **The tested package's advisory answer never absorbs the collateral verdict.** `advisory_verdict`,
   `advisory_count` and `matched_ranges` are `check-advisories.sh`'s reply about the pinned package
   and nothing else; a collateral package's result lives in `collateral_verdict`. Derived instead
