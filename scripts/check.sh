@@ -238,10 +238,42 @@ JS_COVERAGE_SUBJECT='spec/js/generated/workflow.mjs'
 # projection of it, and an instrumentation change that stopped attributing
 # lines to that projection would leave vitest reporting 100% of nothing.
 #
-# So the summary is read rather than trusted: at least one file, the subject
-# among them, and every one of its four buckets at 100. vitest's own
-# thresholds already fail the run; this is the floor that catches the case
-# thresholds cannot see.
+# So the summary is read rather than trusted. Three things it must show, and
+# the third is the one a threshold cannot express: at least one entry matching
+# the subject, all four buckets PRESENT on it, and each of them numeric and at
+# 100. "100 on whichever buckets the provider happened to emit" is not the
+# rule this gate claims to enforce.
+#
+# One predicate decides both questions. An earlier version proved presence
+# with `grep -F` (substring) and then selected the entry to check with
+# `endswith`, so a key that merely CONTAINED the subject satisfied the guard
+# and was invisible to the comparison: a report whose only file was
+# `.../workflow.mjs.orig` at 0% across the board exited 0. Vitest module ids
+# can carry `?v=`/`?t=` query suffixes, so that is a shape a provider change
+# could really produce. `endswith` is now the only test, used for both.
+js_coverage_problems() {
+  jq -r --arg subject "$1" '
+    def buckets: ["lines", "branches", "functions", "statements"];
+    [ to_entries[] | select(.key != "total") | select(.key | endswith($subject)) ] as $matched
+    | if ($matched | length) == 0
+      then "the report names no entry ending in \($subject)"
+      else
+        $matched[] as $e
+        | buckets[] as $b
+        | if ($e.value | has($b)) | not
+          then "\($e.key): the report carries no \($b) bucket at all"
+          elif (($e.value[$b] | type) != "object") or (($e.value[$b] | has("pct")) | not)
+          then "\($e.key): the \($b) bucket carries no pct"
+          elif ($e.value[$b].pct | type) != "number"
+          then "\($e.key): \($b) pct is \($e.value[$b].pct | tostring), not a number"
+          elif $e.value[$b].pct < 100
+          then "\($e.key): \($b) is \($e.value[$b].pct)%"
+          else empty
+          end
+      end
+  ' "$2"
+}
+
 js_assert_coverage() {
   local summary=coverage/coverage-summary.json
   [ -f "$summary" ] \
@@ -251,22 +283,28 @@ js_assert_coverage() {
     || die "could not read $summary"
   [ -n "$files" ] \
     || die 'the coverage report names no files; a threshold over an empty set is never a pass'
-  printf '%s\n' "$files" | grep -qF "$JS_COVERAGE_SUBJECT" \
-    || die "the coverage report does not include $JS_COVERAGE_SUBJECT; it measured $(printf '%s' "$files" | tr '\n' ' ')"
+  # Printed before the verdict, and with an explicit marker for an absent
+  # bucket rather than jq's `null`: the display is how a reviewer sees what was
+  # measured, so a missing bucket has to look missing.
   printf 'check: coverage measured:\n'
-  jq -r --arg s "$JS_COVERAGE_SUBJECT" '
+  jq -r '
+    def buckets: ["lines", "branches", "functions", "statements"];
     to_entries[] | select(.key != "total")
-    | "check:   \(.key)  lines \(.value.lines.pct)%  branches \(.value.branches.pct)%  functions \(.value.functions.pct)%  statements \(.value.statements.pct)%"
+    | .key as $k | .value as $v
+    | "check:   \($k)  "
+      + ([ buckets[] as $b
+           | "\($b) " + (if ($v | has($b)) and (($v[$b] | type) == "object") and ($v[$b] | has("pct"))
+                          then "\($v[$b].pct)%" else "ABSENT" end) ] | join("  "))
   ' "$summary"
-  local shortfall
-  shortfall=$(jq -r --arg s "$JS_COVERAGE_SUBJECT" '
-    to_entries[] | select(.key | endswith($s)) | .value
-    | to_entries[] | select(.key | IN("lines","branches","functions","statements"))
-    | select((.value.pct | type) != "number" or .value.pct < 100)
-    | "\(.key)=\(.value.pct)"
-  ' "$summary") || die "could not read bucket percentages from $summary"
-  [ -z "$shortfall" ] \
-    || die "coverage of $JS_COVERAGE_SUBJECT is below 100: $(printf '%s' "$shortfall" | tr '\n' ' ')"
+  local problems
+  problems=$(js_coverage_problems "$JS_COVERAGE_SUBJECT" "$summary") \
+    || die "could not read bucket percentages from $summary"
+  if [ -n "$problems" ]; then
+    printf '%s\n' "$problems" | while IFS= read -r problem; do
+      [ -z "$problem" ] || printf 'check: %s\n' "$problem" >&2
+    done
+    die "coverage of $JS_COVERAGE_SUBJECT is not 100 on all four buckets"
+  fi
 }
 
 cmd_js() {

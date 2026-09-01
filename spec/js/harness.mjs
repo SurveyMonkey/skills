@@ -24,9 +24,10 @@ export async function workflowSource() {
 // the caller supplies; the rest reproduce the documented semantics — notably
 // parallel()'s contract that a thunk which throws resolves to null rather
 // than rejecting the call.
-export async function runWorkflow({ args, agent, main }) {
+// `logs` may be passed in so a caller can inspect what was logged even when
+// the workflow throws, which is the whole point of the abandonment message.
+export async function runWorkflow({ args, agent, main, logs = [] }) {
   const calls = []
-  const logs = []
   const phases = []
 
   const agentStub = (prompt, opts) => {

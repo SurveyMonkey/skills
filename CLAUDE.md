@@ -42,15 +42,23 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
-Every quality gate (suite, ShellCheck, `claude plugin validate --strict`, and the plugin version
-gate) runs through one entry point, `scripts/check.sh`
-(`lint` / `validate` / `spec` / `version` / `fast` / `all` / `targets`); target lists live there
-and nowhere else, and empty discovery is a hard failure in every gate. Committed git
-hooks run the fast gates on commit and the suite on push, enabled once per clone with
+The one JavaScript file this repo ships — the dispatch Workflow script under
+`plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `npm ci`,
+then `npm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
+buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). That is a dev
+and CI dependency only; the shipped plugin *scripts* remain `bash` + `jq` + `gh`.
+
+Every quality gate (shellspec suite, ShellCheck, `claude plugin validate --strict`, the vitest
+suite with its coverage floor, and the plugin version gate) runs through one entry point,
+`scripts/check.sh`
+(`lint` / `validate` / `spec` / `js` / `version` / `fast` / `all` / `targets`); target lists live
+there and nowhere else, and empty discovery is a hard failure in every gate — including the
+coverage report, where a threshold satisfied by an empty file set is exactly that bug. Committed
+git hooks run the fast gates on commit and both suites on push, enabled once per clone with
 `git config core.hooksPath .githooks`; CI runs them all (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
-scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, and `shellspec`, but still targets
-bash 3.2 because the hooks run it on stock macOS.
+scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
+gate — `node` and `npm`, but still targets bash 3.2 because the hooks run it on stock macOS.
 
 - **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
   private repo into this one, which is public: internal package names, registry URLs, and the

@@ -163,11 +163,13 @@ Describe 'scripts/check.sh'
       # cmd_js clears any stale summary before running the suite, so the
       # stub npm is what publishes the one each example wants — exactly where
       # the real vitest run would write it.
+      # `npm test` publishes whatever summary the example asked for, and fails
+      # if the example asked it to. Both halves matter: a stub that always
+      # exits 0 never exercises the failing-suite path at all.
       cat > bin/npm <<'STUB'
 #!/bin/sh
-[ -f want.json ] || exit 0
-mkdir -p coverage
-cat want.json > coverage/coverage-summary.json
+[ -f want.json ] && { mkdir -p coverage; cat want.json > coverage/coverage-summary.json; }
+[ -f want-suite-failure ] && exit 1
 exit 0
 STUB
       chmod +x bin/npm
@@ -203,7 +205,8 @@ JSON
 JSON
       When run "$CHECK" js
       The status should eq 2
-      The stderr should include 'does not include spec/js/generated/workflow.mjs'
+      The stderr should include 'names no entry ending in spec/js/generated/workflow.mjs'
+      The output should include 'coverage measured'
     End
 
     It 'accepts a report whose subject is fully covered'
@@ -232,20 +235,72 @@ JSON
 JSON
         When run "$CHECK" js
         The status should eq 2
-        The stderr should include 'is below 100'
+        The stderr should include "$1 is 99%"
+        The stderr should include 'is not 100 on all four buckets'
         The output should include 'coverage measured'
       End
     End
 
     # "Unknown" is what vitest prints for a bucket it could not compute, and
     # a numeric comparison against it must fail rather than pass by accident.
+    # A failing vitest run must fail the gate before any coverage assertion
+    # gets a chance to pass on a green report the run also happened to write.
+    It 'fails when the suite itself fails, whatever the coverage report says'
+      : > want-suite-failure
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should not eq 0
+      The status should not eq 2
+    End
+
+    # The stale-report hazard: a summary left by an earlier, greener run must
+    # not satisfy the assertions for a run that produced none. cmd_js deletes
+    # it before invoking the suite, so the refusal below is the deletion
+    # working — without it this example would pass on last run's numbers.
+    It 'refuses a stale summary left behind by an earlier run'
+      mkdir -p coverage
+      cat > coverage/coverage-summary.json <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      # No want.json, so the stub npm publishes nothing this run.
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'produced no coverage summary'
+    End
+
+    It 'refuses a report missing a bucket entirely, not just one below 100'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'carries no branches bucket at all'
+      The output should include 'branches ABSENT'
+    End
+
+    # One predicate for both questions. An earlier version proved presence by
+    # substring and selected the entry to check by suffix, so this exact
+    # report — the only file key containing the subject without ending in it,
+    # every bucket at 0 — exited 0.
+    It 'refuses a key that merely contains the subject without ending in it'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs.orig":$(full 0 0 0 0)}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'names no entry ending in'
+      The output should include 'workflow.mjs.orig'
+    End
+
     It 'refuses a bucket whose percentage is not a number'
       summary <<JSON
 {"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":"Unknown"},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
 JSON
       When run "$CHECK" js
       The status should eq 2
-      The stderr should include 'is below 100'
+      The stderr should include 'pct is Unknown, not a number'
       The output should include 'coverage measured'
     End
   End

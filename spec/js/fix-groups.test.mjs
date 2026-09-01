@@ -22,7 +22,16 @@ import {
   successResult,
   workflowSource,
 } from './harness.mjs'
-import { PURE_BEGIN, PURE_END, WIRING_BEGIN, project, region } from './generate.mjs'
+import {
+  PROJECTION_URL,
+  PURE_BEGIN,
+  PURE_END,
+  WIRING_BEGIN,
+  assertMarkersOnce,
+  project,
+  region,
+} from './generate.mjs'
+import { readFile } from 'node:fs/promises'
 // The projection generate.mjs writes before the suite is collected. This is
 // the module the coverage gate measures; the byte-identity examples at the
 // bottom are what make measuring it equivalent to measuring the shipped file.
@@ -155,6 +164,9 @@ describe('pairEntry', () => {
     ['package', 'sharp'],
     ['major_line', '7.x'],
     ['repo', 'octo/other'],
+    // The branch is what the reap acts on, so a result naming a different
+    // one is the most dangerous mismatch of the four, not the least.
+    ['branch', 'fix/dependabot-sharp-7x'],
   ]) {
     it(`trips on a mismatched ${field}`, () => {
       const entry = pairEntry(d, successResult({ [field]: value }))
@@ -250,6 +262,38 @@ describe('RESULT_SCHEMA, executed', () => {
     expect(accepts(failureResult({ pr_url: 'https://x/pull/1' }))).toBe(false)
   })
 
+  // The agent contract nulls resolved_version on failure and requires it on a
+  // no-op. Both directions, because leaving either unconstrained lets a
+  // result claim something the doc forbids.
+  it('rejects a failure carrying a resolved_version', () => {
+    expect(accepts(failureResult({ resolved_version: '6.28.0' }))).toBe(false)
+  })
+
+  it('rejects a no-op with no resolved_version', () => {
+    expect(accepts(noOpResult({ resolved_version: null }))).toBe(false)
+  })
+
+  it('rejects a success with no resolved_version', () => {
+    expect(accepts(successResult({ resolved_version: null }))).toBe(false)
+  })
+
+  // A no-op made no commit and wrote no override, so it cannot have added one.
+  it('rejects a no-op claiming it added a bare override', () => {
+    expect(accepts(noOpResult({ bare_override: 'added' }))).toBe(false)
+  })
+
+  it('accepts each band the scorer actually emits', () => {
+    for (const band of ['Low', 'Medium', 'High']) {
+      const r = successResult({ risk: { band, score: 3, f4: 0, f5: 0 } })
+      expect(accepts(r), band).toBe(true)
+    }
+  })
+
+  it('rejects a risk band outside the scorer vocabulary', () => {
+    expect(accepts(successResult({ risk: { band: 'Critical', score: 3, f4: 0, f5: 0 } }))).toBe(false)
+    expect(accepts(successResult({ risk: { band: 'low', score: 3, f4: 0, f5: 0 } }))).toBe(false)
+  })
+
   // Still enforced on success, which is where action is non-null and the
   // agreement is meaningful.
   it('rejects a success with bare_override added but a scoped action', () => {
@@ -331,10 +375,22 @@ describe('the workflow body, run with stubbed collaborators', () => {
     Array.from({ length: n }, (_, i) =>
       dispatch({ group: { package: `pkg-${i}`, branch_name: `fix/dependabot-pkg-${i}-6x` } }))
 
-  const echo = (_prompt, opts, i) => {
-    const label = opts.label.split(' ')
-    return successResult({ package: label[1], major_line: label[2], repo: label[0], pr_url: `https://github.com/octo/app/pull/${i}` })
+  // A stub agent that reports the identity of the group it was actually given,
+  // which is what a real fix agent does — and what pairEntry checks. Derived
+  // from the dispatch rather than re-parsed out of the label, so these
+  // examples assert shipped logic and not a fixture's own string handling.
+  const echoFor = (dispatches) => (_prompt, opts, i) => {
+    const d = dispatches.find((x) => agentLabel(x) === opts.label)
+    expect(d, `agent called with an unknown label: ${opts.label}`).toBeDefined()
+    return successResult({
+      package: d.group.package,
+      major_line: d.group.major_line,
+      repo: d.group.repo,
+      branch: d.group.branch_name,
+      pr_url: `https://github.com/octo/app/pull/${i}`,
+    })
   }
+  const echo = echoFor(batch(64))
 
   it('dispatches exactly one agent per group and returns one entry per group', async () => {
     const dispatches = batch(7)
@@ -342,6 +398,40 @@ describe('the workflow body, run with stubbed collaborators', () => {
     expect(calls).toHaveLength(7)
     expect(entries).toHaveLength(7)
     expect(entries.every((e) => e.mispaired === false)).toBe(true)
+  })
+
+  // THE assertion this suite was missing. Replacing dispatchPrompt(d) with a
+  // bare string left all 90 examples green at 100% coverage: dispatchPrompt
+  // stayed covered because other examples call it directly, and nothing ever
+  // looked at what the agent was actually told. The prompt carries the entire
+  // dispatch payload, so it is the most consequential thing this workflow
+  // does.
+  it('sends each agent exactly the prompt built for its own group', async () => {
+    const dispatches = batch(5)
+    const { calls } = await runWorkflow({ main, args: { cap: 2, dispatches }, agent: echo })
+    // Workers steal, so pair by label rather than by call order.
+    for (const d of dispatches) {
+      const c = calls.find((x) => x.opts.label === agentLabel(d))
+      expect(c, `no agent call for ${agentLabel(d)}`).toBeDefined()
+      expect(c.prompt).toBe(dispatchPrompt(d))
+    }
+    expect(calls).toHaveLength(dispatches.length)
+  })
+
+  it('round-trips the whole payload out of every prompt it sent', async () => {
+    const dispatches = batch(4)
+    const { calls } = await runWorkflow({ main, args: { cap: 4, dispatches }, agent: echo })
+    const sent = calls
+      .map((c) => JSON.parse(c.prompt.split('Dispatch payload:\n')[1]))
+      .sort((a, b) => a.group.package.localeCompare(b.group.package))
+    expect(sent).toEqual([...dispatches].sort((a, b) => a.group.package.localeCompare(b.group.package)))
+  })
+
+  it('never sends a prompt that is not one of the built payloads', async () => {
+    const dispatches = batch(3)
+    const { calls } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: echo })
+    const allowed = new Set(dispatches.map((d) => dispatchPrompt(d)))
+    for (const c of calls) expect(allowed.has(c.prompt)).toBe(true)
   })
 
   it('routes every agent to fix-dependency, on sonnet, with the schema', async () => {
@@ -412,6 +502,58 @@ describe('the workflow body, run with stubbed collaborators', () => {
     expect(phases).toEqual(['Fix groups'])
   })
 
+  // agent() throws on budget exhaustion. parallel() would swallow that into a
+  // null thunk result, leaving the groups that worker was holding as nulls
+  // indistinguishable from crashed agents. The run must fail loudly instead.
+  it('fails the whole run loudly when an agent call throws', async () => {
+    const dispatches = batch(6)
+    const boom = (prompt, opts, i) => {
+      if (i === 0) throw new Error('token budget exhausted')
+      return echo(prompt, opts, i)
+    }
+    await expect(runWorkflow({ main, args: { cap: 2, dispatches }, agent: boom }))
+      .rejects.toThrow(/token budget exhausted/)
+  })
+
+  it('says how many groups have no result, and points at the interruption contract', async () => {
+    const dispatches = batch(3)
+    const boom = () => { throw new Error('token budget exhausted') }
+    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom }))
+      .rejects.toThrow(/3 of 3 group\(s\) have no result/)
+    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom }))
+      .rejects.toThrow(/resume from the runId/)
+  })
+
+  // A thrown non-Error has no .message, and the abandonment report must still
+  // name something rather than "undefined". Found by the branch threshold:
+  // this path was the one line the suite did not reach.
+  it('reports a thrown non-Error too', async () => {
+    const boom = () => { throw 'budget gone' }
+    await expect(runWorkflow({ main, args: { cap: 1, dispatches: batch(2) }, agent: boom }))
+      .rejects.toThrow(/budget gone/)
+  })
+
+  it('logs the abandonment before it throws', async () => {
+    const dispatches = batch(4)
+    const logs = []
+    const boom = (prompt, opts, i) => {
+      if (i === 1) throw new Error('token budget exhausted')
+      return echo(prompt, opts, i)
+    }
+    await runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom, logs })
+      .catch(() => {})
+    expect(logs.join('\n')).toMatch(/worker\(s\) stopped early/)
+  })
+
+  it('never reports a partial batch as ordinary failures', async () => {
+    // The hazard in one line: a resolved value here would be read by phase 7
+    // as "these groups crashed", when in fact they were never dispatched.
+    const boom = () => { throw new Error('token budget exhausted') }
+    const outcome = await runWorkflow({ main, args: { cap: 1, dispatches: batch(2) }, agent: boom })
+      .then(() => 'resolved', () => 'rejected')
+    expect(outcome).toBe('rejected')
+  })
+
   it('throws before dispatching anything when args are malformed', async () => {
     const seen = []
     await expect(runWorkflow({
@@ -427,16 +569,34 @@ describe('the projection is the shipped file', () => {
   // Everything the coverage gate claims rests on these. If the projection
   // stopped being byte-identical to the regions it copies, the number would
   // still be 100 and would still mean nothing.
-  it('copies the pure region verbatim', async () => {
-    const src = await workflowSource()
-    const generated = project(src)
-    expect(generated).toContain(region(src, PURE_BEGIN, PURE_END))
+  //
+  // These read the artifact FROM DISK — the same bytes vitest imported and
+  // instrumented — rather than re-projecting in memory and comparing that to
+  // itself. An earlier version did the latter, which certified that project()
+  // is faithful while saying nothing about the file actually measured: a
+  // partial or stale write satisfied every example.
+  const onDisk = async () => readFile(PROJECTION_URL, 'utf8')
+
+  it('is on disk, and is exactly what project() produces from the shipped file', async () => {
+    expect(await onDisk()).toBe(project(await workflowSource()))
   })
 
-  it('copies the wiring region verbatim', async () => {
+  it('copies the pure region verbatim into the measured artifact', async () => {
     const src = await workflowSource()
-    const generated = project(src)
-    expect(generated).toContain(region(src, WIRING_BEGIN, null))
+    expect(await onDisk()).toContain(region(src, PURE_BEGIN, PURE_END))
+  })
+
+  it('copies the wiring region verbatim into the measured artifact', async () => {
+    const src = await workflowSource()
+    expect(await onDisk()).toContain(region(src, WIRING_BEGIN, null))
+  })
+
+  // region() appears on both sides of the assertions above, so a bug in it
+  // would be invisible there. Pin it against a hand-built input instead.
+  it('slices regions by their markers, independently of the shipped file', () => {
+    const src = `head\n${PURE_BEGIN}\nPURE\n${PURE_END}\nmid\n${WIRING_BEGIN}\nWIRE\n`
+    expect(region(src, PURE_BEGIN, PURE_END)).toBe('PURE')
+    expect(region(src, WIRING_BEGIN, null)).toBe('WIRE')
   })
 
   it('adds nothing to the projection but an export list and the main wrapper', async () => {
@@ -476,6 +636,86 @@ describe('the projection is the shipped file', () => {
   it('refuses a pure region that lost one of its declarations', async () => {
     const src = await workflowSource()
     expect(() => project(src.replace(/pairEntry/g, 'renamed'))).toThrow(/no longer defines pairEntry/)
+  })
+
+  // indexOf silently takes the first of a duplicate pair, so a second marker
+  // would truncate the region and a reordered file would project duplicated
+  // declarations that fail later as an unrelated syntax error.
+  it('refuses a duplicated marker rather than taking the first', async () => {
+    const src = await workflowSource()
+    for (const marker of [PURE_BEGIN, PURE_END, WIRING_BEGIN]) {
+      expect(() => project(`${src}\n${marker}\n`), marker)
+        .toThrow(/appears more than once/)
+    }
+  })
+
+  it('refuses markers that are out of order', () => {
+    const src = `${WIRING_BEGIN}\nWIRE\n${PURE_BEGIN}\nPURE\n${PURE_END}\n`
+    expect(() => project(src)).toThrow(/out of order/)
+  })
+
+  it('accepts the shipped file markers as they stand', async () => {
+    const src = await workflowSource()
+    expect(() => assertMarkersOnce(src)).not.toThrow()
+  })
+
+  // Forty lines of the shipped file — the header and `export const meta` —
+  // sit above the pure marker, so the projection never touches them and no
+  // example parsed them. A trailing comma inside meta, a mis-nested brace, or
+  // a stray token up there shipped green, which is the same unparseable-code
+  // problem ADR 010's Context indicts the markdown fence for. So load the
+  // WHOLE file the way the harness does: strip `export` off meta, then
+  // evaluate the entire remainder as an async function body.
+  describe('the whole file parses and evaluates the way the harness loads it', () => {
+    const harnessLoad = async () => {
+      const src = await workflowSource()
+      const body = src.replace(/^export const meta =/m, 'const meta =')
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+      return new AsyncFunction('agent', 'parallel', 'phase', 'log', 'args',
+        `${body}\n;return meta\n`)
+    }
+
+    it('parses as an async function body, meta and header included', async () => {
+      await expect(harnessLoad()).resolves.toBeInstanceOf(Function)
+    })
+
+    // The meta literal on its own: evaluating the whole body would run the
+    // wiring and hit its own `return` first.
+    const evalMeta = async () => {
+      const src = await workflowSource()
+      const at = src.search(/^export const meta = \{$/m)
+      const end = src.indexOf('\n}\n', at)
+      const literal = src.slice(at, end + 2).replace(/^export /, '')
+      // eslint-disable-line no-new-func — same evaluation the harness does
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+      return new AsyncFunction(`${literal}\n;return meta\n`)()
+    }
+
+    it('evaluates to a meta object with the phase title phase() opens', async () => {
+      const meta = await evalMeta()
+      expect(meta.name).toBe('gh-security-fix-dispatch')
+      expect(typeof meta.description).toBe('string')
+      // Every declared phase must have a phase() call that opens it, or the
+      // progress display silently grows an empty group.
+      const { phases } = await runWorkflow({
+        main, args: { cap: 1, dispatches: [dispatch()] }, agent: () => successResult(),
+      })
+      expect(meta.phases.map((p) => p.title)).toEqual(phases)
+      expect(meta.phases.every((p) => p.model === 'sonnet')).toBe(true)
+    })
+
+    it('is rejected as a whole when the header above the markers is malformed', async () => {
+      const src = await workflowSource()
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+      const load = (text) => new AsyncFunction('agent', 'parallel', 'phase', 'log', 'args',
+        text.replace(/^export const meta =/m, 'const meta ='))
+      // Both mutations live in the forty lines above the pure marker, which
+      // the projection never sees. Before this example they shipped green.
+      expect(() => load(src.replace(
+        "name: 'gh-security-fix-dispatch',", "name: 'gh-security-fix-dispatch',,"))).toThrow()
+      expect(() => load(src.replace('  phases: [', '  phases: [[['))).toThrow()
+      expect(() => load(src)).not.toThrow()
+    })
   })
 
   it('declares meta as a pure literal the harness can extract statically', async () => {

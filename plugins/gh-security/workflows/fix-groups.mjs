@@ -63,7 +63,9 @@ const RESULT_SCHEMA = {
       type: ['object', 'null'],
       required: ['band', 'score', 'f4', 'f5'],
       properties: {
-        band: { type: 'string' },
+        // The scorer's own three bands (docs/adr/006, and the
+        // merge-risk:low/medium/high labels render-pr.sh applies).
+        band: { enum: ['Low', 'Medium', 'High'] },
         score: { type: 'number' },
         f4: { type: 'number' },
         f5: { type: 'number' },
@@ -131,6 +133,7 @@ const RESULT_SCHEMA = {
         status: { const: 'success' },
         pr_url: { type: 'string' },
         action: { type: 'string' },
+        resolved_version: { type: 'string' },
         risk: { type: 'object' },
         no_op: { type: 'null' },
         failure: { type: 'null' },
@@ -141,7 +144,14 @@ const RESULT_SCHEMA = {
         status: { const: 'no-op' },
         pr_url: { type: 'null' },
         action: { type: 'null' },
+        // The doc requires this non-null on a no-op — it is what is
+        // installed — and null on a failure. Constrained in both directions
+        // rather than left free in either.
+        resolved_version: { type: 'string' },
         risk: { type: 'null' },
+        // A no-op made no commit and wrote no override, so it cannot have
+        // added or tightened one.
+        bare_override: { const: 'none' },
         no_op: { type: 'object' },
         failure: { type: 'null' },
       },
@@ -151,6 +161,7 @@ const RESULT_SCHEMA = {
         status: { const: 'failure' },
         pr_url: { type: 'null' },
         action: { type: 'null' },
+        resolved_version: { type: 'null' },
         risk: { type: 'null' },
         no_op: { type: 'null' },
         failure: { type: 'object' },
@@ -168,9 +179,12 @@ const RESULT_SCHEMA = {
   // `bare_override: "none"` — silently hiding a global pin on exactly the
   // escalation a reviewer needs it on, and destroying the
   // `unscoped_override_added` observation the pin audit depends on.
-  // `agents/fix-dependency.md` states the agreement rule unconditionally and
-  // nulls `action` on failure a few lines later; that reads fine as prose and
-  // is only a contradiction once machine-checked. Both gates say so.
+  // `agents/fix-dependency.md` used to state the agreement rule
+  // unconditionally while nulling `action` on failure a few lines later —
+  // prose that only contradicts itself once machine-checked. That doc now
+  // scopes the rule to success too, so the schema and the instruction the
+  // model actually reads agree; fixing only this side would have left the
+  // model told to do the impossible.
   allOf: [
     {
       if: {
@@ -236,6 +250,7 @@ function pairEntry(d, r) {
     && r.package === d.group.package
     && r.major_line === d.group.major_line
     && r.repo === d.group.repo
+    && r.branch === d.group.branch_name
   const mispaired = Boolean(r) && !paired
   return { dispatch: d, result: mispaired ? null : r, mispaired }
 }
@@ -254,26 +269,56 @@ phase('Fix groups')
 const results = new Array(DISPATCHES.length).fill(null)
 let next = 0
 
+// agent() returns null when a subagent dies on a terminal error, which is an
+// ordinary failure entry. It THROWS on budget exhaustion, and that is a
+// different animal: parallel() resolves a throwing thunk to null, so the
+// worker would die silently while `next` had already advanced past the group
+// it was holding. Every group that worker would have taken stays null and
+// reads in phase 7 as a crashed agent — indistinguishable from a real crash,
+// which is precisely the silent misreport validateArgs exists to prevent.
+// So: record it and fail the whole run loudly afterwards. Phase 6's
+// interruption contract is written for exactly this (recover from the
+// journal, then resume from the runId), and a loud throw routes there, while
+// a quiet batch of nulls does not.
+const aborted = []
+
 const worker = async () => {
   while (next < DISPATCHES.length) {
     const i = next
     next += 1
     const d = DISPATCHES[i]
-    // Indexed write, never a push: workers finish out of order, and phase 7
-    // is promised the entries in dispatch order.
-    results[i] = await agent(dispatchPrompt(d), {
-      agentType: 'fix-dependency',
-      // ADR 004's pin, stated here because a workflow agent() without `model`
-      // inherits the session model and composition with the target
-      // definition's frontmatter is unspecified.
-      model: 'sonnet',
-      phase: 'Fix groups',
-      label: agentLabel(d),
-      schema: RESULT_SCHEMA,
-    })
+    try {
+      // Indexed write, never a push: workers finish out of order, and phase 7
+      // is promised the entries in dispatch order.
+      results[i] = await agent(dispatchPrompt(d), {
+        agentType: 'fix-dependency',
+        // ADR 004's pin, stated here because a workflow agent() without
+        // `model` inherits the session model and composition with the target
+        // definition's frontmatter is unspecified.
+        model: 'sonnet',
+        phase: 'Fix groups',
+        label: agentLabel(d),
+        schema: RESULT_SCHEMA,
+      })
+    } catch (e) {
+      aborted.push({ group: d.group, error: (e && e.message) || String(e) })
+      throw e
+    }
   }
 }
 
 await parallel(Array.from({ length: WORKERS }, () => () => worker()))
+
+if (aborted.length) {
+  const missing = results.filter((r) => r === null).length
+  log('A subagent call threw, so ' + aborted.length + ' worker(s) stopped early and '
+    + missing + ' of ' + DISPATCHES.length + ' group(s) have no result.')
+  throw new Error('agent() threw for ' + aborted[0].group.package + ' '
+    + aborted[0].group.major_line + ': ' + aborted[0].error + '. '
+    + missing + ' of ' + DISPATCHES.length + ' group(s) have no result, so this run is '
+    + 'incomplete rather than a batch of failures. Recover it with the interruption '
+    + 'contract in SKILL.md phase 6 — read the journal, then resume from the runId — '
+    + 'and never read this as "nothing ran".')
+}
 
 return DISPATCHES.map((d, i) => pairEntry(d, results[i]))

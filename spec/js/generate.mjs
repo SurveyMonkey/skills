@@ -75,6 +75,25 @@ export const PURE_EXPORTS = [
 // error, never an empty string quietly projected into a module that defines
 // nothing: that is the same found-nothing-is-a-pass shape every gate in this
 // repo refuses.
+// Every marker must appear exactly once. `indexOf` silently takes the first
+// of a duplicate pair, so a second `// >>> pure: begin` would truncate the
+// region to whatever sits between them, and a reordered file would project
+// duplicated declarations that fail later as an unrelated syntax error.
+// Neither is a shape to diagnose downstream.
+export function assertMarkersOnce(src) {
+  for (const marker of [PURE_BEGIN, PURE_END, WIRING_BEGIN]) {
+    const first = src.indexOf(marker)
+    if (first === -1) throw new Error(`marker not found in the workflow: ${marker}`)
+    if (src.lastIndexOf(marker) !== first) {
+      throw new Error(`marker appears more than once in the workflow: ${marker}`)
+    }
+  }
+  if (!(src.indexOf(PURE_BEGIN) < src.indexOf(PURE_END)
+    && src.indexOf(PURE_END) < src.indexOf(WIRING_BEGIN))) {
+    throw new Error('the workflow markers are out of order; expected pure begin, pure end, wiring begin')
+  }
+}
+
 export function region(src, open, close) {
   const a = src.indexOf(open)
   if (a === -1) throw new Error(`marker not found in the workflow: ${open}`)
@@ -87,6 +106,7 @@ export function region(src, open, close) {
 }
 
 export function project(src) {
+  assertMarkersOnce(src)
   const pure = region(src, PURE_BEGIN, PURE_END)
   const wiring = region(src, WIRING_BEGIN, null)
   for (const name of PURE_EXPORTS) {

@@ -80,10 +80,13 @@ nothing. So `spec/js/generate.mjs` projects the shipped file into an importable 
 suite is collected: both regions are copied **verbatim**, and the only additions are an export list
 and an `async function main(agent, parallel, phase, log, args)` wrapper around the wiring region —
 which is precisely the shape the harness gives it, injected globals as parameters and the
-top-level `return` as the function's. The tests import that, so every line they execute is a line
-of the shipped file. Three assertions keep it honest: both regions must appear byte-for-byte in
-the projection, the only non-comment additions must be exactly the export list and the wrapper,
-and a missing or empty region is a hard error rather than an empty projection.
+top-level `return` as the function's. The tests import that, so every line of the two marked
+regions that they execute is a line of the shipped file. Assertions keep it honest, and they read
+the artifact **from disk** — the same bytes vitest instrumented — rather than re-projecting in
+memory and comparing that to itself: the on-disk file must equal `project()` of the shipped
+source, both regions must appear in it byte-for-byte, the only non-comment additions must be
+exactly the export list and the wrapper, and a missing, empty, duplicated or out-of-order marker
+is a hard error rather than a silently truncated projection.
 
 **A 100% threshold over an empty file set passes, so the threshold is not the gate.** This was
 reproduced, not assumed: point `coverage.include` at a path matching nothing and vitest reports
@@ -92,7 +95,12 @@ signature found-nothing-is-a-pass bug, arriving inside the coverage gate itself.
 js` therefore reads `coverage/coverage-summary.json` and refuses three things a threshold cannot
 see: a report naming no files, a report not naming the projection, and any bucket of the
 projection below 100. It deletes a stale summary before the run so a previous report cannot
-satisfy them. `spec/check_sh_spec.sh` covers all three, plus a non-numeric percentage.
+satisfy them. It also requires all four buckets to be **present** on that entry rather than checking only the
+ones the provider happened to emit, and it uses one predicate — `endswith` — for both "is the
+subject here" and "which entry do I check", because an earlier version proved presence by
+substring and selected by suffix, so a report whose only file was `…/workflow.mjs.orig` at 0%
+across the board exited 0. `spec/check_sh_spec.sh` covers every one of those refusals, a
+non-numeric percentage, a stale summary left by an earlier run, and a failing suite.
 
 **The harness and the test file are outside the coverage set**, by `include` naming the projection
 alone. They are test infrastructure; measuring them would let an unused helper move the number
@@ -116,11 +124,19 @@ must begin with `export const meta = {...}` *and* `return` a value at top level,
 collaborators (`agent`, `parallel`, `phase`, `log`, `args`) arrive as injected globals rather than
 imports. No ES module can have that shape, so the harness necessarily extracts `meta` and
 evaluates the remainder as a function body — under which a top-level `import` would not even
-parse. The reference does not state whether a `scriptPath` workflow may import a sibling module,
-so the design assumes it may not. Testability is preserved instead by keeping everything above the
-`// >>> wiring: begin` marker free of harness globals; `spec/js/harness.mjs` slices that region out
-of the shipped file and evaluates it, and evaluates the whole file with stubbed collaborators for
-the wiring. **The tests run the shipped bytes, never a copy.**
+parse. The Workflow tool also describes `scriptPath` as pointing at a file it persisted from an
+inline script *string*, which is the clearest available statement that a script is read as source
+rather than imported. The reference does not state whether a `scriptPath` workflow may import a
+sibling module, so the design assumes it may not.
+
+Testability is preserved by the projection described above: everything between the markers is
+copied verbatim into an importable module, so the tests execute shipped bytes rather than a
+paraphrase. Two limits on that claim, stated because the earlier draft of this ADR overstated it:
+the projection covers only what lies between the markers, so **`export const meta` and the file
+header are outside the coverage set** and are gated instead by an example that evaluates the whole
+file the way the harness does (proving it parses) and one that evaluates the `meta` literal and
+checks its phase titles against the `phase()` calls; and coverage proves a line *ran*, not that it
+was asserted on.
 
 **Textual pins survive only where prose IS the implementation.**
 `spec/resolve_alerts_dispatch_spec.sh` keeps the pins on model-executed behavior — the
