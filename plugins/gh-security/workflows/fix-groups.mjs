@@ -48,7 +48,7 @@ const RESULT_SCHEMA = {
   required: [
     'status', 'package', 'major_line', 'repo', 'branch', 'pr_url', 'action',
     'resolved_version', 'risk', 'observations', 'requires_major_bump',
-    'bare_override', 'no_op', 'failure',
+    'bare_override', 'no_op', 'failure', 'cleanup',
   ],
   properties: {
     status: { enum: ['success', 'no-op', 'failure'] },
@@ -119,6 +119,31 @@ const RESULT_SCHEMA = {
           enum: ['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr'],
         },
         detail: { type: 'string' },
+      },
+    },
+    // `fix-group.sh cleanup` runs AFTER the commit, push and `gh pr create`,
+    // and exits 3 when it leaves a worktree behind. That failure can follow
+    // completed work, so it is reported here rather than through `failure`:
+    // null when cleanup finished with no errors, otherwise the driver's own
+    // cleanup report (minus its `status`/`step`).
+    //
+    // **This must be permitted alongside every status, success included.**
+    // Forcing a cleanup error into the `failure` branch would make the agent
+    // choose between reporting `success` and hiding the leak — the exact
+    // thing `exit 3` exists to prevent — or reporting `failure`, which hides
+    // a real open PR from phase 7 AND suppresses `post-agent.sh`'s reap,
+    // since that only reaps a verified-open PR from a `success`. The leak
+    // would then be missed by the second line of defence too. So the `oneOf`
+    // branches below deliberately say nothing about `cleanup`.
+    cleanup: {
+      type: ['object', 'null'],
+      required: ['worktree', 'work_dir', 'branch', 'errors'],
+      properties: {
+        worktree: { type: 'object' },
+        work_dir: { type: 'object' },
+        branch: { type: 'string' },
+        errors: { type: 'array', items: { type: 'string' } },
+        detail: { type: ['string', 'null'] },
       },
     },
   },
@@ -216,6 +241,36 @@ function validateArgs(a) {
   }
   if (typeof a.cap !== 'number' || !(a.cap >= 1)) {
     throw new Error('args.cap must be a number >= 1, from detect-capacity.sh')
+  }
+  // pairEntry compares four group fields against what the agent reports back.
+  // An absent one is `undefined`, so every comparison is false, every entry
+  // is mispaired and nulled, and phase 7 reports a whole batch of crashed
+  // agents over a run in which every pull request was opened — with the reap
+  // never running. That is the same silent, inverted report the guards above
+  // exist to refuse, so the fields pairEntry depends on are checked here too,
+  // naming the index and the field rather than failing downstream.
+  for (let i = 0; i < a.dispatches.length; i += 1) {
+    const d = a.dispatches[i]
+    const g = d && d.group
+    if (!g || typeof g !== 'object') {
+      throw new Error('args.dispatches[' + i + '].group is missing; every dispatch carries that group JSON verbatim')
+    }
+    const named = ['package', 'repo', 'branch_name']
+    for (let k = 0; k < named.length; k += 1) {
+      const field = named[k]
+      if (typeof g[field] !== 'string' || !g[field].length) {
+        throw new Error('args.dispatches[' + i + '].group.' + field
+          + ' must be a non-empty string; the result identity check compares it against what the agent reports')
+      }
+    }
+    // `major_line` may arrive as a number (6) rather than a string ("6.x"):
+    // the layer that builds these payloads accepts and coerces one, so
+    // refusing it here would reject a payload the rest of the stack handles.
+    const line = g.major_line
+    if (!(typeof line === 'number' || (typeof line === 'string' && line.length))) {
+      throw new Error('args.dispatches[' + i
+        + '].group.major_line must be a non-empty string or a number; the result identity check compares it against what the agent reports')
+    }
   }
 }
 

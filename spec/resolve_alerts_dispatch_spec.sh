@@ -342,6 +342,50 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
   End
 
+  Describe 'the cleanup report a shipped PR can still carry'
+    # fix-group.sh cleanup runs after the commit, push and gh pr create, and
+    # exits 3 when it leaves a worktree behind. A success carrying a cleanup
+    # report is the expected shape, and burying it would hide exactly the
+    # leak that exit code exists to surface.
+    It 'reports every non-null cleanup alongside the reap accounting'
+      When call blob_in "$SKILL" 'report every non-null .cleanup. on a result, in the same breath'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'singles out a success whose cleanup failed'
+      When call blob_in "$SKILL" 'A .success. with a non-null .cleanup. is the case to say out loud'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'refuses to report a leaked worktree as a failed group'
+      When call blob_in "$SKILL" 'never as a failed group, and never let the leak go unmentioned'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The two sources must be related, not printed twice: left_behind stays
+    # the key, cleanup explains it and covers what the reap never saw.
+    It 'relates cleanup to post-agent.sh left_behind rather than duplicating it'
+      When call blob_in "$SKILL" 'two views of the same disk, not two lists to print twice'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps left_behind as the key and cleanup as the explanation'
+      When call blob_in "$SKILL" 'key the report on .left_behind., as above, and use .cleanup. to explain it'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the case where the reap cleared what the agent could not'
+      When call blob_in "$SKILL" 'the reap cleared what the agent could not'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   Describe 'the phase 6 rules that survive the rewrite'
     # These predate #175 and are not pool bookkeeping: they are facts about
     # the repository and the batch that hold however dispatch is scheduled.

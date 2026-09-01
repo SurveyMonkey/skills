@@ -762,6 +762,24 @@ at a stable path and comes off by hand with `git -C <repo_root> worktree remove 
 no agent is in flight, but only if this summary says it is there. Nothing left behind is a failure
 on its own; a run that left nothing behind anywhere says so in one line.
 
+**And report every non-null `cleanup` on a result, in the same breath.** The fix driver's own
+cleanup runs *after* the commit, push and PR creation, so it can fail over completed work: a
+result carrying a `cleanup` report left a worktree, a work directory or a branch behind inside the
+agent, whatever its `status` says. **A `success` with a non-null `cleanup` is the case to say out
+loud** — the pull request is real and open, and a worktree leaked anyway. Report it as a shipped
+PR with a leaked artifact, never as a failed group, and never let the leak go unmentioned because
+the group otherwise succeeded.
+
+These are two views of the same disk, not two lists to print twice. The agent's `cleanup` is what
+the agent's *own* cleanup could not remove; `post-agent.sh`'s `left_behind` is what the
+orchestrator's reap found still there afterwards, and on a `success` it runs after the agent has
+already tried. So **key the report on `left_behind`, as above, and use `cleanup` to explain it and
+to catch what `left_behind` cannot see**: a path the reap was never asked about, and the driver's
+own `errors[]` and `detail`, which say why the removal failed. Where both name the same path, say
+it once, with the reason from `cleanup`. Where `cleanup` is non-null and `left_behind` came back
+empty, the reap cleared what the agent could not — say that too, in a clause, because it is the
+one case where a leak resolved itself.
+
 **Then, when phase 5's clone destination was the temporary one, decide whether it can be
 removed.** The condition is the one that gates the reap, for the same reason: **a group whose
 agent ended without a verified open PR has nothing on the remote**, so its worktree and its branch

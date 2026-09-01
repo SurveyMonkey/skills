@@ -15,8 +15,10 @@ import { describe, expect, it } from 'vitest'
 import Ajv from 'ajv'
 
 import {
+  cleanupReport,
   dispatch,
   failureResult,
+  stripCommentsAndStrings,
   noOpResult,
   runWorkflow,
   successResult,
@@ -90,6 +92,100 @@ describe('validateArgs', () => {
 
   it('refuses a bad dispatches list before it looks at cap', () => {
     expect(() => validateArgs({ dispatches: [] })).toThrow(/args\.dispatches/)
+  })
+
+  // pairEntry compares four group fields against what the agent reports. An
+  // absent one is undefined, so every comparison is false, every entry is
+  // mispaired and nulled, and phase 7 reports a whole batch of crashed agents
+  // over a run in which every PR opened — with the reap never running. Before
+  // this guard, a payload missing branch_name did exactly that silently.
+  describe('the group fields the identity check depends on', () => {
+    const ok = { cap: 2 }
+
+    it('accepts a well-formed group', () => {
+      expect(() => validateArgs({ ...ok, dispatches: [dispatch()] })).not.toThrow()
+    })
+
+    for (const [name, group] of [
+      ['a missing group', undefined],
+      ['a null group', null],
+      ['a group that is not an object', 'undici 6.x'],
+    ]) {
+      it(`refuses ${name}`, () => {
+        const d = dispatch()
+        d.group = group
+        expect(() => validateArgs({ ...ok, dispatches: [d] })).toThrow(/group is missing/)
+      })
+    }
+
+    it('refuses a null dispatch entry', () => {
+      expect(() => validateArgs({ ...ok, dispatches: [null] })).toThrow(/dispatches\[0\]\.group is missing/)
+    })
+
+    for (const field of ['package', 'repo', 'branch_name']) {
+      it(`refuses a group with no ${field}`, () => {
+        const d = dispatch()
+        delete d.group[field]
+        expect(() => validateArgs({ ...ok, dispatches: [d] }))
+          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+      })
+
+      it(`refuses a group whose ${field} is empty`, () => {
+        const d = dispatch({ group: { [field]: '' } })
+        expect(() => validateArgs({ ...ok, dispatches: [d] }))
+          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+      })
+
+      it(`refuses a group whose ${field} is not a string`, () => {
+        const d = dispatch({ group: { [field]: 7 } })
+        expect(() => validateArgs({ ...ok, dispatches: [d] }))
+          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+      })
+    }
+
+    // major_line is the one field that may legitimately arrive as a number:
+    // the layer building these payloads accepts and coerces one, so refusing
+    // it here would reject a payload the rest of the stack handles.
+    it('accepts a numeric major_line', () => {
+      const d = dispatch({ group: { major_line: 6 } })
+      expect(() => validateArgs({ ...ok, dispatches: [d] })).not.toThrow()
+    })
+
+    for (const [name, line] of [
+      ['absent', undefined],
+      ['empty', ''],
+      ['null', null],
+      ['an object', { major: 6 }],
+    ]) {
+      it(`refuses a major_line that is ${name}`, () => {
+        const d = dispatch({ group: { major_line: line } })
+        if (line === undefined) delete d.group.major_line
+        expect(() => validateArgs({ ...ok, dispatches: [d] }))
+          .toThrow(/group\.major_line must be a non-empty string or a number/)
+      })
+    }
+
+    // The index is what makes a 33-group batch diagnosable.
+    it('names the offending index, not just the field', () => {
+      const bad = dispatch()
+      delete bad.group.branch_name
+      expect(() => validateArgs({ ...ok, dispatches: [dispatch(), dispatch(), bad] }))
+        .toThrow(/dispatches\[2\]\.group\.branch_name/)
+    })
+
+    // The whole point: this must fail loudly rather than produce a batch of
+    // nulls that phase 7 reads as crashed agents.
+    it('refuses before dispatching anything, rather than nulling the batch', async () => {
+      const seen = []
+      const bad = dispatch()
+      delete bad.group.branch_name
+      await expect(runWorkflow({
+        main,
+        args: { cap: 1, dispatches: [bad] },
+        agent: (p2, o, i) => { seen.push(i); return successResult() },
+      })).rejects.toThrow(/branch_name/)
+      expect(seen).toHaveLength(0)
+    })
   })
 })
 
@@ -265,6 +361,70 @@ describe('RESULT_SCHEMA, executed', () => {
   // The agent contract nulls resolved_version on failure and requires it on a
   // no-op. Both directions, because leaving either unconstrained lets a
   // result claim something the doc forbids.
+  // `fix-group.sh cleanup` runs after the PR is created and exits 3 when it
+  // leaves a worktree behind, so a cleanup error can follow completed work.
+  // Forcing it into the `failure` branch would make the agent choose between
+  // hiding the leak and hiding a real open PR — and hiding the PR also
+  // suppresses post-agent.sh's reap, which only reaps a verified-open PR
+  // from a success. Every branch must therefore permit a report.
+  describe('the cleanup field', () => {
+    it('requires the field to be present, even when it is null', () => {
+      const r = successResult()
+      delete r.cleanup
+      expect(accepts(r)).toBe(false)
+    })
+
+    for (const [name, build] of [
+      ['success', successResult],
+      ['no-op', noOpResult],
+      ['failure', failureResult],
+    ]) {
+      it(`accepts a ${name} with no cleanup error`, () => {
+        expect(accepts(build({ cleanup: null })), JSON.stringify(validate.errors)).toBe(true)
+      })
+
+      it(`accepts a ${name} carrying a cleanup report`, () => {
+        const r = build({ cleanup: cleanupReport() })
+        expect(accepts(r), JSON.stringify(validate.errors)).toBe(true)
+      })
+    }
+
+    // The shape the contract actually maps: a PR shipped, then cleanup
+    // failed. This must validate as a SUCCESS with a live pr_url, or the
+    // reap never runs on a group that really does have an open PR.
+    it('accepts the shipped-PR-then-failed-cleanup shape as a success', () => {
+      const r = successResult({ cleanup: cleanupReport() })
+      expect(accepts(r), JSON.stringify(validate.errors)).toBe(true)
+      expect(r.pr_url).toBeTruthy()
+      expect(r.failure).toBeNull()
+    })
+
+    // The other half of the mapping: cleanup failed and nothing shipped.
+    it('accepts the no-PR cleanup failure as a worktree-phase failure', () => {
+      const r = failureResult({
+        failure: { phase: 'worktree', detail: 'cleanup left a worktree behind' },
+        cleanup: cleanupReport(),
+      })
+      expect(accepts(r), JSON.stringify(validate.errors)).toBe(true)
+    })
+
+    for (const field of ['worktree', 'work_dir', 'branch', 'errors']) {
+      it(`rejects a cleanup report with no ${field}`, () => {
+        const report = cleanupReport()
+        delete report[field]
+        expect(accepts(successResult({ cleanup: report }))).toBe(false)
+      })
+    }
+
+    it('rejects a cleanup report whose errors are not strings', () => {
+      expect(accepts(successResult({ cleanup: cleanupReport({ errors: [{ msg: 'x' }] }) }))).toBe(false)
+    })
+
+    it('rejects a cleanup field that is neither an object nor null', () => {
+      expect(accepts(successResult({ cleanup: 'left a worktree' }))).toBe(false)
+    })
+  })
+
   it('rejects a failure carrying a resolved_version', () => {
     expect(accepts(failureResult({ resolved_version: '6.28.0' }))).toBe(false)
   })
@@ -739,14 +899,40 @@ describe('the projection is the shipped file', () => {
     expect(await workflowSource()).not.toMatch(/^\s*import\s/m)
   })
 
+  // The stripper the purity check depends on. Without these, it recognised
+  // only single-quoted strings, so an error message rewritten with double
+  // quotes or a template literal — both of which name `args.dispatches` for
+  // the caller — would fail the suite on prose rather than on a real use.
+  describe('the stripper the purity check depends on', () => {
+    for (const [form, code] of [
+      ['single-quoted', "const m = 'args.cap must be a number'"],
+      ['double-quoted', 'const m = "args.cap must be a number"'],
+      ['a template literal', 'const m = `args.dispatches[${i}] is bad`'],
+    ]) {
+      it(`strips ${form} strings`, () => {
+        expect(stripCommentsAndStrings(code)).not.toMatch(/\bargs\b/)
+      })
+    }
+
+    it('strips line comments', () => {
+      expect(stripCommentsAndStrings('  // args.cap is the width\nconst x = 1'))
+        .not.toMatch(/\bargs\b/)
+    })
+
+    // And does NOT hide a real use, which is the whole point.
+    it('leaves an actual use of the global visible', () => {
+      expect(stripCommentsAndStrings('const n = args.dispatches.length')).toMatch(/\bargs\b/)
+      expect(stripCommentsAndStrings("const n = args.dispatches.length // 'args'"))
+        .toMatch(/\bargs\b/)
+    })
+  })
+
   it('keeps the pure region free of every harness global', async () => {
     const src = await workflowSource()
     // Strip line comments and single-quoted strings, so neither a prose
     // mention of `agent()` nor an error message naming `args.cap` for the
     // caller's benefit reads as a USE of the global.
-    const code = region(src, PURE_BEGIN, PURE_END)
-      .replace(/^\s*\/\/.*$/gm, '')
-      .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    const code = stripCommentsAndStrings(region(src, PURE_BEGIN, PURE_END))
     for (const [name, use] of [
       ['agent', /\bagent\s*\(/],
       ['parallel', /\bparallel\s*\(/],

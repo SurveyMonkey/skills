@@ -47,6 +47,19 @@ export async function runWorkflow({ args, agent, main, logs = [] }) {
   return { entries, calls, logs, phases }
 }
 
+// Strip comments and EVERY string form, so the purity check below tests what
+// the code USES rather than what its prose and error messages mention. All
+// three quote forms matter: the messages that name `args.dispatches` for the
+// caller's benefit are written in one of them today, and a contributor
+// rewriting one as a template literal must not fail the suite for it.
+export function stripCommentsAndStrings(text) {
+  return text
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+}
+
 // A result that satisfies RESULT_SCHEMA, as the base for mutation in the
 // schema examples. Overrides are shallow-merged so an example states only the
 // field it is about.
@@ -66,6 +79,7 @@ export function successResult(over = {}) {
     bare_override: 'none',
     no_op: null,
     failure: null,
+    cleanup: null,
     ...over,
   }
 }
@@ -86,6 +100,7 @@ export function failureResult(over = {}) {
     bare_override: 'none',
     no_op: null,
     failure: { phase: 'install', detail: 'install failed' },
+    cleanup: null,
     ...over,
   }
 }
@@ -106,6 +121,24 @@ export function noOpResult(over = {}) {
     bare_override: 'none',
     no_op: { reason: 'already fixed on main', evidence: { diff: '' } },
     failure: null,
+    cleanup: null,
+    ...over,
+  }
+}
+
+// A `fix-group.sh cleanup` report as the driver emits it on exit 3, minus
+// the `status`/`step` the Result contract strips. Trimmed from the driver's
+// own jq output rather than invented.
+export function cleanupReport(over = {}) {
+  return {
+    worktree: { path: '/w/app/.claude/worktrees/fix-dependabot-undici-6x', action: 'left' },
+    work_dir: { path: '/w/app/.claude/worktrees/fix-dependabot-undici-6x/.work', action: 'removed' },
+    branch: 'fix/dependabot-undici-6x',
+    branch_deleted: false,
+    branch_tip: null,
+    reason: null,
+    detail: 'git worktree remove refused the path',
+    errors: ['git worktree remove failed: fatal: validation failed, cannot remove working tree'],
     ...over,
   }
 }
