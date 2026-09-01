@@ -109,7 +109,7 @@ describe('validateArgs', () => {
     for (const [name, group] of [
       ['a missing group', undefined],
       ['a null group', null],
-      ['a group that is not an object', 'undici 6.x'],
+      ['a group that is not an object', 'undici 6'],
     ]) {
       it(`refuses ${name}`, () => {
         const d = dispatch()
@@ -239,7 +239,7 @@ describe('the dispatch payload', () => {
   })
 
   it('labels each agent by repo, package and line', () => {
-    expect(agentLabel(dispatch())).toBe('octo/app undici 6.x')
+    expect(agentLabel(dispatch())).toBe('octo/app undici 6')
   })
 })
 
@@ -258,7 +258,7 @@ describe('pairEntry', () => {
   // lose one and still pass a test that only ever varies the first.
   for (const [field, value] of [
     ['package', 'sharp'],
-    ['major_line', '7.x'],
+    ['major_line', '7'],
     ['repo', 'octo/other'],
     // The branch is what the reap acts on, so a result naming a different
     // one is the most dangerous mismatch of the four, not the least.
@@ -413,6 +413,55 @@ describe('RESULT_SCHEMA, executed', () => {
         const report = cleanupReport()
         delete report[field]
         expect(accepts(successResult({ cleanup: report }))).toBe(false)
+      })
+    }
+
+    // Layer 1 confirms worktree and work_dir are each {path, action}, and the
+    // path is the RESOLVED one the driver acted on. Phase 7 correlates on it,
+    // so a report that omits either field would leave the orchestrator
+    // comparing undefined against post-agent.sh's derived path.
+    for (const container of ['worktree', 'work_dir']) {
+      for (const field of ['path', 'action']) {
+        it(`rejects a cleanup report whose ${container} has no ${field}`, () => {
+          const report = cleanupReport()
+          delete report[container][field]
+          expect(accepts(successResult({ cleanup: report }))).toBe(false)
+        })
+      }
+
+      it(`rejects a cleanup report whose ${container} path is not a string`, () => {
+        const report = cleanupReport()
+        report[container].path = { path: '/w' }
+        expect(accepts(successResult({ cleanup: report }))).toBe(false)
+      })
+    }
+
+    // The resolved form is what the driver really emits; the schema must not
+    // quietly require the dispatched spelling.
+    it('accepts the resolved path form the driver emits', () => {
+      const report = cleanupReport()
+      expect(report.worktree.path.startsWith('/private/')).toBe(true)
+      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(true)
+    })
+
+    // The remaining keys layer 1 names. Typed but not required: the driver
+    // emits all eight today, and requiring the three that carry no structural
+    // meaning here would reject a trimmed-but-usable report for nothing.
+    it('accepts the full eight-key report the driver emits', () => {
+      const report = cleanupReport()
+      expect(Object.keys(report).sort()).toEqual([
+        'branch', 'branch_deleted', 'branch_tip', 'detail', 'errors', 'reason', 'work_dir', 'worktree',
+      ])
+      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(true)
+    })
+
+    for (const [field, bad] of [
+      ['branch_deleted', 'no'],
+      ['branch_tip', 7],
+      ['reason', 7],
+    ]) {
+      it(`rejects a cleanup report whose ${field} is mistyped`, () => {
+        expect(accepts(successResult({ cleanup: cleanupReport({ [field]: bad }) }))).toBe(false)
       })
     }
 

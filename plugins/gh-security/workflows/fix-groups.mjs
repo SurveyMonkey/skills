@@ -135,13 +135,32 @@ const RESULT_SCHEMA = {
     // since that only reaps a verified-open PR from a `success`. The leak
     // would then be missed by the second line of defence too. So the `oneOf`
     // branches below deliberately say nothing about `cleanup`.
+    //
+    // `worktree.path` and `work_dir.path` are the paths the driver RESOLVED
+    // and acted on, which can differ textually from the ones the orchestrator
+    // dispatched (`/private/var/...` against `/var/...` on macOS is the
+    // specimen). Anything correlating them with a path built anywhere else —
+    // `post-agent.sh` derives its own, unresolved — must resolve or
+    // suffix-match rather than compare strings, or one leaked directory reads
+    // as two.
     cleanup: {
       type: ['object', 'null'],
       required: ['worktree', 'work_dir', 'branch', 'errors'],
       properties: {
-        worktree: { type: 'object' },
-        work_dir: { type: 'object' },
+        worktree: {
+          type: 'object',
+          required: ['path', 'action'],
+          properties: { path: { type: 'string' }, action: { type: 'string' } },
+        },
+        work_dir: {
+          type: 'object',
+          required: ['path', 'action'],
+          properties: { path: { type: 'string' }, action: { type: 'string' } },
+        },
         branch: { type: 'string' },
+        branch_deleted: { type: 'boolean' },
+        branch_tip: { type: ['string', 'null'] },
+        reason: { type: ['string', 'null'] },
         errors: { type: 'array', items: { type: 'string' } },
         detail: { type: ['string', 'null'] },
       },

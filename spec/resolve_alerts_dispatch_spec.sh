@@ -384,6 +384,48 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The status should be success
       The output should equal '1'
     End
+
+    # Layer 1's handoff: the reap must still run on a success whose cleanup
+    # failed. Gating it on `cleanup == null` would skip exactly the groups
+    # whose leftovers the agent already failed to remove.
+    It 'never gates the reap on cleanup being null'
+      When call blob_in "$SKILL" 'A non-null .cleanup. on the result never changes whether this call runs'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says a leaked success is the group that most needs reaping'
+      When call blob_in "$SKILL" 'exactly the group whose leftovers most need collecting'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The driver reports RESOLVED paths; post-agent.sh derives an unresolved
+    # one. On macOS that is /private/var against /var for one directory, so a
+    # string comparison reports one leak as two.
+    It 'warns that the same directory is not the same string'
+      When call blob_in "$SKILL" 'The same path. is not the same string'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the consequence of comparing the two as text'
+      When call blob_in "$SKILL" 'comparing them as text reports one leaked worktree as two'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'prescribes suffix matching or resolution before comparing'
+      When call blob_in "$SKILL" 'Match on suffix, or resolve both before.*comparing'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reports one artifact when the two agree, showing the resolved path'
+      When call blob_in "$SKILL" 'the resolved path is the one to show'
+      The status should be success
+      The output should equal '1'
+    End
   End
 
   Describe 'the phase 6 rules that survive the rewrite'

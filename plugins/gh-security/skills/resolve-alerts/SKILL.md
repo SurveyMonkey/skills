@@ -599,6 +599,12 @@ whatever the outcome. **An agent that ended any other way is never reaped**: a f
 crash, an unparseable or missing result block, a `no-op`, or a PR that is not open all leave the
 worktree and the branch in place, and the report names them (`reaped: false`, with `reason` and the
 derived `worktree_path`/`branch`) for phase 7 rather than this phase guessing at what survived.
+**A non-null `cleanup` on the result never changes whether this call runs.** A `success` whose
+`cleanup` reports a leak is still a success with an open pull request, and it is exactly the group
+whose leftovers most need collecting — the agent's own cleanup already failed on them. Reaping is
+gated on the pull request reading `OPEN`, as above, and on nothing else; a `cleanup == null`
+condition added here would skip precisely the runs this second line of defence exists for.
+
 **A failure here is not fatal**: record the report, move to the next entry, and carry on. A reap
 that could not finish must never stall the run, and neither does one that printed nothing at all — a
 rejected argument or a refused path in the reap it runs internally — which the script turns into a
@@ -779,6 +785,15 @@ own `errors[]` and `detail`, which say why the removal failed. Where both name t
 it once, with the reason from `cleanup`. Where `cleanup` is non-null and `left_behind` came back
 empty, the reap cleared what the agent could not — say that too, in a clause, because it is the
 one case where a leak resolved itself.
+
+**"The same path" is not the same string.** `cleanup`'s `worktree.path` and `work_dir.path` are
+the paths the driver **resolved** and acted on, while `post-agent.sh` derives its own from
+`<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x` and never resolves it.
+On macOS the same directory is `/private/var/...` in one and `/var/...` in the other, so comparing
+them as text reports one leaked worktree as two. **Match on suffix, or resolve both before
+comparing**, and when they agree report a single artifact — the resolved path is the one to show
+the user, since it is what a `git worktree remove` will act on. Two paths that genuinely differ
+after that are two artifacts and both get named.
 
 **Then, when phase 5's clone destination was the temporary one, decide whether it can be
 removed.** The condition is the one that gates the reap, for the same reason: **a group whose

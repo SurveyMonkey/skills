@@ -67,7 +67,7 @@ export function successResult(over = {}) {
   return {
     status: 'success',
     package: 'undici',
-    major_line: '6.x',
+    major_line: '6',
     repo: 'octo/app',
     branch: 'fix/dependabot-undici-6x',
     pr_url: 'https://github.com/octo/app/pull/1',
@@ -88,7 +88,7 @@ export function failureResult(over = {}) {
   return {
     status: 'failure',
     package: 'undici',
-    major_line: '6.x',
+    major_line: '6',
     repo: 'octo/app',
     branch: 'fix/dependabot-undici-6x',
     pr_url: null,
@@ -109,7 +109,7 @@ export function noOpResult(over = {}) {
   return {
     status: 'no-op',
     package: 'undici',
-    major_line: '6.x',
+    major_line: '6',
     repo: 'octo/app',
     branch: 'fix/dependabot-undici-6x',
     pr_url: null,
@@ -131,8 +131,11 @@ export function noOpResult(over = {}) {
 // own jq output rather than invented.
 export function cleanupReport(over = {}) {
   return {
-    worktree: { path: '/w/app/.claude/worktrees/fix-dependabot-undici-6x', action: 'left' },
-    work_dir: { path: '/w/app/.claude/worktrees/fix-dependabot-undici-6x/.work', action: 'removed' },
+    // Resolved paths, as the driver emits them: on macOS the same directory
+    // the orchestrator dispatched as /w/... comes back as /private/w/...,
+    // which is why nothing may correlate these by string equality.
+    worktree: { path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x', action: 'left' },
+    work_dir: { path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x/.work', action: 'removed' },
     branch: 'fix/dependabot-undici-6x',
     branch_deleted: false,
     branch_tip: null,
@@ -148,7 +151,7 @@ export function dispatch(over = {}) {
   const group = {
     repo: 'octo/app',
     package: 'undici',
-    major_line: '6.x',
+    major_line: '6',
     branch_name: 'fix/dependabot-undici-6x',
     ...(over.group || {}),
   }
