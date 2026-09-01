@@ -218,6 +218,20 @@ JSON
         The status should be success
         The output should equal "[\"$2\"]"
       End
+
+      # `advisory_verdict` carries the script's own word, never the status it
+      # routed to: `inconclusive` is not a value check-advisories.sh emits, so
+      # collapsing onto it loses the difference between `unknown` (a range
+      # could not be read) and `no-advisories` (the query returned nothing).
+      It "carries the $1 verdict through verbatim, with the advisory count"
+        prepare
+        one_tested
+        adv_verdict 'lodash@4.17.19' "$1" 4 '["<4.17.20"]'
+        When call drv_jq '{av: .findings[0].advisory_verdict, ac: .findings[0].advisory_count}' \
+          judge --work "$WORK"
+        The status should be success
+        The output should equal "{\"av\":\"$1\",\"ac\":4}"
+      End
     End
 
     # A pin is removable only when EVERY version in the delta comes back safe.
@@ -267,6 +281,42 @@ JSON
       The status should equal 3
       The output should equal '{"status":"failure","phase":"advisories"}'
       The stderr should include 'describes the tooling and not the package'
+    End
+
+    # The same contract discipline the adapter verbs get, applied to the one
+    # script whose answer becomes the removal recommendation. Read straight, an
+    # absent `adapter_errors` arrives as the string "null", whose `// []`
+    # default is indistinguishable from an empty one — and that default is the
+    # test standing between a broken adapter and an audit of `inconclusive`
+    # verdicts with nothing naming the cause.
+    Describe 'a promised check-advisories.sh field that is absent is a hard error'
+      Parameters
+        verdict
+        advisory_count
+        matched_ranges
+        unevaluated_ranges
+        adapter_errors
+      End
+
+      It "fails phase advisories naming an absent $1"
+        prepare
+        one_tested
+        jq -c "del(.$1)" "$MOCK_DIR/adv/default.json" > "$MOCK_DIR/adv/lodash@4.17.19.json"
+        When call drv_jq '{status, phase}' judge --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"advisories"}'
+        The stderr should include "no '$1'"
+      End
+    End
+
+    It 'fails when check-advisories.sh exits 0 with empty stdout'
+      prepare
+      one_tested
+      : > "$MOCK_DIR/adv/lodash@4.17.19.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'no JSON object on stdout'
     End
 
     It 'keeps an honest unknown as the inconclusive finding the table names'
@@ -373,6 +423,32 @@ ADV readable-stream 2.3.8'
       The output should include '"cv":"vulnerable"'
       The output should include 'readable-stream 2.3.8'
       The output should include 'not required for lodash'
+    End
+
+    # `advisory_verdict`, `advisory_count` and `matched_ranges` come from
+    # check-advisories.sh verbatim FOR THE TESTED PACKAGE; a collateral
+    # package's result lives in `collateral_verdict` and is never folded into
+    # them. Folded, a pin whose own delta came back `safe` reported
+    # `advisory_verdict: "vulnerable"` with `matched_ranges: []` — "this
+    # package is vulnerable, ranges unstated", which is exactly the wrong-place
+    # reading `detail` exists to prevent.
+    It 'never folds the collateral verdict into the tested package advisory fields'
+      prepare
+      with_collateral
+      adv_verdict 'readable-stream@2.3.8' vulnerable 2 '["<3"]'
+      When call drv_jq '{s: .findings[0].status, av: .findings[0].advisory_verdict, mr: .findings[0].matched_ranges, cv: .findings[0].collateral_verdict}' \
+        judge --work "$WORK"
+      The status should be success
+      The output should equal '{"s":"still-required","av":"safe","mr":[],"cv":"vulnerable"}'
+    End
+
+    It 'keeps the tested package own verdict when a collateral turns it inconclusive'
+      prepare
+      with_collateral
+      adv_verdict 'readable-stream@2.3.8' no-advisories 0 '[]'
+      When call drv_jq '{s: .findings[0].status, av: .findings[0].advisory_verdict}' judge --work "$WORK"
+      The status should be success
+      The output should equal '{"s":"inconclusive","av":"safe"}'
     End
 
     It 'turns an unknown collateral into an inconclusive pin'
@@ -504,12 +580,20 @@ ADV readable-stream 2.3.8'
 
   # -------------------------------------------------------------------------
   Describe 'together (phase 7)'
+    # Seeding findings stands in for a completed `judge`, so it sets the flag
+    # `judge` sets. The guard itself is asserted below.
+    mark_judged() {
+      jq -c '.judge_done = true' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+    }
+
     seed_two_removable() {
       seed_findings '[
         {"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare","value":"^4.17.21",
          "status":"removable-individually","sibling_pins":["other"]},
         {"key":"glob","path":["glob","minimatch"],"package":"minimatch","scope":"scoped",
          "value":"^9.0.0","status":"removable","sibling_pins":[]}]'
+      mark_judged
     }
 
     # Nothing was found removable, so there is nothing to open a PR about, and
@@ -518,6 +602,7 @@ ADV readable-stream 2.3.8'
       prepare
       seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash",
         "status":"still-required","sibling_pins":[]}]'
+      mark_judged
       When call drv_jq '{status, pr_skipped_reason}' together --work "$WORK"
       The status should be success
       The output should equal '{"status":"no_candidates","pr_skipped_reason":"no removable pins found"}'
@@ -629,6 +714,7 @@ JSON
       adv_verdict 'lodash@4.17.19' vulnerable 4 '["<4.17.20"]'
       seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
         "value":"^4.17.21","status":"removable-individually","sibling_pins":["other"]}]'
+      mark_judged
       When call drv_jq '{status, pr_skipped_reason, d: .pr_skipped_detail}' together --work "$WORK"
       The status should be success
       The output should include '"pr_skipped_reason":"combined test failed"'
@@ -656,6 +742,76 @@ JSON
       The status should equal 3
       The output should equal '{"status":"failure","phase":"compose"}'
       The stderr should include 'still carries the candidate key'
+    End
+
+    # Before `judge` runs every finding still carries status "tested", so the
+    # candidate set is empty and this step would terminate exit 0 with
+    # "no removable pins found" — a claim about work that never happened,
+    # which the agent reports as a successful audit.
+    It 'refuses to run before judge, rather than reporting no removable pins'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"tested","tested":true,"left_tree":false,
+        "attributable_versions":["4.17.19"],"sibling_pins":[]}]'
+      When run script "$DRIVER" together --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'judge' first"
+    End
+
+    It 'installs nothing when judge has not run'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"tested","tested":true,"left_tree":false,
+        "attributable_versions":["4.17.19"],"sibling_pins":[]}]'
+      "$DRIVER" together --work "$WORK" >/dev/null 2>&1 || true
+      When call cat "$MOCK_DIR/install.n"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # With no `removable-individually` finding attempt 2's set IS attempt 1's,
+    # so running it would reinstall the set that just came back dirty and
+    # report the same failure as `attempt: 2` — an install spent proving the
+    # first one again, under a number that says a narrowing happened.
+    It 'runs no second attempt when narrowing has nothing to drop'
+      prepare
+      cat > "$MOCK_DIR/map.2.json" <<'JSON'
+{"pm":"npm","lockfile_entries":4,"entries_read":4,"entries_expected":4,
+ "unreadable_entries":0,"package_count":3,
+ "resolutions":{"lodash":["4.17.19"],"minimatch":["9.0.5"],"express":["4.18.2"]}}
+JSON
+      adv_verdict 'lodash@4.17.19' vulnerable 4 '["<4.17.20"]'
+      seed_findings '[
+        {"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare","value":"^4.17.21",
+         "status":"removable","sibling_pins":[]},
+        {"key":"glob","path":["glob","minimatch"],"package":"minimatch","scope":"scoped",
+         "value":"^9.0.0","status":"removable","sibling_pins":[]}]'
+      mark_judged
+      When call drv_jq '{status, attempt, d: .pr_skipped_detail}' together --work "$WORK"
+      The status should be success
+      The output should include '"attempt":1'
+      The output should include 'narrowing had nothing to drop'
+    End
+
+    It 'spends only one combined install when narrowing has nothing to drop'
+      prepare
+      cat > "$MOCK_DIR/map.2.json" <<'JSON'
+{"pm":"npm","lockfile_entries":4,"entries_read":4,"entries_expected":4,
+ "unreadable_entries":0,"package_count":3,
+ "resolutions":{"lodash":["4.17.19"],"minimatch":["9.0.5"],"express":["4.18.2"]}}
+JSON
+      adv_verdict 'lodash@4.17.19' vulnerable 4 '["<4.17.20"]'
+      seed_findings '[
+        {"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare","value":"^4.17.21",
+         "status":"removable","sibling_pins":[]},
+        {"key":"glob","path":["glob","minimatch"],"package":"minimatch","scope":"scoped",
+         "value":"^9.0.0","status":"removable","sibling_pins":[]}]'
+      mark_judged
+      "$DRIVER" together --work "$WORK" >/dev/null
+      When call cat "$MOCK_DIR/install.n"
+      The status should be success
+      The output should equal '2'
     End
 
     # A partial view of the tree fails the attempt closed, never into a PR.
@@ -713,6 +869,18 @@ JSON
       The status should equal 1
       The stdout should include '"error"'
       The stderr should include 'not a readable JSON object'
+    End
+
+    # The sibling of together's guard: with no findings recorded, an empty
+    # judgment reported as ok is indistinguishable from an audit that tested
+    # every pin and kept them all.
+    It 'refuses judge before baseline has run'
+      make_env
+      do_list
+      When run script "$DRIVER" judge --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'baseline' and 'test-pin' first"
     End
 
     It 'refuses a state file with no usable worktree'

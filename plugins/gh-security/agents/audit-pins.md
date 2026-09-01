@@ -330,6 +330,12 @@ shortcut that makes it one. The driver enforces that; you never batch pins here.
 **Both steps run an install, so give them `timeout: 600000` (10 minutes).** Walk `test_order` in
 the order phase 2 returned it, one call per pin.
 
+**The steps run in order and each refuses to run early**, with an exit 1 `{"error": ...}` that is a
+bug in the call you just made rather than a finding: `test-pin` before `baseline`, `judge` before
+`baseline`, and phase 7's `together` before `judge`. That last one matters most — before `judge`
+every finding still reads `tested`, so an unguarded `together` would find an empty candidate set
+and report `no removable pins found`, a claim about work that never happened.
+
 ### What `baseline` establishes, and the three ways it stops
 
 It asks the adapter for the lockfile **name** (never inferred from `pm`: the mapping is the
@@ -430,7 +436,10 @@ do not report the worktree as clean. In `pr` mode there is a commit to make, so 
 
 **`collateral_changes: null` with `collateral_verdict: not-checked` means nobody looked**, and the
 driver reports it whenever the map is unavailable **or** its `unreadable_entries` is non-zero on
-either snapshot. `unreadable_entries` counts the lockfile entries the parser could not read at
+either snapshot. `collateral_not_checked_reason` says which of the three it was — the adapter does
+not implement `resolution_map`, a parser refused this repository's lockfile (quoting it), or the
+map was built and could not read N entries — and the report says so rather than "no whole-tree view
+was available", which reads the same for all three while only the second is a defect to chase. `unreadable_entries` counts the lockfile entries the parser could not read at
 all; the parse guard refuses only when the recognized share collapses below half, so one
 unreadable locator passes it — and that entry's package is then missing from *both* snapshots, so
 the diff sees no change for it and `[]` claims nothing else moved. `[]` is the stronger claim, so
@@ -447,9 +456,11 @@ of 26 is 26 packages that moved and "most of them look alike" is not a verdict. 
 is a **platform-binary family**: sibling packages published from a single release of one parent,
 under one scope or name prefix, at **identical** versions, whose only difference is the platform
 triple in the name — `@esbuild/*`, `@rolldown/binding-*`, `lightningcss-*`, `@swc/core-*` and the
-like. The driver checks the three conditions rather than assuming them (same scope or prefix,
-identical `baseline` and `without_pin` across the family, and the family moved as one unit — no
-member of it sitting still elsewhere in the tree), and when any fails it judges every member. When
+like. The driver checks four conditions rather than assuming them: the shared scope or prefix;
+**a real platform triple**, every member's name past that prefix ending in an `<os>-<arch>` pair
+with only libc or ABI tokens after it, which is what keeps `@types/` and `eslint-` out of the rule;
+identical `baseline` and `without_pin` across the family; and the family moved as one unit, with no
+member of it sitting still elsewhere in the tree. When any fails it judges every member. When
 the sample is used, the entry names the member actually judged, the family's size and the shared
 version, and phase 5 reports `collateral_verdict` `sampled-family`. A verdict is worth exactly
 what was checked, so a family verdict that presents itself as 26 checks is the failure this rule
@@ -518,6 +529,12 @@ gives. Its `verdict`:
 | `vulnerable` | at least one advisory range admits this version | `still-required`, naming the ranges |
 | `unknown` | no match, but a range could not be evaluated | `inconclusive`, naming the unreadable range |
 | `no-advisories` | the query succeeded and returned nothing for this package | `inconclusive` |
+
+`advisory_verdict`, `advisory_count` and `matched_ranges` are that script's answer **for the tested
+package**, carried through verbatim. A collateral package's result lives in `collateral_verdict`
+and is never folded into them: folded, a pin whose own delta came back `safe` reported
+`advisory_verdict: "vulnerable"` with `matched_ranges: []`, which reads as "this package is
+vulnerable, ranges unstated" and sends a reader to exactly the wrong place.
 
 **A non-zero exit from `check-advisories.sh` is not a verdict**, and neither is `unknown` with a
 non-empty `adapter_errors[]`: the adapter broke on a range rather than the range being unreadable,

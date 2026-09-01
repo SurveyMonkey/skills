@@ -615,6 +615,44 @@ JSON
       The output should equal '{"c":null,"v":"not-checked"}'
     End
 
+    # The same split `baseline` draws. A `not-checked` that says only "no
+    # whole-tree view was available" reads identically for an adapter that
+    # lacks the verb and for a parser that refused THIS repository's lockfile,
+    # and only the second is a defect to chase.
+    It 'records a per-pin map refusal as a refusal, quoting the adapter'
+      make_env
+      do_list
+      printf '1\n' > "$MOCK_DIR/map.2.status"
+      do_baseline
+      When call drv_jq '{v: .finding.collateral_verdict, r: .finding.collateral_not_checked_reason}' \
+        test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should include '"v":"not-checked"'
+      The output should include 'refused this lockfile'
+      The output should include 'resolution_map: refused'
+    End
+
+    It 'records an unimplemented resolution_map as an unimplemented one'
+      make_env
+      do_list
+      printf '2\n' > "$MOCK_DIR/map.2.status"
+      do_baseline
+      When call drv_jq '.finding.collateral_not_checked_reason' test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should include 'does not implement resolution_map'
+    End
+
+    It 'names the unread entry counts when the map was merely partial'
+      make_env
+      do_list
+      jq -c '.unreadable_entries = 3' "$MOCK_DIR/map.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/map.json"
+      do_baseline
+      When call drv_jq '.finding.collateral_not_checked_reason' test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should include 'could not read 3 lockfile entries'
+    End
+
     It 'falls back to the same narrow claim when resolution_map is unavailable'
       make_env
       do_list
@@ -770,6 +808,66 @@ JSON
         test-pin --work "$WORK" --key lodash
       The status should be success
       The output should equal '["@esbuild/darwin-arm64","@esbuild/linux-x64","@esbuild/win32-x64"]'
+    End
+
+    # A prefix match alone is not a family. `@types/`, `@babel/` and `eslint-`
+    # all group under it, and a two-member scope moving in lockstep is
+    # ordinary — there one member's `safe` verdict would come to stand for a
+    # package nothing judged. The name past the shared prefix has to end in an
+    # <os>-<arch> pair.
+    It 'checks every member of a two-member scope with no platform triple'
+      make_env
+      cat > "$MOCK_DIR/map.json" <<'JSON'
+{"pm":"npm","lockfile_entries":6,"entries_read":6,"entries_expected":6,
+ "unreadable_entries":0,"package_count":4,
+ "resolutions":{"lodash":["4.17.21"],"minimatch":["9.0.5"],
+   "@types/node":["20.1.0"],"@types/react":["20.1.0"]}}
+JSON
+      cat > "$MOCK_DIR/map.2.json" <<'JSON'
+{"pm":"npm","lockfile_entries":6,"entries_read":6,"entries_expected":6,
+ "unreadable_entries":0,"package_count":4,
+ "resolutions":{"lodash":["4.17.21"],"minimatch":["9.0.5"],
+   "@types/node":["20.4.0"],"@types/react":["20.4.0"]}}
+JSON
+      do_list
+      do_baseline
+      When call drv_jq '{judged: [.finding.collateral_changes[] | select(.judged) | .package], fams: .finding.sampled_families}' \
+        test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should equal '{"judged":["@types/node","@types/react"],"fams":[]}'
+    End
+
+    # And the shapes the rule names really do sample: a scope-only triple, a
+    # binding prefix inside the scope, and an unscoped prefix.
+    Describe 'the platform-triple shapes the rule names'
+      # The sampled member leads each row: a first column ending in `/` reads as
+      # a command name to ShellCheck (SC2287), and the family key is the one
+      # value here that ends in one.
+      Parameters
+        '@esbuild/darwin-arm64'          '@esbuild/linux-x64'              '@esbuild/'
+        '@rolldown/binding-darwin-arm64' '@rolldown/binding-linux-x64-gnu' '@rolldown/'
+        'lightningcss-darwin-arm64'      'lightningcss-linux-x64-musl'     'lightningcss-'
+      End
+
+      It "samples the $3 family"
+        make_env
+        jq -cn --arg a "$1" --arg b "$2" '
+          {pm:"npm",lockfile_entries:6,entries_read:6,entries_expected:6,
+           unreadable_entries:0,package_count:4,
+           resolutions:({"lodash":["4.17.21"],"minimatch":["9.0.5"]}
+                        + {($a):["0.21.0"]} + {($b):["0.21.0"]})}' > "$MOCK_DIR/map.json"
+        jq -cn --arg a "$1" --arg b "$2" '
+          {pm:"npm",lockfile_entries:6,entries_read:6,entries_expected:6,
+           unreadable_entries:0,package_count:4,
+           resolutions:({"lodash":["4.17.21"],"minimatch":["9.0.5"]}
+                        + {($a):["0.23.1"]} + {($b):["0.23.1"]})}' > "$MOCK_DIR/map.2.json"
+        do_list
+        do_baseline
+        When call drv_jq '{judged: [.finding.collateral_changes[] | select(.judged) | .package], k: .finding.sampled_families[0].key}' \
+          test-pin --work "$WORK" --key lodash
+        The status should be success
+        The output should equal "{\"judged\":[\"$1\"],\"k\":\"$3\"}"
+      End
     End
 
     It 'never samples a lone package that merely shares a prefix with nothing'

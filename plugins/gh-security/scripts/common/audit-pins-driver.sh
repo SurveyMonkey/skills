@@ -152,8 +152,27 @@ state_get_opt() {
   printf '%s' "$v"
 }
 
-state_getj() {
-  jq -c "$1" "$STATE"
+# Every JSON value read out of the state file goes through this, and there is
+# deliberately no unchecked sibling to reach for.
+#
+# A bare `jq -c "$f" "$STATE"` read through a command substitution drops its
+# status, and a dropped status here is not a small thing: the empty string
+# reaches `jq -n --argjson x ""`, which dies with exit 2 and NO stdout, and
+# exit 2 is this script's own `needs_judgment`. One unreadable state file would
+# therefore arrive at the agent as a judgment escape carrying no
+# `decision_point` and no evidence at all, which is the hazard `require_json`
+# exists for.
+#
+# The value lands in STATE_JSON rather than on stdout for the reason
+# `adapter_field` does the same: `fail_phase` exits, and an exit inside a
+# command substitution ends only the subshell.
+STATE_JSON=""
+
+state_json() {
+  # $1 phase, $2 jq filter, $3 description
+  STATE_JSON=$(jq -c "$2" "$STATE" 2>/dev/null) \
+    || fail_phase "$1" "$3 could not be read out of the state file at $STATE. It is unparseable, truncated, or does not hold the shape the earlier steps wrote; nothing was installed or removed on its say-so."
+  require_json "$1" "$STATE_JSON" "$3"
 }
 
 state_set() {
@@ -302,10 +321,13 @@ override_root_json() {
 #
 # "Remove the whole override block if it is the last entry, and nothing else"
 # is implemented as a prune of every ANCESTOR of the removed path that is left
-# an empty object — deepest first, up to but never including the document
-# itself. That is what turns a last entry into a removed block rather than an
-# empty `"resolutions": {}` left behind, which is the shape a shipped bug in
-# the adapter's own override writer once produced (root CLAUDE.md, SC2086).
+# an empty object — deepest first, **stopping at the override block itself**.
+# That is what turns a last entry into a removed block rather than an empty
+# `"resolutions": {}` left behind, which is the shape a shipped bug in the
+# adapter's own override writer once produced (root CLAUDE.md, SC2086); and
+# stopping there is the "and nothing else" half, since an emptied `pnpm` key
+# above `pnpm.overrides` is not part of the block this audit was asked to
+# edit.
 MANIFEST_EDIT_ERR=""
 
 manifest_remove_paths() {
@@ -316,7 +338,7 @@ manifest_remove_paths() {
   jq --argjson root "$root" --argjson paths "$paths" '
     reduce ($paths[] | ($root + .)) as $full (.;
       delpaths([$full])
-      | reduce range(($full | length) - 1; 0; -1) as $i (.;
+      | reduce range(($full | length) - 1; ($root | length) - 1; -1) as $i (.;
           ($full[0:$i]) as $anc
           | if (getpath($anc) | type) == "object" and (getpath($anc) | length) == 0
             then delpaths([$anc]) else . end))
@@ -459,15 +481,29 @@ advisory_for() {
   # "A non-zero exit from check-advisories.sh is not a verdict."
   [ "$st" -eq 0 ] \
     || fail_phase advisories "check-advisories.sh exited $st for $pkg $version, so there is no verdict for it. A failed query is never read as an absence of advisories. Quoting it: ${errs:-<no stderr>}"
-  printf '%s' "$out" | jq -e 'type == "object" and has("verdict")' >/dev/null 2>&1 \
-    || fail_phase advisories "check-advisories.sh returned no readable verdict for $pkg $version: ${out:-<empty>} ${errs:-}"
+  # The same contract discipline the adapter verbs get, applied to the one
+  # script whose answer becomes the removal recommendation: every field the
+  # caller reads is asserted present before it is read, never defaulted. Read
+  # straight, an absent `adapter_errors` arrives as the string "null", whose
+  # `// []` default is indistinguishable from an empty one — and that is the
+  # test standing between a broken adapter and an audit of `inconclusive`
+  # verdicts with nothing naming the cause. `verdict`, `advisory_count`,
+  # `matched_ranges` and `unevaluated_ranges` are read by `judge` on the same
+  # terms.
+  printf '%s' "$out" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || fail_phase advisories "check-advisories.sh emitted no JSON object on stdout for $pkg $version. A script that cannot answer exits non-zero; answering with nothing lets every check below be skipped rather than failed. Quoting stderr: ${errs:-<none>}"
+  local field
+  for field in verdict advisory_count matched_ranges unevaluated_ranges adapter_errors; do
+    printf '%s' "$out" | jq -e --arg k "$field" 'has($k)' >/dev/null 2>&1 \
+      || fail_phase advisories "check-advisories.sh emitted no '$field' for $pkg $version. Its output contract promises all five fields this driver reads; read straight, an absent one arrives as the string \"null\" and takes a branch of its own instead of failing — and for 'adapter_errors' that branch is the test standing between a broken adapter and an audit of inconclusive verdicts with nothing naming the cause."
+  done
   verdict=$(printf '%s' "$out" | jq -r '.verdict')
   # `unknown` with a non-empty adapter_errors[] is NOT the honest-unknown
   # verdict: the adapter broke on a range rather than the range being
   # unreadable, so the answer describes the tooling and not the package, and
   # every pin after it inherits the same broken adapter.
   if [ "$verdict" = "unknown" ] \
-     && [ "$(printf '%s' "$out" | jq -r '(.adapter_errors // []) | length')" != "0" ]; then
+     && [ "$(printf '%s' "$out" | jq -r '.adapter_errors | length')" != "0" ]; then
     fail_phase advisories "check-advisories.sh answered 'unknown' for $pkg $version with a non-empty adapter_errors[], which describes the tooling and not the package: $(printf '%s' "$out" | jq -c '.adapter_errors'). Every pin after this one would inherit the same broken adapter."
   fi
   printf '%s' "$out" > "$cache" || die "cannot write $cache"
@@ -573,6 +609,7 @@ cmd_list() {
                       elif .kind == "unparseable" then $unparseable
                       else $other end)} ]') \
     || fail_phase list "list_pins' entries could not be routed by kind: $pins_json"
+  require_json list "$routed" "the kind-routed pin list"
 
   # Bare pins first: they constrain every consumer in the tree, so they are
   # both the most costly and the most likely to be over-broad. `test-pin` is
@@ -582,6 +619,7 @@ cmd_list() {
     [ .[] | select(.finding == "testable") ]
     | (map(select(.scope == "bare")) + map(select(.scope != "bare")))
     | map({key, path, package, scope, value})')
+  require_json list "$order" "the bare-first test order"
 
   STATE="$work/state.json"
   jq -n \
@@ -678,13 +716,16 @@ cmd_baseline() {
       || fail_phase install "the baseline resolution_map carries no resolutions object, so there is nothing to diff a removal against."
   elif [ "$st" -eq 2 ]; then
     map_available=false
+    state_set_str map_refusal "the adapter does not implement resolution_map, so no other package's resolution was re-checked"
   else
     fail_phase install "the baseline resolution_map failed on this lockfile: $(adapter_error_text). A parser that refuses a lockfile it could not read is answering, and a diff against a map that was never built reports every package unchanged."
   fi
 
   # One `resolved_versions` per DISTINCT package among the testable pins.
   local pkgs pkg pkg_baselines='[]' inconclusive='[]'
-  pkgs=$(state_getj '.test_order' | jq -r '[ .[].package ] | unique | .[]')
+  state_json install '.test_order' "phase 2's test_order"
+  local test_order=$STATE_JSON
+  pkgs=$(printf '%s' "$test_order" | jq -r '[ .[].package ] | unique | .[]')
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
     adapter_run resolved_versions "$pkg" \
@@ -723,7 +764,7 @@ EOF
   # Every pin on a `present: false` package is recorded inconclusive here and
   # never tested.
   local findings
-  findings=$(state_getj '.test_order' | jq -c --argjson inc "$inconclusive" '
+  findings=$(printf '%s' "$test_order" | jq -c --argjson inc "$inconclusive" '
     [ .[] as $pin
       | ([ $inc[] | select(.package == $pin.package) ] | first) as $bad
       | select($bad != null)
@@ -737,7 +778,7 @@ EOF
 
   jq -n --arg lockfile "$lockfile" --argjson map "$(jbool "$map_available")" \
     --argjson unreadable "$unreadable" --argjson pkgs "$pkg_baselines" \
-    --argjson inc "$inconclusive" --argjson order "$(state_getj '.test_order')" \
+    --argjson inc "$inconclusive" --argjson order "$test_order" \
     '{status: "ok", step: "baseline", lockfile: $lockfile,
       resolution_map_available: $map, unreadable_entries: $unreadable,
       whole_tree_view: ($map and $unreadable == 0),
@@ -758,7 +799,9 @@ EOF
 # Record one finding into state, replacing any earlier record for the same path.
 record_finding() {
   local prev merged
-  prev=$(state_getj '.findings')
+  require_json install "$1" 'the finding about to be recorded'
+  state_json install '.findings' 'the findings recorded so far'
+  prev=$STATE_JSON
   merged=$(jq -cn --argjson a "$prev" --argjson f "$1" \
     '[ $a[] | select(.path != $f.path) ] + [$f]')
   state_set findings "$merged"
@@ -780,7 +823,8 @@ cmd_test_pin() {
     || die "test-pin: run 'baseline' first. Without the with-all-pins baseline there is nothing to measure a removal against."
 
   local order pin
-  order=$(state_getj '.test_order')
+  state_json install '.test_order' "phase 2's test_order"
+  order=$STATE_JSON
   if [ -n "$path_json" ]; then
     printf '%s' "$path_json" | jq -e 'type == "array"' >/dev/null 2>&1 \
       || die "test-pin: --path must be a JSON array, as list_pins reports it"
@@ -803,7 +847,8 @@ cmd_test_pin() {
   pin_path=$(printf '%s' "$pin" | jq -c '.path')
   pin_pkg=$(printf '%s' "$pin" | jq -r '.package')
 
-  [ "$(state_getj '.baseline_inconclusive' | jq -r --arg p "$pin_pkg" 'any(.[]; .package == $p)')" = "false" ] \
+  state_json install '.baseline_inconclusive' "the baseline's inconclusive list"
+  [ "$(printf '%s' "$STATE_JSON" | jq -r --arg p "$pin_pkg" 'any(.[]; .package == $p)')" = "false" ] \
     || die "test-pin: the baseline recorded $pin_pkg inconclusive (present: false), so this pin is not tested. Recording it and never testing it is the baseline's answer, not a step to redo."
 
   local base_count
@@ -821,7 +866,8 @@ cmd_test_pin() {
          fail_phase install "the pnpm-workspace.yaml overrides block could not be edited to remove '$pin_key'. This driver reads exactly the flat 'key: value' block the adapter round-trips and refuses anything else, because a wrong write corrupts a file pnpm reads on every install." ;;
     esac
   else
-    manifest_remove_paths "$(state_getj '.override_root')" "[$pin_path]" \
+    state_json install '.override_root' "the override block's address"
+    manifest_remove_paths "$STATE_JSON" "[$pin_path]" \
       || { restore_tree "$pin_key"
            fail_phase install "package.json could not be rewritten to remove $pin_path, so the manifest does not parse and every verdict measured against an install of it would be fiction. The file was restored, not repaired by re-editing around the error. Quoting jq: $MANIFEST_EDIT_ERR"; }
   fi
@@ -914,13 +960,16 @@ cmd_test_pin() {
   local present without_pin baseline_versions
   present=$(printf '%s' "$rv" | jq -r '.present')
   without_pin=$(printf '%s' "$rv" | jq -c '[ .versions[]?.version ] | unique')
-  baseline_versions=$(state_getj '.baseline_packages' \
+  require_json install "$without_pin" "the versions resolved after the removal"
+  state_json install '.baseline_packages' "the with-all-pins baseline snapshots"
+  baseline_versions=$(printf '%s' "$STATE_JSON" \
     | jq -c --arg p "$pin_pkg" '[ .[] | select(.package == $p) ] | .[0].versions // []')
 
   # ---- step 6: the whole-tree map ----------------------------------------
-  local now_map='null' map_ok=false now_unreadable=0
+  local now_map='null' map_ok=false now_unreadable=0 map_refusal=""
   local base_map map_available base_unreadable
-  base_map=$(state_getj '.baseline_map')
+  state_json install '.baseline_map' "the with-all-pins baseline resolution_map"
+  base_map=$STATE_JSON
   map_available=$(state_get_opt '.map_available')
   base_unreadable=$(state_get_opt '.baseline_unreadable_entries')
   if [ "$map_available" = "true" ]; then
@@ -931,7 +980,24 @@ cmd_test_pin() {
       map_unreadable install "$now_map" "the resolution_map taken after removing $pin_key"
       now_unreadable=$MAP_UNREADABLE
       map_ok=true
+    elif [ "$st" -eq 2 ]; then
+      # The same split `baseline` draws, and for the same reason. Exit 2 is the
+      # contract's "not implemented" (ADR 001): there is no whole-tree view to
+      # be had on this adapter at all.
+      map_refusal="the adapter does not implement resolution_map, so no other package's resolution was re-checked"
+    else
+      # Any other non-zero exit is a parser REFUSING a lockfile it could not
+      # read, which is a different fact from the verb being absent and the one
+      # a reader needs: a `not-checked` that says only "no whole-tree view was
+      # available" hides a parser that broke on this repository's lockfile and
+      # will break on it again. The verdict is the same fail-safe narrow claim
+      # either way; what changes is that the refusal is reported.
+      map_refusal="resolution_map refused this lockfile after removing $pin_key: $(adapter_error_text)"
     fi
+  else
+    map_refusal="$(state_get_opt '.map_refusal')"
+    [ -n "$map_refusal" ] \
+      || map_refusal="the with-all-pins baseline found no whole-tree resolution_map, so no other package's resolution was re-checked"
   fi
 
   # `unreadable_entries` non-zero on EITHER map, or no map at all, is the same
@@ -1011,12 +1077,25 @@ cmd_test_pin() {
     # A large collateral fan-out is CHECKED, not sampled, unless it is a
     # platform-binary family: sibling packages published from a single release
     # of one parent, under one scope or name prefix, at identical versions,
-    # whose only difference is the platform triple in the name. Removing one
-    # pin in a field-test audit run moved 26 `@esbuild/*` packages together.
-    # The three conditions are checked and not assumed, and the third — "moved
-    # as one unit" — is checked against the whole tree: a family with a member
-    # that did NOT move is not a family that moved as one unit, and every
-    # member is then judged on its own.
+    # **whose only difference is the platform triple in the name**. Removing
+    # one pin in a field-test audit run moved 26 `@esbuild/*` packages
+    # together.
+    #
+    # Four conditions, all checked and none assumed. A prefix match alone is
+    # not one of them: `@babel/`, `@types/` and `eslint-` all group under it,
+    # and a two-member scope moving in lockstep is ordinary, so on the prefix
+    # test alone one member's `safe` verdict would come to stand for a package
+    # nothing judged. `platform_tail` is the missing test — every member's name
+    # past the shared prefix has to END in an `<os>-<arch>` pair, optionally
+    # followed by libc/ABI tokens — which admits `@esbuild/linux-x64`,
+    # `@rolldown/binding-darwin-arm64`, `lightningcss-darwin-arm64` and
+    # `@swc/core-linux-x64-gnu`, and refuses `@types/node` and `eslint-config`.
+    # A family with one non-platform member fails as a whole and every member
+    # is judged, which is the conservative direction.
+    #
+    # The last condition — "moved as one unit" — is checked against the whole
+    # tree: a family with a member sitting still elsewhere in the lockfile did
+    # not move as one unit.
     collateral=$(printf '%s' "$raw_collateral" | jq -c \
       --argjson allkeys "$(jq -cn --argjson base "$base_map" --argjson now "$now_map" \
         '(($base.resolutions | keys) + ($now.resolutions | keys)) | unique')" '
@@ -1024,12 +1103,31 @@ cmd_test_pin() {
         if startswith("@") then (split("/")[0] + "/")
         elif (index("-") != null) then .[0:(index("-") + 1)]
         else . end;
+      def platform_tail($k):
+        (.[($k | length):] | split("-")) as $t
+        | ["android","darwin","freebsd","linux","netbsd","openbsd","sunos","win32","win","aix"] as $os
+        | ["arm","arm64","ia32","x64","x86","x86_64","mips64el","ppc64","riscv64","s390x","loong64","wasm32","universal"] as $arch
+        | ["gnu","musl","gnueabihf","eabi","eabihf","msvc","static"] as $abi
+        | ($t | length) as $n
+        | any(range(0; $n - 1);
+            . as $i
+            | ($os | index($t[$i])) != null
+            and ($arch | index($t[$i + 1])) != null
+            # The trailing token is bound BEFORE the `|`: inside
+            # `$abi | index($t[.])` the pipe has already rebound `.` to $abi,
+            # so the lookup asks for `$t[["gnu","musl"]]` and every libc-suffixed
+            # member of a real family fails the test. Same shape as the
+            # `getpath($root + .path)` reading that once kept every pin in the
+            # list after a removal.
+            and all(range($i + 2; $n);
+                    . as $j | ($t[$j]) as $tok | ($abi | index($tok)) != null));
       group_by(.package | famkey)
       | map(
           . as $f
           | ($f[0].package | famkey) as $k
           | ([ $allkeys[] | select(famkey == $k) ] | length) as $intree
           | if ($f | length) >= 2
+               and all($f[]; .package | platform_tail($k))
                and (($f | map(.baseline) | unique | length) == 1)
                and (($f | map(.without_pin) | unique | length) == 1)
                and $intree == ($f | length)
@@ -1051,6 +1149,12 @@ cmd_test_pin() {
   local collateral_verdict='null'
   if [ "$whole_tree" != true ]; then
     collateral_verdict='"not-checked"'
+    # A partially-read map is its own reason, and it outranks an absent one:
+    # the map WAS built here, and how many entries went unread is the number
+    # the report owes the reader (#48).
+    if [ "$map_ok" = true ]; then
+      map_refusal="the resolution_map could not read $base_unreadable lockfile entries at the baseline and $now_unreadable after this removal, so it is not a whole-tree view"
+    fi
   fi
 
   # ---- present: false after removal --------------------------------------
@@ -1074,8 +1178,10 @@ cmd_test_pin() {
     --argjson left "$(jbool "$left_tree")" \
     --argjson whole "$(jbool "$whole_tree")" \
     --argjson unread "${base_unreadable:-0}" --argjson unread_now "${now_unreadable:-0}" \
+    --arg refusal "$map_refusal" \
     '$pin + {status: $status, tested: true, left_tree: $left,
              detail: $detail,
+             collateral_not_checked_reason: (if $refusal == "" then null else $refusal end),
              resolved_with_pin: $base, resolved_without_pin: $without,
              attributable_versions: $delta,
              sibling_pins: [],
@@ -1114,8 +1220,15 @@ cmd_judge() {
   done
   load_state "$work"
 
+  # The sibling of `together`'s guard. With no `baseline` there are no findings
+  # to judge, and an empty judgment reported as `{"status": "ok"}` is
+  # indistinguishable from a repository whose pins were all judged and kept.
+  [ "$(state_get_opt '.baseline_done')" = "true" ] \
+    || die "judge: run 'baseline' and 'test-pin' first. With no findings recorded, an empty judgment is indistinguishable from an audit that tested every pin."
+
   local findings out='[]' fjson
-  findings=$(state_getj '.findings')
+  state_json advisories '.findings' 'the findings phase 4 recorded'
+  findings=$STATE_JSON
   local n i
   n=$(printf '%s' "$findings" | jq -r 'length')
   i=0
@@ -1132,9 +1245,20 @@ cmd_judge() {
     local pkg delta left
     pkg=$(printf '%s' "$fjson" | jq -r '.package')
     delta=$(printf '%s' "$fjson" | jq -c '.attributable_versions')
+    require_json advisories "$delta" "the delta recorded for $pkg"
     left=$(printf '%s' "$fjson" | jq -r '.left_tree')
 
-    local verdict count='null' matched='[]' detail
+    # `own_verdict` is the TESTED PACKAGE's own answer, carried separately from
+    # `verdict` — which is the pin's status, and which the collateral collapse
+    # below overwrites. Folding the two put `advisory_verdict: "vulnerable"`
+    # with `matched_ranges: []` on a pin whose own delta came back `safe` and
+    # whose collateral admitted something else, which reads as "this package is
+    # vulnerable, ranges unstated" — the wrong-place reading `detail` exists to
+    # prevent. The result contract is explicit: `advisory_verdict`,
+    # `advisory_count` and `matched_ranges` come from `check-advisories.sh`
+    # verbatim FOR THE TESTED PACKAGE, and a collateral package's result lives
+    # in `collateral_verdict`, never folded into these.
+    local verdict own_verdict="" count='null' matched='[]' detail
     if [ "$left" = "true" ]; then
       verdict=removable
       count=null
@@ -1167,7 +1291,18 @@ EOF
         if any(.[]; .verdict == "vulnerable") then "still-required"
         elif all(.[]; .verdict == "safe") then "removable"
         else "inconclusive" end')
-      count=$(printf '%s' "$verdicts" | jq -c '[ .[].advisory_count ] | max')
+      # Always one of check-advisories.sh's own four values, never a synthesis
+      # of them: a delta of several versions collapses to the least reassuring
+      # answer any of them earned, in that script's vocabulary.
+      own_verdict=$(printf '%s' "$verdicts" | jq -r '
+        if any(.[]; .verdict == "vulnerable") then "vulnerable"
+        elif any(.[]; .verdict == "unknown") then "unknown"
+        elif any(.[]; .verdict == "no-advisories") then "no-advisories"
+        else "safe" end')
+      # `advisory_count` is the package's advisory total and does not vary by
+      # version, so the first answer IS the verbatim value. A `max` across the
+      # delta would be a synthesis of several readings of one number.
+      count=$(printf '%s' "$verdicts" | jq -c '[ .[].advisory_count ] | first')
       matched=$(printf '%s' "$verdicts" | jq -c '[ .[].matched_ranges[] ] | unique')
       detail=$(printf '%s' "$verdicts" | jq -r '
         [ .[] | "\(.version): \(.verdict)"
@@ -1182,7 +1317,11 @@ EOF
     cverdict=$(printf '%s' "$fjson" | jq -r '.collateral_verdict // "null"')
     if [ "$cverdict" = '"not-checked"' ] || [ "$cverdict" = "not-checked" ]; then
       cverdict='"not-checked"'
-      cdetail="the verdict covers $pkg only: no whole-tree view was available, so no other package's resolution was re-checked"
+      # The reason travels with the verdict rather than being reconstructed
+      # here: "no whole-tree view was available" reads the same for an adapter
+      # that does not implement the verb and for a parser that refused this
+      # repository's lockfile, and only the second is a defect to chase.
+      cdetail="the verdict covers $pkg only: $(printf '%s' "$fjson" | jq -r '.collateral_not_checked_reason // "no whole-tree view was available, so no other package'"'"'s resolution was re-checked"')"
     elif [ "$(printf '%s' "$fjson" | jq -r '(.collateral_changes // []) | length')" = "0" ]; then
       cverdict='"none"'
     else
@@ -1233,14 +1372,14 @@ EOF
         detail="$detail. $cdetail" ;;
     esac
 
+    require_json advisories "$count" "the tested package's advisory_count"
+    require_json advisories "$matched" "the tested package's matched_ranges"
+    require_json advisories "$cverdict" "the collateral verdict"
     out=$(jq -cn --argjson a "$out" --argjson f "$fjson" --arg s "$verdict" \
       --arg d "$detail" --argjson c "$count" --argjson m "$matched" \
-      --argjson cv "$cverdict" \
+      --arg av "$own_verdict" --argjson cv "$cverdict" \
       '$a + [ $f + {status: $s, detail: $d,
-                    advisory_verdict: (if $c == null then null
-                                       elif $s == "still-required" then "vulnerable"
-                                       elif $s == "removable" then "safe"
-                                       else "inconclusive" end),
+                    advisory_verdict: (if $av == "" then null else $av end),
                     advisory_count: $c, matched_ranges: $m, collateral_verdict: $cv} ]')
   done
 
@@ -1263,7 +1402,9 @@ EOF
                                                   and (.path != $f.path)) | .key ]}
           else $f end ]')
 
+  require_json advisories "$out" 'the judged findings, after the sibling rule'
   state_set findings "$out"
+  state_set judge_done true
 
   jq -n --argjson f "$out" \
     '{status: "ok", step: "judge", findings: $f,
@@ -1293,18 +1434,24 @@ remove_candidates() {
   # $1 = JSON array of pins
   local paths keys k
   paths=$(printf '%s' "$1" | jq -c '[ .[].path ]')
+  require_json compose "$paths" 'the candidate paths to remove'
   if [ "$OVERRIDE_FILE" = "pnpm-workspace.yaml" ]; then
     keys=$(printf '%s' "$1" | jq -r '.[].key')
     while IFS= read -r k; do
       [ -n "$k" ] || continue
-      workspace_remove_key "$k" \
-        || fail_phase compose "the pnpm-workspace.yaml overrides block could not be edited to remove '$k', so the combined set was never installed."
+      workspace_remove_key "$k" || {
+        restore_tree "the combined set"
+        fail_phase compose "the pnpm-workspace.yaml overrides block could not be edited to remove '$k', so the combined set was never installed."
+      }
     done <<EOF
 $keys
 EOF
   else
-    manifest_remove_paths "$(state_getj '.override_root')" "$paths" \
-      || fail_phase compose "package.json could not be rewritten to remove the candidate set $paths."
+    state_json compose '.override_root' "the override block's address"
+    manifest_remove_paths "$STATE_JSON" "$paths" || {
+      restore_tree "the combined set"
+      fail_phase compose "package.json could not be rewritten to remove the candidate set $paths. Quoting jq: $MANIFEST_EDIT_ERR"
+    }
   fi
 }
 
@@ -1388,7 +1535,8 @@ run_attempt() {
   # the ones the removed pins name: an override reaches past its own target, and
   # a set of them reaches further than any one did alone.
   local base_map
-  base_map=$(state_getj '.baseline_map')
+  state_json compose '.baseline_map' "the with-all-pins baseline resolution_map"
+  base_map=$STATE_JSON
   ATTEMPT_COLLATERAL=$(jq -cn --argjson base "$base_map" --argjson now "$now_map" '
     def norm: (. // []) | unique;
     [ ((($base.resolutions | keys) + ($now.resolutions | keys)) | unique)[]
@@ -1443,8 +1591,18 @@ cmd_together() {
   done
   load_state "$work"
 
+  # Without this guard a skipped `judge` is indistinguishable from an audit
+  # that kept every pin: before `judge` runs every finding still carries
+  # `status: "tested"`, so the candidate set is empty and this step would
+  # terminate exit 0 with `no removable pins found` — a claim about work that
+  # was never done, reported to the agent as a successful audit. `test-pin`
+  # carries exactly this guard on `baseline_done`.
+  [ "$(state_get_opt '.judge_done')" = "true" ] \
+    || die "together: run 'judge' first. Before it runs every finding is still 'tested', so the candidate set is empty and this step would report 'no removable pins found' for an advisory judgment that never happened."
+
   local findings cands1 cands2
-  findings=$(state_getj '.findings')
+  state_json compose '.findings' "phase 5's findings"
+  findings=$STATE_JSON
   # The candidate set is every finding whose status is `removable` OR
   # `removable-individually` — the two statuses phase 5 judged safe, differing
   # only in whether siblings held the line during the individual test, which is
@@ -1454,6 +1612,8 @@ cmd_together() {
   # find out.
   cands1=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable" or .status == "removable-individually") | {key, path, package, value, status} ]')
   cands2=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable") | {key, path, package, value, status} ]')
+  require_json compose "$cands1" "attempt 1's candidate set"
+  require_json compose "$cands2" "attempt 2's candidate set"
 
   if [ "$cands1" = "[]" ]; then
     jq -n '{status: "no_candidates", step: "together",
@@ -1510,11 +1670,24 @@ cmd_together() {
   # still carrying attempt 1's removals is a result about neither.
   restore_tree "attempt 1"
 
-  if [ "$cands2" = "[]" ]; then
-    jq -n --arg d "$a1_detail" --arg a "$a1" \
+  # Two ways attempt 2 has nothing left to try, and both stop here rather than
+  # running an attempt. The empty set is the documented one. The identical set
+  # is the same fact wearing a different shape: with no `removable-individually`
+  # finding, attempt 2 drops nothing, so running it would reinstall exactly the
+  # set that just came back dirty and report the same failure as `attempt: 2` —
+  # a second install spent proving the first one again, and a number in the
+  # result that says a narrowing happened when none did.
+  if [ "$cands2" = "[]" ] || [ "$cands2" = "$cands1" ]; then
+    local why
+    if [ "$cands2" = "[]" ]; then
+      why="attempt 2 set was empty because every removable finding carried sibling ambiguity"
+    else
+      why="attempt 2 was not run: no finding was removable-individually, so its set is attempt 1's set and narrowing had nothing to drop"
+    fi
+    jq -n --arg d "$a1_detail" --arg a "$a1" --arg why "$why" \
       '{status: "combined_failed", step: "together", attempt: 1,
         pr_skipped_reason: (if $a == "partial" then "partial resolution map" else "combined test failed" end),
-        pr_skipped_detail: ($d + "; attempt 2 set was empty because every removable finding carried sibling ambiguity")}'
+        pr_skipped_detail: ($d + "; " + $why)}'
     exit 0
   fi
 

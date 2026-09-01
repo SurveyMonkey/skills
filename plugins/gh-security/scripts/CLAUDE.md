@@ -162,10 +162,24 @@ What that header does not say, and what belongs here:
 - **`compose` is the one phase name this driver emits that the four-phase audit vocabulary does
   not**: it comes only from `together`, and the agent's result contract reserves it for exactly
   that step's two failures, an edit that did not land and an install that did not finish.
-- **The platform-binary family sample checks its third condition against the whole tree.** "The
-  family moved as one unit" cannot be read off the diff alone: a family with a member sitting
-  still elsewhere in the lockfile did not move as one unit, so the driver counts the family in the
-  union of both maps and refuses to sample when that count exceeds the number that moved.
+- **The platform-binary family sample tests a platform triple, not a shared prefix.** A prefix
+  match alone groups `@babel/`, `@types/` and `eslint-`, and a two-member scope moving in lockstep
+  is ordinary, so on the prefix test alone one member's `safe` verdict would stand for a package
+  nothing judged. Every member's name past the shared prefix must end in an `<os>-<arch>` pair
+  with only libc or ABI tokens after it. **And its "moved as one unit" condition is checked
+  against the whole tree**: that cannot be read off the diff alone, so the driver counts the family
+  in the union of both maps and refuses to sample when that count exceeds the number that moved.
+- **Each step refuses to run before the one it depends on**, and the guard on `together` is the
+  one that earns its keep: before `judge` every finding still reads `tested`, so an unguarded
+  `together` finds an empty candidate set and terminates exit 0 with `no removable pins found` — a
+  claim about work that never happened, arriving at the agent as a successful audit.
+- **The tested package's advisory answer never absorbs the collateral verdict.** `advisory_verdict`,
+  `advisory_count` and `matched_ranges` are `check-advisories.sh`'s reply about the pinned package
+  and nothing else; a collateral package's result lives in `collateral_verdict`. Derived instead
+  from the pin's final status — which the collateral collapse overwrites — a pin whose own delta
+  came back `safe` reported `advisory_verdict: "vulnerable"` with `matched_ranges: []`, and
+  `inconclusive`, which that script never emits, swallowed the difference between `unknown` and
+  `no-advisories` even with no collateral at all.
 
 ## One group per package major line, and validate decides completeness
 
