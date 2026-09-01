@@ -450,14 +450,28 @@ The driver states these; you interpret them.
 
 ## Phase 6: Commit, push, open the PR
 
+**`common/render-pr.sh` renders the commit message, the PR body, the labels, and the `gh pr
+create` call — the same relationship phases 1 to 5 have with `fix-group.sh`.** It is the single
+home of that rendering (`scripts/CLAUDE.md`): re-deriving the commit-message template, the PR body
+sections, the label colors, or the race-tolerant label-creation logic here is a bug, not a
+fallback. You supply two things it cannot: the git operations themselves (commit, push, the PR),
+and the narrative two of its rendered sections require, described below.
+
 Commit and push from the worktree, every git invocation carrying `-C "$WORK/fix"`. Do not pause
 first: the PR is the review artifact, and it opens **ready for review** precisely so it reaches
 the reviewers and CODEOWNERS who decide it. Opening it is not merging it (ADR 008).
 
+Every `render-pr.sh` call below takes `--state <file>` (the score step's `ready_for_pr` JSON,
+saved to `$WORK/ready-for-pr.json`) and `--group-json <file>` (your dispatched `group` payload;
+phase 1 removed its scratchpad copy once `setup` read it, so write it again to
+`$WORK/group.json` if you have not already kept one). Both are read-only inputs; write them once
+and reuse them for every call in this phase. `commit-msg` and `body` are pure — no `gh` or `git`
+call — so writing their output to a file first (`> "$WORK/commit-msg.txt"`,
+`> "$WORK/pr-body.md"`) and then using the file is the whole interaction with them.
+
 **On a `lockfile-refresh` there is nothing left to commit**: the branch already holds its only
-commit, phase 3's drift commit, and the commit-message template below does not apply. Skip
-straight to the push and the PR, whose body carries the refresh statement described under
-`## Changes` below.
+commit, phase 3's drift commit, and `commit-msg` refuses to render one — skip straight to the
+push. The PR body's `## Changes` section states the refresh on its own (`body` renders it).
 
 **The repository's own commit and push hooks are the repository's, and they run.** A repo with
 lefthook, husky or `core.hooksPath` configured fires its pre-commit and pre-push on *your* commit
@@ -487,7 +501,6 @@ too; only git needs the `-C` form.
 
 ```bash
 git -C "$WORK/fix" add package.json <lockfile>
-git -C "$WORK/fix" commit -m "..."
 ```
 
 When `apply_constraint`'s result reported `override_file: "pnpm-workspace.yaml"` (a pnpm 11
@@ -498,20 +511,15 @@ that file, so stage it too:
 git -C "$WORK/fix" add package.json pnpm-workspace.yaml <lockfile>
 ```
 
-Commit message:
+Render the commit message and commit with it (skip both on a `lockfile-refresh`):
 
-```
-fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x
-
-<Direct update | Scoped override | Bare override> to >=<version> via <override location>.
-
-Alerts resolved:
-- #<number>: <CVE> (<severity>)
-
-Refs: https://github.com/<nwo>/security/dependabot/<number>
+```bash
+<scripts_dir>/render-pr.sh commit-msg --state "$WORK/ready-for-pr.json" --group-json "$WORK/group.json" \
+  --repo <nwo> > "$WORK/commit-msg.txt"
+git -C "$WORK/fix" commit -F "$WORK/commit-msg.txt"
 ```
 
-Push with `git -C "$WORK/fix" push -u origin <branch_name>`, then create the PR.
+Push with `git -C "$WORK/fix" push -u origin <branch_name>`.
 
 A push the remote rejects with `(directory file conflict)` — the field specimen is
 `! [remote rejected] fix/dependabot-postcss-8x -> fix/dependabot-postcss-8x (directory file
@@ -526,208 +534,66 @@ rejection line by itself, so the orchestrator's phase 7 summary can key on the c
 rather than parsing git's wording. Run Cleanup as always; its unpushed-commit rule already
 preserves the branch.
 
-The `gh`
-calls below are location-independent because every one of them carries `--repo`, so they take no
-`cd` prefix. Collect **all** required labels from every source and apply them together, each via
-its own `--label` flag. This flow always requires `security` (lowercase, matching Dependabot's own
-`dependencies`/`javascript`/etc. labels, verified across `vercel/next.js`, `microsoft/vscode`,
-`nodejs/node`, and `prettier/prettier`, all lowercase). Check every CLAUDE.md in your context for
-additional required labels. No source overrides another; labels are additive.
-
-`gh pr create` fails outright if a label does not exist in the repository, so check first and
-create any that are missing rather than dropping them. `2>/dev/null || true` alone cannot tell a
-harmless duplicate from a real failure — both discard the exit status and the stderr that would
-distinguish them — so capture the output and branch on it instead:
+**`labels` ensures `security` and this PR's `merge-risk:<band>` label exist on the repository**,
+`<band>` the scorer's `band` field verbatim, lowercased — never a bare `risk:<band>`, which would
+read as alert severity rather than merge risk. Its race-tolerance (an "already exists" failure
+from `gh label create` is success, because sibling agents fixing other packages in the same batch
+race to create the same band label) and its label colors are the script's, not yours to
+re-derive:
 
 ```bash
-gh label list --repo <nwo> --json name --jq '.[].name'
-sec_out=$(gh label create security --repo <nwo> --color D93F0B --description "Security fix" 2>&1) || case "$sec_out" in
-  *"already exists"*) : ;;
-  *) false ;;
-esac
+<scripts_dir>/render-pr.sh labels --repo <nwo> --band <band> [--env-prefix "<env_prefix>"]
 ```
 
-A duplicate-label message is success — the label is there, which is what this step wanted. Any
-other message is a phase `pr` failure, quoting `$sec_out`.
+**`body` renders the whole PR body** — Summary, the alerts table, the scorer's risk markdown
+verbatim, the dependency chain, Changes (with the drift sentence, the pnpm-workspace.yaml note, or
+the lockfile-refresh statement, whichever apply), Not fixed by this PR (omitted when
+`requires_major_bump` is empty), Verification, References, and — driven by `other_line_moves` and
+`bare_override` in the state file — Collateral and Global override. Two of its variants need
+narrative only you can supply, because they name evidence the state file does not carry, and
+`body` refuses with a clear `{"error": ...}` rather than inventing prose when the file is missing:
 
-Label names are case-insensitive for uniqueness but case-preserving, so a repo where this flow
-already ran under the old capitalized convention holds a literal `Security` label. Verified on
-`gh` 2.98.0 against a live repo carrying that label: `gh label create security` reports it as an
-already-existing duplicate (caught by the case branch above, so the pre-existing `Security` label
-is left untouched, never renamed), and `gh issue create --label security` (the same
-label-resolution path `gh pr create` uses) resolved it to the existing `Security` label rather than
-erroring, with the issue coming back tagged `Security` (original casing preserved). So passing
-lowercase `security` below is safe whether the repository's label is already `security` or still
-the older `Security`; no name lookup or casing fallback is needed.
+- **`## Global override`, whenever `bare_override` is not `none`.** Write the reasoning a reviewer
+  needs — why no scoped form covered every path the vulnerable copy is reached through, evidenced
+  by the scoped parents you actually tried and the resolved copies that survived them — to
+  `$WORK/global-override-note.txt`, and pass `--global-override-note "$WORK/global-override-note.txt"`.
+  This is required on every `bare-override` action; the script renders the structural facts
+  (added or tightened, the package, the range, the parents tried, the resolved copies) and appends
+  your note as the reasoning.
+- **A `fatal` entry in `other_line_moves`.** This only happens on a human re-dispatch — phase 4
+  stops on a fatal move outright, so you only reach phase 6 with one when a human explicitly
+  accepted it. Write who accepted it and why to `$WORK/collateral-note.txt`, and pass
+  `--collateral-note "$WORK/collateral-note.txt"`. Never write this narrative from your own
+  judgement that a move looks harmless; it does not belong to you to decide.
 
-**This PR also carries the merge-risk band phase 5 already computed**, one label named
-`merge-risk:<band>` with `<band>` the scorer's `band` field verbatim, lowercased — never a bare
-`risk:<band>`, which would read as alert severity rather than merge risk. The three bands are a
-closed set, each with its own color:
-
-| Label | Color |
-|---|---|
-| `merge-risk:low` | `#2da44e` |
-| `merge-risk:medium` | `#d4a72c` |
-| `merge-risk:high` | `#cf222e` |
-
-Create the one this PR's band needs the same way as `security`, capturing output and branching on
-it rather than a bare `2>/dev/null || true`, for the same reason: a duplicate label and a real
-failure (a token that can open a PR but cannot create labels, say) both discard silently under
-`|| true`, and only one of them is safe to continue past.
+The `null` and all-`benign_dedup` variants of `## Collateral` need no note — the script's
+deterministic text is the whole section.
 
 ```bash
-mr_out=$(gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>&1) || case "$mr_out" in
-  *"already exists"*) : ;;
-  *) false ;;
-esac
-mr_out=$(gh label create merge-risk:medium --repo <nwo> --color d4a72c --description "Medium merge risk" 2>&1) || case "$mr_out" in
-  *"already exists"*) : ;;
-  *) false ;;
-esac
-mr_out=$(gh label create merge-risk:high --repo <nwo> --color cf222e --description "High merge risk" 2>&1) || case "$mr_out" in
-  *"already exists"*) : ;;
-  *) false ;;
-esac
+<scripts_dir>/render-pr.sh body --state "$WORK/ready-for-pr.json" --group-json "$WORK/group.json" \
+  --repo <nwo> \
+  [--collateral-note "$WORK/collateral-note.txt"] \
+  [--global-override-note "$WORK/global-override-note.txt"] \
+  > "$WORK/pr-body.md"
 ```
 
-Run only the one line matching this PR's band; the other two are listed for reference. **Creating
-a label is a deliberate write of repo metadata beyond the PR itself**, the same trade this flow
-already makes for `security`. If `gh pr create` below then fails because the merge-risk label is
-still missing, create it and retry `gh pr create` once. **A `gh label create` that fails because
-the label now exists is success, not an error**: sibling agents fixing other packages in the same
-batch race to create the same band label, and the loser's "already exists" failure means the label
-is there, which is what it wanted; only a failure for some other reason is a failure result
-(phase `pr`), quoting `$mr_out`.
+Then open the PR. `create` applies `security` and `merge-risk:<band>` itself; add any further
+`--label` your dispatcher's CLAUDE.md requires (check every CLAUDE.md in your context for one), and
+it never passes `--draft` — PRs open **ready for review** (ADR 008):
 
 ```bash
-gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band> \
-  [--label ...] --title "..." --body "..."
+<scripts_dir>/render-pr.sh create --repo <nwo> --head <branch_name> --band <band> \
+  [--label <extra>...] --title "$(head -1 "$WORK/commit-msg.txt")" \
+  --body-file "$WORK/pr-body.md" [--env-prefix "<env_prefix>"]
 ```
 
-PR body:
+On a `lockfile-refresh`, there is no `commit-msg.txt` to take the title from; use
+`fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x` yourself, with `<N>` the
+group's alert count.
 
-```markdown
-## Summary
-
-- Resolves <N> Dependabot alert(s) for `<package>` in the <major_line>.x line by <updating the direct dependency | adding scoped overrides | adding an unscoped override>
-- Target version: >=<highest_fixed_version>
-- Resolved version: <post-fix resolved version>
-- Other major lines of this package, if any, are fixed by their own PRs
-
-## Alerts resolved
-
-| # | CVE | Severity | EPSS | Summary |
-|---|---|---|---|---|
-| [#N](https://github.com/<nwo>/security/dependabot/N) | CVE-XXXX-XXXXX | severity | 84.2% | summary |
-
-<risk.markdown from the driver's ready_for_pr, verbatim>
-
-## Dependency chain
-
-```
-<why_raw from the driver's ready_for_pr>
-```
-
-## Changes
-
-```json
-<the exact JSON added or modified in the override file — package.json, or
-pnpm-workspace.yaml when apply_constraint reported override_file:
-"pnpm-workspace.yaml" (quote its written[] entries; the file itself is YAML)>
-```
-
-<the one-sentence drift note whenever phase 3 committed a drift commit, and the
-lockfile-refresh statement on that action — both defined below this template; on a
-lockfile-refresh the JSON block above is omitted, there being no manifest edit to quote>
-
-## Not fixed by this PR
-
-<omit this section entirely when requires_major_bump is empty>
-
-| Version | Alerts still open | Remediation |
-|---|---|---|
-| 5.29.0 | GHSA-… | no patched release in the 5.x line; needs a major bump of `<parent>` or dropping it |
-
-## Verification
-
-- [x] Lockfile validated: <checked> resolved version(s) in the <major_line>.x line satisfy
-      `>=<version> <<next_major>`, and no resolved copy still matches any alert's vulnerable range
-- [x] No collateral: every copy of `<package>` on the other major lines resolves exactly as it did
-      before this change (`other_line_moves: []`, against the baseline recorded after a no-change
-      control install, so the comparison excludes stale-lockfile drift and measures only this
-      change)
-- CI on this PR is the verifier; coverage and CI presence are scored above
-
-## References
-
-- https://github.com/<nwo>/security/dependabot/<number>
-```
-
-EPSS percentile and merge risk are separate signals shown side by side: EPSS is how urgent the
-vulnerability is, merge risk is how risky this fix is to merge. Never merge them into one number.
-
-**Whenever Phase 3 committed a drift commit, the branch carries two commits — drift, then fix —
-and the `## Changes` section must say so in one sentence**, so a reviewer reading the diff knows
-which commit is the fix. For example: "The first commit is a no-change lockfile refresh — the
-default branch's lockfile is stale relative to its manifests, so any install re-resolves these
-entries; the second commit is the fix." Omit the sentence when there was no drift commit.
-
-**On a `lockfile-refresh` the drift commit is the only commit, and `## Changes` states the fix is
-a no-change lockfile refresh**, in place of the JSON block: the manifest already admits the fixed
-version, the stale committed lockfile pinned the vulnerable one, and re-resolving the lockfile
-against the unchanged manifests is the entire fix. Say which resolved versions on this group's
-line the refresh moved, from what to what.
-
-**Whenever `other_line_moves` was anything other than `[]`, replace that second checkbox with a
-`## Collateral` section placed immediately before `## Verification`.** Three situations reach it,
-and none may be left to the reader to infer from a missing tick:
-
-- **`null`** — no usable baseline existed, so the check was never run. Say that, and say the PR
-  makes no claim about the other major lines. A verdict states what it covers; silence here reads
-  as "clean".
-- **every entry `benign_dedup`** — the install deduplicated one or more untouched lines onto a
-  version each already resolved, and validate proved each moved line carries no open alerts. The
-  run proceeds (phase 4), and this section discloses each move as a small table, one row per
-  entry, followed by the sentence that each listed line carries no open Dependabot alerts:
-
-  > | Line | Before | After |
-  > |---|---|---|
-  > | 2.x | 2.3.1, 2.3.2 | 2.3.2 |
-  >
-  > These are within-major dedups by the package manager onto a version each line already
-  > resolved before this change, and none of these lines carries an open Dependabot alert.
-
-- **any entry `fatal`** — the install moved a copy on a line this group does not own. Phase 4
-  stops on this, so a PR only exists if a human re-dispatched you with that move explicitly
-  accepted. Name who accepted it and why, and give the table below. Never write this section from
-  your own judgement that a move looks harmless.
-
-> ## Collateral
->
-> This change also moved a copy of `brace-expansion` on a major line this PR does not own. The
-> Yarn resolutions key `minimatch/brace-expansion` carries no version on its parent half, so Yarn
-> applies it to every resolved copy of `minimatch`.
->
-> | Line | Before | After | Parent | Declared |
-> |---|---|---|---|---|
-> | 1.x | 1.1.18 | (gone) | `minimatch@npm:3.1.5` | `brace-expansion: "npm:^1.1.7"` |
->
-> `minimatch@3.1.5` requires `^1.1.7` and now resolves 5.0.9, a different major. Review this
-> before merging.
-
-If you tightened **or added** a bare override in phase 4, the body gets a `## Global override`
-section after `## Changes`. It is required, not a nicety: a reviewer seeing a new unscoped entry
-in the diff has no other way to learn why it is there. Say which of the two happened, name the
-package and the range, list
-the scoped parents you tried, and name the resolved copies that survived them. For an added
-override, also say which copies were already safe and are now pinned anyway.
-
-> ## Global override
->
-> Added an unscoped override `sharp: ">=0.35.0 <1"`. Scoped entries on `@vercel/analytics` and
-> `astro` left `0.34.5` resolving under `next > @vercel/analytics`, and no single parent covered
-> both copies. This also pins `astro`'s `0.35.3`, which was never vulnerable.
+EPSS percentile and merge risk are separate signals shown side by side in the rendered body: EPSS
+is how urgent the vulnerability is, merge risk is how risky this fix is to merge. The script never
+merges them into one number, and neither should you when describing either in prose.
 
 **Never merge the PR, never enable auto-merge on it, and do not offer to either.** Opening it is
 where your work ends: nothing in this plugin acts on a pull request after `gh pr create`, and the
