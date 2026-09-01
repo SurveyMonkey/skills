@@ -76,9 +76,21 @@ fail_phase() {
   exit 3
 }
 
+# Exit 2 is the contracted `needs_judgment`, so this helper validates its own
+# evidence before handing it to jq. Unvalidated, a jq failure printed nothing
+# and the `exit 2` still ran: the contracted code with no payload at all,
+# which the agent reads as a judgment escape naming no decision point.
 needs_judgment() {
   printf 'fix-group: needs judgment at %s\n' "$1" >&2
-  jq -n --arg dp "$1" --argjson ev "$2" \
+  local ev=$2
+  if ! printf '%s' "$ev" | jq -e 'true' >/dev/null 2>&1; then
+    printf 'fix-group: the evidence for %s could not be assembled\n' "$1" >&2
+    jq -n --arg dp "$1" --arg raw "$ev" \
+      '{status: "needs_judgment", decision_point: $dp,
+        evidence: {error: "the driver could not assemble this decision point'"'"'s evidence as JSON; what it held is quoted verbatim in `raw`", raw: $raw}}'
+    exit 2
+  fi
+  jq -n --arg dp "$1" --argjson ev "$ev" \
     '{status: "needs_judgment", decision_point: $dp, evidence: $ev}'
   exit 2
 }
@@ -169,8 +181,14 @@ state_get_opt() {
   printf '%s' "$v"
 }
 
-state_getj() {
-  jq -c "$1" "$STATE"
+# The JSON reader, held to the same discipline as `state_get`: it reports and
+# `state_ok` does the dying, in the caller's own shell. **There is deliberately
+# no unchecked sibling to reach for.** The one this replaced discarded jq's
+# status at all twelve of its call sites — every one of them sat in `$( )` —
+# which is how a "every --argjson source is asserted first" comment came to sit
+# above a list that had quietly missed three of them.
+state_json() {
+  jq -c "$1" "$STATE" 2>/dev/null || return 1
 }
 
 state_set() {
@@ -236,6 +254,82 @@ git_at() {
   [ -n "$dir" ] \
     || die "refusing to run 'git $*' with an empty directory: git -C '' operates on the current directory, which is how a repo-targeted write lands in the user's checkout (#18)."
   run_env git -C "$dir" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Path containment, for the one operation that deletes
+#
+# Copied from `common/reap-agent-artifacts.sh`, which runs the same `rm -rf`
+# on the orchestrator's side of the same directory. Both halves of every
+# comparison are resolved physically first, so a symlink cannot smuggle a path
+# past the prefix test.
+# ---------------------------------------------------------------------------
+
+RESOLVE_ERR=""
+
+resolve_path() {
+  RESOLVE_ERR=""
+  local p=$1 suffix="" parent resolved
+  while [ ! -d "$p" ]; do
+    suffix="/$(basename "$p")$suffix"
+    parent=$(dirname "$p")
+    [ "$parent" != "$p" ] || break
+    p=$parent
+  done
+  if [ ! -d "$p" ]; then
+    printf '%s' "$1"
+    return 0
+  fi
+  resolved=$( ( CDPATH='' cd -- "$p" 2>/dev/null && pwd -P ) || true )
+  if [ -z "$resolved" ]; then
+    RESOLVE_ERR="cannot resolve $1: $p exists but could not be entered"
+    printf '%s' "$1"
+    return 0
+  fi
+  printf '%s' "$resolved$suffix"
+}
+
+no_dotdot() {
+  case "$1" in
+    *"/../"* | */..) return 1 ;;
+  esac
+  return 0
+}
+
+# $1 = resolved repo root, $2 = the resolved path under test. The trailing
+# `?*` is what keeps the worktree root itself out: only a directory *under*
+# it is ever accepted.
+contained() {
+  case "$2" in
+    "$1/.claude/worktrees/"?*) return 0 ;;
+  esac
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Reading a ref, telling "no such ref" from "git failed"
+#
+# `rev-parse --verify --quiet` answers a missing ref with empty stdout, exit 1
+# and no stderr. The two are distinguishable only by that stderr, and folding
+# them together reports a branch as absent on a transient failure. Sets
+# REF_TIP and REF_ERR; REF_ERR non-empty means the read failed, which is never
+# the same fact as an empty REF_TIP.
+# ---------------------------------------------------------------------------
+
+REF_TIP=""
+REF_ERR=""
+
+read_ref() {
+  local errfile st=0
+  REF_TIP=""
+  REF_ERR=""
+  errfile=$(mktemp) || die "cannot create a temporary file"
+  REF_TIP=$(git_at "$1" rev-parse --verify --quiet "$2" 2>"$errfile") || st=$?
+  if [ "$st" -ne 0 ]; then
+    REF_TIP=""
+    REF_ERR=$(tr '\n' ' ' < "$errfile")
+  fi
+  rm -f "$errfile"
 }
 
 # Run an adapter verb capturing stdout and stderr separately.
@@ -362,7 +456,7 @@ run_install() {
 # `apply` and `score` can both report it.
 record_install_signals() {
   local prev
-  prev=$(state_getj '.install_signals // []')
+  prev=$(state_json '.install_signals // []'); state_ok $? '.install_signals'
   state_set install_signals "$(jq -cn --argjson a "$prev" --argjson b "${INSTALL_SIGNALS:-[]}" \
     '($a + $b) | unique')"
 }
@@ -518,6 +612,16 @@ cmd_setup() {
     | join(", ")')
   [ -z "$unusable" ] || die "setup: the group payload carries no usable value for: $unusable"
 
+  # `major_line` is interpolated into a regex anchor (`test("^" + $l +
+  # "([.]|$)")`) by every reader of a resolved_versions payload, so a
+  # non-numeric value is a pattern rather than a line: `.*` would match every
+  # major in the tree and report the lowest of them as this group's version.
+  local ml_check
+  ml_check=$(printf '%s' "$group" | jq -r '.major_line | tostring')
+  case "$ml_check" in
+    ''|*[!0-9]*) die "setup: major_line '$ml_check' is not a number. It is interpolated into a regex that selects this group's line out of the lockfile, so anything else is a pattern matching lines this group does not own." ;;
+  esac
+
   local package major_line branch_name package_path work
   package=$(printf '%s' "$group" | jq -r '.package')
   major_line=$(printf '%s' "$group" | jq -r '.major_line | tostring')
@@ -544,8 +648,20 @@ cmd_setup() {
   local ferr
   ferr=$(git_at "$repo_root" fetch origin "$default_branch" 2>&1) \
     || fail_phase worktree "git fetch origin $default_branch failed: $ferr"
-  # No remote branch of that name is the ordinary case, not an error.
-  git_at "$repo_root" fetch origin "$branch_name" >/dev/null 2>&1
+  # No remote branch of that name is the ordinary case, not an error — but a
+  # FAILED fetch is not that case, and discarding the status folded them
+  # together. A network failure then leaves a stale `origin/<branch>` in place,
+  # a `tip = remote` comparison then reads as a duplicate of pushed work, and
+  # `branch -D` deletes on the strength of a ref that may no longer be on
+  # origin. Git says "couldn't find remote ref" for the benign one and
+  # something else for every other failure.
+  local berr
+  if ! berr=$(git_at "$repo_root" fetch origin "$branch_name" 2>&1); then
+    case "$berr" in
+      *"couldn't find remote ref"*|*"Couldn't find remote ref"*) ;;
+      *) fail_phase worktree "git fetch origin $branch_name failed, so origin/$branch_name may be stale and cannot be used to judge whether a local branch of that name is a duplicate of pushed work: $berr" ;;
+    esac
+  fi
 
   local listed tip dflt remote
   listed=$(git_at "$repo_root" branch --list "$branch_name" 2>&1) \
@@ -896,14 +1012,16 @@ validate_call() {
     [ -n "$r" ] || continue
     args+=(--vulnerable "$r")
   done <<EOF
-$(state_getj '.group.alerts' | jq -r '[ .[].vulnerable_range ] | unique | .[]')
+$(printf '%s' "$alerts_json" | jq -r '[ .[].vulnerable_range ] | unique | .[]')
 EOF
-  args+=(--baseline "$(state_getj '.baseline')")
+  args+=(--baseline "$baseline_json")
   # `[]` is a real answer and is passed as `[]`. When the field is ABSENT from
   # the payload the flag is omitted entirely, which makes validate class every
   # cross-line move fatal — the intended fail-safe default (#105).
   if [ "$(state_get_opt 'has("group") and (.group | has("sibling_alerts"))')" = "true" ]; then
-    args+=(--sibling-alerts "$(state_getj '.group.sibling_alerts')")
+    local siblings
+    siblings=$(state_json '.group.sibling_alerts'); state_ok $? '.group.sibling_alerts'
+    args+=(--sibling-alerts "$siblings")
   fi
   args+=("$PACKAGE" "$RANGE")
 
@@ -974,8 +1092,16 @@ cmd_apply() {
   # the `null` ("not checked") and `[]` ("checked and clean") distinction
   # `other_line_moves` draws, silently voiding the #146 protection. Only
   # `.relationship` was guarded, so the skip was invisible.
-  local baseline_json
-  baseline_json=$(state_getj '.baseline')
+  #
+  # `baseline_json` and `alerts_json` are read once here and used again inside
+  # `validate_call`, which bash's dynamic scoping makes visible to it. They are
+  # read HERE rather than there so both are checked before the first write.
+  local baseline_json alerts_json
+  baseline_json=$(state_json '.baseline'); state_ok $? '.baseline'
+  alerts_json=$(state_json '.group.alerts'); state_ok $? '.group.alerts'
+  printf '%s' "$alerts_json" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+    || die "apply: the group payload carries no alerts array; run 'setup' with a complete group"
+
   [ "$baseline_json" != "null" ] \
     || die "apply: run 'baseline' first. Without its post-control-install snapshot, validate is handed --baseline null, which reports every cross-line move as 'not checked' rather than as checked and clean (#146)."
 
@@ -984,7 +1110,7 @@ cmd_apply() {
   # can answer whether the alerts were CLEARED, and shrinking the set lets
   # `unresolved_alerts` come back empty for an alert nothing ever checked.
   local unchecked
-  unchecked=$(state_getj '.group.alerts' | jq -c '
+  unchecked=$(printf '%s' "$alerts_json" | jq -c '
     [ .[] | select((.vulnerable_range | type) != "string" or (.vulnerable_range | length) == 0)
       | (.number // "<unnumbered>") ]')
   [ "$unchecked" = "[]" ] \
@@ -992,9 +1118,14 @@ cmd_apply() {
 
   local hfv
   hfv=$(state_get '.group.highest_fixed_version'); state_ok $? '.group.highest_fixed_version'
-  FIX_INSTALLS=$(state_get_opt '.fix_installs')
-  case "${FIX_INSTALLS:-}" in
-    ''|*[!0-9]*) FIX_INSTALLS=0 ;;
+
+  # Read strictly, like every other precondition. Defaulted to 0 on an absent
+  # or unreadable value, the persisted counter re-opens the exact hole
+  # persisting it closed: the budget stops bounding the run and
+  # `install_budget_exhausted` becomes unreachable again, with nothing said.
+  FIX_INSTALLS=$(state_get '.fix_installs'); state_ok $? '.fix_installs'
+  case "$FIX_INSTALLS" in
+    ''|*[!0-9]*) die "apply: the state file's fix_installs is '$FIX_INSTALLS', which is not a count. The fix-install budget cannot be enforced against it, and defaulting it to zero would silently unbound the run." ;;
   esac
 
   # A major-bounded range, always: an unbounded one would auto-install future
@@ -1011,12 +1142,23 @@ cmd_apply() {
   if [ "$relationship" = "direct" ]; then
     APPLIED_PARENTS_JSON='[]'
   else
-    APPLIED_PARENTS_JSON=$(state_getj '.eligible_parents')
+    APPLIED_PARENTS_JSON=$(state_json '.eligible_parents'); state_ok $? '.eligible_parents'
   fi
 
+  # The pre-fix observations are captured once per RUN, not once per `apply`
+  # call. Recomputed on the budgeted re-run, they describe a manifest this
+  # flow has already written the override into, so `targets_this_package`
+  # reads true and a bare override this run ADDED gets reported as
+  # `tightened` — the pin audit then reads a global pin nobody created.
+  local stored_obs
+  stored_obs=$(state_json '.observations_first // null'); state_ok $? '.observations_first'
   apply_call ""
-  OBSERVATIONS_FIRST=$(printf '%s' "$APPLY_RESULT" | jq -c '.observations')
-  state_set observations_first "$OBSERVATIONS_FIRST"
+  if [ "$stored_obs" != "null" ]; then
+    OBSERVATIONS_FIRST=$stored_obs
+  else
+    OBSERVATIONS_FIRST=$(printf '%s' "$APPLY_RESULT" | jq -c '.observations')
+    state_set observations_first "$OBSERVATIONS_FIRST"
+  fi
 
   fix_install_step
   validate_call
@@ -1092,8 +1234,19 @@ cmd_apply() {
   porcelain=$(git_at "$WT" status --porcelain 2>&1) \
     || fail_phase validate "git status --porcelain failed in the worktree: $porcelain"
 
+  # `drift` is the third input to the no_op-versus-lockfile-refresh decision,
+  # and it gets the same strict read as the two snapshots beside it. Read
+  # through `state_get_opt`, an unreadable or absent value mapped to `""`,
+  # which is not `true`, which takes the **no_op** branch — the branch that
+  # cleans up and leaves the alerts open. A silent default in the unsafe
+  # direction is exactly #146's inversion, which the sibling reads already
+  # `fail_phase` over.
   local drift action override_scope bare_override shape
-  drift=$(state_get_opt '.drift_commit')
+  drift=$(state_get '.drift_commit'); state_ok $? '.drift_commit'
+  case "$drift" in
+    true|false) ;;
+    *) fail_phase validate "the state file's drift_commit is '$drift', which is neither true nor false. It decides whether an empty fix diff is a true no-op or a lockfile-refresh, and anything unreadable there defaults toward no_op — reporting a real fix as 'already fixed' and leaving the alerts open (#146)." ;;
+  esac
 
   # The widest shape actually applied, read off what was WRITTEN rather than
   # off `apply_constraint`'s `mode`. `mode` reports the call's INPUT — "direct"
@@ -1166,15 +1319,18 @@ cmd_apply() {
     # Both sides must be KNOWN to have parsed before they are compared. Read
     # through `2>/dev/null` with the status discarded, three separate routes
     # produced `""` or `[]` on both sides — a jq error on a null `.version`, a
-    # `state_getj` handing back the literal `null`, and a genuine zero-version
+    # a state read handing back the literal `null`, and a genuine zero-version
     # parse — and every one of them compared equal and reported `no_op`. That
     # is "already fixed on the default branch" manufactured out of two failed
     # reads: it discards the drift commit that WAS the fix and leaves the
     # alerts open with nothing to review (#146's inversion).
     local pre_line base_line
-    pre_line=$(line_versions "$(state_getj '.pre_drift')" "$MAJOR_LINE") \
+    local pre_src base_src
+    pre_src=$(state_json '.pre_drift');  state_ok $? '.pre_drift'
+    base_src=$(state_json '.baseline');  state_ok $? '.baseline'
+    pre_line=$(line_versions "$pre_src" "$MAJOR_LINE") \
       || fail_phase validate "the pre-drift lockfile snapshot could not be read, so whether the control install cleared the ${MAJOR_LINE}.x line cannot be decided. It is never assumed unchanged: that reports a real lockfile-refresh fix as 'already fixed' and leaves the alerts open (#146)."
-    base_line=$(line_versions "$(state_getj '.baseline')" "$MAJOR_LINE") \
+    base_line=$(line_versions "$base_src" "$MAJOR_LINE") \
       || fail_phase validate "the post-control-install baseline snapshot could not be read, so whether the control install cleared the ${MAJOR_LINE}.x line cannot be decided (#146)."
     # `[]` on either side is a parse that found no copy of this line, while
     # validate has just reported `line_present: true` for it. The two disagree,
@@ -1187,8 +1343,18 @@ cmd_apply() {
       # Dependabot re-scans on its own schedule, so alerts read as open for a
       # window after the fix merged. A lone unrelated drift commit does not
       # change this; the branch is cleaned up like any other no-op.
+      # `resolved_versions` is the whole evidence for "already fixed on the
+      # default branch". Read with `[]?`, an absent one became the empty
+      # string, interpolated into the reason as "against the resolved " and
+      # reported as a success.
       local resolved
-      resolved=$(printf '%s' "$VALIDATE_JSON" | jq -r '[ .resolved_versions[]? ] | join(", ")')
+      adapter_field validate "$VALIDATE_JSON" "validate --line $MAJOR_LINE $PACKAGE" resolved_versions
+      resolved=$(printf '%s' "$VALIDATE_JSON" | jq -r '
+        if (.resolved_versions | type) != "array" or (.resolved_versions | length) == 0
+        then error("validate reported no resolved_versions to evidence the no-op with")
+        else (.resolved_versions | join(", ")) end') \
+        || fail_phase validate "the fix install changed nothing and validate names no resolved version of $PACKAGE, so there is no evidence that the ${MAJOR_LINE}.x line is already fixed. A no_op reported on an empty resolved_versions is an assertion, not a finding."
+
       state_set_str action no-op
       jq -n --arg pkg "$PACKAGE" --arg line "$MAJOR_LINE" --arg resolved "$resolved" \
         --argjson v "$VALIDATE_JSON" --argjson drift "$(jbool "$drift")" \
@@ -1222,16 +1388,24 @@ cmd_apply() {
   state_set_str action "$action"
   state_set_str override_scope "$override_scope"
   state_set_str bare_override "$bare_override"
+  local apply_signals
+  apply_signals=$(state_json '.install_signals // []'); state_ok $? '.install_signals'
   state_set apply_result "$APPLY_RESULT"
   state_set validate "$VALIDATE_JSON"
   state_set applied_parents "$APPLIED_PARENTS_JSON"
   state_set tighten_bare "$(jbool "$TIGHTEN_BARE_RAN")"
 
+  require_json apply "$APPLY_RESULT" "apply_constraint's result"
+  require_json apply "$VALIDATE_JSON" "validate's report"
+  require_json apply "$APPLIED_PARENTS_JSON" "the applied parent list"
+  require_json apply "$OBSERVATIONS_FIRST" "the pre-fix observations"
+  require_json apply "$PARENT_DERIVATION" "the ladder's parent derivation"
+  require_json apply "$apply_signals" "the install signals"
   jq -n --arg action "$action" --arg scope "$override_scope" --arg bare "$bare_override" \
     --argjson apply "$APPLY_RESULT" --argjson validate "$VALIDATE_JSON" \
     --argjson parents "$APPLIED_PARENTS_JSON" --argjson obs0 "$OBSERVATIONS_FIRST" \
     --argjson pd "$PARENT_DERIVATION" \
-    --argjson signals "$(state_getj '.install_signals // []')" \
+    --argjson signals "$apply_signals" \
     '{status: "ok", step: "apply", action: $action, override_scope: $scope,
       bare_override: $bare, applied_parents: $parents,
       parent_derivation: $pd, install_signals: $signals,
@@ -1266,7 +1440,7 @@ cmd_apply() {
 # path.)
 uncovered_parents() {
   local other applied
-  other=$(state_getj '.declared.parents_other_lines // []')
+  other=$(state_json '.declared.parents_other_lines // []') || return 1
   applied=$APPLIED_PARENTS_JSON
   PARENT_DERIVATION=$(printf '%s' "$VALIDATE_JSON" | jq -c \
     --argjson other "$other" --argjson applied "$applied" --arg pkg "$PACKAGE" '
@@ -1274,12 +1448,23 @@ uncovered_parents() {
       . as $k
       | ($k | rindex("@")) as $i
       | if $i == null or $i == 0 then $k else $k[0:$i] end;
-    # Only an install-path shape names the enclosing parent, immediately
-    # before the last `node_modules` segment.
+    # Only an install-path shape names the enclosing parent, in the segments
+    # immediately before the last `node_modules`. A SCOPED parent occupies two
+    # of them: `node_modules/@nestjs/core/node_modules/lodash` must yield
+    # `@nestjs/core`, and the single-segment read yielded `core` — a package
+    # name npm has never heard of. Passed to `apply_constraint` it produced a
+    # scoped override naming a parent that does not exist, so the entry moved
+    # nothing, validate still failed, and the run escalated to a tree-wide
+    # bare pin. Scoped parents are ubiquitous (`@babel/`, `@types/`,
+    # `@nestjs/`), and no fixture in any of the three managers carried one,
+    # which is why the suite never saw it.
     def parent_of($path):
       ($path | split("/")) as $seg
       | ([ range(0; $seg | length) | select($seg[.] == "node_modules") ] | last) as $i
-      | if $i == null or $i == 0 then null else $seg[$i - 1] end;
+      | if $i == null or $i == 0 then null
+        elif $i >= 2 and ($seg[$i - 2] | startswith("@"))
+          then $seg[$i - 2] + "/" + $seg[$i - 1]
+        else $seg[$i - 1] end;
     if (.violations | type) != "array" then
       error("validate reported no violations array")
     else
@@ -1363,9 +1548,9 @@ cmd_score() {
   # change and the pre-drift snapshot is the honest before.
   local before_src before after st
   if [ "$action" = "lockfile-refresh" ]; then
-    before_src=$(state_getj '.pre_drift')
+    before_src=$(state_json '.pre_drift'); state_ok $? '.pre_drift'
   else
-    before_src=$(state_getj '.baseline')
+    before_src=$(state_json '.baseline'); state_ok $? '.baseline'
   fi
   before=""
   adapter_field validate "$before_src" "the pre-fix resolved_versions snapshot" present
@@ -1443,12 +1628,13 @@ EOF
   # `needs_judgment` — so one empty adapter reply here reaches the agent as a
   # judgment escape carrying no decision point and no evidence at all.
   local apply_json validate_json2 parents_json drift_json obs0_json signals_json
-  apply_json=$(state_getj '.apply_result')
-  validate_json2=$(state_getj '.validate')
-  parents_json=$(state_getj '.applied_parents // .eligible_parents')
-  drift_json=$(state_getj '.drift_commit')
-  obs0_json=$(state_getj '.observations_first')
-  signals_json=$(state_getj '.install_signals // []')
+  apply_json=$(state_json '.apply_result');     state_ok $? '.apply_result'
+  validate_json2=$(state_json '.validate');      state_ok $? '.validate'
+  parents_json=$(state_json '.applied_parents // .eligible_parents')
+  state_ok $? '.applied_parents // .eligible_parents'
+  drift_json=$(state_json '.drift_commit');      state_ok $? '.drift_commit'
+  obs0_json=$(state_json '.observations_first'); state_ok $? '.observations_first'
+  signals_json=$(state_json '.install_signals // []'); state_ok $? '.install_signals'
   require_json validate "$risk" "the risk scorer's report"
   require_json validate "$apply_json" "the stored apply_constraint result"
   require_json validate "$validate_json2" "the stored validate report"
@@ -1520,33 +1706,91 @@ cmd_cleanup() {
   done
   load_state "$work"
 
+  local errors=""
+  note_error() { errors="$errors$1
+"; }
+
+  # ---- the containment guard ---------------------------------------------
+  #
+  # This function runs `rm -rf` on `$WORK`, and `$WORK` arrives from `--work`
+  # on the command line rather than from state. The only gate used to be that
+  # the directory held a parseable `state.json`. `reap-agent-artifacts.sh` —
+  # the sibling that runs the same removal on the orchestrator's side — holds
+  # the path to three conditions before its own `rm -rf`, and they are adopted
+  # verbatim here: both sides resolved physically first, no `..` segment, and
+  # contained under `<repo_root>/.claude/worktrees/`. A fourth is available
+  # here and not there: `setup` recorded the path it built, so `--work` has to
+  # name that same directory.
+  local state_work resolved_work resolved_root resolved_wt
+  state_work=$(state_get '.work'); state_ok $? '.work'
+  resolved_root=$(resolve_path "$REPO_ROOT")
+  [ -z "$RESOLVE_ERR" ] || die "cleanup: $RESOLVE_ERR"
+  resolved_work=$(resolve_path "$WORK")
+  [ -z "$RESOLVE_ERR" ] || die "cleanup: $RESOLVE_ERR"
+  local resolved_state_work
+  resolved_state_work=$(resolve_path "$state_work")
+  [ -z "$RESOLVE_ERR" ] || die "cleanup: $RESOLVE_ERR"
+
+  no_dotdot "$WORK" || die "cleanup: the work path must not contain a .. segment: $WORK"
+  contained "$resolved_root" "$resolved_work" \
+    || die "cleanup: the work path is not under $resolved_root/.claude/worktrees/: $resolved_work. Nothing was removed."
+  [ "$resolved_work" = "$resolved_state_work" ] \
+    || die "cleanup: --work names $resolved_work, but setup recorded this run's workspace as $resolved_state_work. A removal is only ever issued against the path this run created; nothing was removed."
+
+  # `$WT` is resolved and guarded the same way: a symlink there would carry
+  # `worktree remove` out of the tree this call proved it owns.
+  resolved_wt=$(resolve_path "$WT")
+  [ -z "$RESOLVE_ERR" ] || die "cleanup: $RESOLVE_ERR"
+  no_dotdot "$WT" || die "cleanup: the worktree path must not contain a .. segment: $WT"
+  contained "$resolved_root" "$resolved_wt" \
+    || die "cleanup: the worktree path resolves outside $resolved_root/.claude/worktrees/: $resolved_wt. Nothing was removed."
+
+  # ---- the worktree ------------------------------------------------------
+  #
   # Three outcomes, never a default of `true`. Initialized to `true` and only
   # ever set false by a failed `worktree remove`, an absent `$WT` reported the
-  # worktree as removed by this cleanup when nothing had been removed at all —
-  # and an empty `$WT` from an unreadable state file made that the ordinary
-  # case (see `state_get`).
+  # worktree as removed by this cleanup when nothing had been removed at all.
   local detail="" removed rerr
   # `worktree remove` names this run's own path and drops its administrative
   # entry: that is the whole cleanup an agent is entitled to. Never
   # `git worktree prune` — it is repository-wide, and a sibling agent very
   # likely shares this repo_root right now (#35).
   if [ ! -e "$WT" ]; then
-    removed=nothing-to-remove
+    removed=absent
   elif rerr=$(git_at "$REPO_ROOT" worktree remove --force "$WT" 2>&1); then
     removed=removed
   else
     removed=removal-failed
     detail="git worktree remove --force $WT failed: $rerr"
+    note_error "git worktree remove --force $WT failed: $rerr"
   fi
 
   # Read every fact the branch decision needs before $WORK disappears.
-  local tip dflt remote subjects nsubj names
-  tip=$(git_at "$REPO_ROOT" rev-parse "$BRANCH_NAME" 2>/dev/null) || tip=""
-  dflt=$(git_at "$REPO_ROOT" rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null) || dflt=""
-  remote=$(git_at "$REPO_ROOT" rev-parse "origin/$BRANCH_NAME" 2>/dev/null) || remote=""
+  #
+  # `rev-parse --verify --quiet` answers a missing ref with empty stdout,
+  # exit 1 and NO stderr, so "no such branch" and "git failed" are told apart
+  # by the stderr and nowhere else. Folded together, a transient failure — a
+  # sibling agent's ref lock is the field specimen — reported the branch as
+  # absent, skipped the whole block, and left it behind with
+  # `branch_deleted: false, reason: null`. reap-agent-artifacts.sh fixed
+  # exactly this (issue #131 review); this rewrite had dropped the split.
+  local tip tip_err dflt dflt_err remote subjects nsubj names
+  read_ref "$REPO_ROOT" "refs/heads/$BRANCH_NAME"
+  tip=$REF_TIP; tip_err=$REF_ERR
+  read_ref "$REPO_ROOT" "refs/remotes/origin/$DEFAULT_BRANCH"
+  dflt=$REF_TIP; dflt_err=$REF_ERR
+  read_ref "$REPO_ROOT" "refs/remotes/origin/$BRANCH_NAME"
+  remote=$REF_TIP
 
   local safe=false reason="" deleted=false
-  if [ -n "$tip" ]; then
+  if [ -n "$tip_err" ]; then
+    note_error "git rev-parse refs/heads/$BRANCH_NAME failed: $tip_err"
+    detail="${detail:+$detail; }the local branch could not be read, so it was neither classified nor deleted: $tip_err"
+  fi
+  if [ -n "$dflt_err" ]; then
+    note_error "git rev-parse refs/remotes/origin/$DEFAULT_BRANCH failed: $dflt_err"
+  fi
+  if [ -n "$tip" ] && [ -z "$tip_err" ] && [ -z "$dflt_err" ]; then
     if [ "$pushed" = true ] && [ -n "$remote" ] && [ "$tip" = "$remote" ]; then
       safe=true
       reason="pushed: the remote carries the same commits, so the local ref is a duplicate"
@@ -1579,13 +1823,26 @@ EOF
   # scripts/CLAUDE.md describes as blocking both a later `worktree add` on that
   # path and any `branch -D` of its branch, and which `git worktree remove`
   # itself then refuses to clean up.
+  local work_action
   if [ "$removed" = "removal-failed" ]; then
+    work_action=kept-registration-live
     detail="${detail:+$detail; }$WORK was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of $BRANCH_NAME, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand."
+  elif [ ! -e "$WORK" ]; then
+    work_action=absent
+  elif rm -rf "$WORK" 2>/dev/null && [ ! -e "$WORK" ]; then
+    work_action=removed
   else
-    rm -rf "$WORK"
+    # The status was never checked, so a removal that failed — a permission,
+    # a busy mount, a read-only parent — reported `worktree_removed: true`,
+    # `detail: null`, and no field naming `$WORK` at all. That is verbatim the
+    # failure scripts/CLAUDE.md records, on the other side of the same
+    # operation.
+    work_action=removal-failed
+    detail="${detail:+$detail; }rm -rf $WORK failed or left the directory in place"
+    note_error "rm -rf $WORK failed or left the directory in place"
   fi
 
-  if [ -n "$tip" ] && [ "$safe" = true ] && [ "$removed" != "removal-failed" ]; then
+  if [ -n "$tip" ] && [ -z "$tip_err" ] && [ "$safe" = true ] && [ "$removed" != "removal-failed" ]; then
     local derr
     if derr=$(git_at "$REPO_ROOT" branch -D "$BRANCH_NAME" 2>&1); then
       deleted=true
@@ -1594,20 +1851,29 @@ EOF
       # the work either shipped or already failed for its own reason.
       detail="${detail:+$detail; }git branch -D $BRANCH_NAME failed: $derr"
     fi
-  elif [ -n "$tip" ]; then
+  elif [ -n "$tip" ] && [ -z "$tip_err" ]; then
     reason="left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated"
     detail="${detail:+$detail; }branch $BRANCH_NAME left in place at $tip"
   fi
 
-  jq -n --arg removed "$removed" \
+  # `worktree` and `work_dir` are two different paths and two different
+  # removals — the git registration, and the directory holding it — so each
+  # reports its own action, the way reap-agent-artifacts.sh reports
+  # `work_dir: {path, action}` beside `errors[]`.
+  jq -n --arg removed "$removed" --arg work_action "$work_action" \
     --argjson deleted "$(jbool "$deleted")" \
+    --arg wt "$WT" --arg workdir "$WORK" \
     --arg branch "$BRANCH_NAME" --arg tip "$tip" --arg reason "$reason" --arg detail "$detail" \
+    --arg errors "$errors" \
     '{status: "ok", step: "cleanup",
-      worktree_removed: ($removed == "removed"), worktree_removal: $removed,
+      worktree_removed: ($removed == "removed"),
+      worktree: {path: $wt, action: $removed},
+      work_dir: {path: $workdir, action: $work_action},
       branch: $branch, branch_deleted: $deleted,
       branch_tip: (if $tip == "" then null else $tip end),
       reason: (if $reason == "" then null else $reason end),
-      detail: (if $detail == "" then null else $detail end)}'
+      detail: (if $detail == "" then null else $detail end),
+      errors: ($errors | split("\n") | map(select(length > 0)))}'
 }
 
 # ---------------------------------------------------------------------------

@@ -538,6 +538,102 @@ JSON
       The output should equal '{"action":"scoped-override","override_scope":"scoped"}'
     End
 
+    # Defaulted to 0 on an absent or unreadable value, the persisted counter
+    # re-opens the exact hole persisting it closed: the budget stops bounding
+    # the run and `install_budget_exhausted` becomes unreachable again, with
+    # nothing said about it.
+    Describe 'the persisted install budget is read strictly'
+      Parameters
+        absent        'del(.fix_installs)'
+        null          '.fix_installs = null'
+        not-a-number  '.fix_installs = "lots"'
+        negative      '.fix_installs = "-1"'
+      End
+
+      It "refuses to run when fix_installs is $1 rather than defaulting to zero"
+        make_env
+        through_baseline
+        jq -c "$2" "$WORK/state.json" > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        When call drv_jq '{has_error: has("error")}' apply --work "$WORK"
+        The status should equal 1
+        The output should equal '{"has_error":true}'
+        The stderr should be present
+      End
+    End
+
+    # `drift_commit` is the third input to the no_op-versus-lockfile-refresh
+    # decision. Read leniently, an unreadable or absent value mapped to "",
+    # which is not "true", which takes the **no_op** branch — the one that
+    # cleans up and leaves the alerts open. The two snapshots beside it already
+    # fail hard for exactly this reason (#146).
+    Describe 'the drift flag fails away from no_op, never toward it'
+      Parameters
+        absent        'del(.drift_commit)'
+        null          '.drift_commit = null'
+        not-a-boolean '.drift_commit = "yes"'
+      End
+
+      It "refuses to decide the empty-diff case when drift_commit is $1"
+        make_env
+        cat > "$MOCK_DIR/install.2.sh" <<'SH'
+:
+SH
+        rv 1 4.17.21
+        rv 2 4.17.21
+        rv 3 4.17.21
+        through_baseline
+        jq -c "$2" "$WORK/state.json" > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        When call drv_jq '{status}' apply --work "$WORK"
+        The status should not equal 0
+        The output should not equal '{"status":"no_op"}'
+        The stderr should be present
+      End
+    End
+
+    # The evidence for "already fixed on the default branch" is the resolved
+    # version. Read with `[]?`, an absent one became the empty string and was
+    # interpolated into the reason as "against the resolved ".
+    It 'never reports a no_op whose resolved_version is empty'
+      make_env
+      cat > "$MOCK_DIR/install.2.sh" <<'SH'
+:
+SH
+      rv 1 4.17.21
+      rv 2 4.17.21
+      rv 3 4.17.21
+      cat > "$MOCK_DIR/validate.1.json" <<'JSON'
+{"ok": true, "package": "lodash", "range": ">=4.17.21 <5", "line": "4",
+ "line_present": true, "checked": 1, "resolved_count": 1,
+ "violations": [], "unresolved_alerts": [], "requires_major_bump": [],
+ "other_line_moves": [], "resolved_versions": []}
+JSON
+      through_baseline
+      When call drv_jq '{status, phase}' apply --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include 'no evidence'
+    End
+
+    It 'fails the same way when validate omits resolved_versions entirely'
+      make_env
+      cat > "$MOCK_DIR/install.2.sh" <<'SH'
+:
+SH
+      rv 1 4.17.21
+      rv 2 4.17.21
+      rv 3 4.17.21
+      validate_json 1 true '[]' '[]'
+      jq -c 'del(.resolved_versions)' "$MOCK_DIR/validate.1.json" > "$MOCK_DIR/v.tmp"
+      mv "$MOCK_DIR/v.tmp" "$MOCK_DIR/validate.1.json"
+      through_baseline
+      When call drv_jq '{status, phase}' apply --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"validate"}'
+      The stderr should include "no 'resolved_versions' field"
+    End
+
     Describe 'the remediation ladder'
       # Step 1: a violating version usually arrives via a parent not in the
       # override list. Those parents come off the violating copies' paths.
@@ -704,6 +800,107 @@ JSON
         End
       End
 
+      # A SCOPED parent occupies two path segments. Read as one,
+      # `node_modules/@nestjs/core/node_modules/lodash` yielded `core` — a
+      # package npm has never heard of — and that name went to
+      # `apply_constraint`, so the scoped entry moved nothing, validate still
+      # failed, and the run escalated to a tree-wide bare pin. No fixture in
+      # any of the three managers carried a scoped name, which is why the
+      # suite never saw it.
+      Describe 'the parent name is the whole name, scope included'
+        Parameters
+          nested-scoped-parent    'node_modules/@nestjs/core/node_modules/lodash'   '["@nestjs/core"]'
+          nested-plain-parent     'node_modules/koa/node_modules/lodash'            '["koa"]'
+          deep-scoped-parent      'node_modules/a/node_modules/@types/node/node_modules/lodash' '["@types/node"]'
+          deep-plain-parent       'node_modules/a/node_modules/koa/node_modules/lodash'         '["koa"]'
+          top-level-copy          'node_modules/lodash'                             '[]'
+        End
+
+        It "derives $3 from an npm $1"
+          make_env
+          validate_json 1 false "[{\"version\":\"4.17.20\",\"path\":\"$2\"}]" '[]'
+          validate_json 2 true '[]' '[]'
+          through_baseline
+          When call drv_jq '{parents: .parent_derivation.parents}' apply --work "$WORK"
+          The status should be success
+          The output should equal "{\"parents\":$3}"
+        End
+      End
+
+      # The verdict, not just the derivation: the scoped name has to reach
+      # apply_constraint's argv, because that is what makes the override name
+      # a parent that exists.
+      It 'passes the scoped parent to apply_constraint verbatim'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/@nestjs/core/node_modules/lodash"}]' '[]'
+        validate_json 2 true '[]' '[]'
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null
+        When call grep -c -x -- 'ARG @nestjs/core' "$MOCK_LOG"
+        The status should be success
+        The output should equal '1'
+      End
+
+      It 'never passes the scope-stripped remainder as a parent'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/@nestjs/core/node_modules/lodash"}]' '[]'
+        validate_json 2 true '[]' '[]'
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null
+        When call grep -c -x -- 'ARG core' "$MOCK_LOG"
+        The status should equal 1
+        The output should equal '0'
+      End
+
+      It 'reports the scoped parent in applied_parents'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/@nestjs/core/node_modules/lodash"}]' '[]'
+        validate_json 2 true '[]' '[]'
+        through_baseline
+        When call drv_jq '{applied_parents}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"applied_parents":["@nestjs/core","express"]}'
+      End
+
+      # A scoped parent already carrying an entry is not derived again, which
+      # only holds if both sides spell the name the same way.
+      It 'excludes a scoped parent that already carries an entry'
+        make_env
+        cat > "$MOCK_DIR/declared_ranges.json" <<'JSON'
+{"pm": "npm", "package": "lodash", "line": 4, "ranges": ["^4.17.20"],
+ "root_range": null, "parents_read": ["@nestjs/core@10.4.1"],
+ "parents_without_range": [], "parents_unreadable": [],
+ "parents_malformed": [], "parents_other_lines": []}
+JSON
+        validate_fallback false '[{"version":"4.17.20","path":"node_modules/@nestjs/core/node_modules/lodash"}]' '[]'
+        rm -f "$MOCK_DIR/validate.1.json"
+        through_baseline
+        When call drv_jq '{parents: .evidence.parent_derivation.parents, applied: .evidence.applied_parents}' apply --work "$WORK"
+        The status should equal 2
+        The output should equal '{"parents":[],"applied":["@nestjs/core"]}'
+        The stderr should include 'needs judgment'
+      End
+
+      # The same name, in the shapes pnpm and Yarn Berry report. Neither names
+      # a parent at all, and a scoped package name must not be mistaken for
+      # one on either.
+      Describe 'a scoped package in the copy-only path shapes'
+        Parameters
+          pnpm  '"@babel/traverse@7.23.0"'
+          yarn  '"@babel/traverse@npm:7.23.0"'
+        End
+
+        It "reads a scoped $1 path as naming no parent"
+          make_env
+          validate_json 1 false "[{\"version\":\"4.17.20\",\"path\":$2}]" '[]'
+          validate_json 2 true '[]' '[]'
+          through_baseline
+          When call drv_jq '{p: .parent_derivation.possible, parents: .parent_derivation.parents, opaque: .parent_derivation.paths_naming_only_the_copy}' apply --work "$WORK"
+          The status should be success
+          The output should equal '{"p":false,"parents":[],"opaque":1}'
+        End
+      End
+
       It 'reports step 1 as possible on an npm install path'
         make_env
         validate_json 1 false '[{"version":"4.17.20","path":"node_modules/koa/node_modules/lodash"}]' '[]'
@@ -763,6 +960,70 @@ JSON
         The status should equal 2
         The output should equal '{"status":"needs_judgment","decision_point":"install_budget_exhausted","n":4,"b":4}'
         The stderr should include 'needs judgment at install_budget_exhausted'
+      End
+
+      # Recomputed on the budgeted re-run, the pre-fix observations describe a
+      # manifest this flow has already written the override into, so
+      # `targets_this_package` reads true and a bare override this run ADDED is
+      # reported as `tightened` — the pin audit then reads a global pin nobody
+      # created. The stored capture is the run's, not the call's.
+      It 'keeps the first run pre-fix observations across a re-run'
+        make_env
+        validate_fallback false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+        rm -f "$MOCK_DIR/validate.1.json"
+        apply_json 1 scoped '[]' '[]'
+        cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        # The second run's adapter now reports the override it already wrote.
+        apply_json 9 scoped '[]' '[{"type":"unscoped_override","key":"lodash","range":">=4.17.21 <5","targets_this_package":true}]'
+        cp "$MOCK_DIR/apply.9.json" "$MOCK_DIR/apply.json"
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        When call jq -c '.observations_first' "$WORK/state.json"
+        The status should be success
+        The output should equal '[]'
+      End
+
+      # The verdict the stored capture protects. On the re-run the ladder
+      # escalates to `--tighten-bare` again, and the adapter now reports the
+      # unscoped override THIS FLOW wrote on the first run. Recomputed, that
+      # observation makes the run report `tightened`; the run's own stored
+      # capture keeps it `added`, which is what the pin audit needs to see.
+      It 'reports a re-run bare override as added, not as tightened'
+        make_env
+        validate_json 1 false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+        validate_json 2 false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+        validate_json 3 false '[{"version":"4.17.20","path":"node_modules/lodash"}]' '[]'
+        apply_json 1 scoped '[]' '[]'
+        cp "$MOCK_DIR/apply.1.json" "$MOCK_DIR/apply.json"
+        through_baseline
+        "$DRIVER" apply --work "$WORK" >/dev/null 2>&1 || true
+        # The re-run: validate clears on the escalation, and the adapter now
+        # sees the override the first run wrote.
+        validate_fallback true '[]' '[]'
+        apply_json 9 scoped '[]' '[{"type":"unscoped_override","key":"lodash","range":">=4.17.21 <5","targets_this_package":true}]'
+        cp "$MOCK_DIR/apply.9.json" "$MOCK_DIR/apply.json"
+        When call drv_jq '{action, bare_override}' apply --work "$WORK"
+        The status should be success
+        The output should equal '{"action":"bare-override","bare_override":"added"}'
+      End
+
+      # Exit 2 is the contracted `needs_judgment`. Unvalidated, a jq failure
+      # assembling the evidence printed nothing and the `exit 2` still ran:
+      # the contracted code with no payload at all, which the agent reads as a
+      # judgment escape naming no decision point. The install error is the one
+      # evidence field carrying arbitrary bytes from outside this flow.
+      It 'never exits 2 without a decision point and an evidence object'
+        make_env
+        printf '1\n' > "$MOCK_DIR/install.2.status"
+        cat > "$MOCK_DIR/install.2.sh" <<'SH'
+printf 'npm ERR! notarget \001\002 no matching version\n' >&2
+SH
+        through_baseline
+        When call drv_jq '{status, dp: (.decision_point | length > 0), ev: (.evidence | type)}' apply --work "$WORK"
+        The status should equal 2
+        The output should equal '{"status":"needs_judgment","dp":true,"ev":"object"}'
+        The stderr should include 'needs judgment at install_failure'
       End
 
       # The contract reserves `install` for the fix-attributable install

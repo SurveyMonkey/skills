@@ -81,11 +81,21 @@ What that header does not say, and what belongs here:
   the agent doc sanctions re-running `apply` — a process-local counter reset on that re-run and
   bounded nothing), and the **`install_signals[]` union**, which carries what an install printed
   past the point where its output is discarded.
-- **Every read of that file distinguishes "value", "absent" and "unreadable".** A discarded jq
-  status turned a truncated `state.json` into empty strings, which is how a `cleanup` came to
-  report success having removed nothing — and how `git -C ""`, which silently operates on the
-  *current* directory, became reachable with `worktree remove --force` behind it (#18's failure
-  mode).
+- **Every read of that file distinguishes "value", "absent" and "unreadable", and there is
+  deliberately no unchecked sibling to reach for.** A discarded jq status turned a truncated
+  `state.json` into empty strings, which is how a `cleanup` came to report success having removed
+  nothing — and how `git -C ""`, which silently operates on the *current* directory, became
+  reachable with `worktree remove --force` behind it (#18's failure mode). Every reader reports
+  and `state_ok` does the dying, in the caller's own shell, because every call site sits in `$( )`
+  and an exit there ends only the subshell. An "every source is asserted" comment above a
+  hand-maintained list is not the guarantee; a reader that cannot be called unchecked is.
+- **`cleanup` holds its path to `reap-agent-artifacts.sh`'s containment discipline**, because the
+  two run the same `rm -rf` on the same directory from opposite sides. Both sides resolved
+  physically, no `..` segment, contained under `<repo_root>/.claude/worktrees/`, plus one
+  condition available only here: `--work` must name the workspace `setup` recorded. The removal's
+  status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
+  `worktree_removed: true` with no field naming `$WORK` is the failure this file records on the
+  reap's side of the same operation.
 - **Judgment escapes at three points**, each fail-closed and none of them a retry:
   `install_failure`, `validate_failed_after_ladder` and `install_budget_exhausted`. The
   placed-shape reconcile-by-hand escalation is a *fourth thing the agent decides*, not a fourth
