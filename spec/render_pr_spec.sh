@@ -186,6 +186,206 @@ Refs: https://github.com/octo/app/security/dependabot/55"
     End
   End
 
+  # A wrongly rendered PR body is a false claim about a security fix, so
+  # every "render something plausible from data we could not read" path is a
+  # correctness bug, not cosmetics (PR #178 review). Each example here
+  # asserts the VERDICT — non-zero exit and a `{"error": ...}` on stdout,
+  # nothing else — never the parse, and never a partial body ahead of the
+  # error. `render_body`/`render_commit_msg` are not reused where a case
+  # needs a non-default --group-json.
+  render_body_g() {
+    state=$1
+    group=$2
+    shift 2
+    "$RENDER" body --state "$FX/$state" --group-json "$FX/$group" --repo "$REPO" "$@"
+  }
+  render_commit_msg_g() {
+    "$RENDER" commit-msg --state "$FX/$1" --group-json "$FX/$2" --repo "$REPO"
+  }
+  # Every failure prints ONLY the {"error": ...} object — no markdown, no
+  # commit-message fragment, ahead of it (finding #1's "die inside a command
+  # substitution never exits" defect, and its class). Inlined at every call
+  # site rather than a shared helper: shellspec's `The ...` DSL lines are
+  # parsed as part of an `It...End` block and cannot be factored into a
+  # plain shell function call.
+
+  Describe 'finding #1: an unreadable --state or --group-json must exit non-zero, never render'
+    It 'refuses a non-JSON --state file in body (die inside a command substitution never exits)'
+      When call render_body malformed.txt
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should not include 'Lockfile validated'
+      The output should not include 'by updating'
+    End
+
+    It 'refuses a non-JSON --state file in commit-msg'
+      When call render_commit_msg malformed.txt
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+
+    It 'refuses a non-JSON --group-json file in body'
+      When call render_body_g state-scoped.json malformed.txt
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+
+    It 'refuses a non-JSON --group-json file in commit-msg'
+      When call render_commit_msg_g state-scoped.json malformed.txt
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+  End
+
+  Describe 'finding #2: every promised --state field is required, never read with a bare jq -r default'
+    Parameters
+      state-missing-action.json           ".action"
+      state-missing-resolved-version.json ".resolved_version"
+      state-missing-drift-commit.json     ".drift_commit"
+      state-missing-bare-override.json    ".bare_override"
+      state-missing-risk-markdown.json    ".risk.markdown"
+      state-missing-why-raw.json          ".why_raw"
+      state-missing-written.json          ".written"
+      state-missing-validate-checked.json ".validate.checked"
+    End
+
+    It "refuses a --state missing $2 rather than rendering the literal string null"
+      When call render_body "$1" --global-override-note "$FX/global-override-note.txt" --collateral-note "$FX/collateral-note.txt"
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should not include '## Summary'
+    End
+  End
+
+  Describe 'finding #3: validate.checked == 0 is never a passing Lockfile-validated claim'
+    It 'refuses rather than ticking the box on zero checked, matching the repo'"'"'s zero-found-is-never-a-pass rule'
+      When call render_body state-zero-checked.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should include 'checked: 0'
+      The output should not include '[x] Lockfile validated: 0'
+    End
+  End
+
+  Describe 'finding #4: a missing drift_commit can no longer silently drop the drift sentence'
+    It 'is covered by finding #2'"'"'s state-missing-drift-commit.json case: require_field now refuses it outright'
+      When call render_body state-missing-drift-commit.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+
+    It 'still renders the sentence when drift_commit is genuinely true (regression check)'
+      When call render_body state-drift.json
+      The status should be success
+      The output should include 'no-change lockfile refresh'
+    End
+  End
+
+  Describe 'finding #5: zero-found renders as an error, never a silent empty section'
+    It 'refuses an empty group.alerts[] in body rather than rendering "Resolves 0 alert(s)"'
+      When call render_body_g state-scoped.json group-empty-alerts.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should not include 'Resolves 0'
+    End
+
+    It 'refuses an empty group.alerts[] in commit-msg for the same reason'
+      When call render_commit_msg_g state-scoped.json group-empty-alerts.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+
+    It 'refuses a requires_major_bump entry missing .path rather than rendering an empty Not-fixed table'
+      When call render_body state-major-bump-missing-path.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should not include '## Not fixed by this PR'
+    End
+  End
+
+  Describe 'finding #6: a fatal Collateral row with an empty After renders (gone), never a blank cell'
+    It 'renders (gone) in the fatal fixture, matching the corrected expected fixture'
+      When call render_body state-collateral-fatal.json --collateral-note "$FX/collateral-note.txt"
+      The status should be success
+      The output should include '| 1.x | 1.1.18 | (gone) |'
+      The output should equal "$(cat "$FX/expected-body-collateral-fatal.md")"
+    End
+  End
+
+  Describe 'finding #7: EPSS always renders the number; a present field is never "unknown"'
+    It 'never renders the word unknown next to an EPSS score'
+      When call render_body state-scoped.json
+      The status should be success
+      The output should not include '| unknown |'
+    End
+
+    It 'refuses when epss_percentile is absent, rather than defaulting it to unknown or 0'
+      When call render_body_g state-scoped.json group-missing-epss.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+  End
+
+  Describe 'finding #8: other_line_moves absent is a hard error, distinct from a legitimate null'
+    It 'refuses an absent other_line_moves key'
+      When call render_body state-missing-other-line-moves.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should include 'no '"'"'other_line_moves'"'"' key at all'
+    End
+
+    It 'still renders the null-baseline claim when the key is genuinely null (regression check)'
+      When call render_body state-collateral-null.json
+      The status should be success
+      The output should include 'No baseline was available'
+    End
+  End
+
+  Describe 'finding #9: commit-msg on a group missing alerts fails with the contract shape, never a partial message + bare jq exit'
+    It 'exits 1 with {"error": ...} rather than jq'"'"'s own exit 5 and a half-written message'
+      When call render_commit_msg_g state-scoped.json group-empty-alerts.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+    End
+  End
+
+  Describe 'finding #10: a Global override range is read from written[], never fabricated as N/A'
+    It 'refuses when bare_override is set but written[] carries no top-level (parent: null) entry'
+      When call render_body state-bare-no-range.json --global-override-note "$FX/global-override-note.txt"
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include '"error"'
+      The stderr should include 'render-pr:'
+      The output should not include 'N/A'
+    End
+  End
+
   Describe 'labels'
     setup_mock() {
       MOCK_DIR="$SHELLSPEC_WORKDIR/render-pr-gh-mock"
@@ -269,6 +469,27 @@ SH
       The status should be success
       The output should equal '"ok"'
       The contents of file "$ENV_LOG" should include 'wrapped: gh label create security'
+    End
+
+    # Finding #11: a dispatcher's CLAUDE.md may require labels beyond
+    # security and the band. `gh pr create` fails outright on a label that
+    # does not already exist, so `labels` — not just `create` — has to
+    # ensure them, with a neutral color since it does not know what the
+    # label means.
+    It 'creates every extra --label given, alongside security and the band label'
+      Mock gh
+        printf '%s\n' "$*" >> "$MOCK_DIR/log"
+        case "$1 $2" in
+          'label create') printf 'created\n' ;;
+          *) printf 'unhandled: %s\n' "$*" >&2; exit 1 ;;
+        esac
+      End
+      When call common_jq render-pr.sh '.' labels --repo "$REPO" --band low \
+        --label needs-review --label breaking-change
+      The status should be success
+      The output should equal '{"status":"ok","labels":["security","merge-risk:low","needs-review","breaking-change"]}'
+      The contents of file "$MOCK_DIR/log" should include 'label create needs-review --repo octo/app --color ededed --description'
+      The contents of file "$MOCK_DIR/log" should include 'label create breaking-change --repo octo/app --color ededed --description'
     End
   End
 

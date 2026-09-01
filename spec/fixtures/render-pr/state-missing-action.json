@@ -1,0 +1,68 @@
+{
+  "status": "ready_for_pr",
+  "package": "lodash",
+  "major_line": "4",
+  "branch": "fix/dependabot-lodash-4x",
+  "override_scope": "scoped",
+  "bare_override": "none",
+  "drift_commit": false,
+  "resolved_version": "4.17.21",
+  "before": "4.17.18",
+  "risk": {
+    "band": "Low",
+    "score": 2,
+    "f4": 0,
+    "f5": 1,
+    "markdown": "## Merge risk: 🟢 Low (2/14)\n\n- F1 version delta: minor (4.17.18 -> 4.17.21)\n- F2 relationship: transitive\n",
+    "coverage": {
+      "modules": 3,
+      "covered": 1
+    },
+    "ci": {
+      "present": true
+    }
+  },
+  "written": [
+    {
+      "parent": "express",
+      "path": [
+        "overrides",
+        "express",
+        "lodash"
+      ],
+      "value": ">=4.17.21 <5"
+    }
+  ],
+  "superseded_keys": [],
+  "override_file": "package.json",
+  "alias_lookup": {
+    "source": "lockfile",
+    "parents_unresolved": []
+  },
+  "lockfile_invalidated": {
+    "performed": false,
+    "keys": []
+  },
+  "observations": [],
+  "observations_pre_fix": [],
+  "applied_parents": [
+    "express"
+  ],
+  "requires_major_bump": [],
+  "other_line_moves": [],
+  "benign_moves": [],
+  "validate": {
+    "ok": true,
+    "checked": 1,
+    "resolved_versions": [
+      "4.17.21"
+    ]
+  },
+  "why_raw": "lodash@4.17.18\n  express@4.18.0\n    lodash \"^4.17.18\"",
+  "declared_ranges": [
+    "^4.17.18"
+  ],
+  "declared_ranges_cause": null,
+  "parents_unreadable": [],
+  "parents_malformed": []
+}

@@ -6,7 +6,8 @@
 #   render-pr.sh commit-msg --state <ready_for_pr.json> --group-json <group.json> --repo <nwo>
 #   render-pr.sh body       --state <ready_for_pr.json> --group-json <group.json> --repo <nwo>
 #                            [--collateral-note <file>] [--global-override-note <file>]
-#   render-pr.sh labels     --repo <nwo> --band <low|medium|high> [--env-prefix "<string>"]
+#   render-pr.sh labels     --repo <nwo> --band <low|medium|high> [--label <name>]...
+#                            [--env-prefix "<string>"]
 #   render-pr.sh create     --repo <nwo> --head <branch> --title <string> --body-file <file>
 #                            --band <low|medium|high> [--label <name>]... [--env-prefix "<string>"]
 #
@@ -54,8 +55,50 @@ need_value() {
   [ -n "${2:-}" ] || die "$1 requires a value"
 }
 
+# Reads a file into a compact-JSON variable. Prints nothing and sets no exit
+# status of its own on a parse failure — jq's own exit is swallowed by `2>&1`
+# discipline elsewhere in this file if this were called through a command
+# substitution and then die'd from inside it, `die`'s `exit 1` would end only
+# that subshell, leaving `{"error": ...}` captured as the caller's "JSON".
+# That is exactly the trap fix-group.sh's `adapter_field` comment documents.
+# So this prints raw output only; every caller runs `require_ok` on the
+# result as its own top-level statement, never inside `$(...)`.
 read_json() {
-  jq -c '.' "$1" 2>/dev/null || die "$2: not readable JSON: $1"
+  jq -c '.' "$1" 2>/dev/null
+}
+
+# Runs a jq boolean filter against a JSON payload already in hand (a plain
+# argument, never re-read from disk) and dies with $3 unless it evaluates to
+# `true` — including a parse error or non-boolean result, both read as false.
+# Called as a bare statement (never `x=$(require_ok ...)`), so `die`'s `exit`
+# actually ends the process: this is fix-group.sh's `adapter_field`/
+# `require_json` discipline, generalized to an arbitrary filter instead of a
+# fixed field-presence check.
+require_ok() {
+  printf '%s' "$1" | jq -e "$2" >/dev/null 2>&1 || die "$3"
+}
+
+# A field the driver's `ready_for_pr` (or the dispatched `group`) contract
+# promises arrives present and non-null, or it is a hard error — never a bare
+# `jq -r`, whose answer for an absent key is the STRING "null", which then
+# renders into the PR body as literal text or takes a branch of its own
+# (scripts/CLAUDE.md, "A field the contract promises..."). `false`, `0`, and
+# `[]` are legitimate answers and pass; only an absent key or an explicit
+# JSON `null` does not, and jq's own `-r` reader cannot tell those two apart
+# from a genuinely missing field either, so this checks with `has` first
+# wherever the field can sit under a possibly-absent parent object, and
+# collapses missing-parent and missing-key into the same failure — both are
+# "this field is not there" from the caller's point of view.
+require_field() {
+  # $1 payload  $2 dotted path with a leading '.' (e.g. ".action",
+  # ".risk.markdown")  $3 description of the payload for the error
+  local ok
+  ok=$(printf '%s' "$1" | jq -r --arg p "${2#.}" '
+    ($p | split(".")) as $ks
+    | reduce $ks[] as $k (.; if (. == null or (type != "object")) then null else .[$k] end)
+    | if . == null then "false" else "true" end' 2>/dev/null)
+  [ "$ok" = "true" ] \
+    || die "$3 has no usable '$2'. The driver's contract promises this field; an absent or null value here is never rendered as a default."
 }
 
 # ---------------------------------------------------------------------------
@@ -133,9 +176,16 @@ cmd_commit_msg() {
   [ -n "$repo" ] || die "commit-msg requires --repo"
 
   local state group
-  state=$(read_json "$state_file" "--state")
-  group=$(read_json "$group_file" "--group-json")
+  state=$(read_json "$state_file")
+  require_ok "$state" 'type == "object"' "commit-msg: --state $state_file is not readable JSON, or not a JSON object."
+  group=$(read_json "$group_file")
+  require_ok "$group" 'type == "object"' "commit-msg: --group-json $group_file is not readable JSON, or not a JSON object."
+  require_ok "$group" '(.alerts | type) == "array" and (.alerts | length) > 0' \
+    "commit-msg: --group-json $group_file carries no non-empty alerts[]. A dispatched group is never empty; rendering a count and an alert list from zero alerts is a false claim, not a legitimate empty state."
+  require_ok "$group" '.alerts | all(.[]; (.number != null) and ((.cve != null) or (.ghsa != null)) and (.severity != null))' \
+    "commit-msg: --group-json $group_file has an alert missing 'number', both of 'cve' and 'ghsa', or 'severity'. Every alert line and Refs: trailer needs all three."
 
+  require_field "$state" ".action" "commit-msg: --state $state_file"
   local action
   action=$(printf '%s' "$state" | jq -r '.action')
   if [ "$action" = "lockfile-refresh" ]; then
@@ -154,23 +204,32 @@ cmd_commit_msg() {
   if [ "$action" = "direct-update" ]; then
     location="package.json"
   else
-    location=$(printf '%s' "$state" | jq -r '.override_file // empty')
-    [ -n "$location" ] || die "commit-msg: state carries no override_file for action '$action'"
+    require_field "$state" ".override_file" "commit-msg: --state $state_file (action '$action')"
+    location=$(printf '%s' "$state" | jq -r '.override_file')
   fi
 
+  require_field "$group" ".package" "commit-msg: --group-json $group_file"
+  require_field "$group" ".major_line" "commit-msg: --group-json $group_file"
+  require_field "$group" ".highest_fixed_version" "commit-msg: --group-json $group_file"
   local package major_line version n
   package=$(printf '%s' "$group" | jq -r '.package')
   major_line=$(printf '%s' "$group" | jq -r '.major_line')
   version=$(printf '%s' "$group" | jq -r '.highest_fixed_version')
   n=$(printf '%s' "$group" | jq '.alerts | length')
 
+  local alert_lines refs_lines
+  alert_lines=$(printf '%s' "$group" | jq -r '.alerts[] | "- #\(.number): \(.cve // .ghsa) (\(.severity))"') \
+    || die "commit-msg: could not render the Alerts resolved list from --group-json $group_file."
+  refs_lines=$(printf '%s' "$group" | jq -r --arg repo "$repo" \
+    '.alerts[] | "Refs: https://github.com/\($repo)/security/dependabot/\(.number)"') \
+    || die "commit-msg: could not render the Refs: trailer from --group-json $group_file."
+
   printf 'fix(deps): resolve %s Dependabot alert(s) for %s %s.x\n\n' "$n" "$package" "$major_line"
   printf '%s to >=%s via %s.\n\n' "$kind" "$version" "$location"
   printf 'Alerts resolved:\n'
-  printf '%s' "$group" | jq -r '.alerts[] | "- #\(.number): \(.cve // .ghsa) (\(.severity))"'
+  printf '%s\n' "$alert_lines"
   printf '\n'
-  printf '%s' "$group" | jq -r --arg repo "$repo" \
-    '.alerts[] | "Refs: https://github.com/\($repo)/security/dependabot/\(.number)"'
+  printf '%s\n' "$refs_lines"
 }
 
 # ---------------------------------------------------------------------------
@@ -206,8 +265,33 @@ cmd_body() {
   [ -z "$override_note" ] || need_file --global-override-note "$override_note"
 
   local state group
-  state=$(read_json "$state_file" "--state")
-  group=$(read_json "$group_file" "--group-json")
+  state=$(read_json "$state_file")
+  require_ok "$state" 'type == "object"' "body: --state $state_file is not readable JSON, or not a JSON object."
+  group=$(read_json "$group_file")
+  require_ok "$group" 'type == "object"' "body: --group-json $group_file is not readable JSON, or not a JSON object."
+  require_ok "$group" '(.alerts | type) == "array" and (.alerts | length) > 0' \
+    "body: --group-json $group_file carries no non-empty alerts[]. A dispatched group is never empty; a Summary and an Alerts resolved table rendered from zero alerts is a false claim, not a legitimate empty state."
+  require_ok "$group" '.alerts | all(.[]; (.number != null) and ((.cve != null) or (.ghsa != null)) and (.severity != null) and (.epss_percentile != null))' \
+    "body: --group-json $group_file has an alert missing 'number', both of 'cve' and 'ghsa', 'severity', or 'epss_percentile'. Every alerts-table row and Refs: line needs all four."
+
+  require_field "$state" ".action" "body: --state $state_file"
+  require_field "$state" ".resolved_version" "body: --state $state_file"
+  require_field "$state" ".drift_commit" "body: --state $state_file"
+  require_field "$state" ".bare_override" "body: --state $state_file"
+  require_field "$state" ".risk.markdown" "body: --state $state_file"
+  require_field "$state" ".why_raw" "body: --state $state_file"
+  require_field "$state" ".validate.checked" "body: --state $state_file"
+  # `other_line_moves` is `null` (no baseline; a real, checked answer) or `[]`
+  # or a populated array — every one of those is a legitimate VALUE. Only its
+  # outright ABSENCE is a contract violation, and `null` at the jq level
+  # cannot be told apart from "missing" by a bare read: `has()` is what tells
+  # them apart (finding #8).
+  require_ok "$state" 'has("other_line_moves")' \
+    "body: --state $state_file has no 'other_line_moves' key at all. \`null\` there is a real, checked answer (no baseline was available); an absent key is not, and rendering the null-case text for it would be a specific factual claim made from a hole in the data."
+
+  require_field "$group" ".package" "body: --group-json $group_file"
+  require_field "$group" ".major_line" "body: --group-json $group_file"
+  require_field "$group" ".highest_fixed_version" "body: --group-json $group_file"
 
   local package major_line n action resolved_version before override_file drift bare
   package=$(printf '%s' "$group" | jq -r '.package')
@@ -226,10 +310,14 @@ cmd_body() {
     moves_kind="null"
   elif [ "$moves_raw" = "[]" ]; then
     moves_kind="clean"
-  elif [ "$(printf '%s' "$moves_raw" | jq '[ .[] | select(.class == "fatal") ] | length > 0')" = "true" ]; then
-    moves_kind="fatal"
   else
-    moves_kind="benign"
+    require_ok "$state" '(.other_line_moves | type) == "array" and (.other_line_moves | all(.[]; has("class") and has("major") and has("before") and has("after")))' \
+      "body: --state $state_file's other_line_moves does not parse as an array of {class, major, before, after} entries."
+    if [ "$(printf '%s' "$moves_raw" | jq '[ .[] | select(.class == "fatal") ] | length > 0')" = "true" ]; then
+      moves_kind="fatal"
+    else
+      moves_kind="benign"
+    fi
   fi
 
   # Every required note is checked before anything is printed: a partial
@@ -240,6 +328,31 @@ cmd_body() {
   fi
   if [ "$moves_kind" = "fatal" ] && [ -z "$collateral_note" ]; then
     die "body: other_line_moves carries a fatal entry, which only happens on a human re-dispatch, and the narrative explaining why the move was accepted is evidence only the agent has. Pass --collateral-note <file>."
+  fi
+
+  # Every remaining check that can fail is run here too, before the first
+  # `printf`, even though its data is only consumed by a section further
+  # down: a die() partway through rendering leaves a real, plausible-looking
+  # partial body ahead of the {"error": ...} on the same stdout, which is
+  # exactly the "render something plausible from data we could not read"
+  # class this whole file exists to refuse (finding #1's lesson, applied to
+  # every section, not just the top-level read).
+  require_ok "$state" '.validate.checked != 0' \
+    "body: --state $state_file reports validate.checked: 0. Zero resolved versions checked on the ${major_line}.x line is never a legitimate 'Lockfile validated' claim, whether the field was genuinely zero or silently defaulted from an absent one."
+  if [ "$action" != "lockfile-refresh" ]; then
+    require_field "$state" ".written" "body: --state $state_file (action '$action')"
+  fi
+  if [ "$bare" != "none" ]; then
+    require_ok "$state" '[ .written[]? | select((.parent // null) == null) ] | length > 0' \
+      "body: bare_override is '$bare' but --state $state_file's written[] carries no top-level (parent: null) entry to report the range from. The state file contradicts its own classification; nothing is rendered rather than a fabricated range."
+  fi
+  require_ok "$state" '(.requires_major_bump // []) | type == "array"' \
+    "body: --state $state_file's requires_major_bump is not an array."
+  require_ok "$state" '(.requires_major_bump // []) | all(.[]; (.version | type) == "string" and (.path | type) == "string" and ((.vulnerable_ranges // []) | type) == "array")' \
+    "body: --state $state_file has a requires_major_bump entry missing 'version' or 'path' as a string, or an unreadable vulnerable_ranges[]. Rendering the table's header with no rows from this would read as \"nothing left open\" — the opposite of the truth — so nothing is rendered instead."
+  if [ "$(printf '%s' "$state" | jq '(.requires_major_bump // []) | length > 0')" = "true" ]; then
+    require_ok "$group" '.alerts | all(.[]; has("vulnerable_range") and has("ghsa") and has("cve"))' \
+      "body: --group-json $group_file has an alert missing 'vulnerable_range', 'ghsa' or 'cve', needed to say which alerts stay open in the Not-fixed-by-this-PR table."
   fi
 
   # ---- Summary ------------------------------------------------------------
@@ -256,22 +369,32 @@ cmd_body() {
   printf '\n'
 
   # ---- Alerts resolved ------------------------------------------------------
+  # `epss_percentile` is validated present above (a required field of every
+  # alert), so it is always a number here and always rendered as one: EPSS is
+  # only ever missing upstream (discover-alerts.sh:385 defaults it to 0 when
+  # GitHub's API reports no score), never null on the wire this script reads,
+  # so an "unknown" branch here could never legitimately fire — and printing
+  # it next to a real 0.0% score would be the false claim, not the fix
+  # (finding #7: chosen fix is "always render the number, require the field
+  # present"; the alternative of preserving null upstream through
+  # discover-alerts.sh was rejected as out of this script's scope and a
+  # change to a contract other consumers — score-merge-risk.sh, the
+  # orchestrator's aggregation — also read).
   printf '## Alerts resolved\n\n'
   printf '| # | CVE | Severity | EPSS | Summary |\n|---|---|---|---|---|\n'
+  local alert_rows
+  alert_rows=$(printf '%s' "$group" | jq -r \
+    '.alerts[] | [.number, (.cve // .ghsa), .severity, .epss_percentile, (.summary // "" | gsub("\\|"; "\\|") | gsub("\n"; " "))] | @tsv') \
+    || die "body: could not render the Alerts resolved table from --group-json $group_file."
   local num cve sev epss summary
   while IFS=$'\t' read -r num cve sev epss summary; do
     [ -n "$num" ] || continue
     local pct
-    if [ -n "$epss" ] && [ "$epss" != "null" ]; then
-      pct=$(awk -v e="$epss" 'BEGIN { printf "%.1f", e * 100 }')
-      pct="${pct}%"
-    else
-      pct="unknown"
-    fi
-    printf '| [#%s](https://github.com/%s/security/dependabot/%s) | %s | %s | %s | %s |\n' \
+    pct=$(awk -v e="$epss" 'BEGIN { printf "%.1f", e * 100 }')
+    printf '| [#%s](https://github.com/%s/security/dependabot/%s) | %s | %s | %s%% | %s |\n' \
       "$num" "$repo" "$num" "$cve" "$sev" "$pct" "$summary"
   done <<EOF
-$(printf '%s' "$group" | jq -r '.alerts[] | [.number, (.cve // .ghsa), .severity, (.epss_percentile // ""), (.summary // "" | gsub("\\|"; "\\|") | gsub("\n"; " "))] | @tsv')
+$alert_rows
 EOF
   printf '\n'
 
@@ -307,12 +430,17 @@ EOF
   # ---- Global override --------------------------------------------------------
   if [ "$bare" != "none" ]; then
     local range parents_tried survived verbed
-    range=$(printf '%s' "$state" | jq -r '[ .written[]? | select((.parent // null) == null) | .value ] | first // empty')
+    # The range comes from the top-level (parent: null) entry `written[]`
+    # itself carries for a bare override — never a fallback placeholder.
+    # Its presence was already asserted before any output was printed
+    # (finding #10); a rendering-time failure here would leave the same
+    # partial-body-then-error shape this file exists to refuse.
+    range=$(printf '%s' "$state" | jq -r '[ .written[]? | select((.parent // null) == null) | .value ] | first')
     parents_tried=$(printf '%s' "$state" | jq -r '(.applied_parents // []) | join(", ")')
     survived=$(printf '%s' "$state" | jq -r '(.validate.resolved_versions // []) | join(", ")')
     if [ "$bare" = "added" ]; then verbed="Added"; else verbed="Tightened"; fi
     printf '## Global override\n\n'
-    jq -rn --arg verb "$verbed" --arg pkg "$package" --arg range "${range:-N/A}" \
+    jq -rn --arg verb "$verbed" --arg pkg "$package" --arg range "$range" \
       --arg parents "$parents_tried" --arg survived "$survived" '
       ("\($verb) an unscoped override `\($pkg): \"\($range)\"`."
        + (if $parents != "" then " Scoped entries were tried on: \($parents)." else "" end)
@@ -324,6 +452,8 @@ EOF
   fi
 
   # ---- Not fixed by this PR ----------------------------------------------------
+  # Every entry's shape and every alert field this table needs was already
+  # asserted before any output was printed (finding #5).
   local bump_count
   bump_count=$(printf '%s' "$state" | jq '(.requires_major_bump // []) | length')
   if [ "$bump_count" -gt 0 ]; then
@@ -334,7 +464,8 @@ EOF
     # own path is all `validate` reports — no parent, and none is invented:
     # the cell says a major bump of the copy's dependent is needed without
     # naming one, rather than rendering an empty or fabricated identifier.
-    printf '%s' "$state" | jq -r --argjson alerts "$(printf '%s' "$group" | jq -c '.alerts')" "$JQ_DEFS"'
+    local bump_rows
+    bump_rows=$(printf '%s' "$state" | jq -r --argjson alerts "$(printf '%s' "$group" | jq -c '.alerts')" "$JQ_DEFS"'
       .requires_major_bump[] as $b
       | ($b.vulnerable_ranges // []) as $vr
       | ([ $alerts[] | select((.vulnerable_range // "") as $r | $vr | index($r) != null)
@@ -345,15 +476,27 @@ EOF
          else "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
          end) as $remedy
       | [$b.version, $open, "no patched release in the \($maj).x line; \($remedy)"]
-      | @tsv' | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
+      | @tsv') \
+      || die "body: could not render the Not-fixed-by-this-PR table from --state $state_file's requires_major_bump."
+    printf '%s\n' "$bump_rows" | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
     printf '\n'
   fi
 
   # ---- Verification / Collateral ------------------------------------------------
+  # `.validate.checked` was already required present and non-zero before any
+  # output was printed (finding #3) — a genuinely zero count, and a missing
+  # field silently defaulted to zero, are the same failure from here.
   local checked hfv next_major
-  checked=$(printf '%s' "$state" | jq -r '.validate.checked // 0')
+  checked=$(printf '%s' "$state" | jq -r '.validate.checked')
   hfv=$(printf '%s' "$group" | jq -r '.highest_fixed_version')
   next_major=$(printf '%s' "$group" | jq -r '(.major_line | tonumber) + 1')
+
+  # `After` is a version list, and an empty one is not "nothing to show" —
+  # it is the package having no resolved copy left on that line, i.e. gone.
+  # Rendering an empty cell there reads as an omission, not as the fact
+  # itself (finding #6); this mirrors the empty-backtick rule already
+  # applied in the Not-fixed table.
+  local collateral_row_filter='.[] | [(.major | tostring) + ".x", (.before | join(", ")), (if (.after | length) == 0 then "(gone)" else (.after | join(", ")) end)] | @tsv'
 
   if [ "$moves_kind" != "clean" ]; then
     printf '## Collateral\n\n'
@@ -365,13 +508,13 @@ EOF
         ;;
       benign)
         printf '| Line | Before | After |\n|---|---|---|\n'
-        printf '%s' "$moves_raw" | jq -r '.[] | [(.major | tostring) + ".x", (.before | join(", ")), (.after | join(", "))] | @tsv' \
+        printf '%s' "$moves_raw" | jq -r "$collateral_row_filter" \
           | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
         printf '\nThese are within-major dedups by the package manager onto a version each line already resolved before this change, and none of these lines carries an open Dependabot alert.\n\n'
         ;;
       fatal)
         printf '| Line | Before | After |\n|---|---|---|\n'
-        printf '%s' "$moves_raw" | jq -r '.[] | [(.major | tostring) + ".x", (.before | join(", ")), (.after | join(", "))] | @tsv' \
+        printf '%s' "$moves_raw" | jq -r "$collateral_row_filter" \
           | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
         printf '\n'
         cat "$collateral_note"
@@ -424,10 +567,12 @@ create_label() {
 
 cmd_labels() {
   local repo="" band="" env_prefix=""
+  local extra_labels=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo)       need_value "$1" "${2-}"; repo="$2"; shift 2 ;;
       --band)       need_value "$1" "${2-}"; band="$2"; shift 2 ;;
+      --label)      need_value "$1" "${2-}"; extra_labels+=("$2"); shift 2 ;;
       --env-prefix) env_prefix="${2-}"; shift 2 ;;
       *) die "labels: unknown option '$1'" ;;
     esac
@@ -449,8 +594,23 @@ cmd_labels() {
   out=$(create_label "$repo" "merge-risk:$band_lower" "$color" "$desc") \
     || die "gh label create merge-risk:$band_lower failed: $out"
 
-  jq -n --arg band "$band_lower" \
-    '{status: "ok", labels: ["security", ("merge-risk:" + $band)]}'
+  # `gh pr create` fails outright on any label that does not already exist
+  # in the repository (the old phase 6's own rule, before this script owned
+  # label creation), so a caller's dispatcher-required extra labels have to
+  # be ensured here too, not only passed to `create`'s `--label` — a name
+  # this repository has never seen gets a neutral color and a generic
+  # description, since nothing in this flow knows what the requesting
+  # CLAUDE.md meant the label for.
+  local l created_extra="[]"
+  for l in "${extra_labels[@]:-}"; do
+    [ -n "$l" ] || continue
+    out=$(create_label "$repo" "$l" ededed "Required by this repository's own conventions") \
+      || die "gh label create $l failed: $out"
+    created_extra=$(jq -cn --argjson a "$created_extra" --arg l "$l" '$a + [$l]')
+  done
+
+  jq -n --arg band "$band_lower" --argjson extra "$created_extra" \
+    '{status: "ok", labels: (["security", ("merge-risk:" + $band)] + $extra)}'
 }
 
 # ---------------------------------------------------------------------------

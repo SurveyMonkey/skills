@@ -46,7 +46,7 @@ lodash@4.17.18
 
 | Line | Before | After |
 |---|---|---|
-| 1.x | 1.1.18 |  |
+| 1.x | 1.1.18 | (gone) |
 
 A human re-dispatch accepted this move: the 1.x copy of `lodash` was retired upstream and
 no consumer on that line still exists, verified by inspecting `next`'s own manifest.

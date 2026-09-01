@@ -536,15 +536,20 @@ rejection line by itself, so the orchestrator's phase 7 summary can key on the c
 rather than parsing git's wording. Run Cleanup as always; its unpushed-commit rule already
 preserves the branch.
 
-**`labels` ensures `security` and this PR's `merge-risk:<band>` label exist on the repository**,
-`<band>` the scorer's `band` field verbatim, lowercased — never a bare `risk:<band>`, which would
-read as alert severity rather than merge risk. Its race-tolerance (an "already exists" failure
-from `gh label create` is success, because sibling agents fixing other packages in the same batch
-race to create the same band label) and its label colors are the script's, not yours to
-re-derive:
+**`labels` ensures `security`, this PR's `merge-risk:<band>` label, and any further label your
+dispatcher's CLAUDE.md requires all exist on the repository** (check every CLAUDE.md in your
+context for one, and pass each as its own `--label`), `<band>` the scorer's `band` field verbatim,
+lowercased — never a bare `risk:<band>`, which would read as alert severity rather than merge risk.
+`gh pr create` fails outright on a label that does not already exist, so a dispatcher-required
+label has to be ensured here, not only handed to `create` below. Its race-tolerance (an "already
+exists" failure from `gh label create` is success, because sibling agents fixing other packages in
+the same batch race to create the same band label) and its label colors — a fixed one per band,
+a neutral one for anything you pass via `--label` here, since the script does not know what a
+dispatcher-required label means — are the script's, not yours to re-derive:
 
 ```bash
-<scripts_dir>/render-pr.sh labels --repo <nwo> --band <band> [--env-prefix "<env_prefix>"]
+<scripts_dir>/render-pr.sh labels --repo <nwo> --band <band> [--label <extra>...] \
+  [--env-prefix "<env_prefix>"]
 ```
 
 **`body` renders the whole PR body** — Summary, the alerts table, the scorer's risk markdown
@@ -579,9 +584,9 @@ deterministic text is the whole section.
   > "$WORK/pr-body.md"
 ```
 
-Then open the PR. `create` applies `security` and `merge-risk:<band>` itself; add any further
-`--label` your dispatcher's CLAUDE.md requires (check every CLAUDE.md in your context for one), and
-it never passes `--draft` — PRs open **ready for review** (ADR 008):
+Then open the PR. `create` applies `security` and `merge-risk:<band>` itself; pass the same
+`--label` extras you gave `labels` above so they land on the PR too, and it never passes
+`--draft` — PRs open **ready for review** (ADR 008):
 
 ```bash
 <scripts_dir>/render-pr.sh create --repo <nwo> --head <branch_name> --band <band> \
