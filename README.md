@@ -28,7 +28,7 @@ request, open for review, that carries a computed merge-risk rating.
 
 | Entry point | Kind | What it does |
 |---|---|---|
-| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches fix subagents from a rolling pool and reports the pull requests they open. |
+| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches one fix subagent per group through a capacity-bounded workflow and reports the pull requests they open. |
 | `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
 | `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. Preflights for the repo's own open `security`-labeled PRs first, and stops if any exist: run it after those fix PRs have merged or been closed. |
 
@@ -51,9 +51,9 @@ parallel from a rolling pool, and `audit-pins` is dispatched alone, one reposito
 
 **What the plugin does, at headline level:**
 
-- **A rolling pool of fix subagents.** One subagent per package major line per repo, each in its
-  own git worktree under the target repo, kept at the machine's capacity: every time one finishes,
-  the next queued fix takes its slot.
+- **A capacity-bounded pool of fix subagents.** One subagent per package major line per repo, each
+  in its own git worktree under the target repo, dispatched by a single workflow that keeps the
+  pool at the machine's capacity: every time one finishes, the next queued fix takes its slot.
 - **Repo, org, or user scope.** Point it at the current repo, a whole GitHub org, or everything
   you own; org runs filter to repos you can actually push to.
 - **Risk-ranked discovery.** Alerts are grouped by package and major line, then ranked by

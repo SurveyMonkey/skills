@@ -94,17 +94,16 @@ flowchart TD
 
     P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6P{"Registry probe per repo, from inside repo_root,<br/>under env_prefix: pm_exec view on a scoped dependency,<br/>or the top-ranked package; one retry"}
     P6P -->|"fails twice: auth 401/403, not-found 404,<br/>or network"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
-    P6P -->|green| P6Q["Work queue: every approved group across every repo,<br/>in ranked order"]
-    P6Q --> P6D["Rolling pool, machine-wide: dispatch queued items until cap<br/>are in flight, one message, one Task call per item;<br/>on each completion refill to cap the same way"]
-    P6D --> P6DQ{"queue empty and every agent returned?"}
-    P6DQ -->|"no: refill while the queue holds work<br/>(a failure or unparseable result frees a slot too)"| P6D
-    P6DQ -->|yes| P7
+    P6P -->|green| P6Q["Dispatch list: every approved group across every repo,<br/>in ranked order, one payload each"]
+    P6Q --> P6D["One Workflow call, machine-wide: cap workers over the list,<br/>one fix-dependency agent per group, each result<br/>schema-validated against the agent Result contract"]
+    P6D --> P6R["Per returned entry: one post-agent.sh call<br/>(PR verified, then reap or leave, always reported)"]
+    P6R --> P7
 
-    P7["Phase 7: parse each fenced JSON result"] --> P7Q{"per result"}
+    P7["Phase 7: read the workflow's returned entries"] --> P7Q{"per entry"}
     P7Q -->|success| P7S["Fix table row: PR, risk, F4/F5, bare-override note"]
     P7Q -->|"no-op"| P7N["Its own 'already fixed' line,<br/>never the failure list"]
     P7Q -->|failure| P7F["Failure list: phase + detail"]
-    P7Q -->|"missing or unparseable block"| P7U["Recorded as a failure; never guess fields"]
+    P7Q -->|"null result (schema unmet, or the agent died)"| P7U["Recorded as a failure; never guess fields"]
     P7S --> P7AGG
     P7N --> P7AGG
     P7F --> P7AGG
@@ -120,10 +119,10 @@ flowchart TD
     DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
 ```
 
-Two cycles, and no others. The drain loop (`P6DQ` back to `P6D`) is the concurrency cap enforced as
-a rolling pool: it turns once per completion, refilling to `cap` from the queue, rather than once
-per barrier. Nothing waits for a slower sibling, and a failed or unparseable result refills exactly
-like a success. The declined-groups loop (phase 8 to phase 3) is reached only when groups
+One cycle, and no others. The drain loop that used to sit at phase 6 is gone: the concurrency cap
+is now held by the dispatch workflow's own workers (issue #175), so nothing in this flow counts
+agents in flight or refills a slot, and a null result is a failure entry rather than a freed slot.
+The declined-groups loop (phase 8 to phase 3) is reached only when groups
 remain *and* the user accepts the offer, and it re-enters the how-much question with what is left;
 those groups were never approved at phase 4, so it is a scope question rather than a resumption of
 approved work. There is no third: this flow dispatches no other agent kind and asks no other

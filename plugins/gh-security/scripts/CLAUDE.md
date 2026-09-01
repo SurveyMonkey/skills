@@ -322,7 +322,7 @@ that this repo's commands belong bare.
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 
-Agents share a `repo_root` by design — the rolling pool runs multiple `fix-dependency` agents
+Agents share a `repo_root` by design — the dispatch workflow runs multiple `fix-dependency` agents
 against the same repo at once, and a pin audit dispatched separately may still coincide with one in
 the narrow window the preflight does not close (`docs/adr/009-decouple-pin-audit.md`) — and
 worktree *paths* not colliding is not the same as repository state not colliding

@@ -578,9 +578,13 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
 
     It 'no longer prescribes a bare pr-status.sh call inside the reap step'
+      # The window is located by its own opening sentence. A marker that stops
+      # matching would silently scan nothing and pass, so an empty window is
+      # reported as itself rather than as a zero.
       raw_pr_status_in_reap_step() {
-        awk '/Reap that agent.s local artifacts between the two motions/{f=1} f{print} f && /Carry the script.s report into phase 7/{exit}' "$1" \
-          | grep -c 'scripts/common/pr-status.sh' || true
+        reap_step_window=$(awk '/Reap each group.s local artifacts once its result is in hand/{f=1} f{print} f && /Carry the script.s report into phase 7/{exit}' "$1")
+        [ -n "$reap_step_window" ] || { echo 'reap-step window not found'; return 0; }
+        printf '%s\n' "$reap_step_window" | grep -c 'scripts/common/pr-status.sh' || true
       }
       When call raw_pr_status_in_reap_step "$SKILL"
       The status should be success
@@ -605,9 +609,22 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
 
     # The verification is the gate, and it is the caller's: the script makes no
-    # network call and asks gh nothing.
+    # network call and asks gh nothing. Issue #175 moved the reap out of a
+    # rolling pool's refill motion (the model no longer schedules anything)
+    # and onto the workflow's returned entries, so the ordering rule is now
+    # stated against the summary rather than against a slot.
     It 'verifies the pull request before reaping anything'
-      When call phrase_in "$SKILL" 'after the pull request is verified and before you refill its slot'
+      When call phrase_in "$SKILL" 'after the pull request is verified and before that result is folded into phase 7'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # One call per returned entry is the whole cadence, and it is the one
+    # thing #175 deliberately left outside the workflow script: a batched or
+    # per-repo reap would lose the per-group `left_behind` accounting phase 7
+    # reads.
+    It 'makes exactly one post-agent.sh call per returned entry'
+      When call phrase_in "$SKILL" 'one .post-agent.sh. call per returned entry, never one per repo and never one for the batch'
       The status should be success
       The output should equal '1'
     End

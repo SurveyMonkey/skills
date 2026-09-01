@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*post-agent.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*post-agent.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Workflow, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -277,6 +277,13 @@ Ask for **one** approval of the whole batch. This is **the last checkpoint befor
 exist**: subagents run unattended from here through PR creation, and no phase after this one asks
 the user to approve anything about a PR. Nothing dispatches without it.
 
+**That one approval covers the workflow launch and every agent inside it.** Phase 6 dispatches the
+batch by running one Workflow script, and once it is launched **nothing inside it prompts** — no
+per-group checkpoint, no confirmation as one agent finishes and the next starts. Say so here, so
+the user approving the batch knows that approving it is approving every group in it. A group
+withdrawn later never needed re-approval either, and no group is ever added to the batch after
+this point.
+
 ## Phase 5: Resolve local checkouts
 
 Skip this phase entirely when phase 1 detected repo scope from a local checkout — `repo_root`,
@@ -399,7 +406,7 @@ For each **distinct repo** named in the approved batch:
 Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
 for a given repo shares its triple.
 
-## Phase 6: Dispatch from a rolling pool
+## Phase 6: Dispatch the fix workflow
 
 **Once per distinct repo in the approved batch, before the first agent for that repo is
 dispatched:**
@@ -458,20 +465,136 @@ green probe does not shield an actual `install` inside a fix agent from failing 
 package specifically, but a probe failing here is worth stopping 30+ downstream failures for one
 report.
 
-Then hold the approved groups as a **work queue**: every group across every repo, in the ranked
-order phases 3 and 4 settled. Drain that queue as a **rolling pool**, in two motions:
+### The dispatch workflow
 
-- **Fill.** Dispatch queued items until `cap` agents are in flight, **in a single message with one
-  Task tool call per item**, so they start in parallel.
-- **Refill.** On each completion notification, dispatch queued items until `cap` are in flight
-  again, in one message whenever more than one slot is free. Concurrent completions can free
-  several at once, and dispatching a single item per notification would leave the rest idle.
+**Dispatch is one Workflow call, not a schedule you keep by hand.** The bookkeeping a rolling pool
+needs — how many agents are in flight, which slot just freed, never overshooting the cap on a stale
+count — is exactly what the harness does deterministically, and re-deriving it in prose costs
+tokens on every run to arrive at a worse answer. Launch the script below with `args` set to
+`{cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>]}`, every group
+across every repo in the ranked order phases 3 and 4 settled.
 
-Keep going until the queue is empty and the last agent has returned. Nothing waits for a sibling.
+Each payload is the group JSON verbatim under `group`, plus `adapter_path`, the group's own `nwo`
+(its `repo` field), `default_branch` and `repo_root` for that group's repo (from phase 1 at repo
+scope, or phase 5's resolved triples at org/user scope), `scripts_dir`
+(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and that repo's `env_prefix` when it resolved one (phase 1
+at repo scope, phase 5 at org and user scope; OPTIONAL — **omit the key rather than send null**).
 
-**Reap that agent's local artifacts between the two motions**, on each completion, after the pull
-request is verified and before you refill its slot. One call replaces the whole procedure — save
-the completed agent's fenced JSON result block to a file, then:
+The script is thin on purpose: it dispatches and it validates, and nothing else. The reap below and
+the phase 7 summary stay outside it.
+
+```javascript
+export const meta = {
+  name: 'gh-security-fix-dispatch',
+  description: 'Fix each approved Dependabot alert group with its own subagent, bounded by the machine capacity cap',
+  phases: [
+    { title: 'Fix groups', detail: 'one fix-dependency agent per approved group' },
+  ],
+}
+
+// args: { cap: <detect-capacity.sh cap>, dispatches: [ <one payload per approved group> ] }
+const RESULT_SCHEMA = {
+  type: 'object',
+  required: [
+    'status', 'package', 'major_line', 'repo', 'branch', 'pr_url', 'action',
+    'resolved_version', 'risk', 'observations', 'requires_major_bump',
+    'bare_override', 'no_op', 'failure',
+  ],
+  properties: {
+    status: { enum: ['success', 'no-op', 'failure'] },
+    package: { type: 'string' },
+    major_line: { type: 'string' },
+    repo: { type: 'string' },
+    branch: { type: 'string' },
+    pr_url: { type: ['string', 'null'] },
+    action: { enum: ['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh', null] },
+    resolved_version: { type: ['string', 'null'] },
+    risk: {
+      type: ['object', 'null'],
+      required: ['band', 'score', 'f4', 'f5'],
+      properties: {
+        band: { type: 'string' },
+        score: { type: 'number' },
+        f4: { type: 'number' },
+        f5: { type: 'number' },
+      },
+    },
+    observations: { type: 'array' },
+    requires_major_bump: { type: 'array' },
+    bare_override: { enum: ['none', 'added', 'tightened'] },
+    no_op: {
+      type: ['object', 'null'],
+      required: ['reason', 'evidence'],
+      properties: { reason: { type: 'string' }, evidence: { type: 'object' } },
+    },
+    failure: {
+      type: ['object', 'null'],
+      required: ['phase', 'detail'],
+      properties: {
+        phase: {
+          enum: ['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr'],
+        },
+        detail: { type: 'string' },
+      },
+    },
+  },
+}
+
+phase('Fix groups')
+
+const DISPATCHES = args.dispatches
+const results = new Array(DISPATCHES.length).fill(null)
+let next = 0
+
+const worker = async () => {
+  while (next < DISPATCHES.length) {
+    const i = next
+    next += 1
+    const d = DISPATCHES[i]
+    results[i] = await agent(
+      'Follow your agent definition end to end and finish with its JSON result block.\n' +
+        'Dispatch payload:\n' + JSON.stringify(d, null, 2),
+      {
+        agentType: 'fix-dependency',
+        phase: 'Fix groups',
+        label: d.group.repo + ' ' + d.group.package + ' ' + d.group.major_line,
+        schema: RESULT_SCHEMA,
+      },
+    )
+  }
+}
+
+await parallel(
+  Array.from({ length: Math.min(args.cap, DISPATCHES.length) }, () => () => worker()),
+)
+
+return DISPATCHES.map((d, i) => ({ dispatch: d, result: results[i] }))
+```
+
+`cap` bounds the pool here and nowhere else: the workers are what hold it, so the pool can never
+exceed it and no count of yours has to track it. The cap stays machine-wide across every repo in
+the batch — a single workflow over every approved group, never one workflow per repo, is what makes
+that true by construction.
+
+**`schema` replaces the old "an unparseable result block is a failure report" rule.** The agent is
+forced through structured output and retried on a mismatch, so a result that reaches you has
+already been validated against the shape `agents/fix-dependency.md` promises, and nothing here
+re-parses a fence. **A group whose entry comes back `null` — the schema could not be satisfied
+after retries, or the agent died — is a failure report for that group, and is still reported.** Its
+`dispatch` entry is right there beside it, carrying `package`, `major_line`, `branch_name` and
+`repo_root`, which is everything the reap and phase 7 need; run the reap below for it exactly as for
+any other entry, with an empty result file, and `post-agent.sh` reports it `missing`, reaps nothing,
+and names the worktree and branch it left. A null entry is never dropped, never retried by hand, and
+never counted as a success.
+
+**Nothing inside the workflow prompts.** Phase 4's single approval covers the launch and every
+agent the script dispatches; there is no per-group checkpoint, and it remains the last checkpoint
+before pull requests exist.
+
+**Reap each group's local artifacts once its result is in hand**, after the pull request is verified
+and before that result is folded into phase 7 — **one `post-agent.sh` call per returned entry, never
+one per repo and never one for the batch**. One call replaces the whole procedure — save that
+entry's `result` object to a file as JSON (an empty file when it is `null`), then:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/post-agent.sh --result <path to the saved result> \
@@ -493,23 +616,13 @@ whatever the outcome. **An agent that ended any other way is never reaped**: a f
 crash, an unparseable or missing result block, a `no-op`, or a PR that is not open all leave the
 worktree and the branch in place, and the report names them (`reaped: false`, with `reason` and the
 derived `worktree_path`/`branch`) for phase 7 rather than this phase guessing at what survived.
-**A failure here is not fatal**: record the report, refill the slot, and carry on. A reap that
-could not finish must never stall the pool, and neither does one that printed nothing at all — a
+**A failure here is not fatal**: record the report, move to the next entry, and carry on. A reap
+that could not finish must never stall the pool, and neither does one that printed nothing at all — a
 rejected argument or a refused path in the reap it runs internally — which the script turns into a
 named `reason` rather than a guessed clean sweep.
 
 Carry the script's report into phase 7 verbatim; it is what phase 7's own paragraph reads from, not
 something to rebuild by hand.
-
-Each queued group is **one Task tool call**:
-
-- `subagent_type`: `fix-dependency`
-- prompt: the group JSON verbatim, plus `adapter_path`, the group's own `nwo` (its `repo` field),
-  `default_branch` and `repo_root` for that group's repo (from phase 1 at repo scope, or phase 5's
-  resolved triples at org/user scope), `scripts_dir`
-  (`${CLAUDE_PLUGIN_ROOT}/scripts/common`), that repo's `env_prefix` when it resolved one (phase 1
-  at repo scope, phase 5 at org and user scope; OPTIONAL — omit rather than send null), and the instruction to follow its agent definition
-  and end with its JSON result block.
 
 Two lines of the same package may be in flight together, whether in the same repo or different
 ones: they carry different `branch_name`s and different worktree paths (worktree paths are always
@@ -522,29 +635,19 @@ one deletes a live sibling's registration — no `git gc`, no config writes, no 
 manipulation outside its own branch. Each agent adds and removes its own worktree by path and
 nothing else. The agent definition states this as a hard rule; the reason it is written here too
 is that the earlier absolute phrasing ("cannot collide") is what invited the two calls issue #35
-found. Under a rolling pool something is in flight from the first dispatch until the queue drains,
-so this is a rule for the whole run rather than for a window between dispatches.
-
-**The cap is machine-wide across every repo in the batch, and the pool must never exceed it.**
-Refill up to `cap` rather than by one, and count from the agents *actually* in flight when a
-completion arrives; dispatching against a stale count overshoots the cap, which is the one way a
-pool can go wrong that a barrier could not. **A failed, crashed, or unparseable result frees its
-slot exactly like a successful one**: record the failure for phase 7 and refill, because a crash
-must never stall the pool. And **refilling a slot is not a new dispatch decision, so it never
-prompts**: phase 4's single approval
-covers the whole queue and remains the last checkpoint before pull requests exist. The harness
-re-invokes you with a task-completion notification when a subagent finishes, which is the
-slot-freed signal ADR 003 lacked; its amendment retires the barrier for this pool.
+found. Something is in flight from the workflow's first dispatch until it returns, so this is a rule
+for the whole run rather than for a window between dispatches.
 
 ## Phase 7: Summarize the run
 
-Results arrive **one at a time**, as each agent completes and its slot is refilled. Parse each
-agent's fenced JSON result as it lands, keep it with the others, and present the summary once the
-queue has drained and the last agent has returned. The summary describes the whole approved batch,
-not whichever results happened to arrive together. **An unparseable or missing result block is a
-failure report** — record it as such; never guess fields, and refill its slot like any other
-completion. Agents are instructed never to park a turn waiting on a hung verb, so a missing block
-means the agent crashed or violated that contract, not that it needs more time.
+The workflow returns **one entry per approved group**, in the order they were dispatched, each
+carrying its own `dispatch` payload and its schema-validated `result`. Read the summary off those
+returned entries; the batch is complete when the workflow returns, so there is nothing to hold or
+reconcile as results trickle in. The summary describes the whole approved batch, not a subset.
+**An entry whose `result` is `null` is a failure report** — record it as such; never guess fields,
+and give it the same reap and the same line in the tables as any other entry. Agents are instructed
+never to park a turn waiting on a hung verb, so a null entry means the agent crashed or could not
+produce a result matching its own schema, not that it needs more time.
 
 Present one table for the run:
 
@@ -665,7 +768,7 @@ everything, and a deliberate leave — a local branch whose tip is not on origin
 in `left_behind` with no `errors` entry at all (the underlying reap's own `tip-not-on-origin` case). So give the count of groups whose `left_behind` came back empty — a genuinely clean sweep —
 rather than the count that merely read `reaped: true`, and name every artifact any other report's
 `left_behind` still carries: a reap that ran and left something behind, and a group that never
-attempted a reap at all — a failure, a crash, an unparseable or missing result block, a `no-op`, a
+attempted a reap at all — a failure, a crash, a `null` entry from the workflow, a `no-op`, a
 PR that is not open, or a reap that printed nothing. Every one of those reports already carries the
 derived `worktree_path` and `branch`, and the `reason` it was not reaped when it was not; nothing
 here recomputes a path or a branch name from a template. A leftover under `.claude/worktrees/` sits
@@ -684,8 +787,8 @@ exactly what phase 6 deliberately preserved.
   Those clones hold nothing the run still needs, because every pull request lives on the remote,
   and anything the reap left behind inside goes with the directory, so say that rather than
   pointing the user at a worktree path that no longer exists.
-- **Any group in it ended any other way** — a failure, a crash, a `no-op`, an unparseable or
-  missing result block, or a `pr_url` whose PR is not open: **keep the whole directory**, and
+- **Any group in it ended any other way** — a failure, a crash, a `no-op`, a `null` entry from the
+  workflow, or a `pr_url` whose PR is not open: **keep the whole directory**, and
   report that it was kept, where it is, and which groups are the reason. It is temporary in the
   sense that nothing else will reuse it, never in the sense that this skill deletes unpushed work.
 

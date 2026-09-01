@@ -198,3 +198,31 @@ condition, met.
   the whole queue.
 
 Everything else above holds.
+
+## Amendment: the harness holds the pool, not the orchestrator
+
+[Issue #175](https://github.com/SurveyMonkey/skills/issues/175) moves phase 6's dispatch into a
+Workflow script embedded in `skills/resolve-alerts/SKILL.md`. The amendment above was right that
+the harness had grown a completion signal; what it left in place was the orchestrator *reacting*
+to that signal — filling, counting the agents actually in flight, refilling without overshooting.
+That is bookkeeping a deterministic harness does exactly, and prose that re-derives it costs
+tokens on every run to reach a worse answer.
+
+- **The cap, its value, `detect-capacity.sh`, and its machine-wide scope are unchanged again.**
+  Only enforcement moved: the script runs `min(cap, N)` workers over the dispatch list, so the
+  worker count *is* the cap and the pool cannot exceed it. One workflow covers the whole batch,
+  never one per repo, which is what keeps the scope machine-wide.
+- **The stale-count hazard is gone rather than guarded**, because nothing counts.
+- **Result shape is validated, not parsed.** Each agent call carries a `schema` for the Result
+  block `agents/fix-dependency.md` promises, so the harness retries a mismatch and the
+  "an unparseable block is a failure report" rule is replaced: an entry that comes back `null` is
+  the failure report, and it is reaped and reported like any other.
+- **Worktree isolation is untouched, and the repo-global git state rule binds exactly as the
+  issue #35 amendment wrote it**: something is in flight from the workflow's first dispatch until
+  it returns.
+- **Approval is unchanged and still single.** Phase 4's approval now explicitly covers launching
+  the workflow, and nothing inside it prompts.
+- **The reap stays outside the script**, one `post-agent.sh` call per returned entry, so phase 7
+  still reads per-group `left_behind` accounting rather than a summary the script invented.
+
+Everything else above holds.
