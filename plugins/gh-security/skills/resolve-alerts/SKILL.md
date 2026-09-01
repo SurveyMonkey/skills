@@ -613,14 +613,33 @@ const RESULT_SCHEMA = {
       },
     },
   ],
-  // bare_override must agree with action, in both directions.
+  // bare_override must agree with action, in both directions — but ONLY on
+  // success. `action` is null on every failure, while `bare_override` still
+  // reports what was written, and `apply_constraint` writes the override
+  // BEFORE `install`: a validate_failed_after_ladder, an install_failure, a
+  // hook-rejected push and a failed pr all reach `status: "failure"` with
+  // `bare_override: "added"`. Ungated, no value of `action` satisfies both
+  // this rule and the failure branch above, the agent is retried into a
+  // `null` entry, and the likelier repair it finds is to report
+  // `bare_override: "none"` — silently hiding a global pin on exactly the
+  // escalation a reviewer needs it on, and destroying the
+  // `unscoped_override_added` observation the pin audit depends on.
+  // `agents/fix-dependency.md` states the agreement rule unconditionally and
+  // nulls `action` on failure a few lines later; that reads fine as prose and
+  // is only a contradiction once machine-checked. Both gates say so.
   allOf: [
     {
-      if: { properties: { bare_override: { enum: ['added', 'tightened'] } }, required: ['bare_override'] },
+      if: {
+        properties: { status: { const: 'success' }, bare_override: { enum: ['added', 'tightened'] } },
+        required: ['status', 'bare_override'],
+      },
       then: { properties: { action: { const: 'bare-override' } } },
     },
     {
-      if: { properties: { action: { const: 'bare-override' } }, required: ['action'] },
+      if: {
+        properties: { status: { const: 'success' }, action: { const: 'bare-override' } },
+        required: ['status', 'action'],
+      },
       then: { properties: { bare_override: { enum: ['added', 'tightened'] } } },
     },
   ],
@@ -668,7 +687,22 @@ const worker = async () => {
 
 await parallel(Array.from({ length: WORKERS }, () => () => worker()))
 
-return DISPATCHES.map((d, i) => ({ dispatch: d, result: results[i] }))
+// Never pair a result to a dispatch by position alone. The workers steal from
+// a shared cursor, so the order agent() calls are initiated varies between
+// runs, and resume is documented as caching "the longest unchanged prefix of
+// agent() calls" without saying whether a call is matched by CONTENT or only
+// by position. If it is positional, a resumed run could hand entry i another
+// group's result, and the reap would then delete the wrong branch. The agent
+// reports its own identity, so check it: an entry whose result does not name
+// its own dispatch is flagged rather than trusted.
+return DISPATCHES.map((d, i) => {
+  const r = results[i]
+  const paired = r
+    && r.package === d.group.package
+    && r.major_line === d.group.major_line
+    && r.repo === d.group.repo
+  return { dispatch: d, result: r, mispaired: Boolean(r) && !paired }
+})
 ```
 
 `cap` bounds the pool here and nowhere else: the workers are what hold it, so the pool can never
@@ -697,11 +731,20 @@ it, or it returns fewer entries than `dispatches`:
   transcript directory; `<transcriptDir>/journal.jsonl` records each agent's actual return value.
   Read it to learn which groups completed and what they returned, rather than assuming.
 - **Resume rather than re-dispatch.** Relaunch with `{scriptPath, resumeFromRunId: <runId>}`, the
-  same script and the same `args`: the unchanged prefix of `agent()` calls returns its cached
-  results instantly and only the unfinished work runs live. Re-launching without
+  same script and the same `args` in the same order: the unchanged prefix of `agent()` calls
+  returns its cached results instantly and only the unfinished work runs live. Re-launching without
   `resumeFromRunId` re-runs every group, which is how a second branch and a second PR appear for
   work that already succeeded. Resuming the batch the user approved is not a new dispatch
   decision — but **a run the user deliberately interrupted is**, so there, ask first.
+- **Do not trust a resumed run's pairing on position.** The pool's workers steal from a shared
+  cursor, so which agent call happens third is decided by which agent finished first, and no
+  bounded pool can make that order repeat — only serial dispatch could, which is the cap's whole
+  purpose. So the script does not rely on it: it checks each result against its own dispatch and
+  sets `mispaired: true` when they disagree. **Treat a `mispaired` entry exactly like a `null`
+  one** — reap it from the dispatch payload with an empty result file, report the group as unknown,
+  and never read its `pr_url` or `branch`, which belong to a different group. It is also a
+  skill-defect report under phase 7's own rule: the evidence indicts this skill's harness, not the
+  target repository.
 - **When resume is impossible or declined, reap the whole `dispatches` list anyway**, one
   `post-agent.sh` call per group, with an empty result file for every group that has no entry.
   That is what finds and names each worktree and branch the interrupted run left behind; skipping
@@ -725,7 +768,7 @@ after retries, or the agent died — is a failure report for that group, and is 
 `repo_root`, which is everything the reap and phase 7 need; run the reap below for it exactly as for
 any other entry, with an empty result file, and `post-agent.sh` reports it `missing`, reaps nothing,
 and names the worktree and branch it left. A null entry is never dropped, never retried by hand, and
-never counted as a success.
+never counted as a success, and neither is a `mispaired` one.
 
 **Nothing inside the workflow prompts.** Phase 4's single approval covers the launch and every
 agent the script dispatches; there is no per-group checkpoint, and it remains the last checkpoint

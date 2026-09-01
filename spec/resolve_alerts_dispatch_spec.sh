@@ -15,6 +15,21 @@
 # prose. So these examples pin the sentences and the template lines that ARE
 # the implementation, exactly as spec/fix_dependency_branch_spec.sh and
 # spec/resolve_alerts_branch_style_spec.sh do for their own prose contracts.
+#
+# **Know what that cannot do.** These are textual pins, not execution. No
+# JSON Schema validator runs here, so a schema that is well-formed but
+# UNSATISFIABLE — the state `allOf` was in before issue #175's final review,
+# where a truthful `status: "failure"` carrying `bare_override: "added"`
+# matched no value of `action` — passes every per-line pin. Adding a
+# JavaScript runtime to the repo-wide gate for one spec file is an ADR-level
+# dependency change and was declined; the script's real verification is the
+# post-merge field run. Two habits compensate, and both are load-bearing:
+#   * **Pin guard BODIES, never just their `if` lines.** A `throw` gutted to
+#     nothing leaves the condition byte-identical, and a pin on the condition
+#     alone stays green against a guard that no longer guards.
+#   * **Pin the cross-field rules relationally** (every `allOf` gate reachable
+#     for the branch it constrains), not by presence, since presence is
+#     exactly what an unsatisfiable combination also has.
 # The pins fall into three groups: the template's own load-bearing lines, the
 # invariants #175 introduced, and the phase 6 rules that survived the rewrite
 # and would otherwise be deleted by a later editor as pool-era leftovers.
@@ -25,6 +40,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
   REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
+  README="$SHELLSPEC_PROJECT_ROOT/README.md"
 
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
@@ -96,7 +112,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # result, which is what lets a null result still be reaped and reported
     # by name.
     It 'returns each dispatch alongside its result'
-      When call rule_in "$SKILL" 'return DISPATCHES\.map((d, i) => ({ dispatch: d, result: results\[i\] }))'
+      When call blob_in "$SKILL" 'return { dispatch: d, result: r, mispaired: Boolean(r) && !paired }'
       The status should be success
       The output should equal '1'
     End
@@ -120,6 +136,42 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     It 'promises that order to phase 7'
       When call phrase_in "$SKILL" 'in the order they were dispatched'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Position alone is not a safe pairing. Workers steal from a shared
+    # cursor, so the order agent() calls are initiated varies run to run, and
+    # resume caches "the longest unchanged prefix of agent() calls" without
+    # saying whether a call is matched by content or by position. If
+    # positional, a resumed run hands entry i another group's result and the
+    # reap deletes the wrong branch. The script checks instead of assuming.
+    It 'checks each result against the identity its own dispatch names'
+      When call blob_in "$SKILL" "const paired = r && r.package === d.group.package && r.major_line === d.group.major_line && r.repo === d.group.repo"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'flags a mispaired entry rather than trusting it'
+      When call rule_in "$SKILL" 'mispaired: Boolean(r) && !paired'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'handles a mispaired entry exactly like a null one'
+      When call blob_in "$SKILL" 'Treat a .mispaired. entry exactly like a .null. one'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never reads a mispaired entry pr_url or branch'
+      When call blob_in "$SKILL" 'never read its .pr_url. or .branch., which belong to a different group'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says no bounded pool can make the dispatch order repeat'
+      When call blob_in "$SKILL" 'no bounded pool can make that order repeat'
       The status should be success
       The output should equal '1'
     End
@@ -364,6 +416,31 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
+    # Pin the THROW, not only the `if`. Gutting the body while leaving the
+    # condition byte-identical is the mutation that survives a condition-only
+    # pin, and it produces exactly the silent empty batch the guard exists
+    # for.
+    It 'throws on a missing or stringified dispatches list rather than proceeding'
+      When call blob_in "$SKILL" "throw new Error('args.dispatches must be a non-empty array of dispatch payloads"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'throws on a bad cap rather than proceeding'
+      When call blob_in "$SKILL" "throw new Error('args.cap must be a number >= 1, from detect-capacity.sh')"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # An empty dispatch list is refused by the same guard: Array.from({length:
+    # 0}) and parallel([]) both succeed silently, so an empty batch would
+    # return zero entries and read as a clean run over nothing.
+    It 'refuses an empty dispatch list, not just an absent one'
+      When call rule_in "$SKILL" '|| !args\.dispatches\.length) {'
+      The status should be success
+      The output should equal '1'
+    End
+
     It 'announces what it is dispatching and at what width'
       When call rule_in "$SKILL" "^log('Dispatching '"
       The status should be success
@@ -390,20 +467,71 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     Describe 'one branch per status value'
       Parameters
-        success   "status: { const: 'success' },"
-        no-op     "status: { const: 'no-op' },"
-        failure   "status: { const: 'failure' },"
+        # Each branch is identified with its own pr_url nullability, because
+        # `status: { const: 'success' }` alone now also matches both allOf
+        # gates.
+        success   "status: { const: 'success' }, pr_url: { type: 'string' },"
+        no-op     "status: { const: 'no-op' }, pr_url: { type: 'null' },"
+        failure   "status: { const: 'failure' }, pr_url: { type: 'null' },"
       End
 
       It "pins the $1 branch"
+        When call blob_in "$SKILL" "$2"
+        The status should be success
+        The output should equal '1'
+      End
+    End
+
+    # The failure branch nulls `action`. That is what makes the gate below
+    # mandatory rather than tidy, so pin it here where the two rules meet.
+    It 'nulls action on the failure branch'
+      When call blob_in "$SKILL" "status: { const: 'failure' }, pr_url: { type: 'null' }, action: { type: 'null' },"
+      The status should be success
+      The output should equal '1'
+    End
+
+    Describe 'the bare_override to action agreement, in both directions' 
+      Parameters
+        bare_override-implies-action  "then: { properties: { action: { const: 'bare-override' } } },"
+        action-implies-bare_override  "then: { properties: { bare_override: { enum: \['added', 'tightened'\] } } },"
+      End
+
+      It "encodes $1"
         When call rule_in "$SKILL" "$2"
         The status should be success
         The output should equal '1'
       End
     End
 
-    It 'encodes the bare_override to action agreement in both directions'
-      When call rule_in "$SKILL" "then: { properties: { action: { const: 'bare-override' } } },"
+    # The mutation this file cannot execute its way to, so it is checked
+    # structurally instead: every `allOf` gate must be reachable only on
+    # success. Ungated, the agreement rule demands action === 'bare-override'
+    # while the failure branch demands action === null, so a truthful failure
+    # carrying bare_override "added" satisfies NO value of action. The schema
+    # stays well-formed and every presence pin stays green, which is exactly
+    # why presence pins are not enough here. The census fails loudly if the
+    # block moves rather than reporting a vacuous zero.
+    It 'gates every allOf rule on success, so no branch is unsatisfiable'
+      allof_gate_census() {
+        allof_window=$(awk '/^  allOf: \[/{f=1} f{print} f && /^  \],$/{exit}' "$1" | tr '\n' ' ' | tr -s ' ')
+        [ -n "$allof_window" ] || { echo 'allOf block not found'; return 0; }
+        allof_total=$(printf '%s\n' "$allof_window" | grep -o 'if: {' | wc -l | tr -d ' ')
+        allof_gated=$(printf '%s\n' "$allof_window" | grep -o "if: { properties: { status: { const: 'success' }" | wc -l | tr -d ' ')
+        echo "$allof_gated/$allof_total"
+      }
+      When call allof_gate_census "$SKILL"
+      The status should be success
+      The output should equal '2/2'
+    End
+
+    It 'records why the gate exists, against the escalation that reaches it'
+      When call rule_in "$SKILL" 'hook-rejected push and a failed pr all reach'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the silent under-report the ungated rule invites'
+      When call blob_in "$SKILL" 'the likelier repair it finds is to report'
       The status should be success
       The output should equal '1'
     End
@@ -446,10 +574,30 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # at once, and the agents that ran had already pushed branches and opened
     # PRs. Under the old pool each completion arrived on its own, so an abort
     # still left the orchestrator holding everything received so far.
+    # Pinned on the two words that carry the rule, not on the whole sentence:
+    # the earlier form quoted an inline aside and broke on a meaning-
+    # preserving reword.
     It 'refuses to read an absent or short return as nothing having run'
-      When call phrase_in "$SKILL" 'Never read an absent or short return as .nothing ran'
+      When call phrase_in "$SKILL" 'absent or short return'
       The status should be success
       The output should equal '1'
+    End
+
+    # All three abort modes, named. Only the short-return mode was pinned
+    # before; a contract that covers one of three is a contract with two
+    # silent holes.
+    Describe 'every mode the contract must cover'
+      Parameters
+        throws     'the call errors'
+        cancelled  'the user interrupts'
+        short      'returns fewer entries than .dispatches'
+      End
+
+      It "names the $1 mode"
+        When call phrase_in "$SKILL" "$2"
+        The status should be success
+        The output should equal '1'
+      End
     End
 
     It 'names the journal as the record of what actually returned'
@@ -530,6 +678,28 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     It 'records the widened pull-request read window in ADR 003'
       When call phrase_in "$ADR" 'widens the window'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # README describes the same dispatch to a reader who will never open
+    # SKILL.md, and the zero-pin table above runs against SKILL.md only — so
+    # reverting README's wording alone left the suite green.
+    It 'no longer describes the fix agent as running from a rolling pool'
+      no_rolling_pool() { grep -c 'rolling pool' "$1" || true; }
+      When call no_rolling_pool "$README"
+      The status should be success
+      The output should equal '0'
+    End
+
+    It 'describes the dispatch as a capacity-bounded workflow instead'
+      When call blob_in "$README" 'parallel from a capacity-bounded workflow'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps the headline bullet on the same mechanism'
+      When call blob_in "$README" 'dispatched by a single workflow that keeps the pool at the machine.s capacity'
       The status should be success
       The output should equal '1'
     End
