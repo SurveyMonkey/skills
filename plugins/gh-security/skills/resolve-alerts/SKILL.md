@@ -659,16 +659,19 @@ requires-major-bump skips, report these whether phase 2 found them at repo scope
 withdrew them after approval.
 
 **Then say what phase 6's reap removed and what it left, from `post-agent.sh`'s own reports —
-never rebuilt by hand.** Give the count of agents whose report read `reaped: true`, and name every
-artifact still on the user's disk: each report's `left_behind` entries, whether it reaped whole,
-reaped and still left something (`errors` non-empty), or never attempted a reap at all — a failure,
-a crash, an unparseable or missing result block, a `no-op`, a PR that is not open, or a reap that
-printed nothing. Every one of those reports already carries the derived `worktree_path` and
-`branch`, and the `reason` it was not reaped when it was not; nothing here recomputes a path or a
-branch name from a template. A leftover under `.claude/worktrees/` sits at a stable path and comes
-off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent is in flight,
-but only if this summary says it is there. Nothing left behind is a failure on its own; a run that
-reaped everything says so in one line.
+never rebuilt by hand.** Key what stayed on the user's disk on each report's `left_behind`, never on
+`reaped` or `errors` alone: `reaped: true` means the reap ran to completion, not that it removed
+everything, and a deliberate leave — a local branch whose tip is not on origin — reports a leftover
+in `left_behind` with no `errors` entry at all (the underlying reap's own `tip-not-on-origin` case). So give the count of groups whose `left_behind` came back empty — a genuinely clean sweep —
+rather than the count that merely read `reaped: true`, and name every artifact any other report's
+`left_behind` still carries: a reap that ran and left something behind, and a group that never
+attempted a reap at all — a failure, a crash, an unparseable or missing result block, a `no-op`, a
+PR that is not open, or a reap that printed nothing. Every one of those reports already carries the
+derived `worktree_path` and `branch`, and the `reason` it was not reaped when it was not; nothing
+here recomputes a path or a branch name from a template. A leftover under `.claude/worktrees/` sits
+at a stable path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once
+no agent is in flight, but only if this summary says it is there. Nothing left behind is a failure
+on its own; a run that left nothing behind anywhere says so in one line.
 
 **Then, when phase 5's clone destination was the temporary one, decide whether it can be
 removed.** The condition is the one that gates the reap, for the same reason: **a group whose

@@ -94,12 +94,23 @@ set -euo pipefail
 
 SELF_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
+# jq is this script's one hard dependency and `die` itself is built out of
+# it, so a jq-less box has to be caught before `die` is ever called — the
+# same preflight reap-agent-artifacts.sh runs, for the same reason (its own
+# header: without it, `die` prints no JSON and the caller sees only a bare
+# non-zero exit with nothing to parse).
+if ! command -v jq >/dev/null 2>&1; then
+  printf '{"error":"jq is required by post-agent.sh"}\n' >&2
+  exit 1
+fi
+
 # Both temp files are declared once, up front, so one trap covers whichever
 # of them end up created — a second `trap ... EXIT` later would silently
-# replace this one and leak the first file.
+# replace this one and leak the first file. `INT TERM` match pr-status.sh's
+# own trap (pr-status.sh:128): EXIT alone misses a killed run.
 PR_ERR_FILE=""
 REAP_ERR_FILE=""
-trap 'rm -f "$PR_ERR_FILE" "$REAP_ERR_FILE"' EXIT
+trap 'rm -f "$PR_ERR_FILE" "$REAP_ERR_FILE"' EXIT INT TERM
 
 die() {
   printf 'post-agent: %s\n' "$1" >&2
@@ -170,12 +181,27 @@ run_env() {
 # Both are tried: a whole-file parse first, then the LAST ```json fence in
 # the file, because a transcript can carry earlier JSON that is not the
 # agent's final answer.
+#
+# **The last fence must be closed, or nothing is extracted at all.** Recording
+# `last` only at a closing ``` means a cut-off final block — the agent hung or
+# was truncated mid-result — silently falls back to whatever CLOSED block came
+# before it, which can be a fully-formed, well-typed decoy: a quoted copy of
+# the Result *template* from `agents/fix-dependency.md` elsewhere in the same
+# message, complete with literal `"<package>"`/`"<branch_name>"` placeholders
+# that pass every `has()`/type/non-empty check below. That is a false
+# `success` built from prose, not a parsed result, and it is exactly the case
+# the dispatch-payload fallback flags exist to catch — so a still-open capture
+# at EOF (the true last block was never closed) discards `last` rather than
+# handing back a stale one, and the caller falls through to `unparsable`.
 extract_fenced_json() {
   awk '
     /^```json[[:space:]]*$/ { capturing = 1; buf = ""; next }
-    /^```[[:space:]]*$/     { if (capturing) { capturing = 0; last = buf }; next }
+    /^```[[:space:]]*$/     { if (capturing) { capturing = 0; last = buf; closed = 1 }; next }
     capturing                { buf = buf $0 "\n" }
-    END                      { if (length(last) > 0) printf "%s", last }
+    END {
+      if (capturing) { exit }
+      if (closed && length(last) > 0) printf "%s", last
+    }
   ' "$1"
 }
 
@@ -203,29 +229,50 @@ else
     RESULT_STATE="unparsable"
   else
     STATUS=$(printf '%s' "$RESULT_JSON" | jq -r '.status // empty')
+    # `package` and `major_line` are promised on every result regardless of
+    # status (`agents/fix-dependency.md`'s Result schema nulls `pr_url`,
+    # `action`, `resolved_version`, and `risk` on a non-success, never these
+    # two) and they are exactly the two fields that build the path handed to
+    # a deleting script, so they get the same has()/type/non-empty gate as
+    # `branch` and `pr_url` — never a bare `// empty` that lets an absent
+    # `package` silently fall through to a DIFFERENT field's source below. A
+    # block missing any promised field is unparsable as a whole: partially
+    # trusting it is how a validated `branch` from this result ends up paired
+    # with a `package` pulled from the dispatch-payload fallback of what is,
+    # from this field's point of view, an unrelated group — issue #161's
+    # failure mode arriving through a different door.
     case "$STATUS" in
       success)
         # A promised field arriving absent, null, or empty is the same hard
         # error as it being missing entirely (scripts/CLAUDE.md) — never
         # defaulted, and never treated as a usable branch or PR to check.
         if printf '%s' "$RESULT_JSON" | jq -e '
-              has("branch") and has("pr_url")
+              has("branch") and has("pr_url") and has("package") and has("major_line")
               and (.branch | type == "string") and (.branch | length > 0)
               and (.pr_url | type == "string") and (.pr_url | length > 0)
+              and (.package | type == "string") and (.package | length > 0)
+              and (.major_line | type == "string") and (.major_line | length > 0)
             ' >/dev/null 2>&1; then
           RESULT_STATE="success"
           R_BRANCH=$(printf '%s' "$RESULT_JSON" | jq -r '.branch')
           R_PR_URL=$(printf '%s' "$RESULT_JSON" | jq -r '.pr_url')
+          R_PACKAGE=$(printf '%s' "$RESULT_JSON" | jq -r '.package')
+          R_MAJOR_LINE=$(printf '%s' "$RESULT_JSON" | jq -r '.major_line')
         else
           RESULT_STATE="unparsable"
         fi
         ;;
       no-op | failure)
         if printf '%s' "$RESULT_JSON" | jq -e '
-              has("branch") and (.branch | type == "string") and (.branch | length > 0)
+              has("branch") and has("package") and has("major_line")
+              and (.branch | type == "string") and (.branch | length > 0)
+              and (.package | type == "string") and (.package | length > 0)
+              and (.major_line | type == "string") and (.major_line | length > 0)
             ' >/dev/null 2>&1; then
           RESULT_STATE="$STATUS"
           R_BRANCH=$(printf '%s' "$RESULT_JSON" | jq -r '.branch')
+          R_PACKAGE=$(printf '%s' "$RESULT_JSON" | jq -r '.package')
+          R_MAJOR_LINE=$(printf '%s' "$RESULT_JSON" | jq -r '.major_line')
         else
           RESULT_STATE="unparsable"
         fi
@@ -234,17 +281,22 @@ else
         RESULT_STATE="unparsable"
         ;;
     esac
-
-    if [ "$RESULT_STATE" != "unparsable" ]; then
-      R_PACKAGE=$(printf '%s' "$RESULT_JSON" | jq -r '.package // empty')
-      R_MAJOR_LINE=$(printf '%s' "$RESULT_JSON" | jq -r '.major_line // empty')
-    fi
   fi
 fi
 
+# errors[] is collected from here on, so it can carry both the
+# result/fallback disagreement below and everything the PR read and the reap
+# add later.
+ERRORS=""
+note_error() { ERRORS="$ERRORS$1
+"; }
+
 # ---------------------------------------------------------------------------
-# Resolve package / major_line / branch — from the result when it parsed,
-# from the dispatch-payload fallback when it did not (or left a field empty).
+# Resolve package / major_line / branch — from the result when it parsed
+# (never mixed field-by-field with the fallback: the has() gate above means
+# R_PACKAGE, R_MAJOR_LINE, and R_BRANCH are either all set together, from the
+# same result block, or all empty), from the dispatch-payload fallback when
+# it did not parse.
 # ---------------------------------------------------------------------------
 
 PACKAGE="$R_PACKAGE"
@@ -257,6 +309,23 @@ BRANCH="$R_BRANCH"
 [ -n "$PACKAGE" ] || die "no package name available: the result block at $RESULT_FILE is $RESULT_STATE and no --package fallback was given"
 [ -n "$MAJOR_LINE" ] || die "no major line available: the result block at $RESULT_FILE is $RESULT_STATE and no --major-line fallback was given"
 [ -n "$BRANCH" ] || die "no branch name available: the result block at $RESULT_FILE is $RESULT_STATE and no --branch fallback was given"
+
+# A result/fallback disagreement is a signal worth reporting rather than a
+# side to silently prefer. SKILL.md phase 6 passes the fallback flags
+# unconditionally, naming the SAME group the result block is for, so the two
+# should always agree when the result parsed; a mismatch means the caller
+# handed this script two different groups' facts. The result's own value is
+# still what gets used — it passed the has()/type/non-empty gate above — this
+# only makes the disagreement visible rather than silent.
+note_disagreement() {
+  # $1 flag name, $2 result value, $3 fallback value
+  if [ -n "$2" ] && [ -n "$3" ] && [ "$2" != "$3" ]; then
+    note_error "the result block's $1 ('$2') disagrees with the --$1 fallback ('$3')"
+  fi
+}
+note_disagreement "package" "$R_PACKAGE" "$FALLBACK_PACKAGE"
+note_disagreement "major-line" "$R_MAJOR_LINE" "$FALLBACK_MAJOR_LINE"
+note_disagreement "branch" "$R_BRANCH" "$FALLBACK_BRANCH"
 
 # <package_path> is <package> with every `/` replaced by `-`, exactly the
 # template reap-agent-artifacts.sh's header requires: a scoped package name
@@ -272,9 +341,6 @@ WORKTREE_PATH="$REPO_ROOT/.claude/worktrees/fix-dependabot-${PACKAGE_PATH}-${MAJ
 
 PR_STATE=""
 REASON=""
-ERRORS=""
-note_error() { ERRORS="$ERRORS$1
-"; }
 
 case "$RESULT_STATE" in
   success)
@@ -328,12 +394,42 @@ note_left() { LEFT_BEHIND="$LEFT_BEHIND$1
 if [ "$RESULT_STATE" = "success" ] && [ "$PR_STATE" = "OPEN" ]; then
   REAP_ERR_FILE=$(mktemp)
   REAP_STDOUT=""
+  REAP_EXIT=0
   REAP_STDOUT=$("$SELF_DIR/reap-agent-artifacts.sh" \
       --repo-root "$REPO_ROOT" --branch "$BRANCH" --work "$WORKTREE_PATH" \
-      2>"$REAP_ERR_FILE") || true
+      2>"$REAP_ERR_FILE") || REAP_EXIT=$?
 
-  if [ -n "$REAP_STDOUT" ] \
-      && printf '%s' "$REAP_STDOUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  # `reap-agent-artifacts.sh:385-399` promises `worktree`, `work_dir`,
+  # `branch_ref`, `left_behind`, and `errors` on every report it prints — an
+  # `{}` or a bare `{"error": "..."}` on stdout is *an* object, but it is not
+  # *that* report, and treating any object as a completed reap is the same
+  # found-nothing-is-a-pass mistake the adjacent branch below refuses. So the
+  # promised keys are asserted, not just the JSON type.
+  REAP_SHAPE_OK=false
+  if [ -n "$REAP_STDOUT" ] && printf '%s' "$REAP_STDOUT" | jq -e '
+        type == "object"
+        and has("worktree") and has("work_dir") and has("branch_ref")
+        and has("left_behind") and (.left_behind | type == "array")
+        and has("errors") and (.errors | type == "array")
+      ' >/dev/null 2>&1; then
+    REAP_SHAPE_OK=true
+  fi
+
+  REAP_AGREES=false
+  if [ "$REAP_SHAPE_OK" = true ]; then
+    REAP_ERRORS_COUNT=$(printf '%s' "$REAP_STDOUT" | jq '.errors | length')
+    # The real script's own invariant is `[ -z "$errors" ] || exit 1`
+    # (reap-agent-artifacts.sh:401): its exit status and its own `errors`
+    # array always agree. A report that disagrees with the process's exit
+    # status is not trustworthy, whatever it claims — never read as a clean
+    # sweep just because it parses.
+    if { [ "$REAP_EXIT" -eq 0 ] && [ "$REAP_ERRORS_COUNT" -eq 0 ]; } \
+        || { [ "$REAP_EXIT" -ne 0 ] && [ "$REAP_ERRORS_COUNT" -gt 0 ]; }; then
+      REAP_AGREES=true
+    fi
+  fi
+
+  if [ "$REAP_AGREES" = true ]; then
     # Ran and reported, whatever it found: reaped for this group's purposes,
     # because the pool step happened. Its own left_behind/errors carry the
     # detail — a worktree it could not remove is a fact about the group,
@@ -360,13 +456,25 @@ EOF
 $REAP_ERRORS
 EOF
     fi
+  elif [ "$REAP_SHAPE_OK" = true ]; then
+    # A well-shaped report whose own errors[] disagrees with the process's
+    # exit status: not trusted, whatever it says was removed.
+    REASON="reap-agent-artifacts.sh's exit status ($REAP_EXIT) disagrees with its own errors array (count=$REAP_ERRORS_COUNT); the report cannot be trusted"
+    note_error "$REASON"
+    note_left "$WORKTREE_PATH"
+    note_left "$BRANCH"
   else
-    # A rejected argument or a refused path: reap-agent-artifacts.sh dies
-    # before printing anything, so it removed nothing. Reporting a clean
-    # sweep here would be exactly the false "found nothing, so all clear"
-    # this plugin's scripts refuse elsewhere (scripts/CLAUDE.md, "The rule
-    # that matters most").
-    REASON="reap-agent-artifacts.sh exited without printing a report; nothing was removed"
+    # Either nothing was printed at all (a rejected argument or a refused
+    # path: reap-agent-artifacts.sh dies before printing anything, so it
+    # removed nothing), or something was printed that is not the promised
+    # report shape. Either way nothing here is trusted as a clean sweep —
+    # exactly the false "found nothing, so all clear" this plugin's scripts
+    # refuse elsewhere (scripts/CLAUDE.md, "The rule that matters most").
+    if [ -z "$REAP_STDOUT" ]; then
+      REASON="reap-agent-artifacts.sh exited without printing a report; nothing was removed"
+    else
+      REASON="reap-agent-artifacts.sh printed JSON that is not the promised report shape (missing worktree/work_dir/branch_ref/left_behind/errors)"
+    fi
     note_error "$REASON: $(cat "$REAP_ERR_FILE")"
     note_left "$WORKTREE_PATH"
     note_left "$BRANCH"
@@ -395,7 +503,12 @@ jq -n \
   --arg reason "$REASON" \
   --arg left_behind "$LEFT_BEHIND" \
   --arg errors "$ERRORS" '
-  def lines: split("\n") | map(select(length > 0)) | unique;
+  # No unique: the sibling reap-agent-artifacts.sh deliberately does not
+  # dedupe either (its own "lines" def), and an errors entry can
+  # legitimately repeat from two different sources — the reap and the PR
+  # read failure text can coincide, and deduping would collapse that into
+  # one, silently understating how many things went wrong.
+  def lines: split("\n") | map(select(length > 0));
   {
     package: $package,
     major_line: $major_line,
