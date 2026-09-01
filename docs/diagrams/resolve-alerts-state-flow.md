@@ -1,6 +1,6 @@
 ---
 type: Reference
-description: State and branch map of the resolve-alerts skill (fix pooling only) and its fix-dependency subagent, plus the standalone /gh-security:audit-pins command and its audit-pins agent, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's own security-PR preflight, findings, guards, and the ways a completed audit opens no PR.
+description: State and branch map of the resolve-alerts skill and its fix-dependency subagent, plus the standalone /gh-security:audit-pins command and its audit-pins agent, as three mermaid flowcharts covering the orchestrator's phases and user decision points, one group's fix through to an open pull request, and the pin audit's own security-PR preflight, findings, guards, and the ways a completed audit opens no PR; boxed regions mark the steps a tested script or workflow executes rather than the model.
 owner: brianespinosa
 created: 2026-08-22
 stale_after: 2027-02-24
@@ -26,6 +26,19 @@ Sources, in the order the flow reads them:
 Three diagrams rather than one: the orchestrator and the two agents are separate control flows that
 meet only at a dispatch payload and a JSON result block, and the agents cannot ask the user
 anything, so where they stop is a different question from where the orchestrator does.
+
+**A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
+workflow — `common/fix-group.sh`, `common/audit-pins-driver.sh`, `workflows/fix-groups.mjs` — with
+its branches decided in code and covered by the suite. Everything outside is prose a model reads
+and follows, which is why the unboxed nodes are the ones that ask the user something, write PR
+narrative, or apply judgment the driver deliberately hands back. The distinction is the point of
+the drivers: a branch inside a box fails a test when it regresses, and a branch outside one is
+only as reliable as the sentence describing it, so re-deriving a boxed procedure in agent prose is
+a bug rather than a fallback (`scripts/CLAUDE.md`).
+
+The boxes hold the steps, not their verdicts. A driver's failure terminals sit outside its box on
+purpose: the driver decides them, and the agent is what maps them onto a result block and reports
+them.
 
 ## Diagram 1: the orchestrator
 
@@ -117,6 +130,10 @@ flowchart TD
     P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); pr-status.sh on every success PR:<br/>checks, merge_state, reported as information"]
     P8REP --> DONE
     DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
+
+    subgraph WFBOX["workflows/fix-groups.mjs — tested JavaScript, not model-executed prose"]
+        P6D
+    end
 ```
 
 One cycle, and no others. The drain loop that used to sit at phase 6 is gone: the concurrency cap
@@ -221,6 +238,42 @@ flowchart TD
     NOOP --> CL
     SUCC --> CL
     CL["Cleanup on every path: worktree remove --force, rm -rf $WORK,<br/>then branch -D only when pushed, nothing was committed,<br/>or the only commit is the drift commit;<br/>a cleanup error goes in detail, never silenced<br/>(no git worktree prune, ever)"] --> RES(["One fenced JSON result:<br/>success | no-op | failure"])
+
+    subgraph FGBOX["common/fix-group.sh — phases 1 to 5, one stepped driver"]
+        D1
+        D1A
+        D1B
+        D1C
+        D1DEL
+        D2
+        D2Q
+        D2E
+        D3
+        D3I
+        D3P
+        D3D
+        D3DQ
+        D3S
+        D3SQ
+        D3N
+        D4
+        D4A
+        D4I
+        D4IQ
+        D4VAL
+        D4C
+        D4VBD
+        D4V
+        D4DR
+        D4LR
+        D4L
+        D4B
+        D5
+    end
+
+    subgraph FGCLEAN["common/fix-group.sh — cleanup step"]
+        CL
+    end
 ```
 
 `requires_major_bump[]` is not a state of its own. It rides on a `success` result, with its own
@@ -365,6 +418,27 @@ flowchart TD
     APR4 --> ACL
     APRD --> ACL
     ACL["Cleanup: worktree remove --force, rm -rf $WORK;<br/>a cleanup failure is reported, not hidden"] --> ARES(["One fenced JSON result:<br/>success | failure"])
+
+    subgraph APBOX["common/audit-pins-driver.sh — phases 2, 4 and 5"]
+        A2
+        A2Q
+        A2K
+        A4B
+        A4BQ
+        A4NC
+        A4
+        A4Q
+        A5
+        A5Q
+        A5C
+    end
+
+    subgraph APTOG["common/audit-pins-driver.sh — phase 7, the together tests"]
+        A7A1
+        A7Q
+        A7A2
+        A7Q2
+    end
 ```
 
 `pr_skipped_reason` carries **one** value chosen by precedence, not by which node was drawn last:
