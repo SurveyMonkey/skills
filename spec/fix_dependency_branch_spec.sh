@@ -1,18 +1,25 @@
 #!/bin/sh
 # shellcheck shell=sh
-# The branch lifecycle rules agents/fix-dependency.md states as prose (issue
-# #84). Nothing in a script decides any of this: phase 1 creates the branch and
-# Cleanup disposes of it, both by instruction, so the definition's sentences are
-# the whole implementation and their absence is the whole regression.
+# The fix branch lifecycle (issue #84), and where it lives now.
 #
-# The defect was the two halves read together, not either alone: Cleanup left
-# the branch behind on every exit path, and phase 1 stopped on any local branch
-# of that name, so every second run of a group failed at phase `worktree` on a
-# leftover of the first. Each example below fails if one half returns to that
-# shape.
+# It used to be prose in agents/fix-dependency.md: phase 1 created the branch
+# and Cleanup disposed of it, both by instruction, so the definition's
+# sentences were the whole implementation and their absence was the whole
+# regression. `common/fix-group.sh` is that implementation now, and the
+# behavioural assertions moved with it — the three recognized tips and the
+# unpushed-work refusal are in spec/fix_group_setup_spec.sh, asserted against
+# real git repositories rather than against a paragraph.
+#
+# What stays here is what a script cannot hold: that the agent definition
+# delegates rather than re-deriving (a prose re-derivation of a driver-owned
+# procedure is the bug this issue's fix creates the room for), that the safety
+# rule survives in both places, and that the sentences the defect shipped as
+# have not come back.
 
-Describe 'the fix branch lifecycle in fix-dependency (#84)'
+Describe 'the fix branch lifecycle in fix-dependency (#84, #171)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/fix-group.sh"
+  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
 
   # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts lines and
@@ -24,145 +31,96 @@ Describe 'the fix branch lifecycle in fix-dependency (#84)'
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
   count_in() { grep -c -e "$2" -- "$1" || true; }
 
-  Describe 'Cleanup disposes of the branch it created'
-    # Without the command itself the rest of the section is advice nobody can
-    # follow. It names repo_root because the worktree is already gone by then.
-    It 'prescribes the delete at repo_root'
-      When call rule_in "$AGENT" 'git -C <repo_root> branch -D <branch_name>'
+  Describe 'the definition delegates the branch lifecycle to the driver'
+    It 'calls the driver for setup rather than prescribing the guard'
+      When call rule_in "$AGENT" 'fix-group.sh setup --group-json'
       The status should be success
       The output should not equal '0'
     End
 
+    It 'calls the driver for cleanup rather than prescribing the delete'
+      When call rule_in "$AGENT" 'fix-group.sh cleanup --work'
+      The status should be success
+      The output should not equal '0'
+    End
+
+    # The one rule the agent still owes a reader: the delete is conditional, and
+    # a branch it left behind is a fact the result has to carry.
     It 'gates the delete on it being provably safe'
       When call phrase_in "$AGENT" 'only when deleting it is provably safe'
       The status should be success
       The output should equal '1'
     End
 
-    # The two safe cases, each of which has to survive on its own: a pushed
-    # branch is a duplicate of a remote ref, and an untouched one carries
-    # nothing. Losing either sentence quietly halves the cleanup and leaves the
-    # deadlock open on the other path.
-    It 'treats a pushed tip as safe because the remote carries it'
-      When call phrase_in "$AGENT" 'the remote carries the same commits'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'treats a tip still at the default branch as safe'
-      When call phrase_in "$AGENT" 'there is nothing on the branch to lose'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The third safe case (#146, #152): a branch whose only commit is the
-    # drift commit carries nothing a rerun cannot derive again. Grounded in
-    # machine-derivability, not identity — hooks and timestamps make byte
-    # identity a promise the flow cannot keep.
-    It 'treats a drift-commit-only branch as safe to delete'
-      When call phrase_in "$AGENT" "Your only commit is Phase 3's drift commit"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'grounds that safety in an equivalent regenerated commit, not an identical one'
-      When call phrase_in "$AGENT" 'regenerates an equivalent commit from the same manifests'
+    It 'says an unrecreatable commit is what the leave-behind protects'
+      When call phrase_in "$AGENT" 'cannot be recreated'
       The status should be success
       The output should not equal '0'
     End
 
-    # Anything else is unpushed work, and the way out of a cleanup is not the
-    # place to adjudicate it.
-    It 'leaves an unaccounted branch in place and reports it'
-      When call phrase_in "$AGENT" 'Otherwise leave the branch and say so in'
+    # The prohibition that has to survive in the agent even though the driver
+    # is what would run the command: sibling agents share this repo_root.
+    It 'still forbids repository-wide git commands'
+      When call phrase_in "$AGENT" 'never run .git worktree prune'
       The status should be success
       The output should equal '1'
     End
 
-    # git refuses to delete a branch checked out in a worktree, so the reversed
-    # order fails on exactly the branch it meant to clean up — and fails
-    # silently if anyone ever adds `|| true` to it.
-    It 'requires the worktree to come off first'
-      When call phrase_in "$AGENT" 'Git refuses to delete a branch that is checked out'
+    # And the convention document names the driver as the single home, so the
+    # next reader re-derives nothing.
+    It 'names the driver as the single home of phases 1 to 5'
+      When call phrase_in "$CONV" 'single home of that procedure'
       The status should be success
       The output should equal '1'
     End
+  End
 
-    # The sentence the defect shipped as. Its return means cleanup stopped
-    # deleting anything.
+  Describe 'the driver still carries all three safe cases'
+    # Each is asserted behaviourally in spec/fix_group_setup_spec.sh; these
+    # pin that the reasoning stayed with the code, since a comment naming the
+    # case is what stops the next reader from collapsing three branches into
+    # one "delete it, it is ours".
+    Parameters
+      'the pushed tip'   'the remote carries the same commits'
+      'the untouched tip' 'there is nothing on the branch to lose'
+      'the drift commit'  'regenerates equivalently from the same manifests'
+    End
+
+    It "grounds $1"
+      When call rule_in "$DRIVER" "$2"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the sentences the defect shipped as have not returned'
+    # Cleanup left the branch behind on every run, so the next run of the same
+    # group always found one and always stopped.
     It 'no longer says the branch simply remains'
       When call count_in "$AGENT" 'fix branch itself remains'
       The status should be success
       The output should equal '0'
     End
-  End
 
-  Describe 'phase 1 verifies the branch instead of stopping on sight'
-    # The old guard, verbatim from the shipped definition. Any output at all
-    # stopped the run, which is the unconditional stop this issue removed.
     It 'no longer stops on the mere existence of a local branch'
       When call count_in "$AGENT" 'any output => branch exists => stop'
       The status should be success
       The output should equal '0'
     End
 
-    It 'says the guard verifies rather than stops on sight'
-      When call phrase_in "$AGENT" 'verifies rather than stops on sight'
-      The status should be success
-      The output should equal '1'
+    # The procedural bodies themselves: their return to the agent definition is
+    # the re-derivation the driver exists to prevent.
+    Parameters
+      'the stale-branch guard command' 'git -C <repo_root> branch -D <branch_name>'
+      'the worktree add'               'git -C <repo_root> worktree add'
+      'the drift commit message'       'control install, no manifest change'
+      'the validate invocation'        'ADAPTER validate --line'
     End
 
-    # The tip is the whole test, and both comparisons are needed: one covers a
-    # run that pushed, the other a run that committed nothing.
-    It 'reads a leftover tip as this plugin.s own'
-      When call phrase_in "$AGENT" 'and you may delete and recreate it'
+    It "no longer prescribes $1"
+      When call count_in "$AGENT" "$2"
       The status should be success
-      The output should equal '1'
-    End
-
-    It 'fetches the remote fix branch before comparing against it'
-      When call rule_in "$AGENT" 'git -C <repo_root> fetch origin <branch_name>'
-      The status should be success
-      The output should not equal '0'
-    End
-
-    It 'reads a missing remote branch as ordinary, not as an error'
-      When call phrase_in "$AGENT" 'which is the ordinary case and not an error'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The guard's third recognized tip (#152): a leftover carrying only this
-    # flow's own drift commit, identified by both its subject and its
-    # lockfile/install-artifact-only paths, never by either alone.
-    It 'recognizes a drift-commit-only tip as this flow.s own leftover'
-      When call phrase_in "$AGENT" 'form a single drift commit'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'requires both the subject check and the paths check'
-      When call phrase_in "$AGENT" 'Recognize it by both checks, not either alone'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The guard still has to stop for the case it was written for, or the fix
-    # has traded a deadlock for a discarded commit.
-    It 'still stops on a tip that matches none of the recognized cases'
-      When call phrase_in "$AGENT" 'is none of these is someone'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A shape found in the wild is the specimen: both field-test branches are
-    # named so the claim stays concrete rather than vague, even though the
-    # repository they came from is scrubbed (see issue #84 for the
-    # verification path).
-    It 'cites the field-test specimens'
-      When call phrase_in "$AGENT" 'fix/dependabot-react-router-6x'
-      The status should be success
-      The output should equal '1'
+      The output should equal '0'
     End
   End
 

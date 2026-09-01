@@ -58,6 +58,47 @@ nothing, so every `has()` check downstream is skipped rather than failed). `scor
 asserts the reply is a JSON object before reading any field of it, and validates the numeric ones
 against `^[0-9]+$`.
 
+## The fix driver owns phases 1 to 5
+
+`common/fix-group.sh` executes `agents/fix-dependency.md` phases 1 to 5 and Cleanup. **It is the
+single home of that procedure**: a prose re-derivation of any of it in an agent definition is a
+bug, not a fallback. Every branch it takes was an enumerated branch of that document first, each
+one added to fix a field defect, and a fully enumerated decision tree is a script that has not
+been written yet ([#171](https://github.com/SurveyMonkey/skills/issues/171)).
+
+**Stepped, with a state file at `$WORK/state.json`, not one run.** `setup`, `classify`,
+`baseline`, `apply`, `score`, `cleanup`. The Bash tool's 10-minute ceiling cannot wrap a control
+install plus a fix install (field runs: ~4 minutes each, up to ~17 minutes total), and the
+remediation ladder needs a seam where judgment can escape to the agent. Only `setup` takes the
+group payload and the paths; every later step takes `--work <dir>` and reads the rest back.
+
+Four exit codes, and no fifth case:
+
+| Exit | Payload | Meaning |
+|---|---|---|
+| 0 | `{"status":"ok", ...}` | the step is done; run the next one |
+| 0 | `{"status":"no_op", ...}` | terminal (from `apply`): nothing to fix, no PR |
+| 0 | `{"status":"ready_for_pr", ...}` | terminal (from `score`): everything phase 6 needs |
+| 2 | `{"status":"needs_judgment","decision_point":...,"evidence":{...}}` | a branch the tree cannot decide |
+| 3 | `{"status":"failure","phase":...,"detail":...}` | terminal failure, mapped onto the agent's result |
+| 1 | `{"error":"..."}` | usage or internal error |
+
+The `phase` vocabulary is the agent result block's: `worktree`, `classify`, `baseline`, `apply`,
+`install`, `validate`. `push` and `pr` stay agent-side, because they name work the driver never
+does.
+
+**Judgment escapes at exactly four points**, each fail-closed and none of them a retry:
+`install_failure` (an install failure outside the ladder's cover — its one sanctioned
+registry-timeout retry has already been spent), `validate_failed_after_ladder`,
+`install_budget_exhausted`, and the placed-shape reconcile-by-hand escalation the agent reads out
+of a `validate_failed_after_ladder` whose `written[]` is all nested rule paths. An
+`apply_constraint` refusal is **not** one of them: nothing was written, so it is a phase `apply`
+failure quoting the adapter verbatim.
+
+`--env-prefix` is an opaque argv prefix (see below), split on whitespace and prepended to every
+git, adapter and package-manager call the driver makes, composed after any `cd`. `--scorer` is a
+test seam for the risk scorer's path, the same shape as `node.sh shim`'s runner override.
+
 ## One group per package major line, and validate decides completeness
 
 `discover-alerts.sh` groups by package **and** the major of `first_patched_version`. Grouping by

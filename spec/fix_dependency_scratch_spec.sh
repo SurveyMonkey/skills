@@ -75,7 +75,7 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
     # corepack shim below is named the same way on every run and needs none.
     It 'scopes the qualified-name requirement to collision-prone files, not every artifact'
       When call phrase_in "$AGENT" \
-        'collide or be mistaken between runs.*the phase 5 .why. capture below is one.*also gets its own qualified name'
+        'collide or be mistaken between runs.*the driver.s .why. capture is one.*also gets its own qualified name'
       The status should be success
       The output should equal '1'
     End
@@ -103,57 +103,23 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
     End
   End
 
-  Describe 'the why-file scratch path is package-qualified'
-    # The write site (phase 5): a bare $WORK/why.json is exactly the
-    # predictable, unqualified filename that let one sibling's write clobber
-    # another's during the field run this issue reports.
-    It 'writes the why capture to a package-qualified path'
-      When call rule_in "$AGENT" \
-        '[$]ADAPTER why <package> > "[$]WORK/why-<package>[.]json"'
-      The status should be success
-      The output should not equal '0'
-    End
-
-    # The consume site (phase 5's score-merge-risk.sh call).
-    It 'passes the same package-qualified path to score-merge-risk.sh'
-      When call rule_in "$AGENT" \
-        '--why-json "[$]WORK/why-<package>[.]json"'
-      The status should be success
-      The output should not equal '0'
-    End
-
-    # The prose reference near phase 5's parent-disclosure paragraph, plus the
-    # write and consume sites above: three lines carry the literal.
-    It 'names the package-qualified path three times: write, prose, consume'
-      When call rule_in "$AGENT" 'why-<package>\.json'
-      The status should be success
-      The output should equal '3'
-    End
-
-    # No unqualified why.json literal should remain anywhere in the document.
-    # "why-<package>.json" never contains the bare substring "why.json", so
-    # this pattern only matches a literal that skipped qualification.
+  # The why capture itself moved into common/fix-group.sh with #171, which
+  # writes it as `$WORK/why-<package_path>.json` and hands that path to
+  # score-merge-risk.sh. Both halves are asserted against the driver's own argv
+  # in spec/fix_group_apply_spec.sh; what stays here is that the agent
+  # definition no longer prescribes a path of its own, and carries no
+  # unqualified `why.json` literal anywhere.
+  Describe 'the why capture is the driver.s, and no unqualified literal survives'
     It 'has no remaining unqualified why.json literal'
       When call count_in "$AGENT" 'why\.json'
       The status should be success
       The output should equal '0'
     End
 
-    # Finding 1: `<package>` substituted raw breaks the redirect for a scoped
-    # package, since `$WORK/why-@babel/` is never created
-    # (`$WORK/why-@babel/traverse.json`). The doc must say to slash-to-dash
-    # slug the name before it goes into this one filename. Deleting the rule
-    # must fail the suite (mutation-tested finding).
-    It 'states the slash-to-dash slug rule for a scoped package name'
-      When call rule_in "$AGENT" 'Slug .<package>. before it goes into that filename'
+    It 'no longer prescribes a why-capture redirect of its own'
+      When call count_in "$AGENT" '[$]ADAPTER why <package> >'
       The status should be success
-      The output should not equal '0'
-    End
-
-    It 'gives the slug rule the concrete scoped-package example'
-      When call rule_in "$AGENT" 'why-@babel-traverse\.json'
-      The status should be success
-      The output should not equal '0'
+      The output should equal '0'
     End
   End
 End
