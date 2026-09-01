@@ -39,10 +39,17 @@
 #           escape into — a pin either tested or it did not. The value still
 #           matters, because `jq -n --argjson x ""` exits 2 with NO stdout, so
 #           an unguarded empty capture would manufacture a judgment escape
-#           carrying no decision point at all. `state_json`, `rv_versions` and
-#           `advisory_validate` exist to stop that at each of the three places a
-#           payload enters this script, and there is deliberately no
-#           `needs_judgment` helper to reach for.
+#           carrying no decision point at all. Two defences, because there are
+#           two ways to get there and they need different ones. A payload
+#           ENTERING the script is validated where it enters, against the shape
+#           its caller reads: `state_json`, `rv_versions`, `advisory_validate`.
+#           A capture PRODUCED here is a different matter — a jq that errors
+#           prints nothing and exits non-zero, and `printf '' | jq -e 'true'`
+#           exits 4, so a generic "is this JSON?" guard did fire for those but
+#           reported the wrong cause — so every internal capture that later
+#           reaches `--argjson` carries `|| fail_phase` on the producing
+#           command itself. There is deliberately no `needs_judgment` helper to
+#           reach for.
 #   exit 3  {"status":"failure","phase":"list|install|restore|advisories|compose",
 #            "detail":"..."}   terminal failure, mapped verbatim onto the
 #           agent's result block. The agent's other phase names never appear
@@ -179,6 +186,32 @@ state_get_opt() {
 # `adapter_field` does the same: `fail_phase` exits, and an exit inside a
 # command substitution ends only the subshell.
 STATE_JSON=""
+
+# The shape `judge` and `together` actually read out of `findings`, not merely
+# the container holding it.
+#
+# `type == "array"` asserts the box. A `tested` finding whose
+# `attributable_versions` came back a string, an object or `null` is not `[]`,
+# so it skips the empty-delta arm, enters the advisory loop, and `jq -r '.[]'`
+# there errors — the heredoc feeds nothing, the loop body never runs, and
+# `verdicts` stays `[]`. `all` over an empty array is **true**, so the pin
+# earns `removable` / `advisory_verdict: "safe"` with **no advisory query run
+# at all**, and in `pr` mode it is deleted and the PR opened. That is the same
+# headline rule inverted that `rv_versions` shuts on the adapter's side,
+# reached through the state file instead. `collateral_changes` has the twin:
+# a non-indexable one leaves the collateral loop with nothing judged, and an
+# empty verdict list collapses to `safe`.
+FINDINGS_SHAPE='type == "array"
+  and all(.[]; type == "object")
+  and all(.[] | select(.status == "tested");
+          (.attributable_versions | type) == "array"
+          and all(.attributable_versions[]; type == "string")
+          and ((.collateral_changes | type) == "array"
+               or (.collateral_changes | type) == "null")
+          and all(.collateral_changes[]?;
+                  type == "object" and (.judged | type) == "boolean"
+                  and (.package | type) == "string"
+                  and (.newly_admitted | type) == "array"))'
 
 state_json() {
   # $1 phase, $2 jq filter, $3 jq predicate the value must satisfy, $4 description
@@ -712,7 +745,8 @@ cmd_list() {
   order=$(printf '%s' "$routed" | jq -c '
     [ .[] | select(.finding == "testable") ]
     | (map(select(.scope == "bare")) + map(select(.scope != "bare")))
-    | map({key, path, package, scope, value})')
+    | map({key, path, package, scope, value})') \
+    || fail_phase list "the bare-first test order could not be built from list_pins' entries: $routed"
 
   STATE="$work/state.json"
   jq -n \
@@ -797,7 +831,9 @@ cmd_baseline() {
   # audit still runs and every verdict says it covers the named package only.
   # Any other non-zero exit is a parser refusing a lockfile it could not read,
   # and that refusal is the answer.
-  local map_available=false base_map='null' unreadable=0
+  # `unreadable` starts EMPTY for the reason `jq_int_or_null` gives: a map that
+  # was never built has not earned the strongest coverage claim this flow makes.
+  local map_available=false base_map='null' unreadable=""
   adapter_run resolution_map
   st=$ADAPTER_STATUS
   if [ "$st" -eq 0 ]; then
@@ -848,7 +884,7 @@ EOF
 
   state_set baseline_map "$base_map"
   state_set map_available "$(jbool "$map_available")"
-  state_set baseline_unreadable_entries "$unreadable"
+  state_set baseline_unreadable_entries "$(jq_int_or_null "$unreadable")"
   state_set baseline_packages "$pkg_baselines"
   state_set baseline_inconclusive "$inconclusive"
   state_set baseline_done true
@@ -867,10 +903,10 @@ EOF
                 attributable_versions: null, sibling_pins: [],
                 collateral_changes: null, collateral_verdict: null,
                 advisory_verdict: null, advisory_count: null, matched_ranges: []} ]')
-  state_set findings "$findings"
+  set_findings "$findings"
 
   jq -n --arg lockfile "$lockfile" --argjson map "$(jbool "$map_available")" \
-    --argjson unreadable "$unreadable" --argjson pkgs "$pkg_baselines" \
+    --argjson unreadable "$(jq_int_or_null "$unreadable")" --argjson pkgs "$pkg_baselines" \
     --argjson inc "$inconclusive" --argjson order "$test_order" \
     '{status: "ok", step: "baseline", lockfile: $lockfile,
       resolution_map_available: $map, unreadable_entries: $unreadable,
@@ -890,19 +926,29 @@ EOF
 # ---------------------------------------------------------------------------
 
 # Record one finding into state, replacing any earlier record for the same path.
+# EVERY write to `findings` goes through this, and that is the point: the one
+# that did not was `baseline`'s bulk write, so a second `baseline` after a
+# completed judgment reset the findings to its own refused set while
+# `judge_done` stayed true — `together`'s guard passed, the candidate set was
+# empty, and it reported `no removable pins found` over an audit whose results
+# it had just discarded. Any `test-pin` after a `judge` invalidates that
+# judgment for the same reason: the finding it writes is `tested` again, and
+# `together` selects on status, so the pin would be dropped from a candidate
+# set the agent believes is complete. Re-running `judge` is cheap — its
+# advisory answers are cached — and being made to is the point.
+set_findings() {
+  state_set findings "$1"
+  state_set judge_done false
+}
+
 record_finding() {
   local prev merged
-  # Any `test-pin` after a `judge` invalidates that judgment: the finding it
-  # writes is `tested` again, and `together` selects on status, so the pin
-  # would be silently dropped from a candidate set the agent believes is
-  # complete. Re-running `judge` is cheap — its advisory answers are cached —
-  # and being made to is the point.
-  state_set judge_done false
-  state_json install '.findings' 'type == "array"' 'the findings recorded so far'
+  state_json install '.findings' "$FINDINGS_SHAPE" 'the findings recorded so far'
   prev=$STATE_JSON
   merged=$(jq -cn --argjson a "$prev" --argjson f "$1" \
-    '[ $a[] | select(.path != $f.path) ] + [$f]')
-  state_set findings "$merged"
+    '[ $a[] | select(.path != $f.path) ] + [$f]') \
+    || fail_phase install "this pin's finding could not be merged into the findings on file. Nothing was recorded, so no later step reads a half-written list."
+  set_findings "$merged"
 }
 
 cmd_test_pin() {
@@ -1025,7 +1071,8 @@ cmd_test_pin() {
                resolved_with_pin: null, resolved_without_pin: null,
                attributable_versions: null, sibling_pins: [],
                collateral_changes: null, collateral_verdict: null,
-               advisory_verdict: null, advisory_count: null, matched_ranges: []}')
+               advisory_verdict: null, advisory_count: null, matched_ranges: []}') \
+      || fail_phase install "this pin's finding could not be assembled, so nothing was recorded for it and no later step reads it as a pin that was never reached."
     record_finding "$f"
     restore_tree "$pin_key"
     jq -n --argjson f "$f" '{status: "ok", step: "test-pin", finding: $f}'
@@ -1049,7 +1096,8 @@ cmd_test_pin() {
                resolved_with_pin: null, resolved_without_pin: null,
                attributable_versions: null, sibling_pins: [],
                collateral_changes: null, collateral_verdict: null,
-               advisory_verdict: null, advisory_count: null, matched_ranges: []}')
+               advisory_verdict: null, advisory_count: null, matched_ranges: []}') \
+      || fail_phase install "this pin's finding could not be assembled, so nothing was recorded for it and no later step reads it as a pin that was never reached."
     record_finding "$f"
     restore_tree "$pin_key"
     jq -n --argjson f "$f" '{status: "ok", step: "test-pin", finding: $f}'
@@ -1069,7 +1117,10 @@ cmd_test_pin() {
     || fail_phase install "the with-all-pins baseline holds no snapshot for $pin_pkg, so there is nothing to measure this removal against. Run baseline before test-pin; a missing snapshot read as an empty one would make every version resolving now look newly admitted." 
 
   # ---- step 6: the whole-tree map ----------------------------------------
-  local now_map='null' map_ok=false now_unreadable=0 map_refusal=""
+  # `now_unreadable` starts EMPTY, not `0`. Zero is the strongest coverage
+  # claim this flow makes, and a map that was never built has not earned it —
+  # the sibling of the baseline's own fabricated zero.
+  local now_map='null' map_ok=false now_unreadable="" map_refusal=
   local base_map map_available base_unreadable
   state_json install '.baseline_map' 'type == "object" or type == "null"' "the with-all-pins baseline resolution_map"
   base_map=$STATE_JSON
@@ -1146,7 +1197,8 @@ cmd_test_pin() {
                resolved_with_pin: $base, resolved_without_pin: $without,
                attributable_versions: null, sibling_pins: [],
                collateral_changes: null, collateral_verdict: null,
-               advisory_verdict: null, advisory_count: null, matched_ranges: []}')
+               advisory_verdict: null, advisory_count: null, matched_ranges: []}') \
+      || fail_phase install "this pin's finding could not be assembled, so nothing was recorded for it and no later step reads it as a pin that was never reached."
     record_finding "$f"
     restore_tree "$pin_key"
     jq -n --argjson f "$f" '{status: "ok", step: "test-pin", finding: $f}'
@@ -1294,7 +1346,8 @@ cmd_test_pin() {
              sampled_families: $fams,
              whole_tree_view: $whole,
              unreadable_entries: {baseline: $unread, without_pin: $unread_now},
-             advisory_verdict: null, advisory_count: null, matched_ranges: []}')
+             advisory_verdict: null, advisory_count: null, matched_ranges: []}') \
+    || fail_phase install "this pin's finding could not be assembled, so nothing was recorded for it."
   record_finding "$f"
 
   # ---- step 7: the verified restore, before the next pin ------------------
@@ -1340,16 +1393,28 @@ cmd_judge() {
   [ "$(state_get_opt '.baseline_done')" = "true" ] \
     || die "judge: run 'baseline' first. With no with-all-pins baseline there is nothing any finding was measured against."
 
+  # `expected` counts the pins the baseline did NOT refuse, never every
+  # testable pin. `baseline` records a `present: false` package's pins
+  # inconclusive and `test-pin` refuses them by design, so counting all of them
+  # deadlocks a repository where the baseline refused every one: `judge` would
+  # say run `test-pin`, every `test-pin` would refuse, and there would be no
+  # route to any report at all.
   local expected recorded
-  state_json advisories '.test_order' 'type == "array"' "phase 2's test_order"
-  expected=$(printf '%s' "$STATE_JSON" | jq -r 'length')
+  expected=$(jq -r '[ (.baseline_inconclusive // [])[].package ] as $bad
+                    | [ (.test_order // [])[]
+                        | select(.package as $p | ($bad | index($p)) == null) ]
+                    | length' "$STATE" 2>/dev/null) \
+    || die "judge: phase 2's test_order and the baseline's inconclusive list could not be read out of $STATE"
+  case "$expected" in
+    ''|*[!0-9]*) die "judge: the count of pins still to test could not be computed from $STATE" ;;
+  esac
   # The findings list is read through the shape check FIRST, so a `findings`
   # that came back something other than a list is reported as the shape it is
   # rather than as an arithmetic accident downstream.
-  state_json advisories '.findings' 'type == "array"' 'the findings phase 4 recorded'
+  state_json advisories '.findings' "$FINDINGS_SHAPE" 'the findings phase 4 recorded'
   recorded=$(printf '%s' "$STATE_JSON" | jq -r 'map(select(.tested == true)) | length')
   if [ "$expected" != "0" ] && [ "$recorded" = "0" ]; then
-    die "judge: run 'test-pin' first. phase 2 found $expected testable pin(s) and none has been tested, so every finding on file is one the baseline refused — and judging that set reports an audit that examined nothing as one that kept every pin it has."
+    die "judge: run 'test-pin' first. $expected pin(s) survived the baseline and none has been tested, so every finding on file is one the baseline refused — and judging that set reports an audit that examined nothing as one that kept every pin it has."
   fi
 
   local findings out='[]' fjson
@@ -1364,7 +1429,8 @@ cmd_judge() {
     local st
     st=$(printf '%s' "$fjson" | jq -r '.status')
     if [ "$st" != "tested" ]; then
-      out=$(jq -cn --argjson a "$out" --argjson f "$fjson" '$a + [$f]')
+      out=$(jq -cn --argjson a "$out" --argjson f "$fjson" '$a + [$f]') \
+        || fail_phase advisories "a finding phase 4 recorded could not be carried through unchanged: $fjson"
       continue
     fi
 
@@ -1427,8 +1493,10 @@ EOF
       # `advisory_count` is the package's advisory total and does not vary by
       # version, so the first answer IS the verbatim value. A `max` across the
       # delta would be a synthesis of several readings of one number.
-      count=$(printf '%s' "$verdicts" | jq -c '[ .[].advisory_count ] | first')
-      matched=$(printf '%s' "$verdicts" | jq -c '[ .[].matched_ranges[] ] | unique')
+      count=$(printf '%s' "$verdicts" | jq -c '[ .[].advisory_count ] | first') \
+        || fail_phase advisories "the advisory count for $pkg could not be read back out of the per-version answers: $verdicts"
+      matched=$(printf '%s' "$verdicts" | jq -c '[ .[].matched_ranges[] ] | unique') \
+        || fail_phase advisories "the matched ranges for $pkg could not be read back out of the per-version answers: $verdicts"
       detail=$(printf '%s' "$verdicts" | jq -r '
         [ .[] | "\(.version): \(.verdict)"
           + (if (.matched_ranges | length) > 0 then " (" + (.matched_ranges | join("; ")) + ")" else "" end)
@@ -1450,13 +1518,14 @@ EOF
     elif [ "$(printf '%s' "$fjson" | jq -r '(.collateral_changes // []) | length')" = "0" ]; then
       cverdict='"none"'
     else
-      local cn ci centry cpkg cv cverdicts='[]'
+      local cn ci centry cpkg cv cverdicts='[]' cjudged=0
       cn=$(printf '%s' "$fjson" | jq -r '.collateral_changes | length')
       ci=0
       while [ "$ci" -lt "$cn" ]; do
         centry=$(printf '%s' "$fjson" | jq -c ".collateral_changes[$ci]")
         ci=$((ci + 1))
         [ "$(printf '%s' "$centry" | jq -r '.judged')" = "true" ] || continue
+        cjudged=$((cjudged + 1))
         cpkg=$(printf '%s' "$centry" | jq -r '.package')
         while IFS= read -r cv; do
           [ -n "$cv" ] || continue
@@ -1471,13 +1540,22 @@ EOF
 $(printf '%s' "$centry" | jq -r '.newly_admitted[]')
 EOF
       done
+      # A collateral list with entries but nothing judged is a broken sampling
+      # record, not a clean tree: `length == 0` below would call it `safe`
+      # having asked about nothing. An entry that legitimately admitted no new
+      # version still counts as judged, which is why the counter is separate
+      # from the verdict list.
+      [ "$cn" = "0" ] || [ "$cjudged" != "0" ] \
+        || fail_phase advisories "the collateral list for $pkg carries $cn entr(ies) and not one of them is marked judged, so nothing in the tree was checked. An empty verdict list would collapse to 'safe' here, which is the strongest claim available about packages nobody looked at."
       cverdict=$(printf '%s' "$cverdicts" | jq -c --argjson f "$fjson" '
         if length == 0 then "safe"
         elif any(.[]; .verdict == "vulnerable") then "vulnerable"
         elif all(.[]; .verdict == "safe") then
           (if (($f.sampled_families // []) | length) > 0 then "sampled-family" else "safe" end)
-        else "inconclusive" end')
-      fjson=$(jq -cn --argjson f "$fjson" --argjson c "$cverdicts" '$f + {collateral_verdicts: $c}')
+        else "inconclusive" end') \
+        || fail_phase advisories "the collateral verdict for $pkg could not be collapsed out of $cverdicts"
+      fjson=$(jq -cn --argjson f "$fjson" --argjson c "$cverdicts" '$f + {collateral_verdicts: $c}') \
+        || fail_phase advisories "the collateral verdicts could not be attached to the finding for $pkg"
     fi
 
     # A `vulnerable` collateral makes the pin `still-required` even when its own
@@ -1502,7 +1580,8 @@ EOF
       --arg av "$own_verdict" --argjson cv "$cverdict" \
       '$a + [ $f + {status: $s, detail: $d,
                     advisory_verdict: (if $av == "" then null else $av end),
-                    advisory_count: $c, matched_ranges: $m, collateral_verdict: $cv} ]')
+                    advisory_count: $c, matched_ranges: $m, collateral_verdict: $cv} ]') \
+      || fail_phase advisories "the judged finding for $pkg could not be assembled, so the report would be short one pin without saying so."
   done
 
   # ---- the sibling rule ---------------------------------------------------
@@ -1522,15 +1601,22 @@ EOF
           then $f + {status: "removable-individually",
                      sibling_pins: [ .[] | select(.package == $f.package and .key != $f.key
                                                   and (.path != $f.path)) | .key ]}
-          else $f end ]')
+          else $f end ]') \
+    || die "judge: the sibling rule could not be applied to the judged findings, so removable-individually was never assigned. Nothing was written."
 
-  state_set findings "$out"
+  set_findings "$out"
   state_set judge_done true
 
   local untested
-  untested=$(jq -c '[ .test_order[] as $p
-                      | select([ (.findings // [])[] | .path ] | index($p.path) | not)
-                      | {key: $p.key, path: $p.path, package: $p.package} ]' "$STATE" 2>/dev/null) \
+  # `.path` is an ARRAY, and jq's `index` with an array argument searches for a
+  # subsequence of ELEMENTS rather than for an element equal to that array:
+  # `[["overrides","a"]] | index(["overrides","a"])` is `null`. Read that way
+  # the predicate held for every entry, so this field named every pin — fully
+  # judged ones included — while the report treats it as authoritative.
+  untested=$(jq -c '(.findings // []) as $f
+                    | [ .test_order[] as $p
+                        | select([ $f[] | select(.path == $p.path) ] | length == 0)
+                        | {key: $p.key, path: $p.path, package: $p.package} ]' "$STATE" 2>/dev/null) \
     || die "judge: the untested-pin list could not be computed from $STATE"
 
   jq -n --argjson f "$out" --argjson untested "$untested" \
@@ -1560,7 +1646,8 @@ ATTEMPT_DETAIL=""
 remove_candidates() {
   # $1 = JSON array of pins
   local paths keys k
-  paths=$(printf '%s' "$1" | jq -c '[ .[].path ]')
+  paths=$(printf '%s' "$1" | jq -c '[ .[].path ]') \
+    || fail_phase compose "the candidate paths could not be read out of the set to remove: $1"
   if [ "$OVERRIDE_FILE" = "pnpm-workspace.yaml" ]; then
     keys=$(printf '%s' "$1" | jq -r '.[].key')
     while IFS= read -r k; do
@@ -1613,7 +1700,8 @@ run_attempt() {
   base_count=$(state_get '.pins_count'); state_ok $? '.pins_count'
   nremoved=$(printf '%s' "$cands" | jq -r 'length')
   still=$(printf '%s' "$after" | jq -c --argjson c "$cands" \
-    '[ .pins[] | select(.path as $p | any($c[]; .path == $p)) | .key ]')
+    '[ .pins[] | select(.path as $p | any($c[]; .path == $p)) | .key ]') \
+    || fail_phase compose "attempt $attempt could not be checked against list_pins' reply, so whether the removals landed is unknown and no verdict is reported as if it were."
   if [ "$still" != "[]" ]; then
     restore_tree "attempt $attempt"
     fail_phase compose "attempt $attempt still carries the candidate key(s) $still after the removal, so the install would have been an install of a manifest still holding them."
@@ -1670,7 +1758,8 @@ run_attempt() {
       | ($base.resolutions[$p] | norm) as $b
       | ($now.resolutions[$p] | norm) as $w
       | select($b != $w)
-      | {package: $p, baseline: $b, without_pins: $w, newly_admitted: ($w - $b)} ]')
+      | {package: $p, baseline: $b, without_pins: $w, newly_admitted: ($w - $b)} ]') \
+    || fail_phase compose "attempt $attempt's map could not be diffed against the with-all-pins baseline, so nothing is known about what the set moved."
 
   local cn ci centry cpkg cv
   cn=$(printf '%s' "$ATTEMPT_COLLATERAL" | jq -r 'length')
@@ -1684,7 +1773,8 @@ run_attempt() {
       advisory_for "$cpkg" "$cv"
       ATTEMPT_VERDICTS=$(jq -cn --argjson a "$ATTEMPT_VERDICTS" --argjson r "$ADVISORY_JSON" \
         --arg p "$cpkg" --arg v "$cv" \
-        '$a + [{package: $p, version: $v, verdict: $r.verdict, matched_ranges: $r.matched_ranges}]')
+        '$a + [{package: $p, version: $v, verdict: $r.verdict, matched_ranges: $r.matched_ranges}]') \
+        || fail_phase compose "an advisory answer for $cpkg $cv could not be recorded, so the attempt cannot be called clean."
     done <<EOF
 $(printf '%s' "$centry" | jq -r '.newly_admitted[]')
 EOF
@@ -1727,7 +1817,7 @@ cmd_together() {
     || die "together: run 'judge' first. Before it runs every finding is still 'tested', so the candidate set is empty and this step would report 'no removable pins found' for an advisory judgment that never happened."
 
   local findings cands1 cands2
-  state_json compose '.findings' 'type == "array"' "phase 5's findings"
+  state_json compose '.findings' "$FINDINGS_SHAPE" "phase 5's findings"
   findings=$STATE_JSON
   # The candidate set is every finding whose status is `removable` OR
   # `removable-individually` — the two statuses phase 5 judged safe, differing
@@ -1736,8 +1826,10 @@ cmd_together() {
   # set. Nothing else joins it: `still-required`, `inconclusive`, `not-tested`
   # and `not-a-version-pin` are not confirmed safe, and a PR is not the place to
   # find out.
-  cands1=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable" or .status == "removable-individually") | {key, path, package, value, status} ]')
-  cands2=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable") | {key, path, package, value, status} ]')
+  cands1=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable" or .status == "removable-individually") | {key, path, package, value, status} ]') \
+    || fail_phase compose "attempt 1's candidate set could not be selected out of phase 5's findings, so no set was installed: $findings"
+  cands2=$(printf '%s' "$findings" | jq -c '[ .[] | select(.status == "removable") | {key, path, package, value, status} ]') \
+    || fail_phase compose "attempt 2's candidate set could not be selected out of phase 5's findings, so no set was installed: $findings"
 
   if [ "$cands1" = "[]" ]; then
     jq -n '{status: "no_candidates", step: "together",

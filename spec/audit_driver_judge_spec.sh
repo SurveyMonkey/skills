@@ -1022,6 +1022,38 @@ JSON
       The stderr should include 'not a readable JSON object'
     End
 
+    # `.path` is an ARRAY, and jq's `index` with an array argument searches for
+    # a subsequence of ELEMENTS, not for an element equal to that array, so the
+    # predicate held for every entry and this field named every pin — fully
+    # judged ones included — while the report treats it as authoritative.
+    It 'lists only the pins no test-pin call covered'
+      prepare
+      one_tested
+      When call drv_jq '.untested' judge --work "$WORK"
+      The status should be success
+      The output should equal '[{"key":"glob","path":["glob","minimatch"],"package":"minimatch"}]'
+    End
+
+    It 'lists nothing when every testable pin was covered'
+      prepare
+      seed_findings '[
+        {"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare","value":"^4.17.21",
+         "status":"tested","tested":true,"left_tree":false,"resolved_with_pin":["4.17.21"],
+         "resolved_without_pin":["4.17.21"],"attributable_versions":[],"sibling_pins":[],
+         "collateral_changes":[],"collateral_verdict":null,"sampled_families":[],
+         "whole_tree_view":true,"advisory_verdict":null,"advisory_count":null,
+         "matched_ranges":[]},
+        {"key":"glob","path":["glob","minimatch"],"package":"minimatch","scope":"scoped",
+         "value":"^9.0.0","status":"tested","tested":true,"left_tree":false,
+         "resolved_with_pin":["9.0.5"],"resolved_without_pin":["9.0.5"],
+         "attributable_versions":[],"sibling_pins":[],"collateral_changes":[],
+         "collateral_verdict":null,"sampled_families":[],"whole_tree_view":true,
+         "advisory_verdict":null,"advisory_count":null,"matched_ranges":[]}]'
+      When call drv_jq '.untested' judge --work "$WORK"
+      The status should be success
+      The output should equal '[]'
+    End
+
     It 'refuses judge before baseline has run'
       make_env
       do_list
@@ -1036,6 +1068,35 @@ JSON
     # finishes, and baseline -> judge -> together with no test-pin at all used
     # to answer "no removable pins found" at exit 0: the identical false claim
     # the together guard exists to stop, reached by the route it did not cover.
+    # `baseline` refuses every pin whose package answers present: false and
+    # `test-pin` then dies for those by design, so counting all testable pins
+    # deadlocked a repository where the baseline refused every one: judge said
+    # run test-pin, every test-pin refused, and there was no route to a report.
+    It 'reports rather than deadlocking when the baseline refused every pin'
+      make_env
+      do_list
+      jq -c '.present = false | .versions = []' "$MOCK_DIR/rv.json" > "$MOCK_DIR/rv-lodash.json"
+      cp "$MOCK_DIR/rv-lodash.json" "$MOCK_DIR/rv-minimatch.json"
+      do_baseline
+      When call drv_jq '{status, s: [.findings[].status], u: [.untested[].key]}' judge --work "$WORK"
+      The status should be success
+      The output should equal '{"status":"ok","s":["inconclusive","inconclusive"],"u":[]}'
+    End
+
+    # A repository whose every pin is a non-range kind has count > 0 and an
+    # empty test_order: audited, nothing testable, nothing removable.
+    It 'reaches no removable pins found when nothing was a version pin at all'
+      make_env
+      jq -c '.pins = [ .pins[] | .kind = "protocol" ]' "$MOCK_DIR/list_pins.json" > "$MOCK_DIR/t"
+      mv "$MOCK_DIR/t" "$MOCK_DIR/list_pins.json"
+      do_list
+      do_baseline
+      "$DRIVER" judge --work "$WORK" >/dev/null
+      When call drv_jq '{status, pr_skipped_reason}' together --work "$WORK"
+      The status should be success
+      The output should equal '{"status":"no_candidates","pr_skipped_reason":"no removable pins found"}'
+    End
+
     It 'refuses judge when phase 2 found testable pins and none was tested'
       prepare
       When run script "$DRIVER" judge --work "$WORK"
@@ -1057,6 +1118,24 @@ JSON
     # `judge_done` is not a one-way latch: a test-pin after it writes a finding
     # that is `tested` again, and `together` selects on status, so the pin
     # would be dropped from a candidate set the agent believes is complete.
+    # `baseline`'s bulk write to `findings` was the one that did not clear the
+    # flag, so a second baseline after a completed judgment reset the findings
+    # to its own refused set while `judge_done` stayed true — the guard passed,
+    # the candidate set was empty, and `no removable pins found` was reported
+    # over an audit whose results had just been discarded.
+    It 'invalidates a judgment that a later baseline discarded'
+      prepare
+      seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
+        "value":"^4.17.21","status":"removable","sibling_pins":[]}]'
+      jq -c '.judge_done = true' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      do_baseline
+      When run script "$DRIVER" together --work "$WORK"
+      The status should equal 1
+      The stdout should include '"error"'
+      The stderr should include "run 'judge' first"
+    End
+
     It 'invalidates a judgment that a later test-pin overtook'
       prepare
       seed_findings '[{"key":"lodash","path":["lodash"],"package":"lodash","scope":"bare",
@@ -1068,6 +1147,90 @@ JSON
       The status should equal 1
       The stdout should include '"error"'
       The stderr should include "run 'judge' first"
+    End
+
+    # `type == "array"` asserts the BOX. A `tested` finding whose
+    # `attributable_versions` came back a string, an object or null is not
+    # `[]`, so it skips the empty-delta arm, enters the advisory loop, and
+    # `jq -r '.[]'` there errors: the heredoc feeds nothing, the loop body
+    # never runs, `verdicts` stays `[]`, and `all` over an empty array is TRUE.
+    # The pin earned `removable` with `advisory_verdict: "safe"` and **no
+    # advisory query run at all** — the same headline rule inverted that
+    # `rv_versions` shuts on the adapter's side, reached through the state file.
+    Describe 'a delta that is not a list of versions never reaches a verdict'
+      Parameters
+        'a string' '"4.17.19"'
+        'an object' '{"0":"4.17.19"}'
+        'null'      'null'
+        'a list of non-strings' '[{"version":"4.17.19"}]'
+      End
+
+      It "refuses attributable_versions that is $1"
+        prepare
+        one_tested
+        jq -c --argjson v "$2" '.findings[0].attributable_versions = $v' "$WORK/state.json" \
+          > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        When call drv_jq '{status, phase}' judge --work "$WORK"
+        The status should equal 3
+        The output should equal '{"status":"failure","phase":"advisories"}'
+        The stderr should include 'not the shape the step that wrote it promised'
+      End
+
+      It "asks the advisory database nothing, and reports no verdict, for $1"
+        prepare
+        one_tested
+        jq -c --argjson v "$2" '.findings[0].attributable_versions = $v' "$WORK/state.json" \
+          > "$WORK/s.tmp"
+        mv "$WORK/s.tmp" "$WORK/state.json"
+        "$DRIVER" judge --work "$WORK" >/dev/null 2>&1 || true
+        When call jq -r '.findings[0].status' "$WORK/state.json"
+        The status should be success
+        The output should equal 'tested'
+      End
+    End
+
+    # The twin, on the collateral side: a non-indexable collateral_changes left
+    # the loop with nothing judged, and an empty verdict list collapses to
+    # `safe` — the strongest claim available about packages nobody looked at.
+    It 'refuses a collateral list that is not a list'
+      prepare
+      one_tested
+      jq -c '.findings[0].collateral_changes = "moved"' "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'not the shape the step that wrote it promised'
+    End
+
+    It 'refuses a collateral entry with no judged flag'
+      prepare
+      one_tested
+      jq -c '.findings[0].collateral_changes =
+               [{"package":"readable-stream","baseline":["3.6.2"],
+                 "without_pin":["2.3.8"],"newly_admitted":["2.3.8"]}]' \
+        "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'not the shape the step that wrote it promised'
+    End
+
+    It 'refuses a collateral list where nothing at all was judged'
+      prepare
+      one_tested
+      jq -c '.findings[0].collateral_changes =
+               [{"package":"readable-stream","baseline":["3.6.2"],
+                 "without_pin":["2.3.8"],"newly_admitted":["2.3.8"],
+                 "judged":false,"represented_by":"other","family":null}]' \
+        "$WORK/state.json" > "$WORK/s.tmp"
+      mv "$WORK/s.tmp" "$WORK/state.json"
+      When call drv_jq '{status, phase}' judge --work "$WORK"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"advisories"}'
+      The stderr should include 'not one of them is marked judged'
     End
 
     # Validating that a state value is JSON says almost nothing: every jq read

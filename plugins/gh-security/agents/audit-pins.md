@@ -332,7 +332,7 @@ the order phase 2 returned it, one call per pin.
 
 **The steps run in order and each refuses to run early**, with an exit 1 `{"error": ...}` that is a
 bug in the call you just made rather than a finding: `test-pin` before `baseline`, `judge` before
-`baseline` **and before any pin has actually been tested**, and phase 7's `together` before
+`baseline` **and before any pin the baseline kept has actually been tested**, and phase 7's `together` before
 `judge`. The last two matter most. `baseline` writes findings of its own — the pins it refused on
 a `present: false` — so a repository with nothing wrong has `findings: []` the moment it finishes,
 and `baseline` → `judge` → `together` with no `test-pin` call in between would otherwise answer

@@ -310,6 +310,22 @@ JSON
       The stderr should include 'no JSON object on stdout'
     End
 
+    # A jq that errors prints nothing and exits non-zero, so an unguarded
+    # capture reached `--argjson` and jq died exit 2 with no stdout — this
+    # contract's own needs_judgment — while the reported cause was whatever the
+    # next check happened to be. `list`'s test order is the one such capture a
+    # fixture can drive from outside, through a pin entry with no `scope`.
+    It 'names the producing step when an internal capture cannot be built'
+      make_env
+      jq -c 'del(.override_root) | .pins = ["oops"] | .count = 1' \
+        "$MOCK_DIR/list_pins.json" > "$MOCK_DIR/list_pins.override"
+      When call drv_jq '{status, phase}' \
+        list --work "$WORK" --worktree "$WT" --adapter "$MOCK" --advisories "$ADV"
+      The status should equal 3
+      The output should equal '{"status":"failure","phase":"list"}'
+      The stderr should include 'could not be routed by kind'
+    End
+
     It 'refuses a count that disagrees with the entries beside it'
       make_env
       jq -c 'del(.override_root) | .count = 9' "$MOCK_DIR/list_pins.json" \
@@ -824,6 +840,30 @@ JSON
         test-pin --work "$WORK" --key lodash
       The status should be success
       The output should equal '{"u":{"baseline":null,"without_pin":0},"v":"not-checked"}'
+    End
+
+    # The sibling of the baseline's own fabricated zero: `now_unreadable` was
+    # initialized at declaration and only overwritten when the map was actually
+    # built, so a map that never existed reported "every lockfile entry was
+    # read" — the strongest coverage claim there is.
+    It 'reports the after-removal count as null when no map was ever built'
+      make_env
+      do_list
+      printf '2\n' > "$MOCK_DIR/map.status"
+      do_baseline
+      When call drv_jq '.finding.unreadable_entries' test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should equal '{"baseline":null,"without_pin":null}'
+    End
+
+    It 'reports it as null when the map refused this lockfile after the removal'
+      make_env
+      do_list
+      printf '1\n' > "$MOCK_DIR/map.2.status"
+      do_baseline
+      When call drv_jq '.finding.unreadable_entries' test-pin --work "$WORK" --key lodash
+      The status should be success
+      The output should equal '{"baseline":0,"without_pin":null}'
     End
 
     It 'falls back to the same narrow claim when resolution_map is unavailable'

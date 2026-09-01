@@ -184,12 +184,26 @@ What that header does not say, and what belongs here:
   the four values `check-advisories.sh` emits. A torn entry read blind reaches `--argjson`, where
   jq dies exit 2 with no stdout: the checkpoint contract's own `needs_judgment`, manufactured out
   of a half-written file.
-- **There is no `require_json` helper, deliberately.** Guarding a capture with "is this JSON?"
-  passes for `null`, for `[]`, and for every wrong-shaped value, so its call sites were
-  unreachable by construction and a suite could not tell them from `return 0`. The guarantee lives
-  instead at the three places a payload enters the script — `state_json`'s shape predicate,
-  `rv_versions`, and `advisory_validate` — each of which refuses an empty value along with every
-  other value that is not what was promised, and each of which a fixture can fire.
+- **There is no `require_json` helper, and the reason is not that it never fired.** It did: a jq
+  that errors prints nothing, and `printf '' | jq -e 'true'` exits 4. What it could not do is say
+  anything useful — "is this JSON?" passes for `null`, for `[]` and for every wrong-shaped value,
+  so on a payload it reported the wrong problem and on an internal capture it reported the right
+  problem too late to name which step produced it. Both halves are now handled where they belong.
+  A payload ENTERING the script is validated against **the shape its caller reads**:
+  `state_json`'s predicate, `rv_versions`, `advisory_validate`. A capture PRODUCED here carries
+  `|| fail_phase` on the producing command, so the diagnosis names that command instead of
+  whichever check the empty value happened to trip next.
+- **A container check is not a shape check, and the difference recommends deletions.**
+  `state_json '.findings' 'type == "array"'` asserted the box. A `tested` finding whose
+  `attributable_versions` came back a string, an object or `null` is not `[]`, so it skipped the
+  empty-delta arm, entered the advisory loop, and `jq -r '.[]'` errored there — the heredoc fed
+  nothing, the loop body never ran, `verdicts` stayed `[]`, and **`all` over an empty array is
+  `true`**. The pin earned `removable` with `advisory_verdict: "safe"` and no advisory query run
+  at all, which in `pr` mode is a deletion in a pull request. `FINDINGS_SHAPE` is therefore the
+  shape the callers read, down to `collateral_changes` entries carrying a boolean `judged` — and
+  `judge` additionally refuses a non-empty collateral list in which nothing was judged, because an
+  empty verdict list collapses to `safe`, the strongest claim available about packages nobody
+  looked at.
 - **Each step refuses to run before the one it depends on**, and the guard on `together` is the
   one that earns its keep: before `judge` every finding still reads `tested`, so an unguarded
   `together` finds an empty candidate set and terminates exit 0 with `no removable pins found` — a
@@ -199,7 +213,13 @@ What that header does not say, and what belongs here:
   same false claim was reachable with no `test-pin` call at all. And `judge_done` is cleared by
   every `record_finding`, because a `test-pin` run after a judgment leaves that pin `tested` and
   `together` selects on status — the pin would be dropped from a candidate set the agent believes
-  is complete.
+  is complete. **Every** write to `findings` goes through `set_findings`, which clears the flag:
+  the one that did not was `baseline`'s bulk write, so a second `baseline` after a completed
+  judgment reset the findings to its own refused set while `judge_done` stayed true and
+  `together` reported `no removable pins found` over an audit it had just discarded. And `judge`
+  counts the pins the baseline did NOT refuse, never every testable pin: counting all of them
+  deadlocks a repository whose baseline refused every one, since `test-pin` refuses those by
+  design and there would be no route to any report at all.
 - **The tested package's advisory answer never absorbs the collateral verdict.** `advisory_verdict`,
   `advisory_count` and `matched_ranges` are `check-advisories.sh`'s reply about the pinned package
   and nothing else; a collateral package's result lives in `collateral_verdict`. Derived instead
