@@ -59,8 +59,12 @@
 # **Never `git worktree prune`.** It walks every worktree entry in the
 # repository, so a call timed against a sibling agent's `worktree add` or
 # `remove` can delete a live registration, and the breakage surfaces in the
-# victim rather than here (issue #35). Sibling agents are in flight by
-# construction whenever the pool refills, which is exactly when this runs.
+# victim rather than here (issue #35). The orchestrator now runs this after
+# its dispatch workflow returns (issue #175), so a sibling is usually not in
+# flight — the rule holds anyway, and deliberately: it is a property of what
+# this script is entitled to touch, not of when it happens to be called, and
+# a `prune` added on the strength of the new timing would be a live hazard
+# again the moment anything reaps mid-flight.
 #
 # A worktree whose directory is gone while its registration survives is the one
 # state that needs an administrative write, and it gets the narrow form of the

@@ -474,6 +474,13 @@ tokens on every run to arrive at a worse answer. Launch the script below with `a
 `{cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>]}`, every group
 across every repo in the ranked order phases 3 and 4 settled.
 
+**Pass `args` as an actual JSON value, never as a JSON-encoded string.** A stringified `args`
+arrives as one string, `args.dispatches` is then `undefined`, and the guard at the top of the
+script rejects it. That guard exists because every one of these mistakes is otherwise silent: a
+missing `cap` makes the worker count `NaN`, `Array.from({length: NaN})` empty, and `parallel([])`
+return at once with every entry still `null` — which phase 7 would faithfully report as a whole
+batch of crashed agents when nothing was ever dispatched. Fail loudly, fix the `args`, relaunch.
+
 Each payload is the group JSON verbatim under `group`, plus `adapter_path`, the group's own `nwo`
 (its `repo` field), `default_branch` and `repo_root` for that group's repo (from phase 1 at repo
 scope, or phase 5's resolved triples at org/user scope), `scripts_dir`
@@ -488,7 +495,7 @@ export const meta = {
   name: 'gh-security-fix-dispatch',
   description: 'Fix each approved Dependabot alert group with its own subagent, bounded by the machine capacity cap',
   phases: [
-    { title: 'Fix groups', detail: 'one fix-dependency agent per approved group' },
+    { title: 'Fix groups', detail: 'one fix-dependency agent per approved group', model: 'sonnet' },
   ],
 }
 
@@ -519,8 +526,40 @@ const RESULT_SCHEMA = {
         f5: { type: 'number' },
       },
     },
-    observations: { type: 'array' },
-    requires_major_bump: { type: 'array' },
+    // `type` is the only field every observation carries: the adapter emits
+    // `unscoped_override`, `manifest_pnpm_overrides_ignored` and
+    // `pnpm_major_unknown`, the agent appends `unscoped_override_added`, and
+    // only the two override shapes carry `key`.
+    // Do NOT narrow this to an enum: an adapter gaining a fourth type would
+    // then fail every result it appears in.
+    observations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['type'],
+        properties: {
+          type: { type: 'string' },
+          key: { type: 'string' },
+          range: { type: 'string' },
+          targets_this_package: { type: 'boolean' },
+          reason: { type: 'string' },
+        },
+      },
+    },
+    // validate's own array, verbatim: one entry per still-vulnerable copy
+    // below the fix line (node.sh `$bump`), keyed by the resolved `version`
+    // and the advisory ranges it still matches.
+    requires_major_bump: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['version', 'vulnerable_ranges'],
+        properties: {
+          version: { type: 'string' },
+          vulnerable_ranges: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
     bare_override: { enum: ['none', 'added', 'tightened'] },
     no_op: {
       type: ['object', 'null'],
@@ -538,11 +577,73 @@ const RESULT_SCHEMA = {
       },
     },
   },
+  // The Result contract's cross-field rules. Without these,
+  // {"status":"failure","failure":null} validates field-for-field, clears
+  // post-agent.sh's gate (which reads only branch/package/major_line), and
+  // reaches phase 7's "failures get their phase and detail" with no data.
+  oneOf: [
+    {
+      properties: {
+        status: { const: 'success' },
+        pr_url: { type: 'string' },
+        action: { type: 'string' },
+        risk: { type: 'object' },
+        no_op: { type: 'null' },
+        failure: { type: 'null' },
+      },
+    },
+    {
+      properties: {
+        status: { const: 'no-op' },
+        pr_url: { type: 'null' },
+        action: { type: 'null' },
+        risk: { type: 'null' },
+        no_op: { type: 'object' },
+        failure: { type: 'null' },
+      },
+    },
+    {
+      properties: {
+        status: { const: 'failure' },
+        pr_url: { type: 'null' },
+        action: { type: 'null' },
+        risk: { type: 'null' },
+        no_op: { type: 'null' },
+        failure: { type: 'object' },
+      },
+    },
+  ],
+  // bare_override must agree with action, in both directions.
+  allOf: [
+    {
+      if: { properties: { bare_override: { enum: ['added', 'tightened'] } }, required: ['bare_override'] },
+      then: { properties: { action: { const: 'bare-override' } } },
+    },
+    {
+      if: { properties: { action: { const: 'bare-override' } }, required: ['action'] },
+      then: { properties: { bare_override: { enum: ['added', 'tightened'] } } },
+    },
+  ],
 }
+
+// Refuse a malformed `args` loudly. Every failure here is silent otherwise:
+// a stringified `args` leaves `args.dispatches` undefined, and a missing
+// `cap` makes Math.min NaN, Array.from({length: NaN}) empty, and parallel()
+// return at once with every entry still null — which phase 7 would read as a
+// whole batch of crashed agents when nothing was ever dispatched.
+if (!args || !Array.isArray(args.dispatches) || !args.dispatches.length) {
+  throw new Error('args.dispatches must be a non-empty array of dispatch payloads (pass args as JSON, never as a JSON-encoded string)')
+}
+if (typeof args.cap !== 'number' || !(args.cap >= 1)) {
+  throw new Error('args.cap must be a number >= 1, from detect-capacity.sh')
+}
+
+const DISPATCHES = args.dispatches
+const WORKERS = Math.min(args.cap, DISPATCHES.length)
+log('Dispatching ' + DISPATCHES.length + ' group(s), ' + WORKERS + ' at a time')
 
 phase('Fix groups')
 
-const DISPATCHES = args.dispatches
 const results = new Array(DISPATCHES.length).fill(null)
 let next = 0
 
@@ -556,6 +657,7 @@ const worker = async () => {
         'Dispatch payload:\n' + JSON.stringify(d, null, 2),
       {
         agentType: 'fix-dependency',
+        model: 'sonnet',
         phase: 'Fix groups',
         label: d.group.repo + ' ' + d.group.package + ' ' + d.group.major_line,
         schema: RESULT_SCHEMA,
@@ -564,9 +666,7 @@ const worker = async () => {
   }
 }
 
-await parallel(
-  Array.from({ length: Math.min(args.cap, DISPATCHES.length) }, () => () => worker()),
-)
+await parallel(Array.from({ length: WORKERS }, () => () => worker()))
 
 return DISPATCHES.map((d, i) => ({ dispatch: d, result: results[i] }))
 ```
@@ -576,10 +676,50 @@ exceed it and no count of yours has to track it. The cap stays machine-wide acro
 the batch — a single workflow over every approved group, never one workflow per repo, is what makes
 that true by construction.
 
+**`model: 'sonnet'` is passed explicitly, and that is what holds ADR 004's pin here.** The fix
+agent's own frontmatter (`agents/fix-dependency.md`) pins sonnet for a Task dispatch, but a
+workflow `agent()` call with no `model` inherits the session model, and whether `agentType`
+composes with the target definition's frontmatter is not specified. Left implicit, a 33-group run
+could silently execute on whatever model the session happens to hold, voiding ADR 004 with nothing
+to notice it. So the pin is stated at the call site and mirrored on the `meta` phase entry, where
+the progress display reports it. **Never drop either without changing ADR 004 first**, and if the
+frontmatter mechanism is ever confirmed to compose, this becomes redundant rather than wrong.
+
+**The workflow can also throw, be cancelled, or return short — and that must never lose a group.**
+Under the old rolling pool each completion arrived on its own, so an abort still left every result
+already in hand. A single call loses them all at once, and the agents that ran had already made
+worktrees, pushed branches and opened pull requests. So when the call errors, the user interrupts
+it, or it returns fewer entries than `dispatches`:
+
+- **Never read an absent or short return as "nothing ran."** It is the opposite: work you cannot
+  see is exactly what is at risk of being abandoned.
+- **Recover what did run before deciding anything.** The tool result carries a `runId` and a
+  transcript directory; `<transcriptDir>/journal.jsonl` records each agent's actual return value.
+  Read it to learn which groups completed and what they returned, rather than assuming.
+- **Resume rather than re-dispatch.** Relaunch with `{scriptPath, resumeFromRunId: <runId>}`, the
+  same script and the same `args`: the unchanged prefix of `agent()` calls returns its cached
+  results instantly and only the unfinished work runs live. Re-launching without
+  `resumeFromRunId` re-runs every group, which is how a second branch and a second PR appear for
+  work that already succeeded. Resuming the batch the user approved is not a new dispatch
+  decision — but **a run the user deliberately interrupted is**, so there, ask first.
+- **When resume is impossible or declined, reap the whole `dispatches` list anyway**, one
+  `post-agent.sh` call per group, with an empty result file for every group that has no entry.
+  That is what finds and names each worktree and branch the interrupted run left behind; skipping
+  it is the only way a group actually disappears.
+- **Phase 7 then reports every group in `dispatches`**, says plainly that the run was interrupted
+  and at which point, and names the groups with no result at all as unknown rather than as
+  failures — they may have opened a pull request that nothing here read.
+
 **`schema` replaces the old "an unparseable result block is a failure report" rule.** The agent is
-forced through structured output and retried on a mismatch, so a result that reaches you has
-already been validated against the shape `agents/fix-dependency.md` promises, and nothing here
-re-parses a fence. **A group whose entry comes back `null` — the schema could not be satisfied
+forced through structured output and retried on a mismatch, so nothing here re-parses a fence. Be
+precise about what that buys: the schema validates **the field set, the four enumerations, the
+nullability of each field, the element shape of `observations[]` and `requires_major_bump[]`, and
+the Result contract's cross-field rules** — exactly one of `no_op`/`failure` non-null with both
+null on success, each agreeing with `status`, and `bare_override` agreeing with `action`. It does
+not and cannot check that a `pr_url` names a real pull request, that `risk` is the scorer's own
+output rather than a number the agent invented, or that a `no_op`'s evidence supports its reason.
+Those stay what they always were: `post-agent.sh` verifies the pull request, and the rest is the
+agent's contract to keep. **A group whose entry comes back `null` — the schema could not be satisfied
 after retries, or the agent died — is a failure report for that group, and is still reported.** Its
 `dispatch` entry is right there beside it, carrying `package`, `major_line`, `branch_name` and
 `repo_root`, which is everything the reap and phase 7 need; run the reap below for it exactly as for
@@ -617,7 +757,7 @@ crash, an unparseable or missing result block, a `no-op`, or a PR that is not op
 worktree and the branch in place, and the report names them (`reaped: false`, with `reason` and the
 derived `worktree_path`/`branch`) for phase 7 rather than this phase guessing at what survived.
 **A failure here is not fatal**: record the report, move to the next entry, and carry on. A reap
-that could not finish must never stall the pool, and neither does one that printed nothing at all — a
+that could not finish must never stall the run, and neither does one that printed nothing at all — a
 rejected argument or a refused path in the reap it runs internally — which the script turns into a
 named `reason` rather than a guessed clean sweep.
 
@@ -643,7 +783,10 @@ for the whole run rather than for a window between dispatches.
 The workflow returns **one entry per approved group**, in the order they were dispatched, each
 carrying its own `dispatch` payload and its schema-validated `result`. Read the summary off those
 returned entries; the batch is complete when the workflow returns, so there is nothing to hold or
-reconcile as results trickle in. The summary describes the whole approved batch, not a subset.
+reconcile as results trickle in. The summary describes the whole approved batch, not a subset —
+and when the workflow threw, was cancelled, or returned fewer entries than `dispatches`, phase 6's
+interruption contract is what fills the gap: recover from the journal, resume or reap the whole
+list anyway, and report every group in `dispatches` either way.
 **An entry whose `result` is `null` is a failure report** — record it as such; never guess fields,
 and give it the same reap and the same line in the tables as any other entry. Agents are instructed
 never to park a turn waiting on a hung verb, so a null entry means the agent crashed or could not

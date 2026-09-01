@@ -224,5 +224,22 @@ tokens on every run to reach a worse answer.
   the workflow, and nothing inside it prompts.
 - **The reap stays outside the script**, one `post-agent.sh` call per returned entry, so phase 7
   still reads per-group `left_behind` accounting rather than a summary the script invented.
+- **ADR 004's `sonnet` pin is now passed explicitly** as `model: 'sonnet'` on the `agent()` call
+  and mirrored on the `meta` phase entry. A workflow `agent()` without `model` inherits the
+  session model, and whether `agentType` composes with the target definition's frontmatter is
+  unspecified; leaving it implicit would void ADR 004 silently.
+
+Two drifts this accepts, neither of them free:
+
+- **The reap now runs after the whole batch, not per completion.** In practice almost nothing
+  accumulates: `fix-group.sh cleanup` already removes the worktree before the agent returns on
+  success, failure and partial progress, so only a crashed agent leaves one for the deferred reap,
+  and the crashed-run guard cannot fire on a sibling's leftover under either design. Reaping after
+  every agent has returned is a strict superset of the safety that justified reaping mid-flight.
+- **Deferring the pull-request read to end of batch widens the window** in which a human merges or
+  closes a PR between the agent opening it and `post-agent.sh` reading it. The read then returns
+  something other than `OPEN`, the reap is correctly withheld, and that group's worktree and
+  branch are reported as left behind. This inflates the `left_behind` report on long batches; it
+  never deletes anything it should not, because the gate only ever withholds.
 
 Everything else above holds.

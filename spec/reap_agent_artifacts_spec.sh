@@ -178,9 +178,11 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
   End
 
   Describe 'nothing repository-wide, and nothing belonging to a sibling'
-    # Sibling agents are in flight by construction whenever the pool refills,
-    # which is exactly when this runs. One named worktree and one named ref is
-    # the whole entitlement.
+    # One named worktree and one named ref is the whole entitlement, and that
+    # is a property of what this script may touch rather than of when it is
+    # called: since issue #175 the reap runs after the dispatch workflow
+    # returns, so a sibling is usually finished, and none of that licenses
+    # widening the blast radius here.
     It 'leaves a sibling agent worktree and branch in place'
       make_repo
       add_agent_worktree
@@ -644,8 +646,8 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '1'
     End
 
-    It 'refills the slot even when the reap could not finish'
-      When call phrase_in "$SKILL" 'A reap that could not finish must never stall the pool'
+    It 'carries on to the next entry even when the reap could not finish'
+      When call phrase_in "$SKILL" 'A reap that could not finish must never stall the run'
       The status should be success
       The output should equal '1'
     End
@@ -662,9 +664,9 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     # The gap a reviewer found: a reap rejected before it printed anything falls
     # into neither phase 7 bucket, since this group's PR *was* verified. The
-    # script now reports this itself; SKILL.md only has to say the pool keeps
+    # script now reports this itself; SKILL.md only has to say the run keeps
     # going.
-    It 'never lets a reap that printed nothing stall the pool either'
+    It 'never lets a reap that printed nothing stall the run either'
       When call phrase_in "$SKILL" 'and neither does one that printed nothing at all'
       The status should be success
       The output should equal '1'

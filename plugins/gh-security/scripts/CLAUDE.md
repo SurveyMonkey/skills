@@ -337,11 +337,13 @@ worktree *paths* not colliding is not the same as repository state not colliding
   and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
   removes the caller's own entry; that is the whole cleanup an agent is entitled to.
 - **What an agent leaves behind is reaped by the orchestrator, one agent at a time**, through
-  `common/reap-agent-artifacts.sh`: on each completion, after the orchestrator has verified that
-  agent's pull request is open, and never for an agent that ended any other way. The verified open
-  PR is what makes the local branch delete safe (its tip is on origin), and the script is local
-  scope only, touching exactly one worktree path and one local ref, so it is legal while siblings
-  are in flight. It never prunes either. Its one administrative write is the narrow form of the
+  `common/reap-agent-artifacts.sh`: once that agent's result is in hand and its pull request has
+  been verified open, and never for an agent that ended any other way. The verified open PR is what
+  makes the local branch delete safe (its tip is on origin). Since issue #175 the reap runs after
+  the dispatch workflow returns, so in practice no sibling is in flight — but **the local-scope
+  rule is what makes it safe, not the timing**: the script touches exactly one worktree path and
+  one local ref, which is why it would be legal mid-flight too, and why nothing here may be
+  widened on the strength of "everything has finished by now." It never prunes either. Its one administrative write is the narrow form of the
   same rule: a worktree directory that is gone while its registration survives blocks both a later
   `worktree add` on that path and any `branch -D` of its branch, and `git worktree remove` refuses
   it, so the reap removes the **single** entry under `<git-common-dir>/worktrees/` whose `gitdir`

@@ -21,6 +21,10 @@
 
 Describe 'phase 6 dispatches one workflow (issue #175)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+  AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+  SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
+  REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
+  ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
 
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
@@ -52,7 +56,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     Describe 'the single dispatch phase, titled identically in meta and in the body'
       Parameters
         # where it appears   the literal that must appear there
-        meta-entry           "{ title: 'Fix groups', detail: 'one fix-dependency agent per approved group' },"
+        meta-entry           "{ title: 'Fix groups', detail: 'one fix-dependency agent per approved group', model: 'sonnet' },"
         body-call            "phase('Fix groups')"
         agent-option         "phase: 'Fix groups',"
       End
@@ -77,7 +81,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # rather than by a count the model maintains. This one line is what
     # replaced the fill/refill motions and the stale-count hazard.
     It 'bounds the worker pool by the capacity cap'
-      When call rule_in "$SKILL" 'Math\.min(args\.cap, DISPATCHES\.length)'
+      When call rule_in "$SKILL" '^const WORKERS = Math\.min(args\.cap, DISPATCHES\.length)$'
       The status should be success
       The output should equal '1'
     End
@@ -93,6 +97,29 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # by name.
     It 'returns each dispatch alongside its result'
       When call rule_in "$SKILL" 'return DISPATCHES\.map((d, i) => ({ dispatch: d, result: results\[i\] }))'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Phase 7 promises entries "in the order they were dispatched", and the
+    # only thing holding that is the indexed write: workers finish out of
+    # order, so a refactor to results.push() would scramble the order
+    # silently while every other pin here still passed.
+    It 'writes each result at its own index rather than appending'
+      When call rule_in "$SKILL" '^    results\[i\] = await agent($'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never appends results in completion order'
+      no_push() { grep -c 'results\.push' "$1" || true; }
+      When call no_push "$SKILL"
+      The status should be success
+      The output should equal '0'
+    End
+
+    It 'promises that order to phase 7'
+      When call phrase_in "$SKILL" 'in the order they were dispatched'
       The status should be success
       The output should equal '1'
     End
@@ -140,6 +167,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
         status             "status: { enum: \['success', 'no-op', 'failure'\] },"
         bare_override      "bare_override: { enum: \['none', 'added', 'tightened'\] },"
         failure.phase      "enum: \['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr'\],"
+        action             "action: { enum: \['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh', null\] },"
       End
 
       It "pins the $1 enumeration"
@@ -266,6 +294,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # one field whose absence is meaningful: an omitted key, never a null.
     Describe 'the dispatch payload'
       Parameters
+        'nwo'
         'adapter_path'
         'default_branch'
         'repo_root'
@@ -281,6 +310,226 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     It 'still omits env_prefix rather than sending null'
       When call phrase_in "$SKILL" 'omit the key rather than send null'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+  Describe 'the model pin (ADR 004)'
+    # agents/fix-dependency.md pins `model: sonnet` in its frontmatter, which
+    # is what a Task dispatch honors. A workflow agent() with no `model`
+    # inherits the session model, and whether agentType composes with the
+    # target definition's frontmatter is unspecified — so the pin is stated
+    # at the call site. Losing it would put a 33-group field run on whatever
+    # model the session held, voiding ADR 004 with nothing to notice.
+    It 'passes sonnet explicitly on the agent call'
+      When call rule_in "$SKILL" "^        model: 'sonnet',$"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'mirrors it on the meta phase entry'
+      When call rule_in "$SKILL" "detail: 'one fix-dependency agent per approved group', model: 'sonnet'"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says which mechanism holds the pin here'
+      When call phrase_in "$SKILL" 'that is what holds ADR 004.s pin here'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps the agent frontmatter pin ADR 004 names'
+      When call rule_in "$AGENT" '^model: sonnet$'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the args guard'
+    # Every one of these failures is otherwise silent, and the worst of them
+    # inverts the report: an absent `cap` makes the worker count NaN,
+    # Array.from({length: NaN}) empty, parallel([]) return at once, and every
+    # entry stay null — which phase 7 reads as a whole batch of crashed
+    # agents when nothing was ever dispatched.
+    It 'rejects a missing or stringified dispatches list'
+      When call rule_in "$SKILL" 'if (!args || !Array\.isArray(args\.dispatches) || !args\.dispatches\.length) {'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'rejects a cap that is not a number of at least one'
+      When call rule_in "$SKILL" "if (typeof args\.cap !== 'number' || !(args\.cap >= 1)) {"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'announces what it is dispatching and at what width'
+      When call rule_in "$SKILL" "^log('Dispatching '"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'tells the caller to pass args as JSON, never as a JSON-encoded string'
+      When call phrase_in "$SKILL" 'Pass .args. as an actual JSON value, never as a JSON-encoded string'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the cross-field rules the Result contract fixes'
+    # Field-for-field validation is not enough: {"status":"failure",
+    # "failure":null} passes every per-field check, clears post-agent.sh's
+    # gate (branch/package/major_line only), and reaches phase 7's "failures
+    # get their phase and detail" with no data source.
+    It 'encodes exactly-one-of no_op and failure, agreeing with status'
+      When call rule_in "$SKILL" '^  oneOf: \['
+      The status should be success
+      The output should equal '1'
+    End
+
+    Describe 'one branch per status value'
+      Parameters
+        success   "status: { const: 'success' },"
+        no-op     "status: { const: 'no-op' },"
+        failure   "status: { const: 'failure' },"
+      End
+
+      It "pins the $1 branch"
+        When call rule_in "$SKILL" "$2"
+        The status should be success
+        The output should equal '1'
+      End
+    End
+
+    It 'encodes the bare_override to action agreement in both directions'
+      When call rule_in "$SKILL" "then: { properties: { action: { const: 'bare-override' } } },"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The two arrays phase 7 actually reads element-by-element.
+    It 'validates the element shape of observations'
+      When call blob_in "$SKILL" "observations: { type: 'array', items: { type: 'object', required: \['type'\],"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The specimen is node.sh's own `$bump` array (spec/node_validate_spec.sh:
+    # {"version":"5.29.0","vulnerable_ranges":["< 6.28.0"]}), not an invented
+    # {package, resolved_version} shape.
+    It 'validates the element shape of requires_major_bump against the adapter it comes from'
+      When call blob_in "$SKILL" "required: \['version', 'vulnerable_ranges'\],"
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Narrowing observations.type to an enum would reject three types the
+    # adapter really emits. The comment is the guard against a future editor
+    # "tightening" it.
+    It 'refuses to narrow the observation type to an enum'
+      When call phrase_in "$SKILL" 'Do NOT narrow this to an enum'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The prose must not claim more than the schema does.
+    It 'says plainly what the schema cannot check'
+      When call phrase_in "$SKILL" 'It does not and cannot check that a .pr_url. names a real pull request'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the interruption contract'
+    # The largest way a group can now disappear: a barrier loses every result
+    # at once, and the agents that ran had already pushed branches and opened
+    # PRs. Under the old pool each completion arrived on its own, so an abort
+    # still left the orchestrator holding everything received so far.
+    It 'refuses to read an absent or short return as nothing having run'
+      When call phrase_in "$SKILL" 'Never read an absent or short return as .nothing ran'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the journal as the record of what actually returned'
+      When call rule_in "$SKILL" '<transcriptDir>/journal.jsonl'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'resumes from the runId rather than re-dispatching the batch'
+      When call rule_in "$SKILL" 'resumeFromRunId: <runId>'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says a plain relaunch duplicates the branches and PRs that already succeeded'
+      When call blob_in "$SKILL" 'how a second branch and a second PR appear for work that already succeeded'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # Resuming the approved batch is not a new dispatch decision; a run the
+    # user deliberately stopped is, which is the one place the approval
+    # boundary genuinely moves.
+    It 'asks before resuming a run the user deliberately interrupted'
+      When call phrase_in "$SKILL" 'a run the user deliberately interrupted is.*so there, ask first'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reaps the whole dispatch list anyway when resume is impossible or declined'
+      When call phrase_in "$SKILL" 'reap the whole .dispatches. list anyway'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reports groups with no result as unknown rather than as failures'
+      When call phrase_in "$SKILL" 'names the groups with no result at all as unknown rather than as'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'is reachable from phase 7, which otherwise keys on one entry per group'
+      When call phrase_in "$SKILL" "phase 6.s interruption contract is what fills the gap"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the reap timing this layer changed'
+    # Precisely the sentence a later editor would "restore" to the old
+    # wording. The reap moved from per-completion (inside a refill motion the
+    # model kept) to per-returned-entry after the workflow returns, and both
+    # binding documents that carried the old reason were corrected with it.
+    It 'ties the reap to the result being in hand, not to a completion notification'
+      When call phrase_in "$SKILL" 'Reap each group.s local artifacts once its result is in hand'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'no longer claims in scripts/CLAUDE.md that the reap runs on each completion'
+      no_completion_reap() { grep -c 'on each completion' "$1" || true; }
+      When call no_completion_reap "$SCRIPTS_DOC"
+      The status should be success
+      The output should equal '0'
+    End
+
+    It 'keeps the never-prune rule in scripts/CLAUDE.md on the entitlement, not the timing'
+      When call phrase_in "$SCRIPTS_DOC" 'the local-scope\s*rule is what makes it safe, not the timing'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too'
+      When call phrase_in "$REAP" 'a property of what.*this script is entitled to touch, not of when it happens to be called'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'records the widened pull-request read window in ADR 003'
+      When call phrase_in "$ADR" 'widens the window'
       The status should be success
       The output should equal '1'
     End
