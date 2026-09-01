@@ -102,6 +102,47 @@ Describe 'scripts/check.sh'
       The status should eq 2
       The stderr should include 'no spec files found'
     End
+
+    # ADR 010's gate refuses the same way the others do, and its discovery is
+    # `git ls-files -- 'spec/js/*.test.mjs'` — anchored so the many
+    # hand-authored package.json and node_modules trees under spec/fixtures/
+    # can never be collected as this repo's own project code.
+    It 'fails js when no test files are tracked under spec/js'
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'no JS test files discovered'
+    End
+
+    It 'ignores a fixture package.json when deciding whether the js gate has targets'
+      mkdir -p spec/fixtures/some-repo
+      printf '{"name":"fixture"}' > spec/fixtures/some-repo/package.json
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'no JS test files discovered'
+    End
+
+    # Discovery passing does not mean the gate can run: an untracked
+    # node_modules and a missing package.json each get their own refusal
+    # rather than a confusing failure from inside npm.
+    It 'fails js when the project manifest is absent'
+      mkdir -p spec/js
+      printf 'x\n' > spec/js/x.test.mjs
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'package.json is missing'
+    End
+
+    It 'fails js when node_modules has not been installed'
+      mkdir -p spec/js
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'run npm ci'
+    End
   End
 
   # The example floor is the guard against shellspec's own "0 examples, 0

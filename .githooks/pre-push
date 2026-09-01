@@ -1,7 +1,15 @@
 #!/bin/sh
-# The full shellspec suite, before anything leaves the machine. Parallel by
-# default because a human is waiting (roughly a minute, machine-dependent);
-# CI runs the same suite serially for a legible report.
+# The full suites — vitest then shellspec — before anything leaves the
+# machine. shellspec runs parallel by default because a human is waiting
+# (roughly a minute, machine-dependent); CI runs it serially for a legible
+# report.
+#
+# The js gate lives here rather than pre-commit for the same reason the
+# shellspec suite does: cost, plus a precondition. It needs an installed
+# node_modules, and a fresh clone has none, so putting it in the ~2s
+# pre-commit pair would fail every first commit with "run npm ci" and train
+# people straight to --no-verify (ADR 005, ADR 010). Missing tooling warns
+# and stands down here, exactly as a missing shellspec does; CI enforces.
 #
 # Enable once per clone: git config core.hooksPath .githooks
 # Bypass for one push with git push --no-verify. CI enforces regardless.
@@ -29,6 +37,13 @@ fi
 if [ "$needs_suite" -eq 0 ]; then
   printf 'pre-push: only deletions or tags being pushed; skipping the suite (CI runs it regardless)\n' >&2
   exit 0
+fi
+
+if [ -d node_modules ] && command -v npm >/dev/null 2>&1; then
+  ./scripts/check.sh js </dev/null || exit $?
+else
+  printf '\n!! pre-push: node_modules is absent or npm is not installed, so the js\n' >&2
+  printf '!! gate did not run here. CI enforces it. Install locally with:\n!!   npm ci\n\n' >&2
 fi
 
 if ! command -v shellspec >/dev/null 2>&1; then

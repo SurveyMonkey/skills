@@ -1,38 +1,35 @@
 #!/bin/sh
 # shellcheck shell=sh
-# Phase 6 dispatch as a Workflow script rather than a scheduler the model
+# Phase 6 dispatches one Workflow script rather than a schedule the model
 # keeps in prose (issue #175).
 #
 # What changed: the orchestrator used to hold a work queue, fill it to `cap`,
 # refill on every completion notification counting the agents actually in
 # flight, and never overshoot on a stale count. That is bookkeeping the
 # harness does deterministically, and every token spent re-deriving it
-# recurred on every run. Phase 6 now hands the whole batch to one Workflow
-# script embedded in SKILL.md, whose workers are what hold the cap.
+# recurred on every run. Phase 6 now hands the whole approved batch to
+# plugins/gh-security/workflows/fix-groups.mjs.
 #
-# Nothing executable runs here, and nothing can: the template is JavaScript
-# inside a skill document, and the behavior it replaces was model-executed
-# prose. So these examples pin the sentences and the template lines that ARE
-# the implementation, exactly as spec/fix_dependency_branch_spec.sh and
-# spec/resolve_alerts_branch_style_spec.sh do for their own prose contracts.
+# **What this file may and may not pin, after ADR 010.** The workflow used to
+# live in a ```javascript fence in SKILL.md, so the only verification
+# available was grepping the document — 93 textual assertions and zero
+# behavioral tests, which is exactly how a well-formed but UNSATISFIABLE
+# result schema passed every one of them. The script is a real file now, and
+# spec/js/fix-groups.test.mjs runs it: the args guards, the worker count, the
+# payload construction, the identity check, and the schema executed against
+# ajv. Every pin here that was standing in for that coverage has been
+# deleted, because two sources of truth for one behavior is worse than
+# either alone.
 #
-# **Know what that cannot do.** These are textual pins, not execution. No
-# JSON Schema validator runs here, so a schema that is well-formed but
-# UNSATISFIABLE — the state `allOf` was in before issue #175's final review,
-# where a truthful `status: "failure"` carrying `bare_override: "added"`
-# matched no value of `action` — passes every per-line pin. Adding a
-# JavaScript runtime to the repo-wide gate for one spec file is an ADR-level
-# dependency change and was declined; the script's real verification is the
-# post-merge field run. Two habits compensate, and both are load-bearing:
-#   * **Pin guard BODIES, never just their `if` lines.** A `throw` gutted to
-#     nothing leaves the condition byte-identical, and a pin on the condition
-#     alone stays green against a guard that no longer guards.
-#   * **Pin the cross-field rules relationally** (every `allOf` gate reachable
-#     for the branch it constrains), not by presence, since presence is
-#     exactly what an unsatisfiable combination also has.
-# The pins fall into three groups: the template's own load-bearing lines, the
-# invariants #175 introduced, and the phase 6 rules that survived the rewrite
-# and would otherwise be deleted by a later editor as pool-era leftovers.
+# What remains is the prose that IS the implementation, because a model
+# executes it and nothing else can: the approval boundary, the interruption
+# and resume contract, the reap cadence, the payload the orchestrator
+# assembles, and the phase 6 rules that predate the workflow. Those follow
+# the spec/fix_dependency_branch_spec.sh pattern — the sentence is the code,
+# and its absence is the whole regression.
+#
+# The dividing question for anything added later: does a MODEL do it, or does
+# the SCRIPT? A script behavior belongs in spec/js/, run rather than read.
 
 Describe 'phase 6 dispatches one workflow (issue #175)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
@@ -40,218 +37,125 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
   REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
+  ADR010="$SHELLSPEC_PROJECT_ROOT/docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md"
+  WORKFLOW="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/workflows/fix-groups.mjs"
   README="$SHELLSPEC_PROJECT_ROOT/README.md"
 
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
-  # The template is indented JavaScript, so flattening its newlines leaves
-  # runs of spaces where the prose helpers leave one. Squeeze them, so a
-  # pinned literal can be written the way it reads.
   blob_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
-  Describe 'the embedded template'
-    # `meta` must be a pure literal — no variables, calls, spreads or
-    # interpolation — or the Workflow tool refuses the script outright. It is
-    # pinned as a whole-line literal so an editor cannot quietly parameterize
-    # the name.
-    It 'opens with a pure-literal meta block'
-      When call rule_in "$SKILL" '^export const meta = {$'
+  Describe 'the workflow is a file, not a fence (ADR 010)'
+    It 'ships the workflow as a real file'
+      When call test -f "$WORKFLOW"
+      The status should be success
+    End
+
+    # The fence is what made the whole layer untestable. Its return would
+    # take the vitest suite's subject with it.
+    It 'embeds no javascript fence in the skill any more'
+      no_fence() { grep -c '```javascript' "$1" || true; }
+      When call no_fence "$SKILL"
+      The status should be success
+      The output should equal '0'
+    End
+
+    # The `$` is written as `.` so the pattern does not spell `${`, which
+    # SC2016 reads as an expansion someone forgot to double-quote. Same fix
+    # the repo already uses for a sed character class (root CLAUDE.md), and
+    # `.` matches the literal `$` here: no directive needed.
+    It 'launches the workflow by scriptPath, from the plugin root'
+      When call rule_in "$SKILL" 'scriptPath: ".{CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs"'
       The status should be success
       The output should equal '1'
     End
 
-    It 'names the workflow and describes it in one line'
-      When call rule_in "$SKILL" "^  name: 'gh-security-fix-dispatch',$"
+    # A hand-inlined variant would not be the tested file, which is the one
+    # thing ADR 010 buys.
+    It 'forbids inlining a copy or hand-editing a variant'
+      When call phrase_in "$SKILL" 'Never inline a copy of it, and never hand-edit a variant for one run'
       The status should be success
       The output should equal '1'
     End
 
-    # One phase, declared in meta and started in the body with the SAME
-    # title: the titles are matched exactly, and a mismatch silently splits
-    # the progress display into two groups.
-    Describe 'the single dispatch phase, titled identically in meta and in the body'
+    It 'points at the tests as the reason the file is authoritative'
+      When call blob_in "$SKILL" 'unit-tested by .spec/js/., and its result schema is executed against a validator rather than read'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The guarantees the model is told not to re-derive. Each is enforced by
+    # a real test in spec/js/; these pins only keep the skill from growing a
+    # second, drifting statement of them.
+    Describe 'the guarantees the skill defers to the script for'
       Parameters
-        # where it appears   the literal that must appear there
-        meta-entry           "{ title: 'Fix groups', detail: 'one fix-dependency agent per approved group', model: 'sonnet' },"
-        body-call            "phase('Fix groups')"
-        agent-option         "phase: 'Fix groups',"
+        worker-pool   'min(cap, N). workers hold the pool'
+        args-guard    'Malformed .args. is refused loudly'
+        model-pin     'Each agent runs as .fix-dependency. on .sonnet.'
+        ordering      'Entries come back in dispatch order'
+        mispairing    'A result that does not name its own dispatch is dropped, not trusted'
       End
 
-      It "carries the $1 form"
-        When call rule_in "$SKILL" "$2"
+      It "states the $1 guarantee once"
+        When call blob_in "$SKILL" "$2"
         The status should be success
         The output should equal '1'
       End
     End
 
-    # The dispatch itself: one agent per group, routed to the fix-dependency
-    # agent definition. Losing agentType silently dispatches the generic
-    # workflow subagent, which has none of the fix agent's contract.
-    It 'dispatches each group to the fix-dependency subagent type'
-      When call rule_in "$SKILL" "agentType: 'fix-dependency',"
-      The status should be success
-      The output should equal '1'
-    End
-
-    # `cap` bounds the pool by construction — the worker count IS the cap —
-    # rather than by a count the model maintains. This one line is what
-    # replaced the fill/refill motions and the stale-count hazard.
-    It 'bounds the worker pool by the capacity cap'
-      When call rule_in "$SKILL" '^const WORKERS = Math\.min(args\.cap, DISPATCHES\.length)$'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says the cap stays machine-wide because one workflow covers the whole batch'
-      When call phrase_in "$SKILL" 'never one workflow per repo, is what makes'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Every entry returned carries its own dispatch payload beside its
-    # result, which is what lets a null result still be reaped and reported
-    # by name.
-    It 'returns each dispatch alongside its result'
-      When call blob_in "$SKILL" 'return { dispatch: d, result: r, mispaired: Boolean(r) && !paired }'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Phase 7 promises entries "in the order they were dispatched", and the
-    # only thing holding that is the indexed write: workers finish out of
-    # order, so a refactor to results.push() would scramble the order
-    # silently while every other pin here still passed.
-    It 'writes each result at its own index rather than appending'
-      When call rule_in "$SKILL" '^    results\[i\] = await agent($'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'never appends results in completion order'
-      no_push() { grep -c 'results\.push' "$1" || true; }
-      When call no_push "$SKILL"
-      The status should be success
-      The output should equal '0'
-    End
-
-    It 'promises that order to phase 7'
-      When call phrase_in "$SKILL" 'in the order they were dispatched'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Position alone is not a safe pairing. Workers steal from a shared
-    # cursor, so the order agent() calls are initiated varies run to run, and
-    # resume caches "the longest unchanged prefix of agent() calls" without
-    # saying whether a call is matched by content or by position. If
-    # positional, a resumed run hands entry i another group's result and the
-    # reap deletes the wrong branch. The script checks instead of assuming.
-    It 'checks each result against the identity its own dispatch names'
-      When call blob_in "$SKILL" "const paired = r && r.package === d.group.package && r.major_line === d.group.major_line && r.repo === d.group.repo"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'flags a mispaired entry rather than trusting it'
-      When call rule_in "$SKILL" 'mispaired: Boolean(r) && !paired'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'handles a mispaired entry exactly like a null one'
-      When call blob_in "$SKILL" 'Treat a .mispaired. entry exactly like a .null. one'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'never reads a mispaired entry pr_url or branch'
-      When call blob_in "$SKILL" 'never read its .pr_url. or .branch., which belong to a different group'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says no bounded pool can make the dispatch order repeat'
-      When call blob_in "$SKILL" 'no bounded pool can make that order repeat'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The template is deliberately thin: dispatch and schema only. A reap or
-    # a summary stage inside it would put the per-group `post-agent.sh`
-    # accounting somewhere phase 7 cannot read it.
     It 'keeps the reap and the summary outside the script'
       When call phrase_in "$SKILL" 'it dispatches and it validates, and nothing else'
       The status should be success
       The output should equal '1'
     End
+
+    # ADR 004's pin lives in two places now: the agent definition (for a Task
+    # dispatch) and the workflow's agent() call (tested in spec/js/). This
+    # guards the half that is not JavaScript.
+    It 'keeps the sonnet pin in the agent frontmatter ADR 004 names'
+      When call rule_in "$AGENT" '^model: sonnet$'
+      The status should be success
+      The output should equal '1'
+    End
   End
 
-  Describe 'the schema that replaces the fenced-block parse'
-    # The agent is forced through structured output, so the shape is
-    # validated at the tool-call layer and retried on a mismatch. Without a
-    # schema the template is just a parallel Task loop and the old "an
-    # unparseable block is a failure report" prose has nothing standing in
-    # its place.
-    It 'passes a schema on every agent call'
-      When call rule_in "$SKILL" 'schema: RESULT_SCHEMA,'
+  Describe 'what the model still has to get right about args'
+    # The script refuses a malformed args object (spec/js/), but only the
+    # model can pass a well-formed one in the first place, and a stringified
+    # args is a caller mistake no callee can prevent.
+    It 'tells the caller to pass args as JSON, never as a JSON-encoded string'
+      When call phrase_in "$SKILL" 'Pass .args. as an actual JSON value, never as a JSON-encoded string'
       The status should be success
       The output should equal '1'
     End
 
-    It 'defines that schema in the template'
-      When call rule_in "$SKILL" '^const RESULT_SCHEMA = {$'
+    It 'names the silent empty-batch inversion that guard prevents'
+      When call blob_in "$SKILL" 'report as a whole batch of crashed agents when nothing was ever dispatched'
       The status should be success
       The output should equal '1'
     End
 
-    # The schema must validate agents/fix-dependency.md's Result block, not a
-    # subset of it: a field dropped from `required` is a field an agent can
-    # silently omit and phase 7 then reports as absent.
-    It 'requires every field the agent Result contract promises'
-      When call blob_in "$SKILL" "required: \[ 'status', 'package', 'major_line', 'repo', 'branch', 'pr_url', 'action', 'resolved_version', 'risk', 'observations', 'requires_major_bump', 'bare_override', 'no_op', 'failure', \],"
-      The status should be success
-      The output should equal '1'
-    End
-
-    Describe 'the enumerations the Result contract fixes'
+    # The payload is assembled by the model from phases 1, 2 and 5, so its
+    # field list is prose, not script.
+    Describe 'the dispatch payload the orchestrator assembles'
       Parameters
-        # field            the enumeration line the schema must carry
-        status             "status: { enum: \['success', 'no-op', 'failure'\] },"
-        bare_override      "bare_override: { enum: \['none', 'added', 'tightened'\] },"
-        failure.phase      "enum: \['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr'\],"
-        action             "action: { enum: \['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh', null\] },"
+        'nwo'
+        'adapter_path'
+        'default_branch'
+        'repo_root'
+        'scripts_dir'
       End
 
-      It "pins the $1 enumeration"
-        When call rule_in "$SKILL" "$2"
+      It "still carries $1"
+        When call phrase_in "$SKILL" "Each payload is the group JSON verbatim under .group., plus .*$1"
         The status should be success
         The output should equal '1'
       End
     End
 
-    # The verdict the schema replaces has to be stated, or a validation
-    # failure reads as an unexplained gap. A null entry is a failure report
-    # for that group and is reaped and tabled like any other.
-    It 'says a group whose entry comes back null is still a failure report, and still reported'
-      When call phrase_in "$SKILL" 'is a failure report for that group, and is still reported'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'reaps a null entry with an empty result file so post-agent.sh reports it missing'
-      When call phrase_in "$SKILL" 'with an empty result file, and .post-agent.sh. reports it .missing'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'never drops, hand-retries, or counts a null entry as a success'
-      When call phrase_in "$SKILL" 'never dropped, never retried by hand, and never counted as a success'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'reads phase 7 off the returned entries rather than a fence'
-      When call phrase_in "$SKILL" 'The workflow returns .*one entry per approved group'
+    # An omitted key, never a null: the one field whose absence is meaningful.
+    It 'still omits env_prefix rather than sending null'
+      When call phrase_in "$SKILL" 'omit the key rather than send null'
       The status should be success
       The output should equal '1'
     End
@@ -313,279 +217,18 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
   End
 
-  Describe 'the phase 6 rules that survive the rewrite'
-    # These predate #175 and are not pool bookkeeping: they are facts about
-    # the repository and the batch that hold however dispatch is scheduled.
-    # Pinned here because a later editor clearing out pool-era prose is
-    # exactly who would take them by mistake.
-    It 'still writes the worktree exclude once per repo, before any dispatch for it'
-      When call phrase_in "$SKILL" 'Once per distinct repo in the approved batch, before the first agent for that repo is'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'still gives the registry preflight one retry before it means anything'
-      When call phrase_in "$SKILL" 'one retry.. before it means anything'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'still keeps repo-global git state with the orchestrator while agents are in flight'
-      When call phrase_in "$SKILL" 'while any agent is in flight no agent may touch it'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'still allows two lines of the same package to run together'
-      When call phrase_in "$SKILL" 'Two lines of the same package may be in flight together'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The payload is unchanged from the Task-per-group era, including the
-    # one field whose absence is meaningful: an omitted key, never a null.
-    Describe 'the dispatch payload'
-      Parameters
-        'nwo'
-        'adapter_path'
-        'default_branch'
-        'repo_root'
-        'scripts_dir'
-      End
-
-      It "still carries $1"
-        When call phrase_in "$SKILL" "Each payload is the group JSON verbatim under .group., plus .*$1"
-        The status should be success
-        The output should equal '1'
-      End
-    End
-
-    It 'still omits env_prefix rather than sending null'
-      When call phrase_in "$SKILL" 'omit the key rather than send null'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-  Describe 'the model pin (ADR 004)'
-    # agents/fix-dependency.md pins `model: sonnet` in its frontmatter, which
-    # is what a Task dispatch honors. A workflow agent() with no `model`
-    # inherits the session model, and whether agentType composes with the
-    # target definition's frontmatter is unspecified — so the pin is stated
-    # at the call site. Losing it would put a 33-group field run on whatever
-    # model the session held, voiding ADR 004 with nothing to notice.
-    It 'passes sonnet explicitly on the agent call'
-      When call rule_in "$SKILL" "^        model: 'sonnet',$"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'mirrors it on the meta phase entry'
-      When call rule_in "$SKILL" "detail: 'one fix-dependency agent per approved group', model: 'sonnet'"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says which mechanism holds the pin here'
-      When call phrase_in "$SKILL" 'that is what holds ADR 004.s pin here'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps the agent frontmatter pin ADR 004 names'
-      When call rule_in "$AGENT" '^model: sonnet$'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'the args guard'
-    # Every one of these failures is otherwise silent, and the worst of them
-    # inverts the report: an absent `cap` makes the worker count NaN,
-    # Array.from({length: NaN}) empty, parallel([]) return at once, and every
-    # entry stay null — which phase 7 reads as a whole batch of crashed
-    # agents when nothing was ever dispatched.
-    It 'rejects a missing or stringified dispatches list'
-      When call rule_in "$SKILL" 'if (!args || !Array\.isArray(args\.dispatches) || !args\.dispatches\.length) {'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'rejects a cap that is not a number of at least one'
-      When call rule_in "$SKILL" "if (typeof args\.cap !== 'number' || !(args\.cap >= 1)) {"
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Pin the THROW, not only the `if`. Gutting the body while leaving the
-    # condition byte-identical is the mutation that survives a condition-only
-    # pin, and it produces exactly the silent empty batch the guard exists
-    # for.
-    It 'throws on a missing or stringified dispatches list rather than proceeding'
-      When call blob_in "$SKILL" "throw new Error('args.dispatches must be a non-empty array of dispatch payloads"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'throws on a bad cap rather than proceeding'
-      When call blob_in "$SKILL" "throw new Error('args.cap must be a number >= 1, from detect-capacity.sh')"
-      The status should be success
-      The output should equal '1'
-    End
-
-    # An empty dispatch list is refused by the same guard: Array.from({length:
-    # 0}) and parallel([]) both succeed silently, so an empty batch would
-    # return zero entries and read as a clean run over nothing.
-    It 'refuses an empty dispatch list, not just an absent one'
-      When call rule_in "$SKILL" '|| !args\.dispatches\.length) {'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'announces what it is dispatching and at what width'
-      When call rule_in "$SKILL" "^log('Dispatching '"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'tells the caller to pass args as JSON, never as a JSON-encoded string'
-      When call phrase_in "$SKILL" 'Pass .args. as an actual JSON value, never as a JSON-encoded string'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'the cross-field rules the Result contract fixes'
-    # Field-for-field validation is not enough: {"status":"failure",
-    # "failure":null} passes every per-field check, clears post-agent.sh's
-    # gate (branch/package/major_line only), and reaches phase 7's "failures
-    # get their phase and detail" with no data source.
-    It 'encodes exactly-one-of no_op and failure, agreeing with status'
-      When call rule_in "$SKILL" '^  oneOf: \['
-      The status should be success
-      The output should equal '1'
-    End
-
-    Describe 'one branch per status value'
-      Parameters
-        # Each branch is identified with its own pr_url nullability, because
-        # `status: { const: 'success' }` alone now also matches both allOf
-        # gates.
-        success   "status: { const: 'success' }, pr_url: { type: 'string' },"
-        no-op     "status: { const: 'no-op' }, pr_url: { type: 'null' },"
-        failure   "status: { const: 'failure' }, pr_url: { type: 'null' },"
-      End
-
-      It "pins the $1 branch"
-        When call blob_in "$SKILL" "$2"
-        The status should be success
-        The output should equal '1'
-      End
-    End
-
-    # The failure branch nulls `action`. That is what makes the gate below
-    # mandatory rather than tidy, so pin it here where the two rules meet.
-    It 'nulls action on the failure branch'
-      When call blob_in "$SKILL" "status: { const: 'failure' }, pr_url: { type: 'null' }, action: { type: 'null' },"
-      The status should be success
-      The output should equal '1'
-    End
-
-    Describe 'the bare_override to action agreement, in both directions' 
-      Parameters
-        bare_override-implies-action  "then: { properties: { action: { const: 'bare-override' } } },"
-        action-implies-bare_override  "then: { properties: { bare_override: { enum: \['added', 'tightened'\] } } },"
-      End
-
-      It "encodes $1"
-        When call rule_in "$SKILL" "$2"
-        The status should be success
-        The output should equal '1'
-      End
-    End
-
-    # The mutation this file cannot execute its way to, so it is checked
-    # structurally instead: every `allOf` gate must be reachable only on
-    # success. Ungated, the agreement rule demands action === 'bare-override'
-    # while the failure branch demands action === null, so a truthful failure
-    # carrying bare_override "added" satisfies NO value of action. The schema
-    # stays well-formed and every presence pin stays green, which is exactly
-    # why presence pins are not enough here. The census fails loudly if the
-    # block moves rather than reporting a vacuous zero.
-    It 'gates every allOf rule on success, so no branch is unsatisfiable'
-      allof_gate_census() {
-        allof_window=$(awk '/^  allOf: \[/{f=1} f{print} f && /^  \],$/{exit}' "$1" | tr '\n' ' ' | tr -s ' ')
-        [ -n "$allof_window" ] || { echo 'allOf block not found'; return 0; }
-        allof_total=$(printf '%s\n' "$allof_window" | grep -o 'if: {' | wc -l | tr -d ' ')
-        allof_gated=$(printf '%s\n' "$allof_window" | grep -o "if: { properties: { status: { const: 'success' }" | wc -l | tr -d ' ')
-        echo "$allof_gated/$allof_total"
-      }
-      When call allof_gate_census "$SKILL"
-      The status should be success
-      The output should equal '2/2'
-    End
-
-    It 'records why the gate exists, against the escalation that reaches it'
-      When call rule_in "$SKILL" 'hook-rejected push and a failed pr all reach'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'names the silent under-report the ungated rule invites'
-      When call blob_in "$SKILL" 'the likelier repair it finds is to report'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The two arrays phase 7 actually reads element-by-element.
-    It 'validates the element shape of observations'
-      When call blob_in "$SKILL" "observations: { type: 'array', items: { type: 'object', required: \['type'\],"
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The specimen is node.sh's own `$bump` array (spec/node_validate_spec.sh:
-    # {"version":"5.29.0","vulnerable_ranges":["< 6.28.0"]}), not an invented
-    # {package, resolved_version} shape.
-    It 'validates the element shape of requires_major_bump against the adapter it comes from'
-      When call blob_in "$SKILL" "required: \['version', 'vulnerable_ranges'\],"
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Narrowing observations.type to an enum would reject three types the
-    # adapter really emits. The comment is the guard against a future editor
-    # "tightening" it.
-    It 'refuses to narrow the observation type to an enum'
-      When call phrase_in "$SKILL" 'Do NOT narrow this to an enum'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The prose must not claim more than the schema does.
-    It 'says plainly what the schema cannot check'
-      When call phrase_in "$SKILL" 'It does not and cannot check that a .pr_url. names a real pull request'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
   Describe 'the interruption contract'
-    # The largest way a group can now disappear: a barrier loses every result
-    # at once, and the agents that ran had already pushed branches and opened
-    # PRs. Under the old pool each completion arrived on its own, so an abort
-    # still left the orchestrator holding everything received so far.
-    # Pinned on the two words that carry the rule, not on the whole sentence:
-    # the earlier form quoted an inline aside and broke on a meaning-
-    # preserving reword.
+    # The largest way a group can now disappear: a single call loses every
+    # result at once, and the agents that ran had already pushed branches and
+    # opened PRs. Under the old pool each completion arrived on its own, so
+    # an abort still left the orchestrator holding everything received so
+    # far. Nothing in the script can help here; recovery is the model's.
     It 'refuses to read an absent or short return as nothing having run'
       When call phrase_in "$SKILL" 'absent or short return'
       The status should be success
       The output should equal '1'
     End
 
-    # All three abort modes, named. Only the short-return mode was pinned
-    # before; a contract that covers one of three is a contract with two
-    # silent holes.
     Describe 'every mode the contract must cover'
       Parameters
         throws     'the call errors'
@@ -646,6 +289,89 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
   End
 
+  Describe 'how the model handles the entries it gets back'
+    It 'reads phase 7 off the returned entries rather than a fence'
+      When call phrase_in "$SKILL" 'The workflow returns .*one entry per approved group'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'treats a null entry as that group failure report, still reported'
+      When call phrase_in "$SKILL" 'is a failure report for that group, and is still reported'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'reaps a null entry with an empty result file so post-agent.sh reports it missing'
+      When call phrase_in "$SKILL" 'with an empty result file, and .post-agent.sh. reports it .missing'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never drops, hand-retries, or counts a null or mispaired entry as a success'
+      When call blob_in "$SKILL" 'never dropped, never retried by hand, and never counted as a success, and neither is a .mispaired. one'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The script empties a mispaired result (spec/js/); the model still has
+    # to route the group somewhere, and this is where that is said.
+    It 'handles a mispaired entry exactly like a null one'
+      When call blob_in "$SKILL" 'Treat a .mispaired. entry exactly like a .null. one'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never reads a mispaired entry pr_url or branch'
+      When call blob_in "$SKILL" 'never read its .pr_url. or .branch., which belong to a different group'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says no bounded pool can make the dispatch order repeat'
+      When call blob_in "$SKILL" 'no bounded pool can make that order repeat'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The prose must not claim more than the schema does.
+    It 'says plainly what the schema cannot check'
+      When call phrase_in "$SKILL" 'It does not and cannot check that a .pr_url. names a real pull request'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'the phase 6 rules that survive the rewrite'
+    # These predate #175 and are not pool bookkeeping: they are facts about
+    # the repository and the batch that hold however dispatch is scheduled.
+    # Pinned here because a later editor clearing out pool-era prose is
+    # exactly who would take them by mistake.
+    It 'still writes the worktree exclude once per repo, before any dispatch for it'
+      When call phrase_in "$SKILL" 'Once per distinct repo in the approved batch, before the first agent for that repo is'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'still gives the registry preflight one retry before it means anything'
+      When call phrase_in "$SKILL" 'one retry.. before it means anything'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'still keeps repo-global git state with the orchestrator while agents are in flight'
+      When call phrase_in "$SKILL" 'while any agent is in flight no agent may touch it'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'still allows two lines of the same package to run together'
+      When call phrase_in "$SKILL" 'Two lines of the same package may be in flight together'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   Describe 'the reap timing this layer changed'
     # Precisely the sentence a later editor would "restore" to the old
     # wording. The reap moved from per-completion (inside a refill motion the
@@ -700,6 +426,44 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     It 'keeps the headline bullet on the same mechanism'
       When call blob_in "$README" 'dispatched by a single workflow that keeps the pool at the machine.s capacity'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'ADR 010 records the boundary the toolchain change rests on'
+    # The whole argument for adding node to this repo: the workflow runs
+    # inside the harness, which is already node, so no shipped script gained
+    # a runtime. Losing that sentence turns the ADR into a bare dependency
+    # addition and invites the next one.
+    It 'says the plugin scripts keep their bash, jq and gh constraint'
+      When call blob_in "$ADR010" 'remain .bash. + .jq. + .gh.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'rests the decision on the harness already being node'
+      When call blob_in "$ADR010" 'a node process already running on that machine'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names the toolchain as a dev and CI dependency, not a user-facing one'
+      When call blob_in "$ADR010" 'a .*dev and CI.* dependency'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The scripts/CLAUDE.md rule is still absolute for what it governs; what
+    # it gained is a statement of what that is.
+    It 'scopes the scripts dependency rule to what runs on a user machine'
+      When call blob_in "$SCRIPTS_DOC" 'this rule governs what runs on a user.s machine'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'forbids a plugin script from calling into the workflow file'
+      When call blob_in "$SCRIPTS_DOC" 'Nothing here may call it, import it, or acquire a runtime because it exists'
       The status should be success
       The output should equal '1'
     End

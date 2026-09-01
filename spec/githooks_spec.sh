@@ -13,19 +13,21 @@ Describe 'the committed git hooks'
 
   # A scratch repo whose scripts/check.sh records every gate invocation in
   # gates.log, with stub tools on PATH so command -v always succeeds and the
-  # hooks' tool-missing branches stay out of the way.
+  # hooks' tool-missing branches stay out of the way. An empty node_modules
+  # is part of that: pre-push runs the js gate only when one exists (ADR 010),
+  # and its absence is a branch of its own, exercised below.
   scratch_hook_repo() {
     TEST_DIR=$(mktemp -d)
     cd "$TEST_DIR" || return 1
     git init -q .
-    mkdir -p scripts bin
+    mkdir -p scripts bin node_modules
     cat > scripts/check.sh <<'STUB'
 #!/bin/sh
 echo "$1" >> gates.log
 exit 0
 STUB
     chmod +x scripts/check.sh
-    for _t in shellcheck claude shellspec; do
+    for _t in shellcheck claude shellspec npm; do
       printf '#!/bin/sh\nexit 0\n' > "bin/$_t"
       chmod +x "bin/$_t"
     done
@@ -118,20 +120,37 @@ STUB
       The path gates.log should not be exist
     End
 
-    It 'runs the suite for a branch push'
+    It 'runs both suites for a branch push'
       Data "refs/heads/topic 1111111111111111111111111111111111111111 refs/heads/topic 0000000000000000000000000000000000000000"
       When run "$PREPUSH" origin git@example.com:x/y.git
       The status should be success
+      The contents of file gates.log should include 'js'
       The contents of file gates.log should include 'spec'
     End
 
-    It 'runs the suite for a mixed tag and branch push'
+    # ADR 010: the js gate needs an installed node_modules, and a fresh clone
+    # has none. A hook that hard-failed there would train people to
+    # --no-verify, so it warns and stands down — and the shellspec suite must
+    # still run, which is the half a careless "exit on missing tooling" would
+    # take with it.
+    It 'warns and still runs the suite when node_modules is absent'
+      rm -rf node_modules
+      Data "refs/heads/topic 1111111111111111111111111111111111111111 refs/heads/topic 0000000000000000000000000000000000000000"
+      When run "$PREPUSH" origin git@example.com:x/y.git
+      The status should be success
+      The stderr should include 'the js'
+      The contents of file gates.log should include 'spec'
+      The contents of file gates.log should not include 'js'
+    End
+
+    It 'runs the suites for a mixed tag and branch push'
       Data
         #|refs/tags/v1 1111111111111111111111111111111111111111 refs/tags/v1 0000000000000000000000000000000000000000
         #|refs/heads/topic 2222222222222222222222222222222222222222 refs/heads/topic 0000000000000000000000000000000000000000
       End
       When run "$PREPUSH" origin git@example.com:x/y.git
       The status should be success
+      The contents of file gates.log should include 'js'
       The contents of file gates.log should include 'spec'
     End
 

@@ -10,6 +10,12 @@ JSON contract; interpreting failures and writing prose stays with the agent.
 `python`. Semver comparison is implemented in jq rather than shelling out to `npx semver`, which
 would mean a cold-cache network fetch in the middle of a security fix.
 
+**Scope: this rule governs what runs on a user's machine, which is every script in this
+directory.** It is not a repository-wide ban on node. `plugins/gh-security/workflows/` ships one
+JavaScript file, and this repo's dev and CI toolchain runs vitest over it, because that file
+executes inside the Claude Code harness — which is already node — and never in a user's shell
+(ADR 010). Nothing here may call it, import it, or acquire a runtime because it exists.
+
 **Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
 Homebrew, so anything the two versions read differently goes green locally and red only in CI.
 **Parenthesize a `//` default before binding it**: `(A // B) as $x`, never `A // B as $x`. `as`

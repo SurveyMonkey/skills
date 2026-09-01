@@ -3,25 +3,28 @@
 # git hooks in .githooks/, the workflow in .github/workflows/gates.yml, and
 # humans running it directly.
 #
-# Usage: scripts/check.sh <lint|validate|spec|version|fast|all|targets>
+# Usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>
 #
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
 #             pre-push hook and CI both set it, ADR 005)
+#   js        the vitest suite over the Workflow script (ADR 010). Needs an
+#             installed node_modules; run npm ci first.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
 #             pre-commit hook invokes lint and validate separately so each
 #             can warn about its own missing tool)
-#   all       lint + validate + spec + version
+#   all       lint + validate + spec + js + version
 #   targets   print the lint target list, for inspection
 #
 # This is dev tooling, not shipped plugin code: unlike the scripts under
 # plugins/gh-security/scripts/ it may assume git, jq, shellcheck, shellspec,
-# and the claude CLI. It still targets bash 3.2, because the hooks run it on
-# stock macOS.
+# the claude CLI, and — since ADR 010 — node and npm. It still targets bash
+# 3.2, because the hooks run it on stock macOS. The node dependency is a dev
+# and CI one only: no shipped plugin script gained a runtime.
 #
 # The version gate answers exactly one question: if the tip of this branch
 # became the default branch, would users be handed changed plugin code at a
@@ -84,6 +87,15 @@ shell_targets() {
 
 cmd_targets() {
   shell_targets
+}
+
+# The vitest suite's targets, from the index like every other gate's. Anchored
+# at spec/js/ deliberately: spec/fixtures/ carries dozens of hand-authored
+# package.json and node_modules trees that are lockfile specimens, and a
+# broader pattern would collect a fixture as if it were this repo's own
+# project code. vitest.config.mjs states the same anchor to the runner.
+js_targets() {
+  git ls-files -- 'spec/js/*.test.mjs'
 }
 
 cmd_lint() {
@@ -213,6 +225,24 @@ cmd_spec() {
   rm -f "$report"
 }
 
+cmd_js() {
+  local targets n=0 f
+  targets=$(js_targets)
+  while IFS= read -r f; do
+    if [ -n "$f" ]; then n=$((n + 1)); fi
+  done < <(printf '%s\n' "$targets")
+  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
+  [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
+  command -v npm >/dev/null 2>&1 \
+    || die 'npm is not installed; the js gate needs node (ADR 010)'
+  [ -d node_modules ] || die 'node_modules is absent; run npm ci before the js gate'
+  # `vitest run`, never watch mode: a gate that waits for a keypress is a gate
+  # that hangs CI. passWithNoTests is false in vitest.config.mjs, so a
+  # collection that finds nothing fails there too — the same floor stated
+  # twice, because this gate's discovery and the runner's are separate.
+  npm test --silent
+}
+
 # The commit-ish the version gate compares against, before the merge-base is
 # taken. Every caller goes through the merge base, so an explicit
 # CHECK_VERSION_BASE may be a branch, a tag, or a raw sha: the workflow passes
@@ -319,6 +349,7 @@ cmd_all() {
   cmd_lint
   cmd_validate
   cmd_spec
+  cmd_js
   cmd_version
 }
 
@@ -327,8 +358,9 @@ case "${1:-}" in
   lint) cmd_lint ;;
   validate) cmd_validate ;;
   spec) cmd_spec ;;
+  js) cmd_js ;;
   version) cmd_version ;;
   fast) cmd_fast ;;
   all) cmd_all ;;
-  *) die 'usage: scripts/check.sh <lint|validate|spec|version|fast|all|targets>' ;;
+  *) die 'usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>' ;;
 esac

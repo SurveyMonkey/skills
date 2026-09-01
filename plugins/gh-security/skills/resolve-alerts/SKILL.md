@@ -470,9 +470,8 @@ report.
 **Dispatch is one Workflow call, not a schedule you keep by hand.** The bookkeeping a rolling pool
 needs — how many agents are in flight, which slot just freed, never overshooting the cap on a stale
 count — is exactly what the harness does deterministically, and re-deriving it in prose costs
-tokens on every run to arrive at a worse answer. Launch the script below with `args` set to
-`{cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>]}`, every group
-across every repo in the ranked order phases 3 and 4 settled.
+tokens on every run to arrive at a worse answer. Dispatch every approved group across every repo,
+in the ranked order phases 3 and 4 settled, in one call.
 
 **Pass `args` as an actual JSON value, never as a JSON-encoded string.** A stringified `args`
 arrives as one string, `args.dispatches` is then `undefined`, and the guard at the top of the
@@ -490,234 +489,35 @@ at repo scope, phase 5 at org and user scope; OPTIONAL — **omit the key rather
 The script is thin on purpose: it dispatches and it validates, and nothing else. The reap below and
 the phase 7 summary stay outside it.
 
-```javascript
-export const meta = {
-  name: 'gh-security-fix-dispatch',
-  description: 'Fix each approved Dependabot alert group with its own subagent, bounded by the machine capacity cap',
-  phases: [
-    { title: 'Fix groups', detail: 'one fix-dependency agent per approved group', model: 'sonnet' },
-  ],
-}
+Launch it as:
 
-// args: { cap: <detect-capacity.sh cap>, dispatches: [ <one payload per approved group> ] }
-const RESULT_SCHEMA = {
-  type: 'object',
-  required: [
-    'status', 'package', 'major_line', 'repo', 'branch', 'pr_url', 'action',
-    'resolved_version', 'risk', 'observations', 'requires_major_bump',
-    'bare_override', 'no_op', 'failure',
-  ],
-  properties: {
-    status: { enum: ['success', 'no-op', 'failure'] },
-    package: { type: 'string' },
-    major_line: { type: 'string' },
-    repo: { type: 'string' },
-    branch: { type: 'string' },
-    pr_url: { type: ['string', 'null'] },
-    action: { enum: ['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh', null] },
-    resolved_version: { type: ['string', 'null'] },
-    risk: {
-      type: ['object', 'null'],
-      required: ['band', 'score', 'f4', 'f5'],
-      properties: {
-        band: { type: 'string' },
-        score: { type: 'number' },
-        f4: { type: 'number' },
-        f5: { type: 'number' },
-      },
-    },
-    // `type` is the only field every observation carries: the adapter emits
-    // `unscoped_override`, `manifest_pnpm_overrides_ignored` and
-    // `pnpm_major_unknown`, the agent appends `unscoped_override_added`, and
-    // only the two override shapes carry `key`.
-    // Do NOT narrow this to an enum: an adapter gaining a fourth type would
-    // then fail every result it appears in.
-    observations: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['type'],
-        properties: {
-          type: { type: 'string' },
-          key: { type: 'string' },
-          range: { type: 'string' },
-          targets_this_package: { type: 'boolean' },
-          reason: { type: 'string' },
-        },
-      },
-    },
-    // validate's own array, verbatim: one entry per still-vulnerable copy
-    // below the fix line (node.sh `$bump`), keyed by the resolved `version`
-    // and the advisory ranges it still matches.
-    requires_major_bump: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['version', 'vulnerable_ranges'],
-        properties: {
-          version: { type: 'string' },
-          vulnerable_ranges: { type: 'array', items: { type: 'string' } },
-        },
-      },
-    },
-    bare_override: { enum: ['none', 'added', 'tightened'] },
-    no_op: {
-      type: ['object', 'null'],
-      required: ['reason', 'evidence'],
-      properties: { reason: { type: 'string' }, evidence: { type: 'object' } },
-    },
-    failure: {
-      type: ['object', 'null'],
-      required: ['phase', 'detail'],
-      properties: {
-        phase: {
-          enum: ['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr'],
-        },
-        detail: { type: 'string' },
-      },
-    },
-  },
-  // The Result contract's cross-field rules. Without these,
-  // {"status":"failure","failure":null} validates field-for-field, clears
-  // post-agent.sh's gate (which reads only branch/package/major_line), and
-  // reaches phase 7's "failures get their phase and detail" with no data.
-  oneOf: [
-    {
-      properties: {
-        status: { const: 'success' },
-        pr_url: { type: 'string' },
-        action: { type: 'string' },
-        risk: { type: 'object' },
-        no_op: { type: 'null' },
-        failure: { type: 'null' },
-      },
-    },
-    {
-      properties: {
-        status: { const: 'no-op' },
-        pr_url: { type: 'null' },
-        action: { type: 'null' },
-        risk: { type: 'null' },
-        no_op: { type: 'object' },
-        failure: { type: 'null' },
-      },
-    },
-    {
-      properties: {
-        status: { const: 'failure' },
-        pr_url: { type: 'null' },
-        action: { type: 'null' },
-        risk: { type: 'null' },
-        no_op: { type: 'null' },
-        failure: { type: 'object' },
-      },
-    },
-  ],
-  // bare_override must agree with action, in both directions — but ONLY on
-  // success. `action` is null on every failure, while `bare_override` still
-  // reports what was written, and `apply_constraint` writes the override
-  // BEFORE `install`: a validate_failed_after_ladder, an install_failure, a
-  // hook-rejected push and a failed pr all reach `status: "failure"` with
-  // `bare_override: "added"`. Ungated, no value of `action` satisfies both
-  // this rule and the failure branch above, the agent is retried into a
-  // `null` entry, and the likelier repair it finds is to report
-  // `bare_override: "none"` — silently hiding a global pin on exactly the
-  // escalation a reviewer needs it on, and destroying the
-  // `unscoped_override_added` observation the pin audit depends on.
-  // `agents/fix-dependency.md` states the agreement rule unconditionally and
-  // nulls `action` on failure a few lines later; that reads fine as prose and
-  // is only a contradiction once machine-checked. Both gates say so.
-  allOf: [
-    {
-      if: {
-        properties: { status: { const: 'success' }, bare_override: { enum: ['added', 'tightened'] } },
-        required: ['status', 'bare_override'],
-      },
-      then: { properties: { action: { const: 'bare-override' } } },
-    },
-    {
-      if: {
-        properties: { status: { const: 'success' }, action: { const: 'bare-override' } },
-        required: ['status', 'action'],
-      },
-      then: { properties: { bare_override: { enum: ['added', 'tightened'] } } },
-    },
-  ],
-}
-
-// Refuse a malformed `args` loudly. Every failure here is silent otherwise:
-// a stringified `args` leaves `args.dispatches` undefined, and a missing
-// `cap` makes Math.min NaN, Array.from({length: NaN}) empty, and parallel()
-// return at once with every entry still null — which phase 7 would read as a
-// whole batch of crashed agents when nothing was ever dispatched.
-if (!args || !Array.isArray(args.dispatches) || !args.dispatches.length) {
-  throw new Error('args.dispatches must be a non-empty array of dispatch payloads (pass args as JSON, never as a JSON-encoded string)')
-}
-if (typeof args.cap !== 'number' || !(args.cap >= 1)) {
-  throw new Error('args.cap must be a number >= 1, from detect-capacity.sh')
-}
-
-const DISPATCHES = args.dispatches
-const WORKERS = Math.min(args.cap, DISPATCHES.length)
-log('Dispatching ' + DISPATCHES.length + ' group(s), ' + WORKERS + ' at a time')
-
-phase('Fix groups')
-
-const results = new Array(DISPATCHES.length).fill(null)
-let next = 0
-
-const worker = async () => {
-  while (next < DISPATCHES.length) {
-    const i = next
-    next += 1
-    const d = DISPATCHES[i]
-    results[i] = await agent(
-      'Follow your agent definition end to end and finish with its JSON result block.\n' +
-        'Dispatch payload:\n' + JSON.stringify(d, null, 2),
-      {
-        agentType: 'fix-dependency',
-        model: 'sonnet',
-        phase: 'Fix groups',
-        label: d.group.repo + ' ' + d.group.package + ' ' + d.group.major_line,
-        schema: RESULT_SCHEMA,
-      },
-    )
-  }
-}
-
-await parallel(Array.from({ length: WORKERS }, () => () => worker()))
-
-// Never pair a result to a dispatch by position alone. The workers steal from
-// a shared cursor, so the order agent() calls are initiated varies between
-// runs, and resume is documented as caching "the longest unchanged prefix of
-// agent() calls" without saying whether a call is matched by CONTENT or only
-// by position. If it is positional, a resumed run could hand entry i another
-// group's result, and the reap would then delete the wrong branch. The agent
-// reports its own identity, so check it: an entry whose result does not name
-// its own dispatch is flagged rather than trusted.
-return DISPATCHES.map((d, i) => {
-  const r = results[i]
-  const paired = r
-    && r.package === d.group.package
-    && r.major_line === d.group.major_line
-    && r.repo === d.group.repo
-  return { dispatch: d, result: r, mispaired: Boolean(r) && !paired }
+```
+Workflow({
+  scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs",
+  args: { cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>] }
 })
 ```
 
-`cap` bounds the pool here and nowhere else: the workers are what hold it, so the pool can never
-exceed it and no count of yours has to track it. The cap stays machine-wide across every repo in
-the batch — a single workflow over every approved group, never one workflow per repo, is what makes
-that true by construction.
+The script is a real file, not something to write out here: it is version-controlled, unit-tested
+by `spec/js/`, and its result schema is executed against a validator rather than read
+([ADR 010](../../../../docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). **Never
+inline a copy of it, and never hand-edit a variant for one run.** It does exactly two things —
+fan one `fix-dependency` agent out per group under the cap, and validate each result against the
+Result contract in `agents/fix-dependency.md`. Everything else on this page is yours.
 
-**`model: 'sonnet'` is passed explicitly, and that is what holds ADR 004's pin here.** The fix
-agent's own frontmatter (`agents/fix-dependency.md`) pins sonnet for a Task dispatch, but a
-workflow `agent()` call with no `model` inherits the session model, and whether `agentType`
-composes with the target definition's frontmatter is not specified. Left implicit, a 33-group run
-could silently execute on whatever model the session happens to hold, voiding ADR 004 with nothing
-to notice it. So the pin is stated at the call site and mirrored on the `meta` phase entry, where
-the progress display reports it. **Never drop either without changing ADR 004 first**, and if the
-frontmatter mechanism is ever confirmed to compose, this becomes redundant rather than wrong.
+What it guarantees, so nothing here re-derives it:
+
+- **`min(cap, N)` workers hold the pool**, so it cannot exceed `cap` and no count of yours has to
+  track it. One workflow covers the whole batch — never one per repo — which is what keeps the cap
+  machine-wide.
+- **Malformed `args` is refused loudly**, before a single agent is dispatched: a `dispatches` that
+  is absent, not an array, or empty, and a `cap` that is not a number of at least one.
+- **Each agent runs as `fix-dependency` on `sonnet`** (ADR 004's pin, passed explicitly because a
+  workflow agent call without it inherits the session model) with the Result schema attached.
+- **Entries come back in dispatch order**, one per group, each carrying its own `dispatch` payload
+  beside its `result`.
+- **A result that does not name its own dispatch is dropped, not trusted** (`mispaired: true`,
+  `result: null`).
 
 **The workflow can also throw, be cancelled, or return short — and that must never lose a group.**
 Under the old rolling pool each completion arrived on its own, so an abort still left every result

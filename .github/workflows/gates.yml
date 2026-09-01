@@ -46,6 +46,10 @@ env:
   SHELLCHECK_VERSION: 0.11.0
   SHELLSPEC_VERSION: 0.28.1
   CLAUDE_VERSION: 2.1.238
+  # ADR 010. Pinned like every other tool here, and asserted after setup for
+  # the same reason: printing a version is not enforcing one. This is a dev
+  # and CI dependency only — no shipped plugin script gained a runtime.
+  NODE_VERSION: 24.18.0
 
 jobs:
   lint:
@@ -175,6 +179,36 @@ jobs:
           SHELLSPEC_JOBS: ''
         run: ./scripts/check.sh spec
 
+  js:
+    # The vitest suite over plugins/gh-security/workflows/fix-groups.mjs, the
+    # one piece of shipped JavaScript in this repository (ADR 010). It runs on
+    # ubuntu alone: unlike the bash scripts, whose target shell differs per
+    # platform (bash 3.2 on macOS, and the reason the spec job is a matrix),
+    # this is one node version evaluating one file with no platform surface.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Assert the pinned node version
+        run: |
+          installed=$(node --version)
+          if [ "$installed" != "v$NODE_VERSION" ]; then
+            echo "expected node v$NODE_VERSION, got: $installed"
+            exit 1
+          fi
+      - name: Install pinned dev dependencies
+        # `ci`, never `install`: it installs exactly the lockfile and fails if
+        # package.json and the lockfile disagree, which is what makes the
+        # exact-version pins in package.json real.
+        run: npm ci
+      - name: Run the vitest suite
+        run: ./scripts/check.sh js
+
   version:
     # A plugin's version lives in its own plugin.json and nowhere else, so a
     # change shipped without bumping it reaches nobody while every other gate
@@ -268,9 +302,10 @@ jobs:
     # produces a red check here rather than a skipped one, while a
     # superseded (cancelled) PR run does not publish a spurious red. The
     # arity floor keeps a gate dropped from `needs:` from shrinking coverage
-    # silently: zero (or three) results iterating to success is the same
-    # found-nothing-is-a-pass shape every other gate refuses.
-    needs: [lint, validate, spec, version]
+    # silently: zero (or four) results iterating to success is the same
+    # found-nothing-is-a-pass shape every other gate refuses. Bump it with
+    # every gate added to `needs:`; it was 4 before the js gate (ADR 010).
+    needs: [lint, validate, spec, js, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -287,7 +322,7 @@ jobs:
               exit 1
             fi
           done
-          if [ "$n" -ne 4 ]; then
-            echo "expected 4 gate results, got $n"
+          if [ "$n" -ne 5 ]; then
+            echo "expected 5 gate results, got $n"
             exit 1
           fi
