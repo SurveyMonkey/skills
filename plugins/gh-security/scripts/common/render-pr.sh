@@ -329,8 +329,14 @@ cmd_body() {
   # empty on a non-numeric major_line with no `set -e` to catch it, silently
   # truncating the Lockfile-validated claim's version bound (finding #2).
   # Checked here, before any output, not where the arithmetic happens.
-  require_ok "$group" '.major_line | test("^[0-9]+$")' \
-    "body: --group-json $group_file's major_line is not a plain non-negative integer string."
+  # `tostring` first: `jq`'s `test` cannot be called on a JSON number, and
+  # `major_line` arriving as one is contract-legal — fix-group.sh coerces it
+  # with `tostring` itself and only rejects a non-numeric-typed, non-numeric-
+  # string value, so an agent that re-serializes the dispatched `4` as a
+  # number must still succeed here, not die on a legal value with `test`'s
+  # own type error swallowed on stderr by `require_ok`.
+  require_ok "$group" '.major_line | tostring | test("^[0-9]+$")' \
+    "body: --group-json $group_file's major_line is not a plain non-negative integer, as a number or a string."
 
   local package major_line n action resolved_version before override_file drift bare
   package=$(printf '%s' "$group" | jq -r '.package')
@@ -349,8 +355,23 @@ cmd_body() {
   elif [ "$moves_raw" = "[]" ]; then
     moves_kind="clean"
   else
-    require_ok "$state" '(.other_line_moves | type) == "array" and (.other_line_moves | all(.[]; has("class") and has("major") and has("before") and has("after")))' \
-      "body: --state $state_file's other_line_moves does not parse as an array of {class, major, before, after} entries."
+    # `before`/`after` must be ARRAYS, not merely present: a `before: null`
+    # (or non-array) entry passes `has("before")` and then errors inside
+    # `join(", ")`, discarded by the `| awk` pipeline that follows — the
+    # Collateral table ships with its header, zero rows, and the
+    # no-open-alert paragraph at exit 0, the same "header with no rows reads
+    # as nothing to see" hazard the requires_major_bump guard names below.
+    # `class` must be exactly one of `validate`'s two emitted values: an
+    # unrecognized third value (a typo, a future addition) used to fall
+    # through `select(.class == "fatal")` into `benign`, skipping the
+    # `--collateral-note` requirement and asserting the no-open-alert claim
+    # for a move nobody classified.
+    require_ok "$state" '(.other_line_moves | type) == "array" and (.other_line_moves | all(.[];
+        (.class == "fatal" or .class == "benign_dedup")
+        and (.major != null)
+        and ((.before | type) == "array")
+        and ((.after | type) == "array")))' \
+      "body: --state $state_file's other_line_moves does not parse as an array of {class: fatal|benign_dedup, major, before: [], after: []} entries."
     if [ "$(printf '%s' "$moves_raw" | jq '[ .[] | select(.class == "fatal") ] | length > 0')" = "true" ]; then
       moves_kind="fatal"
     else
@@ -396,6 +417,17 @@ cmd_body() {
     # literal string "null" as the pinned range (finding #1).
     require_ok "$state" '[ .written[]? | select((.parent // null) == null) | select((.value | type) == "string") ] | length > 0' \
       "body: bare_override is '$bare' but --state $state_file's written[] carries no top-level (parent: null) entry with a string value to report the range from. The state file contradicts its own classification; nothing is rendered rather than a fabricated range."
+    # `(.applied_parents // []) | join(", ")` and
+    # `(.validate.resolved_versions // []) | join(", ")` have no error
+    # checking of their own: a non-array, or an array holding a non-string
+    # element, errors `join` to the empty string, and the `!= ""` guard in
+    # the rendering filter then silently drops the "Scoped entries were
+    # tried on: …"/"Resolved copies after the fix: …" sentences from the
+    # Global override section with no sign anything went missing.
+    require_ok "$state" '(.applied_parents // []) | type == "array" and all(.[]; type == "string")' \
+      "body: --state $state_file's applied_parents is not an array of strings."
+    require_ok "$state" '(.validate.resolved_versions // []) | type == "array" and all(.[]; type == "string")' \
+      "body: --state $state_file's validate.resolved_versions is not an array of strings."
   fi
   require_ok "$state" '(.requires_major_bump // []) | type == "array"' \
     "body: --state $state_file's requires_major_bump is not an array."
@@ -461,9 +493,18 @@ EOF
   # ---- Changes ---------------------------------------------------------------
   printf '## Changes\n\n'
   if [ "$action" = "lockfile-refresh" ]; then
-    jq -rn --arg before "${before:-an unresolved version}" --arg line "$major_line" \
-      --arg after "$resolved_version" \
-      '"The fix is a no-change lockfile refresh: the manifest already admits the fixed version, but the committed lockfile pinned `\($before)` on the \($line).x line. Re-resolving it against the unchanged manifests moves it to `\($after)`."'
+    # `before` empty is a real, checked answer (`has("before")` was already
+    # asserted above): nothing on this line was resolved before the fix, not
+    # an unresolved-but-present version. `${before:-an unresolved version}`
+    # used to fabricate the latter for the former.
+    jq -rn --arg line "$major_line" --arg after "$resolved_version" \
+      --argjson had_before "$([ -n "$before" ] && printf true || printf false)" \
+      --arg before "$before" '
+      if $had_before then
+        "The fix is a no-change lockfile refresh: the manifest already admits the fixed version, but the committed lockfile pinned `\($before)` on the \($line).x line. Re-resolving it against the unchanged manifests moves it to `\($after)`."
+      else
+        "The fix is a no-change lockfile refresh: the manifest already admits the fixed version, and the committed lockfile had no comparable version on the \($line).x line before this change. Re-resolving it against the unchanged manifests resolves it to `\($after)`."
+      end'
     printf '\n'
   else
     printf '```json\n'
@@ -520,7 +561,11 @@ EOF
       .requires_major_bump[] as $b
       | ($b.vulnerable_ranges // []) as $vr
       | ([ $alerts[] | select((.vulnerable_range // "") as $r | $vr | index($r) != null)
-           | (.ghsa // .cve // ("#" + (.number | tostring))) ] | join(", ")) as $open
+           | (.ghsa // .cve // ("#" + (.number | tostring))) ] | join(", ")) as $open_raw
+      # An empty cell in the one column naming what stays vulnerable reads as
+      # "nothing open" — the opposite of why this row exists at all. Mirrors
+      # the sibling (gone) rule for Collateral'"'"'s After column.
+      | (if $open_raw == "" then "(no alert'"'"'s vulnerable_range matched this entry)" else $open_raw end) as $open
       | (parent_of($b.path)) as $parent
       | (major_of($b.version)) as $maj
       | (if $parent != null then "needs a major bump of `\($parent)` or dropping it"

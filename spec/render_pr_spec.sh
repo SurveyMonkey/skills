@@ -440,8 +440,8 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       When call render_body_g state-scoped.json group-bad-major-line.json
       The status should equal 1
       The line 1 of output should equal '{'
-      The output should include 'not a plain non-negative integer string'
-      The stderr should include 'not a plain non-negative integer string'
+      The output should include 'not a plain non-negative integer'
+      The stderr should include 'not a plain non-negative integer'
       The output should not include '<`'
     End
   End
@@ -509,6 +509,111 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The output should include 'rate limited'
       The output should not include '"status": "ok"'
       The stderr should include 'rate limited'
+    End
+  End
+
+  # PR #178, third (independent) review of the unreviewed round-2 commit.
+  Describe 'round 3, HIGH: a numeric major_line is contract-legal and must succeed, not die on jq test'
+    It 'renders byte-identically for a JSON-number major_line (jq test cannot be called on a number)'
+      When call render_body_g state-scoped.json group-numeric-major-line.json
+      The status should be success
+      The output should equal "$(cat "$FX/expected-body-scoped.md")"
+    End
+
+    It 'still refuses a genuinely non-numeric major_line (regression check)'
+      When call render_body_g state-scoped.json group-bad-major-line.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'not a plain non-negative integer'
+      The stderr should include 'not a plain non-negative integer'
+    End
+  End
+
+  Describe 'round 3, HIGH: the Collateral table refuses a non-array before/after rather than shipping zero rows'
+    It 'refuses a before: null entry instead of erroring join() and shipping an empty-row safety claim'
+      When call render_body state-collateral-before-null.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'class: fatal|benign_dedup'
+      The stderr should include 'class: fatal|benign_dedup'
+      The output should not include 'These are within-major dedups'
+    End
+  End
+
+  Describe 'round 3, MEDIUM: other_line_moves refuses an unrecognized class rather than folding it into benign'
+    It 'refuses class: FATAL (wrong case) instead of silently treating it as benign_dedup'
+      When call render_body state-collateral-bad-class.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'class: fatal|benign_dedup'
+      The stderr should include 'class: fatal|benign_dedup'
+      The output should not include 'none of these lines carries an open Dependabot alert'
+    End
+  End
+
+  Describe 'round 3, MEDIUM: an unmatched requires_major_bump entry never renders an empty Alerts-still-open cell'
+    It 'renders a parenthetical rather than a blank cell when no alert matches'
+      When call render_body state-major-bump-no-alert-match.json
+      The status should be success
+      The output should include "| (no alert's vulnerable_range matched this entry) |"
+      The output should not include '| 3.18.1 |  |'
+    End
+
+    It 'still renders the matched-alert case unchanged (regression check)'
+      When call render_body state-major-bump.json
+      The status should be success
+      The output should equal "$(cat "$FX/expected-body-major-bump.md")"
+    End
+  End
+
+  Describe 'round 3, MEDIUM: applied_parents and validate.resolved_versions are checked before the Global override joins run'
+    It 'refuses a non-array applied_parents rather than silently dropping the "tried on" sentence'
+      When call render_body state-bare-bad-applied-parents.json --global-override-note "$FX/global-override-note.txt"
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'applied_parents is not an array of strings'
+      The stderr should include 'applied_parents is not an array of strings'
+    End
+
+    It 'refuses a non-string element in validate.resolved_versions rather than silently dropping the "survived" sentence'
+      When call render_body state-bare-bad-resolved-versions.json --global-override-note "$FX/global-override-note.txt"
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'resolved_versions is not an array of strings'
+      The stderr should include 'resolved_versions is not an array of strings'
+    End
+
+    It 'still renders the ordinary bare-added case unchanged (regression check)'
+      When call render_body state-bare-added.json --global-override-note "$FX/global-override-note.txt"
+      The status should be success
+      The output should equal "$(cat "$FX/expected-body-bare-added.md")"
+    End
+  End
+
+  Describe 'round 3, MEDIUM: a lockfile-refresh with no pre-fix version never fabricates "an unresolved version"'
+    It 'states plainly that nothing was resolved pre-fix, rather than inventing prose for a real null'
+      When call render_body state-lockfile-refresh-no-before.json
+      The status should be success
+      The output should include 'had no comparable version on the 4.x line before this change'
+      The output should not include 'an unresolved version'
+    End
+
+    It 'still renders the ordinary lockfile-refresh case unchanged (regression check)'
+      When call render_body state-lockfile-refresh.json
+      The status should be success
+      The output should equal "$(cat "$FX/expected-body-lockfile-refresh.md")"
+    End
+  End
+
+  # `state-before-null.json` (action scoped-override) does not reach the
+  # lockfile-refresh branch that reads `before` at all, so it never
+  # exercised this field's one consumer — `state-lockfile-refresh-no-before`
+  # above is the specimen that actually does, added for exactly that gap.
+  Describe 'round 3, fixture gap: the accepting side of round-2 guards, previously untested'
+    It 'renders a genuine EPSS of exactly 0 as 0.0%%, not a refusal and not "unknown"'
+      When call render_body_g state-scoped.json group-zero-epss.json
+      The status should be success
+      The output should include '| 0.0% |'
     End
   End
 
