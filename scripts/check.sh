@@ -10,7 +10,8 @@
 #             and every plugin under plugins/*/
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
 #             pre-push hook and CI both set it, ADR 005)
-#   js        the vitest suite over the Workflow script (ADR 010). Needs an
+#   js        the vitest suite over the Workflow script, with coverage
+#             thresholds at 100 on all four buckets (ADR 010). Needs an
 #             installed node_modules; run npm ci first.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
@@ -225,6 +226,49 @@ cmd_spec() {
   rm -f "$report"
 }
 
+# The file the coverage thresholds are about. Named here as well as in
+# vitest.config.mjs's `include`, because the whole hazard below is a report
+# that names nothing: a threshold satisfied by an empty file set.
+JS_COVERAGE_SUBJECT='spec/js/generated/workflow.mjs'
+
+# A 100% threshold over zero files passes. That is this repo's signature bug
+# class arriving inside the coverage gate, and it is a live risk here rather
+# than a theoretical one: the shipped Workflow script cannot be imported (its
+# contract requires a top-level `return`), so the suite measures an importable
+# projection of it, and an instrumentation change that stopped attributing
+# lines to that projection would leave vitest reporting 100% of nothing.
+#
+# So the summary is read rather than trusted: at least one file, the subject
+# among them, and every one of its four buckets at 100. vitest's own
+# thresholds already fail the run; this is the floor that catches the case
+# thresholds cannot see.
+js_assert_coverage() {
+  local summary=coverage/coverage-summary.json
+  [ -f "$summary" ] \
+    || die "the js gate produced no coverage summary at $summary"
+  local files
+  files=$(jq -r 'keys[] | select(. != "total")' "$summary") \
+    || die "could not read $summary"
+  [ -n "$files" ] \
+    || die 'the coverage report names no files; a threshold over an empty set is never a pass'
+  printf '%s\n' "$files" | grep -qF "$JS_COVERAGE_SUBJECT" \
+    || die "the coverage report does not include $JS_COVERAGE_SUBJECT; it measured $(printf '%s' "$files" | tr '\n' ' ')"
+  printf 'check: coverage measured:\n'
+  jq -r --arg s "$JS_COVERAGE_SUBJECT" '
+    to_entries[] | select(.key != "total")
+    | "check:   \(.key)  lines \(.value.lines.pct)%  branches \(.value.branches.pct)%  functions \(.value.functions.pct)%  statements \(.value.statements.pct)%"
+  ' "$summary"
+  local shortfall
+  shortfall=$(jq -r --arg s "$JS_COVERAGE_SUBJECT" '
+    to_entries[] | select(.key | endswith($s)) | .value
+    | to_entries[] | select(.key | IN("lines","branches","functions","statements"))
+    | select((.value.pct | type) != "number" or .value.pct < 100)
+    | "\(.key)=\(.value.pct)"
+  ' "$summary") || die "could not read bucket percentages from $summary"
+  [ -z "$shortfall" ] \
+    || die "coverage of $JS_COVERAGE_SUBJECT is below 100: $(printf '%s' "$shortfall" | tr '\n' ' ')"
+}
+
 cmd_js() {
   local targets n=0 f
   targets=$(js_targets)
@@ -236,11 +280,16 @@ cmd_js() {
   command -v npm >/dev/null 2>&1 \
     || die 'npm is not installed; the js gate needs node (ADR 010)'
   [ -d node_modules ] || die 'node_modules is absent; run npm ci before the js gate'
-  # `vitest run`, never watch mode: a gate that waits for a keypress is a gate
-  # that hangs CI. passWithNoTests is false in vitest.config.mjs, so a
-  # collection that finds nothing fails there too — the same floor stated
-  # twice, because this gate's discovery and the runner's are separate.
+  # A stale summary from an earlier run must never satisfy the assertions
+  # below, so the report is removed before the suite regenerates it.
+  rm -f coverage/coverage-summary.json
+  # `vitest run --coverage`, never watch mode: a gate that waits for a
+  # keypress is a gate that hangs CI. passWithNoTests is false in
+  # vitest.config.mjs, so a collection that finds nothing fails there too —
+  # the same floor stated twice, because this gate's discovery and the
+  # runner's are separate.
   npm test --silent
+  js_assert_coverage
 }
 
 # The commit-ish the version gate compares against, before the merge-base is

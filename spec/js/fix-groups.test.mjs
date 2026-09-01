@@ -17,16 +17,24 @@ import Ajv from 'ajv'
 import {
   dispatch,
   failureResult,
-  loadPure,
   noOpResult,
   runWorkflow,
-  stripCommentsAndStrings,
   successResult,
   workflowSource,
 } from './harness.mjs'
-
-const pure = await loadPure()
-const { RESULT_SCHEMA, validateArgs, workerCount, dispatchPrompt, agentLabel, pairEntry } = pure
+import { PURE_BEGIN, PURE_END, WIRING_BEGIN, project, region } from './generate.mjs'
+// The projection generate.mjs writes before the suite is collected. This is
+// the module the coverage gate measures; the byte-identity examples at the
+// bottom are what make measuring it equivalent to measuring the shipped file.
+import {
+  RESULT_SCHEMA,
+  agentLabel,
+  dispatchPrompt,
+  main,
+  pairEntry,
+  validateArgs,
+  workerCount,
+} from './generated/workflow.mjs'
 
 const validate = new Ajv({ allErrors: true, strict: false }).compile(RESULT_SCHEMA)
 const accepts = (r) => validate(r)
@@ -330,14 +338,14 @@ describe('the workflow body, run with stubbed collaborators', () => {
 
   it('dispatches exactly one agent per group and returns one entry per group', async () => {
     const dispatches = batch(7)
-    const { entries, calls } = await runWorkflow({ args: { cap: 3, dispatches }, agent: echo })
+    const { entries, calls } = await runWorkflow({ main, args: { cap: 3, dispatches }, agent: echo })
     expect(calls).toHaveLength(7)
     expect(entries).toHaveLength(7)
     expect(entries.every((e) => e.mispaired === false)).toBe(true)
   })
 
   it('routes every agent to fix-dependency, on sonnet, with the schema', async () => {
-    const { calls } = await runWorkflow({ args: { cap: 2, dispatches: batch(3) }, agent: echo })
+    const { calls } = await runWorkflow({ main, args: { cap: 2, dispatches: batch(3) }, agent: echo })
     for (const c of calls) {
       expect(c.opts.agentType).toBe('fix-dependency')
       expect(c.opts.model).toBe('sonnet')
@@ -356,7 +364,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
       inFlight -= 1
       return echo(prompt, opts, i)
     }
-    await runWorkflow({ args: { cap: 3, dispatches: batch(12) }, agent: slow })
+    await runWorkflow({ main, args: { cap: 3, dispatches: batch(12) }, agent: slow })
     expect(peak).toBeLessThanOrEqual(3)
     expect(peak).toBe(3)
   })
@@ -367,7 +375,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
       await new Promise((r) => setTimeout(r, (6 - i) * 2))
       return echo(prompt, opts, i)
     }
-    const { entries } = await runWorkflow({ args: { cap: 6, dispatches }, agent: reversed })
+    const { entries } = await runWorkflow({ main, args: { cap: 6, dispatches }, agent: reversed })
     expect(entries.map((e) => e.dispatch.group.package)).toEqual(dispatches.map((d) => d.group.package))
     expect(entries.map((e) => e.result.package)).toEqual(dispatches.map((d) => d.group.package))
   })
@@ -375,7 +383,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
   it('carries a null result through as a failure entry without stalling the batch', async () => {
     const dispatches = batch(4)
     const withNull = (prompt, opts, i) => (i === 1 ? null : echo(prompt, opts, i))
-    const { entries } = await runWorkflow({ args: { cap: 2, dispatches }, agent: withNull })
+    const { entries } = await runWorkflow({ main, args: { cap: 2, dispatches }, agent: withNull })
     expect(entries).toHaveLength(4)
     expect(entries[1].result).toBeNull()
     expect(entries[1].mispaired).toBe(false)
@@ -387,7 +395,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
     const dispatches = batch(3)
     const swap = (prompt, opts, i) =>
       (i === 2 ? successResult({ package: 'someone-else', pr_url: 'https://github.com/octo/app/pull/99' }) : echo(prompt, opts, i))
-    const { entries } = await runWorkflow({ args: { cap: 1, dispatches }, agent: swap })
+    const { entries } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: swap })
     const bad = entries.find((e) => e.mispaired)
     expect(bad).toBeDefined()
     expect(bad.result).toBeNull()
@@ -395,18 +403,19 @@ describe('the workflow body, run with stubbed collaborators', () => {
   })
 
   it('announces the batch size and the width it runs at', async () => {
-    const { logs } = await runWorkflow({ args: { cap: 3, dispatches: batch(9) }, agent: echo })
+    const { logs } = await runWorkflow({ main, args: { cap: 3, dispatches: batch(9) }, agent: echo })
     expect(logs).toContain('Dispatching 9 group(s), 3 at a time')
   })
 
   it('opens exactly one phase, matching the meta entry', async () => {
-    const { phases } = await runWorkflow({ args: { cap: 2, dispatches: batch(2) }, agent: echo })
+    const { phases } = await runWorkflow({ main, args: { cap: 2, dispatches: batch(2) }, agent: echo })
     expect(phases).toEqual(['Fix groups'])
   })
 
   it('throws before dispatching anything when args are malformed', async () => {
     const seen = []
     await expect(runWorkflow({
+      main,
       args: { dispatches: [] },
       agent: (p, o, i) => { seen.push(i); return echo(p, o, i) },
     })).rejects.toThrow(/args\.dispatches/)
@@ -414,7 +423,61 @@ describe('the workflow body, run with stubbed collaborators', () => {
   })
 })
 
-describe('the shipped file itself', () => {
+describe('the projection is the shipped file', () => {
+  // Everything the coverage gate claims rests on these. If the projection
+  // stopped being byte-identical to the regions it copies, the number would
+  // still be 100 and would still mean nothing.
+  it('copies the pure region verbatim', async () => {
+    const src = await workflowSource()
+    const generated = project(src)
+    expect(generated).toContain(region(src, PURE_BEGIN, PURE_END))
+  })
+
+  it('copies the wiring region verbatim', async () => {
+    const src = await workflowSource()
+    const generated = project(src)
+    expect(generated).toContain(region(src, WIRING_BEGIN, null))
+  })
+
+  it('adds nothing to the projection but an export list and the main wrapper', async () => {
+    const src = await workflowSource()
+    const generated = project(src)
+    const added = generated
+      .replace(region(src, PURE_BEGIN, PURE_END), '')
+      .replace(region(src, WIRING_BEGIN, null), '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('//'))
+    expect(added).toEqual([
+      'export { RESULT_SCHEMA, validateArgs, workerCount, dispatchPrompt, agentLabel, pairEntry }',
+      'export async function main(agent, parallel, phase, log, args) {',
+      '}',
+    ])
+  })
+
+  // An absent or empty region must be a hard error, never an empty projection
+  // that defines nothing and reports 100% of zero.
+  it('refuses a workflow whose markers are gone', async () => {
+    const src = await workflowSource()
+    expect(() => project(src.replace(PURE_BEGIN, '// nope'))).toThrow(/marker not found/)
+    expect(() => project(src.replace(WIRING_BEGIN, '// nope'))).toThrow(/marker not found/)
+  })
+
+  it('refuses a workflow whose pure region is empty', () => {
+    const empty = `${PURE_BEGIN}\n\n${PURE_END}\n${WIRING_BEGIN}\nreturn 1\n`
+    expect(() => project(empty)).toThrow(/is empty; nothing would be projected/)
+  })
+
+  it('refuses a workflow whose wiring region is empty', () => {
+    const src = `${PURE_BEGIN}\nconst x = 1\n${PURE_END}\n${WIRING_BEGIN}\n   \n`
+    expect(() => project(src)).toThrow(/is empty; nothing would be projected/)
+  })
+
+  it('refuses a pure region that lost one of its declarations', async () => {
+    const src = await workflowSource()
+    expect(() => project(src.replace(/pairEntry/g, 'renamed'))).toThrow(/no longer defines pairEntry/)
+  })
+
   it('declares meta as a pure literal the harness can extract statically', async () => {
     const src = await workflowSource()
     expect(src).toMatch(/^export const meta = \{$/m)
@@ -438,8 +501,12 @@ describe('the shipped file itself', () => {
 
   it('keeps the pure region free of every harness global', async () => {
     const src = await workflowSource()
-    const region = stripCommentsAndStrings(
-      src.slice(src.indexOf('// >>> pure: begin'), src.indexOf('// >>> pure: end')))
+    // Strip line comments and single-quoted strings, so neither a prose
+    // mention of `agent()` nor an error message naming `args.cap` for the
+    // caller's benefit reads as a USE of the global.
+    const code = region(src, PURE_BEGIN, PURE_END)
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/'(?:[^'\\]|\\.)*'/g, "''")
     for (const [name, use] of [
       ['agent', /\bagent\s*\(/],
       ['parallel', /\bparallel\s*\(/],
@@ -447,7 +514,7 @@ describe('the shipped file itself', () => {
       ['log', /\blog\s*\(/],
       ['args', /\bargs\b/],
     ]) {
-      expect(region, `the pure region must not use the ${name} global`).not.toMatch(use)
+      expect(code, `the pure region must not use the ${name} global`).not.toMatch(use)
     }
   })
 })

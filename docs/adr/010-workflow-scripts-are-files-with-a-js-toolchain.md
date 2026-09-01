@@ -1,6 +1,6 @@
 ---
 type: ADR
-description: Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) to test them, while shipped plugin scripts stay bash + jq + gh.
+description: Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) with coverage thresholds at 100 on all four buckets to test them, while shipped plugin scripts stay bash + jq + gh.
 status: stable
 created: 2026-09-01
 owner: brianespinosa
@@ -68,6 +68,35 @@ gains a JavaScript toolchain for development and CI only.**
   added to the aggregate `gates` job's `needs:` list, whose arity floor moves from 4 to 5.
 - The schema is tested by executing it with **ajv**, not by reading it. The unsatisfiable-`allOf`
   bug above is a test case.
+- **Coverage thresholds are 100 on all four buckets** — `lines`, `functions`, `branches`,
+  `statements` — via `@vitest/coverage-v8`, pinned exactly like every other tool here. The gate
+  runs coverage; it is not a local convenience.
+
+**The subject of that threshold is a projection, because the shipped file cannot be instrumented.**
+The same property that stops vitest importing the workflow stops any provider measuring it: an
+evaluated string belongs to no module graph, so the first coverage run named only the test harness
+and not one line of the script. A `//# sourceURL=` pointing at the real path was tried and changed
+nothing. So `spec/js/generate.mjs` projects the shipped file into an importable module before the
+suite is collected: both regions are copied **verbatim**, and the only additions are an export list
+and an `async function main(agent, parallel, phase, log, args)` wrapper around the wiring region —
+which is precisely the shape the harness gives it, injected globals as parameters and the
+top-level `return` as the function's. The tests import that, so every line they execute is a line
+of the shipped file. Three assertions keep it honest: both regions must appear byte-for-byte in
+the projection, the only non-comment additions must be exactly the export list and the wrapper,
+and a missing or empty region is a hard error rather than an empty projection.
+
+**A 100% threshold over an empty file set passes, so the threshold is not the gate.** This was
+reproduced, not assumed: point `coverage.include` at a path matching nothing and vitest reports
+`Unknown%` over 0/0 files, satisfies its own 100% thresholds, and exits 0 — this repository's
+signature found-nothing-is-a-pass bug, arriving inside the coverage gate itself. `scripts/check.sh
+js` therefore reads `coverage/coverage-summary.json` and refuses three things a threshold cannot
+see: a report naming no files, a report not naming the projection, and any bucket of the
+projection below 100. It deletes a stale summary before the run so a previous report cannot
+satisfy them. `spec/check_sh_spec.sh` covers all three, plus a non-numeric percentage.
+
+**The harness and the test file are outside the coverage set**, by `include` naming the projection
+alone. They are test infrastructure; measuring them would let an unused helper move the number
+while no shipped code changed.
 
 **The boundary that keeps this consistent with the bash-only rule: a Workflow script never runs on
 the user's machine the way a plugin script does.** It is loaded and evaluated *by the Claude Code
@@ -106,9 +135,21 @@ sources of truth for one behavior is worse than either alone.
   `js` gate runs locally; it stands down with a warning in the pre-push hook when `node_modules`
   is absent, the same graceful degradation a missing `shellspec` already gets, because a hook that
   hard-fails a fresh clone trains people to `--no-verify` (ADR 005).
-- **Another pinned version pair to maintain.** `NODE_VERSION` in the workflow and the exact
-  `vitest`/`ajv` versions in `package.json`, plus a committed lockfile, join ShellCheck, shellspec
-  and the Claude CLI as things that must be bumped deliberately rather than drifting.
+- **Another pinned version set to maintain.** `NODE_VERSION` in the workflow and the exact
+  `vitest`/`@vitest/coverage-v8`/`ajv` versions in `package.json`, plus a committed lockfile, join
+  ShellCheck, shellspec and the Claude CLI as things that must be bumped deliberately rather than
+  drifting. The two vitest packages must move together.
+- **A generated file in the test tree.** `spec/js/generated/` is written on every run and
+  gitignored. It is a build artifact: editing it is meaningless, and the byte-identity assertions
+  are what stop it drifting from its source. If the Workflow contract is ever confirmed to permit
+  a `scriptPath` script to `import` a sibling module, the projection can be deleted and the pure
+  region moved into a module both the workflow and the tests import directly.
+- **100% coverage is a floor, not a proof.** Two of the `pairEntry` identity examples can be
+  deleted without moving the number, because other examples already execute those branches — yet
+  removing the `repo` comparison from the shipped code fails the suite on assertions. Coverage
+  gates that code was *run*; the examples are what gate that it was *right*. Neither replaces the
+  other, and a future contributor should not delete an assertion because the percentage survives
+  it.
 - **`plugins/gh-security/scripts/CLAUDE.md`'s dependency sentence needed a scope qualifier** and
   has one: the rule now says explicitly that it governs what runs on a user's machine, that it is
   not a repository-wide ban on node, and that no script there may call into the workflow file.

@@ -145,6 +145,111 @@ Describe 'scripts/check.sh'
     End
   End
 
+  # The coverage assertions, with a stub npm so no suite runs: this tests how
+  # check.sh reads a coverage summary, the same way the executed-example floor
+  # tests how it reads a shellspec summary.
+  #
+  # The hazard is specific and was reproduced before these were written: point
+  # vitest's `coverage.include` at a path that matches nothing and it reports
+  # "Unknown%" over 0/0 files, satisfies its own 100% thresholds, and exits 0.
+  # A threshold cannot see an empty file set, so the gate has to.
+  Describe 'the coverage floor'
+    stub_npm() {
+      scratch_repo || return 1
+      mkdir -p spec/js bin coverage node_modules
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      git add -A
+      # cmd_js clears any stale summary before running the suite, so the
+      # stub npm is what publishes the one each example wants — exactly where
+      # the real vitest run would write it.
+      cat > bin/npm <<'STUB'
+#!/bin/sh
+[ -f want.json ] || exit 0
+mkdir -p coverage
+cat want.json > coverage/coverage-summary.json
+exit 0
+STUB
+      chmod +x bin/npm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before stub_npm
+
+    summary() { cat > want.json; }
+    full() {
+      printf '{"lines":{"pct":%s},"branches":{"pct":%s},"functions":{"pct":%s},"statements":{"pct":%s}}' \
+        "$1" "$2" "$3" "$4"
+    }
+
+    It 'refuses a run that produced no coverage summary at all'
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'produced no coverage summary'
+    End
+
+    It 'refuses a report that names no files, however green its total'
+      summary <<JSON
+{"total":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'names no files'
+    End
+
+    It 'refuses a report that measured something other than the workflow projection'
+      summary <<JSON
+{"total":{},"/x/spec/js/harness.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'does not include spec/js/generated/workflow.mjs'
+    End
+
+    It 'accepts a report whose subject is fully covered'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should be success
+      The output should include 'coverage measured'
+    End
+
+    # One column per bucket, so each example moves exactly one of them and no
+    # word-splitting is needed to spread a single field across four.
+    Describe 'any single bucket below 100 fails'
+      Parameters
+        # bucket      lines branches functions statements
+        lines          99    100      100       100
+        branches       100   99       100       100
+        functions      100   100      99        100
+        statements     100   100      100       99
+      End
+
+      It "refuses a shortfall in $1"
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full "$2" "$3" "$4" "$5")}
+JSON
+        When run "$CHECK" js
+        The status should eq 2
+        The stderr should include 'is below 100'
+        The output should include 'coverage measured'
+      End
+    End
+
+    # "Unknown" is what vitest prints for a bucket it could not compute, and
+    # a numeric comparison against it must fail rather than pass by accident.
+    It 'refuses a bucket whose percentage is not a number'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":"Unknown"},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'is below 100'
+      The output should include 'coverage measured'
+    End
+  End
+
   # The example floor is the guard against shellspec's own "0 examples, 0
   # failures, exit 0" behavior, and skips are equally green, so the floor is
   # on executed examples. Exercised with a stub shellspec on PATH printing a

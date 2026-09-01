@@ -4,9 +4,10 @@
   "type": "module",
   "description": "Dev and CI toolchain for this marketplace. Not a shipped package, and not a dependency of any plugin: the plugin scripts remain bash + jq + gh (ADR 010).",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run --coverage"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "4.1.11",
     "ajv": "8.20.0",
     "vitest": "4.1.11"
   }

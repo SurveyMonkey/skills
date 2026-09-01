@@ -206,7 +206,13 @@ jobs:
         # package.json and the lockfile disagree, which is what makes the
         # exact-version pins in package.json real.
         run: npm ci
-      - name: Run the vitest suite
+      - name: Run the vitest suite with coverage at 100
+        # check.sh runs vitest with --coverage and then reads the JSON summary
+        # itself: vitest's thresholds cannot see an empty file set, and a
+        # 100% threshold over zero files passes (reproduced — it reports
+        # "Unknown%" over 0/0 and exits 0). The gate refuses a report naming
+        # no files, one missing the workflow projection, and any bucket under
+        # 100 (ADR 010).
         run: ./scripts/check.sh js
 
   version:
