@@ -9,7 +9,7 @@ description: >
   open for review, carrying a computed merge-risk rating. Use when asked to fix security
   vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
   org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*reap-agent-artifacts.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Task, AskUserQuestion
+allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*post-agent.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Task, AskUserQuestion
 ---
 
 Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
@@ -77,8 +77,9 @@ that arrange that load through interactive shell hooks that a non-interactive to
 runs, so a bare `gh`, `git`, or install silently resolves the wrong identity or a dead registry
 token. **The prefix covers your own commands, not just the agents'**: from here on, every `gh`,
 `git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
-`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `pr-status.sh` in phase 6's reap
-step and again in phase 8 — runs under it, or discovery itself reads the wrong account's alerts
+`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `post-agent.sh` in phase 6's reap
+step (which threads it to its own `pr-status.sh` call and never to the reap it runs after) and
+`pr-status.sh` again in phase 8 — runs under it, or discovery itself reads the wrong account's alerts
 before any dispatch exists. Note
 that `<env_prefix> <cmd>` runs `<cmd>` in the caller's current directory — it injects the
 environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
@@ -468,70 +469,37 @@ order phases 3 and 4 settled. Drain that queue as a **rolling pool**, in two mot
 
 Keep going until the queue is empty and the last agent has returned. Nothing waits for a sibling.
 
-**Reap that agent's local artifacts between the two motions**, on each completion, after you have
-verified its pull request and before you refill its slot. The completion is the one moment you
-know exactly which branch and which worktree belonged to that agent, and its result block names
-them, so nothing here needs a run-start snapshot or any bookkeeping about what existed before:
-
-1. Parse the completed agent's fenced JSON result. A `success` result carries both `branch` and
-   `pr_url`. A `no-op` and a failure null `pr_url` but still carry `branch`, which is what phase 7
-   names them by; only an unparseable block and a missing block carry nothing.
-2. Verify that pull request is open, under that repo's `env_prefix` when it has one:
+**Reap that agent's local artifacts between the two motions**, on each completion, after the pull
+request is verified and before you refill its slot. One call replaces the whole procedure — save
+the completed agent's fenced JSON result block to a file, then:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr_url>
+${CLAUDE_PLUGIN_ROOT}/scripts/common/post-agent.sh --result <path to the saved result> \
+  --repo-root <repo_root> [--env-prefix "<env_prefix>"] \
+  --package <group.package> --major-line <group.major_line> --branch <group.branch_name>
 ```
 
-3. **Only when it reads `OPEN`**, reap that group's worktree directory and local branch:
+Pass that group's own `package`, `major_line`, and `branch_name` from its dispatch payload every
+time, not only when you expect to need them: they are the only source of those facts when the
+agent's result block cannot supply them — unparseable, missing, or a crash before it printed one —
+and passing them unconditionally means this call never has to guess whether the fallback will be
+needed. `env_prefix` goes to the pull-request read the script makes internally, under that repo's
+`env_prefix` when it has one, and never to the reap that follows it — the script's own header says
+why.
 
-```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work <repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x
-```
+The script parses the result, verifies the pull request, reaps the group's worktree directory and
+local branch **only when that PR reads `OPEN`**, and reports what it did on stdout, exit 0,
+whatever the outcome. **An agent that ended any other way is never reaped**: a failure result, a
+crash, an unparseable or missing result block, a `no-op`, or a PR that is not open all leave the
+worktree and the branch in place, and the report names them (`reaped: false`, with `reason` and the
+derived `worktree_path`/`branch`) for phase 7 rather than this phase guessing at what survived.
+**A failure here is not fatal**: record the report, refill the slot, and carry on. A reap that
+could not finish must never stall the pool, and neither does one that printed nothing at all — a
+rejected argument or a refused path in the reap it runs internally — which the script turns into a
+named `reason` rather than a guessed clean sweep.
 
-**`<package_path>` is `<package>` with every `/` replaced by `-`**, exactly as the fix agent
-built it: `@scope/pkg` line 2 is `.claude/worktrees/fix-dependabot-@scope-pkg-2x`. The template
-names `<package_path>` rather than `<package>` so that copying the command cannot interpolate the
-raw name. Verbatim,
-a scoped name's `/` becomes a directory separator, and the reap then removes the leaf it was
-handed and reports `left_behind: []` while the interposed `fix-dependabot-@scope/` directory
-survives every clean run ([#161](https://github.com/SurveyMonkey/skills/issues/161)). `<branch_name>`
-is the opposite case and is passed through untouched, in whichever spelling it arrived: a slash in
-a ref is ordinary and nothing here rewrites it.
-
-**The reap takes no `env_prefix`, and the asymmetry with step 2 is deliberate.** Step 2 reads a
-pull request, which needs the account the repo's credentials resolve to; the reap only removes a
-directory and a local ref in a repository whose path it is handed, reaching no remote and no
-service, so no identity is involved in it at all.
-
-An open PR is what makes this safe rather than merely tidy: the agent pushed that tip, so the
-remote carries it and the local branch is a duplicate of a ref that outlives the delete. **An
-agent that ended any other way is never reaped**: a failure result, a crash, an unparseable or
-missing result block, a `no-op`, or a `pr_url` whose PR is not open all leave the worktree and the
-branch exactly where they are, for phase 7 to report.
-
-The agent's own Cleanup is the first line of defense, and what this step adds to it is narrow:
-**a success that crashed before its Cleanup ran, and a `branch -D` that errored there.** It
-re-checks only `origin/<branch_name>` — a narrower test than the agent's three safe cases — so a
-branch the agent deliberately left because its tip
-is not on origin is left here too and reported, never deleted. Neither end ever discards an
-unpushed commit.
-
-The script is **local scope only and reaps one named worktree and one named ref**, which is what
-makes it legal while siblings are in flight: it never prunes, never touches another group's
-artifacts, and never deletes the remote branch the open PR is built on. Its one administrative
-write is the single registration entry of that one path, when a worktree directory is gone while
-its entry survives; nothing else in the repository is read for it or written by it. It re-checks
-the tip against `origin/<branch_name>` itself and leaves any branch that is not on origin, naming
-it in `left_behind`. **A failure here is not fatal**: record what its `left_behind` and `errors`
-name for phase 7, refill the slot, and carry on. A reap that could not finish must never stall the
-pool. **A reap that exits without printing a report at all** (a rejected argument, a refused path)
-did nothing and reported nothing, so take the branch from that agent's own result block (or from
-the dispatch payload for that group when there is no block to read) and **rebuild** the worktree
-path from the template in step 3,
-`<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x`, using that group's
-own package and major line: no result field carries the path, so it is derived, never copied, and
-a scoped package rebuilt from the raw name instead of `<package_path>` names a path no agent ever
-created. Carry both to phase 7 instead.
+Carry the script's report into phase 7 verbatim; it is what phase 7's own paragraph reads from, not
+something to rebuild by hand.
 
 Each queued group is **one Task tool call**:
 
@@ -690,18 +658,17 @@ the shared parent past the old line, or dropping the dependent that pins it. Lik
 requires-major-bump skips, report these whether phase 2 found them at repo scope or phase 5
 withdrew them after approval.
 
-**Then say what phase 6's reap removed and what it left.** Give the count of agents reaped, and
-name every artifact still on the user's disk: each `left_behind` entry a reap reported, every
-group whose reap exited without printing a report at all (named by the `branch` from that agent's
-own result block, or from its dispatch payload when it left no block, and by the worktree path
-rebuilt from phase 6's template with that group's package and major line —
-`fix-dependabot-<package_path>-<major_line>x`, where `<package_path>` is `<package>` with every
-`/` replaced by `-` — since no report exists to read either from), together
-with the worktree directory and branch of every group whose agent ended without a verified open
-PR, which is deliberately never reaped; that directory is derived from the same template. A leftover under `.claude/worktrees/` sits at a stable
-path and comes off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent
-is in flight, but only if this summary says it is there. Nothing left behind is a failure on its
-own; a run that reaped everything says so in one line.
+**Then say what phase 6's reap removed and what it left, from `post-agent.sh`'s own reports —
+never rebuilt by hand.** Give the count of agents whose report read `reaped: true`, and name every
+artifact still on the user's disk: each report's `left_behind` entries, whether it reaped whole,
+reaped and still left something (`errors` non-empty), or never attempted a reap at all — a failure,
+a crash, an unparseable or missing result block, a `no-op`, a PR that is not open, or a reap that
+printed nothing. Every one of those reports already carries the derived `worktree_path` and
+`branch`, and the `reason` it was not reaped when it was not; nothing here recomputes a path or a
+branch name from a template. A leftover under `.claude/worktrees/` sits at a stable path and comes
+off by hand with `git -C <repo_root> worktree remove --force <path>` once no agent is in flight,
+but only if this summary says it is there. Nothing left behind is a failure on its own; a run that
+reaped everything says so in one line.
 
 **Then, when phase 5's clone destination was the temporary one, decide whether it can be
 removed.** The condition is the one that gates the reap, for the same reason: **a group whose
