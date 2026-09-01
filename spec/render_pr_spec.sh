@@ -170,6 +170,27 @@ Refs: https://github.com/octo/app/security/dependabot/55"
     End
   End
 
+  # Structural finding (PR #178 second review): render-pr.sh's parent_of is
+  # a deliberately independent copy of fix-group.sh's, and fix-group.sh's
+  # own version has a live defect on a SCOPED parent
+  # (`node_modules/@nestjs/core/node_modules/<pkg>`): it reports the bare
+  # `core`, dropping the `@nestjs/` scope — a wrong package name in a PR
+  # body, not a missing one. Fixed here; specimens for all three managers.
+  Describe 'body — a scoped npm parent renders its full @scope/name, never just the bare name'
+    Parameters
+      npm  state-major-bump-npm-scoped.json  "needs a major bump of \`@nestjs/core\` or dropping it"
+      pnpm state-major-bump-pnpm-scoped.json "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
+      yarn state-major-bump-yarn-scoped.json "needs a major bump of the dependent that pins it (not derivable from this report) or dropping it"
+    End
+
+    It "renders the honest remediation for a scoped $1-shaped violation path"
+      When call render_body "$2"
+      The status should be success
+      The output should include "$3"
+      The output should not include "of \`core\`"
+    End
+  End
+
   Describe 'body — pnpm and yarn never fabricate a parent name'
     It 'never renders an empty backtick pair for a pnpm-shaped path'
       When call render_body state-major-bump-pnpm.json
@@ -209,13 +230,27 @@ Refs: https://github.com/octo/app/security/dependabot/55"
   # parsed as part of an `It...End` block and cannot be factored into a
   # plain shell function call.
 
+  # Every example below pins the SPECIFIC error message the top-level
+  # `type == "object"` guard produces, not just "exited 1 with some JSON
+  # error" — a mutation test (PR #178 second review) proved that assertion
+  # alone passes even with the original die-inside-a-command-substitution
+  # defect restored: reverting it lets `die`'s pretty `{"error": ...}` object
+  # leak into the `$state`/`$group` variable as a plausible-looking value
+  # (the subshell's `exit 1` only ends the subshell), and a LATER,
+  # unrelated field-presence guard then fails on that object's missing
+  # fields — a different message, but still exit 1 with `{"error": ...}` as
+  # line 1, so a generic assertion cannot tell the two failures apart. Only
+  # asserting this guard's own wording closes that gap. Confirmed against a
+  # scratch mutant that restores the old `read_json() { ... || die ...; }`
+  # shape: with only the generic assertions, all four examples here still
+  # passed; with the message pin, all four fail as expected.
   Describe 'finding #1: an unreadable --state or --group-json must exit non-zero, never render'
     It 'refuses a non-JSON --state file in body (die inside a command substitution never exits)'
       When call render_body malformed.txt
       The status should equal 1
       The line 1 of output should equal '{'
-      The output should include '"error"'
-      The stderr should include 'render-pr:'
+      The output should include 'is not readable JSON, or not a JSON object'
+      The stderr should include 'is not readable JSON, or not a JSON object'
       The output should not include 'Lockfile validated'
       The output should not include 'by updating'
     End
@@ -224,24 +259,24 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       When call render_commit_msg malformed.txt
       The status should equal 1
       The line 1 of output should equal '{'
-      The output should include '"error"'
-      The stderr should include 'render-pr:'
+      The output should include 'is not readable JSON, or not a JSON object'
+      The stderr should include 'is not readable JSON, or not a JSON object'
     End
 
     It 'refuses a non-JSON --group-json file in body'
       When call render_body_g state-scoped.json malformed.txt
       The status should equal 1
       The line 1 of output should equal '{'
-      The output should include '"error"'
-      The stderr should include 'render-pr:'
+      The output should include 'is not readable JSON, or not a JSON object'
+      The stderr should include 'is not readable JSON, or not a JSON object'
     End
 
     It 'refuses a non-JSON --group-json file in commit-msg'
       When call render_commit_msg_g state-scoped.json malformed.txt
       The status should equal 1
       The line 1 of output should equal '{'
-      The output should include '"error"'
-      The stderr should include 'render-pr:'
+      The output should include 'is not readable JSON, or not a JSON object'
+      The stderr should include 'is not readable JSON, or not a JSON object'
     End
   End
 
@@ -383,6 +418,97 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The output should include '"error"'
       The stderr should include 'render-pr:'
       The output should not include 'N/A'
+    End
+  End
+
+  # PR #178's second (three-way regression/silent-failure/mutation) review.
+  # Same theme as findings 1-10 above, surviving in the places that sweep
+  # did not reach.
+  Describe 'round 2, finding 1: a Global override entry with no .value renders null, not a range'
+    It 'refuses when the top-level written[] entry carries no value at all'
+      When call render_body state-bare-no-value.json --global-override-note "$FX/global-override-note.txt"
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'with a string value'
+      The stderr should include 'with a string value'
+      The output should not include ': "null"'
+    End
+  End
+
+  Describe 'round 2, finding 2: a non-numeric major_line must not silently truncate the Verification claim'
+    It 'refuses rather than letting (.major_line | tonumber) error to empty under set -uo pipefail'
+      When call render_body_g state-scoped.json group-bad-major-line.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'not a plain non-negative integer string'
+      The stderr should include 'not a plain non-negative integer string'
+      The output should not include '<`'
+    End
+  End
+
+  Describe 'round 2, finding 3: a non-numeric EPSS score must not render as a reassuring 0.0%'
+    It 'refuses rather than letting awk default a non-numeric epss_percentile to 0.0'
+      When call render_body_g state-scoped.json group-nonnumeric-epss.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'numeric'
+      The stderr should include 'numeric'
+      The output should not include '0.0%'
+    End
+  End
+
+  Describe 'round 2, finding 4: before and override_file are promised the same way commit-msg already promises them'
+    It 'refuses an absent before key, distinct from a legitimate null (regression check below)'
+      When call render_body state-missing-before.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include 'no '"'"'before'"'"' key at all'
+      The stderr should include 'no '"'"'before'"'"' key at all'
+    End
+
+    It 'still renders when before is genuinely null (regression check)'
+      When call render_body state-before-null.json
+      The status should be success
+      The output should include '## Summary'
+    End
+
+    It 'refuses a scoped-override state missing override_file, matching commit-msg'"'"'s own requirement'
+      When call render_body state-missing-override-file.json
+      The status should equal 1
+      The line 1 of output should equal '{'
+      The output should include "has no usable '.override_file'"
+      The stderr should include "has no usable '.override_file'"
+    End
+
+    It 'still renders a direct-update with no override_file at all (legitimately absent, regression check)'
+      When call render_body state-direct-no-override-file.json
+      The status should be success
+      The output should equal "$(cat "$FX/expected-body-direct.md")"
+    End
+  End
+
+  Describe 'round 2, finding 5: create_label matches "already exists" only on stderr, never combined output'
+    setup_mock() {
+      MOCK_DIR="$SHELLSPEC_WORKDIR/render-pr-gh5-mock"
+      rm -rf "$MOCK_DIR"
+      mkdir -p "$MOCK_DIR"
+      export MOCK_DIR
+    }
+    Before 'setup_mock'
+
+    It 'treats "already exists" appearing only on stdout as a real failure, not success'
+      Mock gh
+        # A real failure whose STDOUT happens to contain the phrase, and
+        # whose STDERR carries the actual, unrelated error.
+        printf 'some unrelated resource already exists in a different context\n'
+        printf 'real error: rate limited\n' >&2
+        exit 1
+      End
+      When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
+      The status should equal 1
+      The output should include 'rate limited'
+      The output should not include '"status": "ok"'
+      The stderr should include 'rate limited'
     End
   End
 

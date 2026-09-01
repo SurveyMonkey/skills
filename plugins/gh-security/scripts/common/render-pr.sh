@@ -134,14 +134,32 @@ run_env() {
 # ---------------------------------------------------------------------------
 
 # parent_of/bare_name mirror fix-group.sh's uncovered_parents/parent_derivation
-# exactly (same shape test, same extraction): only an npm-style install path
-# names the enclosing parent, immediately before the last `node_modules`
-# segment. pnpm's `<name>@<version>` and Yarn Berry's `<name>@npm:<version>`
-# name the violating COPY, not a parent, and carry no `node_modules/` segment
-# at all, so `parent_of` returns null for them rather than inventing one — the
-# earlier `.pnpm/<parent>@<ver>/...` branch this used to strip was dead
-# (node.sh never emits that shape) and, worse, implied a pnpm derivation this
-# report cannot make.
+# (same shape test, same extraction): only an npm-style install path names
+# the enclosing parent, immediately before the last `node_modules` segment.
+# pnpm's `<name>@<version>` and Yarn Berry's `<name>@npm:<version>` name the
+# violating COPY, not a parent, and carry no `node_modules/` segment at all,
+# so `parent_of` returns null for them rather than inventing one.
+#
+# This is a deliberately independent copy, not a shared library — the two
+# scripts have no shared-code mechanism (scripts/CLAUDE.md: bash/jq/gh only,
+# nothing to `source`) — and it has already diverged from fix-group.sh's
+# `uncovered_parents` in one respect that matters: a SCOPED parent
+# (`node_modules/@nestjs/core/node_modules/<pkg>`) needs both the `@scope`
+# segment and the name segment joined back together, or it reports `core`
+# instead of `@nestjs/core` — a real, wrong package name in a PR body, not a
+# missing one. fix-group.sh's `parent_of` carries that exact defect as of
+# this writing, being fixed there separately; this copy is fixed here and
+# specimen-tested for all three managers (spec/render_pr_spec.sh) rather than
+# left to wait on that other change landing and being re-copied. When it
+# does land, diff the two `parent_of` bodies and reconcile by hand — this
+# comment is the pin against silently drifting apart again, since nothing
+# in this toolchain can enforce it as code (see the Structural note in issue
+# #172's review for why consuming fix-group.sh's `parent_derivation` object
+# instead was rejected: it is computed from `validate`'s `violations[]`
+# during the apply ladder, a different array from the `requires_major_bump[]`
+# entries this table renders — below-line copies the ladder's scoped-parent
+# step never touches — so it cannot answer this question no matter how
+# current it is).
 JQ_DEFS=$(cat <<'JQLIB'
   def bare_name:
     . as $k
@@ -151,6 +169,8 @@ JQ_DEFS=$(cat <<'JQLIB'
     ($path | split("/")) as $seg
     | ([ range(0; $seg | length) | select($seg[.] == "node_modules") ] | last) as $i
     | if $i == null or $i == 0 then null
+      elif ($i >= 2) and ($seg[$i - 2] | startswith("@"))
+        then ($seg[$i - 2] + "/" + $seg[$i - 1] | bare_name)
       else ($seg[$i - 1] | bare_name) end;
   def major_of($v):
     ($v | sub("^[vV=]*"; "") | sub("[^0-9].*$"; ""));
@@ -271,8 +291,14 @@ cmd_body() {
   require_ok "$group" 'type == "object"' "body: --group-json $group_file is not readable JSON, or not a JSON object."
   require_ok "$group" '(.alerts | type) == "array" and (.alerts | length) > 0' \
     "body: --group-json $group_file carries no non-empty alerts[]. A dispatched group is never empty; a Summary and an Alerts resolved table rendered from zero alerts is a false claim, not a legitimate empty state."
-  require_ok "$group" '.alerts | all(.[]; (.number != null) and ((.cve != null) or (.ghsa != null)) and (.severity != null) and (.epss_percentile != null))' \
-    "body: --group-json $group_file has an alert missing 'number', both of 'cve' and 'ghsa', 'severity', or 'epss_percentile'. Every alerts-table row and Refs: line needs all four."
+  # A present-but-non-numeric epss_percentile used to pass this check (only
+  # `!= null` was asked) and then print as a reassuring `0.0%` next to a
+  # possibly-high-severity alert: `awk` errors to its zero-value default on
+  # non-numeric input the same way `jq -r`'s missing-key read errors to the
+  # string "null" — both are a silent, wrong number where a hole belongs
+  # (finding #3).
+  require_ok "$group" '.alerts | all(.[]; (.number != null) and ((.cve != null) or (.ghsa != null)) and (.severity != null) and ((.epss_percentile | type) == "number"))' \
+    "body: --group-json $group_file has an alert missing 'number', both of 'cve' and 'ghsa', 'severity', or a numeric 'epss_percentile'. Every alerts-table row and Refs: line needs all four."
 
   require_field "$state" ".action" "body: --state $state_file"
   require_field "$state" ".resolved_version" "body: --state $state_file"
@@ -288,10 +314,23 @@ cmd_body() {
   # them apart (finding #8).
   require_ok "$state" 'has("other_line_moves")' \
     "body: --state $state_file has no 'other_line_moves' key at all. \`null\` there is a real, checked answer (no baseline was available); an absent key is not, and rendering the null-case text for it would be a specific factual claim made from a hole in the data."
+  # `before` is the same shape: fix-group.sh's score always emits the key,
+  # `null` when there was genuinely nothing to report on this line pre-fix
+  # (a real, checked answer, not a hole) — so only the key's outright
+  # absence is a contract violation, checked the same way as
+  # `other_line_moves` (finding #4).
+  require_ok "$state" 'has("before")' \
+    "body: --state $state_file has no 'before' key at all. \`null\` there is a real, checked answer (nothing to report pre-fix on this line); an absent key is not."
 
   require_field "$group" ".package" "body: --group-json $group_file"
   require_field "$group" ".major_line" "body: --group-json $group_file"
   require_field "$group" ".highest_fixed_version" "body: --group-json $group_file"
+  # `(.major_line | tonumber) + 1` in the Verification section errors to
+  # empty on a non-numeric major_line with no `set -e` to catch it, silently
+  # truncating the Lockfile-validated claim's version bound (finding #2).
+  # Checked here, before any output, not where the arithmetic happens.
+  require_ok "$group" '.major_line | test("^[0-9]+$")' \
+    "body: --group-json $group_file's major_line is not a plain non-negative integer string."
 
   local package major_line n action resolved_version before override_file drift bare
   package=$(printf '%s' "$group" | jq -r '.package')
@@ -300,7 +339,6 @@ cmd_body() {
   action=$(printf '%s' "$state" | jq -r '.action')
   resolved_version=$(printf '%s' "$state" | jq -r '.resolved_version')
   before=$(printf '%s' "$state" | jq -r '.before // empty')
-  override_file=$(printf '%s' "$state" | jq -r '.override_file // empty')
   drift=$(printf '%s' "$state" | jq -r '.drift_commit')
   bare=$(printf '%s' "$state" | jq -r '.bare_override')
 
@@ -342,9 +380,22 @@ cmd_body() {
   if [ "$action" != "lockfile-refresh" ]; then
     require_field "$state" ".written" "body: --state $state_file (action '$action')"
   fi
+  # `override_file` is only promised when an override was actually written
+  # (scoped-override, bare-override) — a direct-update or a lockfile-refresh
+  # legitimately has none, which is why commit-msg's own requirement (above)
+  # is scoped the same way. `body` used to read it with a bare `// empty`
+  # unconditionally, silently dropping the pnpm-workspace.yaml clarification
+  # on a truncated field the two subcommands disagreed about (finding #4).
+  if [ "$action" = "scoped-override" ] || [ "$action" = "bare-override" ]; then
+    require_field "$state" ".override_file" "body: --state $state_file (action '$action')"
+  fi
+  override_file=$(printf '%s' "$state" | jq -r '.override_file // empty')
   if [ "$bare" != "none" ]; then
-    require_ok "$state" '[ .written[]? | select((.parent // null) == null) ] | length > 0' \
-      "body: bare_override is '$bare' but --state $state_file's written[] carries no top-level (parent: null) entry to report the range from. The state file contradicts its own classification; nothing is rendered rather than a fabricated range."
+    # `.value` is required alongside the entry itself: a written[] row with
+    # `{parent: null}` and no `value` passed the old guard and rendered the
+    # literal string "null" as the pinned range (finding #1).
+    require_ok "$state" '[ .written[]? | select((.parent // null) == null) | select((.value | type) == "string") ] | length > 0' \
+      "body: bare_override is '$bare' but --state $state_file's written[] carries no top-level (parent: null) entry with a string value to report the range from. The state file contradicts its own classification; nothing is rendered rather than a fabricated range."
   fi
   require_ok "$state" '(.requires_major_bump // []) | type == "array"' \
     "body: --state $state_file's requires_major_bump is not an array."
@@ -556,12 +607,23 @@ EOF
 # there, which is what it wanted.
 #
 # Creating a label at all is a deliberate write of repo metadata beyond the PR itself, the same trade audit-pins.md makes for its own risk label.
+#
+# The "already exists" match runs against stderr ALONE, never against
+# `2>&1`-combined output: `gh`'s own error text is what carries that phrase,
+# and matching the combined stream let any failure whose STDOUT happened to
+# contain it — echoed input, an unrelated diagnostic — read as success
+# (finding #5).
 create_label() {
-  local repo=$1 name=$2 color=$3 desc=$4 out
-  out=$(run_env gh label create "$name" --repo "$repo" --color "$color" --description "$desc" 2>&1) && return 0
-  case "$out" in
+  local repo=$1 name=$2 color=$3 desc=$4 out err errfile st
+  errfile=$(mktemp) || { printf 'cannot create a temporary file'; return 1; }
+  out=$(run_env gh label create "$name" --repo "$repo" --color "$color" --description "$desc" 2>"$errfile")
+  st=$?
+  err=$(cat "$errfile")
+  rm -f "$errfile"
+  [ "$st" -eq 0 ] && return 0
+  case "$err" in
     *"already exists"*) return 0 ;;
-    *) printf '%s' "$out"; return 1 ;;
+    *) printf '%s' "${err:-$out}"; return 1 ;;
   esac
 }
 
