@@ -127,6 +127,46 @@ What that header does not say, and what belongs here:
   override** written for it. Keyed off `mode`, that pin was reported as `direct-update`, scored F6
   as 0, and never reached the pin audit as an `unscoped_override_added` observation.
 
+## The pin-audit driver owns phases 2, 4, 5 and 7
+
+`common/audit-pins-driver.sh` executes `agents/audit-pins.md` phases 2, 4, 5 and, in `pr` mode,
+phase 7. Same rule as the fix driver: **the audit procedure lives here and nowhere else**, and a
+prose re-derivation of any of it in the agent definition is a bug. What stays with the agent is what
+reads history or writes prose — phase 1's worktree and its two `pr`-mode guards, phase 3's
+provenance, phase 6's report, and phase 8's merge risk and pull request.
+
+Stepped, with a state file at `$WORK/state.json`, for `fix-group.sh`'s reasons and one of its own:
+this flow runs **one install per pin**, so a repository with a dozen pins cannot fit inside the
+Bash tool's 10-minute ceiling however the work is arranged. `test-pin` is therefore one pin per
+call, and the state file is what makes the with-all-pins baseline outlive the call that took it.
+The subcommands, the exit-code contract and the option surface are stated once, in the script's
+own header; restating them here is how the two drift.
+
+What that header does not say, and what belongs here:
+
+- **The removal is an in-script `jq` edit, not an agent Edit call**, and it takes the whole
+  override block when the entry was the last one in it. `pnpm-workspace.yaml` (issue #159) cannot
+  be edited with `jq` at all and the adapter's own workspace writer deliberately refuses to delete
+  a pre-existing entry, so the driver carries a line-level deleter over exactly the flat
+  `key: value` block that writer round-trips, and refuses any line inside the block it cannot read
+  as an entry. A wrong parse there writes a file pnpm reads on every install.
+- **A pin is identified by its `path`, never by its key alone.** npm nests several entries under
+  one key (`{"rimraf": {".": ..., "glob": ...}}`), so `--key` is refused when it names more than
+  one pin rather than resolved by position.
+- **`resolution_map` unavailable and `resolution_map` erroring take different routes**, and the
+  agent definition reads as if they were one thing. Exit 2 is the contract's "not implemented"
+  (ADR 001): there is no whole-tree view to be had, so the audit runs and every verdict says it
+  covers the named package only. Any other non-zero exit is a parser refusing a lockfile it could
+  not read, and that refusal is the answer — a diff against a map that was never built reports
+  every package unchanged, which is "found nothing" meaning "all clear" once more.
+- **`compose` is the one phase name this driver emits that the four-phase audit vocabulary does
+  not**: it comes only from `together`, and the agent's result contract reserves it for exactly
+  that step's two failures, an edit that did not land and an install that did not finish.
+- **The platform-binary family sample checks its third condition against the whole tree.** "The
+  family moved as one unit" cannot be read off the diff alone: a family with a member sitting
+  still elsewhere in the lockfile did not move as one unit, so the driver counts the family in the
+  union of both maps and refuses to sample when that count exceeds the number that moved.
+
 ## One group per package major line, and validate decides completeness
 
 `discover-alerts.sh` groups by package **and** the major of `first_patched_version`. Grouping by

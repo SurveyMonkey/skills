@@ -53,6 +53,19 @@ dispatch is broken and stopping is the answer.
 
 These match `fix-dependency`'s, for the same reasons. Read them as binding, not as background.
 
+- **Phases 2, 4, 5 and 7 are `<scripts_dir>/audit-pins-driver.sh`, and you never re-derive them.**
+  The driver is the single home of that procedure (`scripts/CLAUDE.md`, "The pin-audit driver owns
+  phases 2, 4, 5 and 7"): every branch it takes was an enumerated branch of this document first,
+  and each one exists because a field run got it wrong. Its contract is one shape, whichever
+  subcommand you called: **exit 0** with a `status` this document names, **exit 2**
+  `needs_judgment` with a `decision_point` and evidence, **exit 3** `{"status": "failure",
+  "phase": ..., "detail": ...}` whose `phase` you copy verbatim into your result block, and
+  **exit 1** `{"error": ...}` for a usage error, which is a bug in the call you just made and never
+  a finding. JSON is on stdout and human detail on stderr; read the JSON. **Give every step that
+  runs an install `timeout: 600000` (10 minutes)** — `baseline`, `test-pin` and `together` — and
+  the others the default. A driver step is expected to terminate: one that has not answered by its
+  timeout has failed the phase, so kill it and fail closed rather than backgrounding it.
+
 - **Never ask the user anything.** You cannot. Where an interactive flow would ask, stop, clean
   up, and return a failure result.
 - **Denials are answers.** A declined permission on an essential step — worktree, install — ends
@@ -224,26 +237,42 @@ survive to the next call, so every later command carries its own location instea
 ## Phase 2: List the pins
 
 ```bash
-cd "$WORK/audit" && $ADAPTER list_pins
+<scripts_dir>/audit-pins-driver.sh list --work "$WORK" --worktree "$WORK/audit" \
+  --adapter $ADAPTER --scripts-dir <scripts_dir> [--env-prefix "<env_prefix>"]
 ```
+
+The driver runs `list_pins`, routes every pin by `kind`, keeps phase 2's `count` for the
+minus-one verification every later edit is checked against, and records `override_file` so that
+every later edit, restore and staging list targets the right file. That file is `package.json`
+everywhere except a pnpm repository whose live overrides sit in `pnpm-workspace.yaml`'s top-level
+`overrides:` block (pnpm 11, or any repo already keeping them there — issue #159); the driver
+owns that difference, and no step below has to.
 
 Each pin carries `key` (the literal manifest key), `path`, `package`, `parents`, `scope`
 (`bare` or `scoped`), `value`, and `kind`. It also carries `selector`, `range`, `alias_package`
 and `alias_range` (see [ADR 001](../../../docs/adr/001-ecosystem-adapter-contract.md)); none of
 the phases below needs them, beyond quoting `range` and the alias fields in your report.
 
-`count` of 0 is a complete answer: this repository pins nothing, so report that and stop after
-cleanup. In `pr` mode that also means `pr` is `null` with `pr_skipped_reason` `no pins`, which is a
-different answer from `no removable pins found`: one repository has nothing to audit, the other was
-audited and kept every pin it has. Unlike a lockfile parse, an empty override block is read from
-structured JSON and cannot mean "the parser failed".
+**A manifest key is not unique.** npm nests several entries under one key
+(`{"rimraf": {".": ..., "glob": ...}}`), so `--key` is refused when it names more than one pin
+and the pin's own `path` is passed with `--path` instead. The driver says which case it is;
+never resolve the ambiguity by picking the first.
 
-**Keep `count`.** Phase 7 checks its own edits against it.
+What comes back:
 
-**A non-zero exit is not an empty result.** The adapter fails rather than reporting zero pins when
-the override block is present but is not an object of entries — a corrupted or hand-mangled
-manifest. Return a failure result (phase `list`) quoting its error; never report a manifest the
-adapter refused to read as a repository that pins nothing.
+- **`{"status": "ok"}`** carries `test_order` — the pins that are yours to test, **bare pins
+  first** (they constrain every consumer in the tree, so they are both the most costly and the
+  most likely to be over-broad), then scoped — and `not_a_version_pin[]`, each entry carrying
+  what the entry actually is.
+- **`{"status": "no_pins"}`** is a complete answer: this repository pins nothing, so report that
+  and stop after cleanup. In `pr` mode that also means `pr` is `null` with `pr_skipped_reason`
+  `no pins`, which is a different answer from `no removable pins found`: one repository has
+  nothing to audit, the other was audited and kept every pin it has. Unlike a lockfile parse, an
+  empty override block is read from structured JSON and cannot mean "the parser failed".
+- **Exit 3, phase `list`** is a manifest the adapter refused to read — an override block that is
+  present but is not an object of entries, a corrupted or hand-mangled manifest. Return a failure
+  result (phase `list`) quoting its `detail`; never report a manifest the adapter refused to read
+  as a repository that pins nothing.
 
 **`kind` decides whether a pin is yours to test at all.** Only `range` entries are version pins:
 
@@ -290,256 +319,198 @@ alert history alone re-admits exactly what was published in the interim. Phase 5
 Test **one pin per install**, always. Removing several at once changes the resolution of each: a
 pin you removed alongside this one may be the reason this package now resolves where it does, in
 either direction. A batch result is not evidence about any individual pin, and there is no
-shortcut that makes it one.
-
-First, **resolve `<lockfile>`.** It is the one placeholder below that `list_pins` does not already
-carry, and every restore in this phase names it:
+shortcut that makes it one. The driver enforces that; you never batch pins here.
 
 ```bash
-cd "$WORK/audit" && $ADAPTER detect
+<scripts_dir>/audit-pins-driver.sh baseline --work "$WORK"
+<scripts_dir>/audit-pins-driver.sh test-pin --work "$WORK" --key <key>
+<scripts_dir>/audit-pins-driver.sh test-pin --work "$WORK" --path '<path array>'
 ```
 
-Take `lockfile` from that output — `pnpm-lock.yaml`, `yarn.lock` or `package-lock.json` — and
-**substitute the literal filename for `<lockfile>` in every command below**, exactly as you do for
-`$WORK`. Ask the adapter rather than inferring the name from `pm` yourself: the mapping is the
-adapter's to own, and a restore aimed at a file that is not there fails in the one way step 7
-cannot afford (see below).
+**Both steps run an install, so give them `timeout: 600000` (10 minutes).** Walk `test_order` in
+the order phase 2 returned it, one call per pin.
 
-Then **record the with-all-pins baseline**: install the manifest as it stands, once, then read
-both the whole-tree resolution map and the resolutions of each distinct package you are about to
-test.
+### What `baseline` establishes, and the three ways it stops
 
-```bash
-cd "$WORK/audit" && $ADAPTER install
-cd "$WORK/audit" && $ADAPTER resolution_map                # once, the whole lockfile
-cd "$WORK/audit" && $ADAPTER resolved_versions <package>   # one call per distinct package
-```
+It asks the adapter for the lockfile **name** (never inferred from `pm`: the mapping is the
+adapter's to own, and a restore aimed at a file that is not there fails in the one way the
+restore verification cannot afford), installs the manifest as it stands **once**, and reads both
+the whole-tree `resolution_map` and the `resolved_versions` of every distinct package about to be
+tested. The tree is restored between every pin, so both baselines are read once and stay valid
+for every pin — one install for the whole audit, not one per pin.
 
-Keep the map's `resolutions` object and each `versions[]`. The tree is restored between every pin,
-so both baselines are read once and stay valid for every pin — this costs one install for the whole
-audit, not one per pin.
+Three outcomes are hard stops, and each is a failure result (phase `install`) quoting the
+driver's `detail`:
 
-**A baseline `present: false` is a hard stop for that pin.** The manifest pins this package and the
-tree was just installed from that manifest, so a parser that cannot find it in that tree is making a
-claim about itself, not about the tree. Record the pin `inconclusive` quoting the baseline, and do
-not test it: every later step reads `present: false` as "the package left the tree entirely", which
-is this phase's cue for `removable`, so a parser gap here becomes a deletion recommendation for a
-pin nothing examined. This has been the shape of the last two defects found in the adapter's lockfile
-parsing ([#44](https://github.com/SurveyMonkey/skills/issues/44),
-[#46](https://github.com/SurveyMonkey/skills/issues/46)), and nothing checked the baseline for it.
+- **A failed baseline install.** Do not fall back to testing pins against a tree that could not
+  be built: the baseline is what every later delta is measured against, and a package manager
+  that rewrote part of the lockfile before failing poisons every pin's result at once, silently
+  and in the same direction. One failure reported honestly beats a whole audit of
+  plausible-looking verdicts.
+- **A `resolution_map` or `resolved_versions` that errors.** Both refuse to report a lockfile they
+  could not parse, and that refusal is the answer.
+- Not a stop but a per-pin refusal: **a baseline `present: false` for a pinned package** comes
+  back in `inconclusive[]`, and those pins are absent from `test_order`. The manifest pins that
+  package and the tree was just installed from that manifest, so a parser that cannot find it is
+  making a claim about itself, not about the tree. Every later step reads `present: false` as
+  "the package left the tree entirely", which is this phase's cue for `removable`, so a parser gap
+  here would become a deletion recommendation for a pin nothing examined. This has been the shape
+  of the last two defects found in the adapter's lockfile parsing
+  ([#44](https://github.com/SurveyMonkey/skills/issues/44),
+  [#46](https://github.com/SurveyMonkey/skills/issues/46)). Report those pins `inconclusive`
+  quoting the baseline; the driver refuses to test them.
 
-**If the baseline install fails, stop.** Return a failure result (phase `install`) quoting the
-error, and clean up. Do not fall back to testing pins against a tree you could not build: the
-baseline is what every later delta is measured against, and a package manager that rewrote part of
-the lockfile before failing poisons every pin's result at once, silently and in the same direction.
-One failure reported honestly beats a whole audit of plausible-looking verdicts. The same goes for
-a baseline `resolution_map` or `resolved_versions` that errors — both refuse to report a lockfile
-they could not parse, and that refusal is the answer.
+An adapter with no `resolution_map` at all is not a stop either: the audit runs, and
+`whole_tree_view` comes back `false`. See "Every verdict states what it covers" in phase 6.
 
-Then, for each `range` pin, in priority order — **bare pins first** (they constrain every consumer
-in the tree, so they are both the most costly and the most likely to be over-broad), then scoped:
+### What `test-pin` does, and what each answer means
 
-> **Which file holds the pins**: `list_pins` reports it as `override_file`. It is `package.json`
-> everywhere except pnpm repositories whose live overrides sit in `pnpm-workspace.yaml`'s
-> top-level `overrides:` block (pnpm 11, or any repo already keeping them there — issue #159).
-> When `override_file` is `pnpm-workspace.yaml`, every step below that names `package.json` for a
-> pin edit, a `log -S` archaeology, a checkout/restore, a diff, or a staging list applies to
-> `pnpm-workspace.yaml` instead (or in addition, for restore and staging), and the
-> `jq . package.json` syntax check does not apply to the YAML file — rely on `list_pins`
-> re-reading it, which refuses loudly on a block it cannot parse.
+Per pin, in one call: remove exactly that entry from the override file (the whole block when it
+was the last entry, and nothing else), check the manifest still parses, re-run `list_pins` and
+require both that the entry is gone and that `count` is phase 2's count **minus one**, install,
+read `resolved_versions` and `resolution_map`, compute the delta and the whole-map collateral
+diff, and restore the tree with the verification below.
 
-1. Remove exactly that entry from `package.json` with Edit. Remove the whole override block if it
-   is the last entry, and nothing else. Then **verify the edit landed before installing**, in two
-   steps and in this order:
+- **`{"status": "ok"}`** carries `finding`. `status` `tested` means the pin installed cleanly and
+  phase 5 judges it; `status` `inconclusive` means the pin stopped for a reason the finding's
+  `detail` names, and **a per-pin install failure stops that pin, not the run** — unlike the
+  baseline, whose failure stops everything, and unlike a failed restore, which stops everything.
+  Never report a pin as removable off a failed install.
+- **Exit 3, phase `install`** is an edit that did not land or a manifest that no longer parses.
+  A removal can leave the manifest syntactically broken — the classic way is a trailing comma
+  where the removed entry was the last one in its block, which happened on the first field-test
+  audit run removing the picomatch/minimatch entries — and an edit that silently matched nothing,
+  or matched a similar key elsewhere, produces an install of the manifest you started with and a
+  verdict that reads as a tested removal. The driver restores the tree and stops; the manifest is
+  never repaired by re-editing around the error.
+- **Exit 3, phase `restore`** ends the **run**, not the pin. Return a failure result (phase
+  `restore`) quoting the driver's `detail`, which carries `git status --porcelain` for the files
+  it checked, then clean up. Do not retry, and do not continue to the next pin.
 
-   ```bash
-   cd "$WORK/audit" && jq . package.json >/dev/null
-   cd "$WORK/audit" && $ADAPTER list_pins
-   ```
+**The delta is the finding, not the raw list.** The versions attributable to *this* pin are the
+ones present after removal and absent from the baseline (`attributable_versions`).
+`resolved_versions` reports every resolution of that package name anywhere in the tree, so with
+two scoped pins on one package the raw list carries the sibling's resolutions and unrelated
+copies elsewhere in the tree. Judging those against the advisory database is how a genuinely safe
+scoped pin reports `still-required` citing a version that has nothing to do with it.
 
-   **`jq . package.json` comes first because a removal can leave the manifest syntactically
-   broken**, and the classic way is a trailing comma where the removed entry was the last one in
-   its block. That happened on the first field-test audit run removing the picomatch/minimatch
-   entries. A non-zero exit here is a failure result (phase `install`) quoting jq's own parse
-   error: the manifest is corrupt, and every verdict measured against an install of it would be
-   fiction. Do not repair it by re-editing around the error — restore the file per step 7 and stop.
-   Reaching `list_pins` with a broken manifest instead makes the corruption surface as whatever
-   that verb happens to do with unparseable JSON, which is not a report of the actual problem.
+**The whole-map diff is not bookkeeping; it is the reason a `removable` verdict can be trusted.**
+An override reaches past its own target: lifting it changes dedup and hoisting, and lets a peer
+conflict resolve differently. If that moves some previously-safe package into a vulnerable
+version, a diff of the tested package alone cannot see it, and the pin reports `removable` while
+the tree it was tested in is no longer safe. This is the audit's only removal recommendation, so
+a wrong "safe" here is the most expensive mistake it can make.
 
-   `pins[]` must no longer carry this pin's `key`, and `count` must be phase 2's count minus one.
-   Anything else is a failure result (phase `install`) quoting the key still present. An Edit that
-   silently matched nothing, or matched a similar key elsewhere in the manifest, produces an
-   install of the manifest you started with and a verdict that reads as a tested removal.
-2. `cd "$WORK/audit" && $ADAPTER install`
-3. `cd "$WORK/audit" && $ADAPTER resolved_versions <package>`
-4. `cd "$WORK/audit" && $ADAPTER resolution_map`
-5. **Diff the tested package against the baseline.** The versions attributable to *this* pin are
-   the ones present after removal and absent from the baseline. `resolved_versions` reports every
-   resolution of that package name anywhere in the tree, not the ones the removed key was holding,
-   so with two scoped pins on one package the raw list carries the sibling's resolutions and
-   unrelated copies elsewhere in the tree. Judging those against the advisory database is how a
-   genuinely safe scoped pin reports `still-required` citing a version that has nothing to do with
-   it. Keep both lists and the delta; phase 5 judges the delta.
-6. **Diff the whole map against the baseline map.** For every *other* package whose version set
-   changed, record `{package, baseline, without_pin, newly_admitted}`, where `newly_admitted` is
-   what the removal added. This is the collateral list, and it is usually empty.
+**The restore verification is not ceremony either: it is what keeps "one pin per install" true.**
+A restore that fails or only half completes — a lockfile name that is not this repository's, a
+permission denial, a checkout that touched the manifest and not the lockfile — leaves the previous
+pin's removal in the tree while the next pin is edited out of it. Nothing downstream notices: a
+doubly-modified manifest is still valid, so the next install succeeds, and `resolved_versions` and
+`resolution_map` both parse a lockfile they have no way to know is wrong. Every other failure path
+in this phase keys off an install failing or a parser erroring, and none of them fires. What you
+would then report is a batch result presented as a per-pin one, which this phase's opening rule
+says is evidence about no pin at all — arrived at by tooling failure instead of by choice, and
+with nothing in the output saying so. That is why the check runs after every single pin and why
+failing it ends the run rather than the pin.
 
-   **First read `unreadable_entries` on the map, in the baseline and after every removal.** It
-   counts the lockfile entries the parser could not read at all. The parse guard refuses only when
-   the recognized share collapses below half, so one unreadable locator passes it — and that
-   entry's package is then missing from *both* snapshots, so the diff sees no change for it and
-   `[]` claims nothing else moved. `[]` is the stronger claim, so an unaudited package would be
-   reported as an affirmatively clean one and the pin would stay `removable`
-   ([#48](https://github.com/SurveyMonkey/skills/issues/48)). **When `unreadable_entries` is
-   non-zero on either map, set `collateral_changes` to `null` and `collateral_verdict` to
-   `not-checked`** for every pin measured against it, and say in the report — per verdict and once
-   in the summary — how many entries could not be read. This is the same fallback as an
-   unavailable `resolution_map` below, for the same reason: a partial view is not a whole-tree
-   view, and a verdict that outruns what was checked is a wrong one.
-   **A large collateral fan-out is checked, not sampled, unless it is a platform-binary family.**
-   Removing one pin in the first field-test audit run moved 26 `@esbuild/*` packages together. The
-   default is that **every** collateral entry is judged against the advisory database, because a
-   list of 26 is 26 packages that moved and "most of them look alike" is not a verdict. The one
-   exception is a **platform-binary family**: sibling packages published from a single release of
-   one parent, under one scope, at **identical** versions, whose only difference is the platform
-   triple in the name — `@esbuild/*`, `@rolldown/binding-*`, `lightningcss-*`, `@swc/core-*` and
-   the like. There, one member's verdict may stand for the family, on three conditions that are
-   checked and not assumed:
+**What the restore verifies is exactly the override file (plus `package.json` alongside it in the
+workspace-file case) and the lockfile.** In a zero-install Yarn Berry repository every install
+also rewrites the committed `.yarn/cache/*.zip` entries, which are tracked, outside this pathspec,
+and restored by nothing here. That is deliberate rather than overlooked: cache archives are
+content-addressed artifacts of the lockfile, so they cannot make the next pin resolve differently.
+In `report` mode nothing else is at stake either, because Cleanup removes the whole worktree and
+none of it reaches the user's own tree. So say those files match HEAD, which is what was checked;
+do not report the worktree as clean. In `pr` mode there is a commit to make, so phase 7 restores
+`.yarn/cache` to HEAD once, before attempt 1, for exactly that reason.
 
-   - every member is under the same scope or name prefix,
-   - every member's `baseline` and `without_pin` versions are identical across the family, and
-   - the family moved as one unit in the same diff.
+### The collateral list, and how far it was checked
 
-   When any condition fails, check every member. When the sample is used, **say so in the
-   verdict**: `collateral_verdict` is `sampled-family`, and the collateral entry names the member
-   actually judged, the family's size, and the shared version. A verdict is worth exactly what was
-   checked, so a family verdict that presents itself as 26 checks is the failure this rule exists
-   to prevent — as is reporting `not-checked` for a fan-out that was simply large, which claims
-   less than was actually established.
+`collateral_changes[]` is one entry per **other** package whose resolved version set changed,
+`{package, baseline, without_pin, newly_admitted}`. It is usually empty.
 
-7. **Restore the tree, then verify the restore, before the next pin:**
+**`collateral_changes: null` with `collateral_verdict: not-checked` means nobody looked**, and the
+driver reports it whenever the map is unavailable **or** its `unreadable_entries` is non-zero on
+either snapshot. `unreadable_entries` counts the lockfile entries the parser could not read at
+all; the parse guard refuses only when the recognized share collapses below half, so one
+unreadable locator passes it — and that entry's package is then missing from *both* snapshots, so
+the diff sees no change for it and `[]` claims nothing else moved. `[]` is the stronger claim, so
+an unaudited package would be reported as an affirmatively clean one and the pin would stay
+`removable` ([#48](https://github.com/SurveyMonkey/skills/issues/48)). Say in the report — per
+verdict and once in the summary — that the verdict covers the named package only, and how many
+entries could not be read. A scoped claim is a smaller finding; a claim that outruns what was
+checked is a wrong one.
 
-   ```bash
-   git -C "$WORK/audit" checkout HEAD -- package.json <lockfile>
-   git -C "$WORK/audit" diff --quiet HEAD -- package.json <lockfile>
-   ```
+**A large collateral fan-out is checked, not sampled, unless it is a platform-binary family.**
+Removing one pin in the first field-test audit run moved 26 `@esbuild/*` packages together. The
+default is that **every** collateral entry is judged against the advisory database, because a list
+of 26 is 26 packages that moved and "most of them look alike" is not a verdict. The one exception
+is a **platform-binary family**: sibling packages published from a single release of one parent,
+under one scope or name prefix, at **identical** versions, whose only difference is the platform
+triple in the name — `@esbuild/*`, `@rolldown/binding-*`, `lightningcss-*`, `@swc/core-*` and the
+like. The driver checks the three conditions rather than assuming them (same scope or prefix,
+identical `baseline` and `without_pin` across the family, and the family moved as one unit — no
+member of it sitting still elsewhere in the tree), and when any fails it judges every member. When
+the sample is used, the entry names the member actually judged, the family's size and the shared
+version, and phase 5 reports `collateral_verdict` `sampled-family`. A verdict is worth exactly
+what was checked, so a family verdict that presents itself as 26 checks is the failure this rule
+exists to prevent — as is reporting `not-checked` for a fan-out that was simply large, which
+claims less than was actually established.
 
-   The second command exits 0 only when both files match HEAD again. **`HEAD` is load-bearing in
-   both, and for the same reason.** Without it `checkout` restores from the *index* and `diff`
-   compares against the *index*, so the restore and the check that is supposed to catch a failed
-   restore share one movable reference: anything that lands in the index — a stray `git add`, a
-   tool that stages — is restored and then confirmed as correct
-   ([#46](https://github.com/SurveyMonkey/skills/issues/46)). **A non-zero exit stops the run**:
-   return a failure result (phase `restore`) saying which pin was being tested and quoting
-   `git -C "$WORK/audit" status --porcelain -- package.json <lockfile>`, then clean up. Do not
-   retry, and do not continue to the next pin.
+### The two inconclusive shapes a name collision produces
 
-   **What this verifies is exactly `package.json` and the lockfile.** In a zero-install Yarn Berry
-   repository every install also rewrites the committed `.yarn/cache/*.zip` entries, which are
-   tracked, outside this pathspec, and restored by nothing here. That is deliberate rather than
-   overlooked: cache archives are content-addressed artifacts of the lockfile, so they cannot make
-   the next pin resolve differently. In `report` mode nothing else is at stake either, because
-   Cleanup removes the whole worktree and none of it reaches the user's own tree. So say the two
-   files match HEAD, which is what was checked; do not report the worktree as clean.
+`resolution_map` and `resolved_versions` must agree about the tested package, and the driver
+compares them **after normalizing both to the same shape**: a sorted, deduplicated list of bare
+version strings. The two verbs answer different questions and their raw shapes differ by design —
+`resolved_versions` returns one `{version, path}` per resolution, so one version installed at two
+paths is two entries, while the map holds each package's versions once — so comparing the raw
+shapes reports a disagreement that is not one, and a healthy pin comes back `inconclusive`.
 
-   **In `pr` mode there is a commit to make, so scratch is not the whole story.** Per-pin cache
-   residue must not reach it, and phase 7 restores `.yarn/cache` to HEAD once, before attempt 1,
-   for exactly that reason. This pathspec still does not grow: it runs after every pin and the
-   archives cannot perturb the next pin's resolution.
+If the normalized answers still differ, the pin is `inconclusive` and the finding's
+`disagreement.shape` says which of three it is. Quote both answers and do not pick a winner.
 
-**Step 6 is not bookkeeping; it is the reason a `removable` verdict can be trusted.** An override
-reaches past its own target: lifting it changes dedup and hoisting, and lets a peer conflict
-resolve differently. If that moves some previously-safe package into a vulnerable version, a diff
-of the tested package alone cannot see it, and the pin reports `removable` while the tree it was
-tested in is no longer safe. This is the audit's only removal recommendation, so a wrong "safe"
-here is the most expensive mistake it can make.
+- **`alias-key`** is not a parser bug: a pin keyed on an `npm:` alias. `"lodash-alias":
+  ">=4.18.0"` is a version pin on a copy of `lodash` installed under a name no registry has, so
+  the map holds that copy under `lodash` — the name an advisory query needs — while
+  `resolved_versions` answers under both. The map therefore has no entry for the pin's own key,
+  and the normalized comparison reads `[]` against a non-empty list. Say it is keyed on an alias
+  of the package named in its value and that the two views cannot be compared under one name.
+  That is the honest small answer; `removable` here would be a deletion recommendation reached by
+  the same route ([#46](https://github.com/SurveyMonkey/skills/issues/46)). That worked example is
+  a **`range`** pin keyed on an alias name, deliberately: `"lodash-alias": "npm:lodash@4.18.2"`
+  never reaches this comparison at all, because `kind` is `alias` and phase 2 files it
+  `not-a-version-pin` ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
+- **`shared-install-key`** is a documented limit, not a parser bug either, and it looks different:
+  two non-empty lists that disagree, with the map's a subset. A real package can share its name
+  with another entry's install key — a repository that installs `underscore` under the key
+  `lodash` while some dependency pulls the real `lodash`. `resolved_versions` answers under both
+  senses of the name and so merges the two packages into one answer, while the map keeps each
+  under what it resolves to. Say that the name is carried by two different packages in this tree,
+  naming both. Do not report it as a parser bug: the adapter cannot tell which sense a name was
+  meant in, and neither can the pin's key
+  ([#48](https://github.com/SurveyMonkey/skills/issues/48); ADR 001's alias exception).
+- **`parser-disagreement`** is the remaining case, and there one of the two parsers is wrong.
 
-**Step 7's verification is not ceremony either: it is what keeps "one pin per install" true.** A
-restore that fails or only half completes — a lockfile name that is not this repository's, a
-permission denial, a checkout that touched `package.json` and not the lockfile — leaves the
-previous pin's removal in the tree while the next pin is edited out of it. Nothing downstream
-notices: a doubly-modified manifest is still valid, so the next install succeeds, and
-`resolved_versions` and `resolution_map` both parse a lockfile they have no way to know is wrong.
-Every existing failure path in this phase keys off an install failing or a parser erroring, and
-none of them fires. What you would then report is a batch result presented as a per-pin one, which
-this phase's opening rule says is evidence about no pin at all — arrived at by tooling failure
-instead of by choice, and with nothing in the output saying so. That is why the check runs after
-every single pin and why failing it ends the run rather than the pin.
-
-`resolution_map` and `resolved_versions` must agree about the tested package — **compared after
-normalizing both to the same shape**, which is a sorted, deduplicated list of bare version strings:
-
-```bash
-cd "$WORK/audit" && $ADAPTER resolution_map | jq -c '.resolutions["<package>"] // []'
-cd "$WORK/audit" && $ADAPTER resolved_versions <package> | jq -c '[.versions[].version] | unique'
-```
-
-The two verbs answer different questions and their raw shapes differ by design: `resolved_versions`
-returns one `{version, path}` per resolution, so one version installed at two paths is two entries,
-while the map holds each package's versions once. Comparing the raw shapes reports a disagreement
-that is not one, and a healthy pin comes back `inconclusive` — so normalize first, always.
-
-If the normalized answers still differ, one of the two parsers is wrong; report the pin
-`inconclusive`, quote both answers, and do not pick a winner.
-
-**One difference is not a parser bug: a pin keyed on an `npm:` alias.** `"lodash-alias":
-">=4.18.0"` is a version pin on a copy of `lodash` installed under a name no registry has, so the
-map holds that copy under `lodash` — the name an advisory query needs — while `resolved_versions`
-answers under both. The map therefore has no entry for the pin's own key, and the normalized
-comparison reads `[]` against a non-empty list. Report the pin `inconclusive`, saying it is keyed on
-an alias of the package named in its value and that the two views cannot be compared under one name.
-That is the honest small answer; `removable` here would be a deletion recommendation reached by the
-same route ([#46](https://github.com/SurveyMonkey/skills/issues/46)).
-
-That worked example is a **`range`** pin keyed on an alias name, deliberately. `"lodash-alias":
-"npm:lodash@4.18.2"` never reaches this comparison at all: `kind` is `alias`, so phase 2 files it
-`not-a-version-pin` and it is never tested
-([#48](https://github.com/SurveyMonkey/skills/issues/48)).
-
-**A second difference is a documented limit, not a parser bug either, and it looks different: two
-non-empty lists that disagree.** A real package can share its name with another entry's install
-key — a repository that installs `underscore` under the key `lodash` while some dependency pulls the
-real `lodash`. `resolved_versions` answers under both senses of the name and so merges the two
-packages into one answer, while the map keeps each under what it resolves to. `[]` against non-empty
-is the alias-key case above; **non-empty against non-empty, where the map's list is a subset, is
-this one**. Report the pin `inconclusive` either way, and for this shape say that the name is
-carried by two different packages in this tree, naming both. Do not report it as a parser bug: the
-adapter cannot tell which sense a name was meant in, and neither can the pin's key
-([#48](https://github.com/SurveyMonkey/skills/issues/48); ADR 001's alias exception).
-
-**If `resolution_map` is unavailable** — exit 2 from an adapter that does not implement it, or an
-error on this lockfile — you have no whole-tree view, and you may not fabricate one. Fall back to
-the honest narrow claim: keep testing pins, set `collateral_changes` to `null`, and say in the
-report, per verdict and once in the summary, that the verdict covers the named package only and no
-other package's resolution was re-checked. A scoped claim is a smaller finding; a claim that
-outruns what was checked is a wrong one.
-
-An install that fails is a result: record the pin as `inconclusive` with the install error. Never
-report a pin as removable off a failed install, and restore the tree before continuing — with step
-7's verification, which applies to every restore including this one. A per-pin install failure
-stops that pin, not the run — unlike the baseline, whose failure stops everything, and unlike a
-failed restore, which stops everything for the reason step 7 gives.
-
-If `present` is false after removal, the package left the tree entirely — the pin was the only
-thing holding it in. That is `removable`, with the detail saying the package is no longer resolved
-at all.
+**`present: false` after removal** is different from the baseline case above: the package left the
+tree entirely, because the pin was the only thing holding it in. The finding carries
+`left_tree: true`, and phase 5 reports it `removable` with the detail saying the package is no
+longer resolved at all.
 
 **A repository can have more pins than one session can install through.** If you cannot test them
-all, test in the priority order above and report every untested pin as `not-tested` with that
-reason. Reporting fewer findings honestly is correct; extrapolating from a tested pin to an
-untested one is not.
+all, test in `test_order` and report every untested pin as `not-tested` with that reason.
+Reporting fewer findings honestly is correct; extrapolating from a tested pin to an untested one
+is not.
 
 ## Phase 5: Judge each naturally resolved version against the advisory database
 
-For each pin you installed without, take **every version in phase 4's delta** — the versions that
-appeared only once the pin was gone (a removal can admit more than one) — and ask:
-
 ```bash
-<scripts_dir>/check-advisories.sh --adapter $ADAPTER --version <resolved version> <package>
+<scripts_dir>/audit-pins-driver.sh judge --work "$WORK"
 ```
 
-The script unions the vulnerable ranges of every published advisory for the package, which is the
-only sound source for this question, for the reason phase 3 gives. Its `verdict`:
+For each pin the driver installed without, it takes **every version in phase 4's delta** — the
+versions that appeared only once the pin was gone, since a removal can admit more than one — and
+asks `check-advisories.sh` about each. That script unions the vulnerable ranges of every published
+advisory for the package, which is the only sound source for this question, for the reason phase 3
+gives. Its `verdict`:
 
 | `verdict` | Meaning | Finding |
 |---|---|---|
@@ -548,11 +519,12 @@ only sound source for this question, for the reason phase 3 gives. Its `verdict`
 | `unknown` | no match, but a range could not be evaluated | `inconclusive`, naming the unreadable range |
 | `no-advisories` | the query succeeded and returned nothing for this package | `inconclusive` |
 
-**A non-zero exit from `check-advisories.sh` is not a verdict.** Return a failure result (phase
-`advisories`) quoting its error. So is `unknown` with a non-empty `adapter_errors[]`: the adapter
-broke on a range rather than the range being unreadable, so the answer describes the tooling and
-not the package, and every pin after it inherits the same broken adapter. `unknown` with an empty
-`adapter_errors[]` is the honest verdict the table above routes to `inconclusive`.
+**A non-zero exit from `check-advisories.sh` is not a verdict**, and neither is `unknown` with a
+non-empty `adapter_errors[]`: the adapter broke on a range rather than the range being unreadable,
+so the answer describes the tooling and not the package, and every pin after it inherits the same
+broken adapter. Both come back as exit 3 phase `advisories`; return a failure result (phase
+`advisories`) quoting the `detail`. `unknown` with an empty `adapter_errors[]` is the honest
+verdict the table above routes to `inconclusive`.
 
 `no-advisories` is **not** a synonym for safe. A pin may exist for a reason that was never a
 security advisory (a broken release, a peer conflict), and a wrong package name or ecosystem
@@ -562,30 +534,36 @@ judgment to the reader.
 A pin is `removable` only when **every** version in the delta comes back `safe`. One version short
 of that makes the whole pin `still-required` or `inconclusive`; there is no partial removal.
 
-**Then judge the collateral list the same way.** For each entry phase 4 step 6 recorded, run
-`check-advisories.sh` against every version in its `newly_admitted`, using that entry's own package
-name — not the tested pin's. The list is usually empty, so this usually costs nothing; when it is
-not empty, it is the whole point. Collapse the results into `collateral_verdict`:
+**An empty delta is its own finding, not a missing one.** Nothing new resolved, so there is no
+version to judge and removing the entry changes nothing observable *in this manifest as it stands*
+— which is what a sibling pin on the same package holding the tree looks like. The driver reports
+it `removable` with a detail that says exactly that, in those terms, rather than implying the
+package was independently checked and found safe. Phase 6 is where that becomes visible to the
+reader.
+
+**The collateral list is judged the same way**, each newly admitted version under that entry's own
+package name — not the tested pin's. The list is usually empty, so this usually costs nothing;
+when it is not empty, it is the whole point. The results collapse into `collateral_verdict`:
 
 | Collateral | `collateral_verdict` | Effect on the pin |
 |---|---|---|
 | nothing else moved | `none` | none; the verdict stands as computed |
 | every newly-admitted version `safe` | `safe` | none, but the report must still name what moved |
+| a platform-binary family stood for its members, everything `safe` | `sampled-family` | none, and the report says which member was judged |
 | any `vulnerable` | `vulnerable` | the pin is `still-required` |
 | any `unknown` or `no-advisories`, none vulnerable | `inconclusive` | the pin is `inconclusive` |
 | `resolution_map` unavailable, **or its `unreadable_entries` non-zero** | `not-checked` | the verdict is scoped to the named package |
 
 A `vulnerable` collateral makes the pin `still-required` even when its own package came back
-clean, and `detail` must say why in those terms: the pin is not required for the package it names,
-it is required because removing it admits a vulnerable version of something else. Naming the
-package it is really holding is the finding; a bare `still-required` here would send a reader
-looking in the wrong place.
+clean, and `detail` says why in those terms: the pin is not required for the package it names, it
+is required because removing it admits a vulnerable version of something else. Naming the package
+it is really holding is the finding; a bare `still-required` here would send a reader looking in
+the wrong place.
 
-**An empty delta is its own finding, not a missing one.** Nothing new resolved, so there is no
-version to judge and removing the entry changes nothing observable *in this manifest as it stands*
-— which is what a sibling pin on the same package holding the tree looks like. Report it
-`removable` with a detail that says exactly that, in those terms, rather than implying the package
-was independently checked and found safe. Phase 6 is where that becomes visible to the reader.
+**The sibling rule is applied here, not in your prose.** When two or more pins on the **same**
+package come back removable, the driver rewrites their status to `removable-individually` and
+fills `sibling_pins` with the other pins on that package that were in place during the test.
+Phase 6 says what you owe the reader on top of that.
 
 ## Phase 6: Report
 
@@ -640,146 +618,84 @@ So the PR earns its own test, and the rule is absolute:
 **a PR never removes a set that was not installed and judged as a set.**
 Attempt 1 is that test; attempt 2 is the one fallback, and there is no third.
 
-Work in the same `$WORK/audit` worktree, which phase 4 step 7 left matching `HEAD`.
-
-**Before attempt 1, restore the cache too, where the repository tracks one.** Ask git whether it
-does rather than looking for the directory: an untracked `.yarn/cache` is a perfectly ordinary
-non-zero-install Berry repository, and `checkout` against a pathspec matching nothing tracked is an
-error, not a no-op.
-
 ```bash
-git -C "$WORK/audit" ls-files -- .yarn/cache
-git -C "$WORK/audit" checkout HEAD -- .yarn/cache
+<scripts_dir>/audit-pins-driver.sh together --work "$WORK"
 ```
 
-**Run the `checkout` only when `ls-files` printed at least one path.** Empty output means nothing
-under `.yarn/cache` is tracked here, so there is nothing to restore and the second command is
-skipped entirely. When it does run, **a non-zero exit is a failure result (phase `restore`)**,
-quoting git's output: it is the same restore obligation phase 4 step 7 carries, on a different
-pathspec, and a restore that did not happen leaves per-pin residue in the tree that phase 8 would
-stage.
+**Two installs can ride inside this one call, so give it `timeout: 600000` (10 minutes).** It
+works in the same `$WORK/audit` worktree, which phase 4 left matching `HEAD`.
 
-Phase 4's per-pin restore deliberately leaves those archives alone because they cannot change how
-the next pin resolves, but in `pr` mode there is a commit at the end of this, and per-pin residue
-in it would be an artifact of tests rather than of the change being proposed.
+Before attempt 1 the driver restores `.yarn/cache` where the repository tracks one, asking git
+whether it does rather than looking for the directory: an untracked `.yarn/cache` is a perfectly
+ordinary non-zero-install Berry repository, and `checkout` against a pathspec matching nothing
+tracked is an error, not a no-op. Phase 4's per-pin restore deliberately leaves those archives
+alone because they cannot change how the next pin resolves, but in `pr` mode there is a commit at
+the end of this, and per-pin residue in it would be an artifact of tests rather than of the change
+being proposed. This restores tracked archives only. **Untracked ones the installs created are
+caught later**, by phase 8's porcelain check, which fails on any `?? ` entry it did not put there,
+`.yarn/cache` included.
 
-This restores tracked archives only. **Untracked ones the installs created are caught later**, by
-phase 8's porcelain check, which fails on any `?? ` entry it did not put there, `.yarn/cache`
-included. Nothing under that directory reaches a commit without one of the two having looked at
-it.
-
-**Both maps have to be whole, and the baseline is checked first.** If phase 4's with-all-pins
-baseline `resolution_map` was unavailable, or its `unreadable_entries` was anything other than
-zero, then **no attempt runs at all**: every diff below is measured against that baseline, so a
-partial baseline makes both attempts unmeasurable rather than one of them. Set `pr` to `null` with
-`pr_skipped_reason` `partial resolution map`, say so in the report, and go to Cleanup.
-
-`unreadable_entries` must be **present on each map and a non-negative integer**. An absent field is
-not zero: `jq -r` on a missing key yields the string `null`, and a numeric test against it fails on
-stderr inside a conditional that never sees it, so an adapter that stopped emitting the field would
-read as full coverage on every map (`scripts/CLAUDE.md`, "A field the contract promises arrives
-present and of the promised type"). Treat an absent or non-integer value exactly as a non-zero one.
-
-### Attempt 1: every removable pin at once
-
-The candidate set is every finding whose status is `removable` **or**
+**Attempt 1 is the maximal set**: every finding whose status is `removable` **or**
 `removable-individually`, the two statuses phase 5 judged safe, differing only in whether siblings
 held the line during the individual test, which is exactly the question this combined install
-answers. Attempt 1 is the maximal set: it includes the individually-tested pins as well, because
-the whole point of installing them together is to settle the sibling question that made them
-individual in the first place. Nothing else joins it: `still-required`, `inconclusive`,
-`not-tested` and `not-a-version-pin` are not confirmed safe, and a PR is not the place to find
-out.
+answers. It includes the individually-tested pins as well, because the whole point of installing
+them together is to settle the sibling question that made them individual in the first place.
+Nothing else joins it: `still-required`, `inconclusive`, `not-tested` and `not-a-version-pin` are
+not confirmed safe, and a PR is not the place to find out.
 
-**An empty candidate set is a complete answer.** Nothing was found removable, so there is nothing
-to open a PR about. Set `pr` to `null` with `pr_skipped_reason` `no removable pins found`, say so
-in the report, and go to Cleanup.
-
-Otherwise:
-
-1. Remove **every** candidate entry from `package.json` with Edit, removing the whole override
-   block if nothing survives, and nothing else.
-2. **Verify the edits landed before installing:**
-
-   ```bash
-   cd "$WORK/audit" && $ADAPTER list_pins
-   ```
-
-   No candidate `key` may still appear in `pins[]`, and `count` must be phase 2's count minus the
-   number of entries you removed. Anything else is a failure result (phase `compose`) quoting the
-   keys still present. This is not defensive padding: a set edit is several Edit calls against one
-   file, and one that silently matched nothing installs a manifest still carrying that pin while
-   everything downstream reports the set as removed. The count catches the opposite mistake too, an
-   Edit that took a neighbouring entry with it.
-3. `cd "$WORK/audit" && $ADAPTER install`
-
-   **A non-zero exit ends the run**: run phase 4 step 7's restore and verification, then return a
-   failure result (phase `compose`) quoting the install error. Do not read the map, and do not fall
-   through to attempt 2. Attempt 2 exists for a set that **installed** and came back dirty, which
-   is a fact about the pins; an install that did not finish is a fact about the environment, and
-   rerunning it with a smaller set turns a registry timeout or a peer conflict into a narrower PR
-   nobody asked for. A `resolution_map` read off a half-written lockfile is worse still, because it
-   parses.
-4. `cd "$WORK/audit" && $ADAPTER resolution_map`, checked for wholeness the same way the baseline
-   was. Unavailable, erroring, or `unreadable_entries` absent or anything other than zero:
-   **a partial view of the tree fails the attempt closed**, never into a PR.
-   In `report` mode a partial view degrades to a narrower claim, which is still only words; here
-   the same gap would ship a deletion nothing checked. Go to attempt 2, which is measured the same
-   way and fails the same way for the same cause.
-5. **Diff every package in that map against phase 4's with-all-pins baseline map**, every package,
-   not only the ones the removed pins name. That is the point: an override reaches past its own
-   target, and a set of them reaches further than any one did alone. For each package whose version
-   set changed, record `{package, baseline, without_pins, newly_admitted}`.
-6. **Run `check-advisories.sh` on every newly admitted version of every changed package, each
-   under its own package name:**
-
-   ```bash
-   <scripts_dir>/check-advisories.sh --adapter $ADAPTER --version <newly admitted version> <that package>
-   ```
-
-   The attempt is **clean** only when every one of those comes back `safe`. `vulnerable` fails it,
-   and so do `unknown` and `no-advisories` with an empty `adapter_errors[]`, for the reason phase 5
-   gives: neither is a synonym for safe, and this is the one place in the audit where the answer
-   becomes a change to a real repository rather than a sentence in a report.
-
-   **A non-zero exit, or `unknown` with a non-empty `adapter_errors[]`, is a failure result (phase
-   `advisories`) quoting the error, not a failed attempt.** `combined test failed` is a claim about
-   the pins, and a broken adapter or a failed query says nothing about them. Attempt 2 would ask
-   the same broken tool the same question and record its silence as a second verdict.
-
-**Restore the tree before attempt 2**, with phase 4 step 7's two commands and its verification,
-including that a non-zero exit ends the run (phase `restore`). Everything that rule protects is
-still true here: an attempt 2 measured against a tree still carrying attempt 1's removals is a
-result about neither.
-
-### Attempt 2: the `removable` pins only
-
-Only if attempt 1 failed. The candidate set **drops every pin whose finding was
+**Attempt 2, only if attempt 1 failed, drops every pin whose finding was
 `removable-individually`**, keeping the pins that were the sole removable pin on their package.
 They are the findings with no sibling ambiguity at all, so the set is the most conservative one
 the audit can still stand behind, and dropping them is how a failing combined test narrows rather
-than being overridden.
+than being overridden. Each attempt removes its whole set, verifies the edits landed against
+phase 2's count, installs, reads `resolution_map`, diffs **every** package against phase 4's
+with-all-pins baseline map, and judges every newly admitted version of every changed package under
+its own package name. The tree is restored between the attempts: an attempt 2 measured against a
+tree still carrying attempt 1's removals is a result about neither.
 
-Run the identical procedure, all six steps: Edit them all out, verify with `list_pins` that the
-edits landed, install, read `resolution_map`, diff every package against phase 4's baseline map,
-and run `check-advisories.sh` on every newly admitted version of every package. Same clean bar,
-same `compose` failure on an edit that did not land or an install that did not finish, same
-fail-closed rule on a partial map, and same `advisories` failure on a broken advisory lookup.
+An attempt is **clean** only when every one of those comes back `safe`. `vulnerable` fails it, and
+so do `unknown` and `no-advisories`, for the reason phase 5 gives: neither is a synonym for safe,
+and this is the one place in the audit where the answer becomes a change to a real repository
+rather than a sentence in a report.
 
-If attempt 2's candidate set is empty, every removable finding having been
-`removable-individually`, there is no second attempt to run. That is still
-`pr_skipped_reason` `combined test failed`, with a `pr_skipped_detail` that says both which attempt
-ran and that the second set was empty because every removable finding carried sibling ambiguity:
-`"attempt 1 admitted lodash 4.17.20 via eslint; attempt 2 set was empty"`. **The attempt number has
-no field of its own when no PR was opened**, since `attempt` lives inside `pr` and `pr` is `null`
-here, so `pr_skipped_detail` is where it travels. It is not a separate reason either: what happened
-is that the combined test failed and the fallback had nothing left to narrow to.
+What comes back:
 
-**Both attempts failing means no PR**, and the result says so with the evidence: which attempt,
-which package and version were newly admitted, and what verdict they earned. That is a finding,
-not a failure; the audit did its job and the answer is that this set cannot be removed as a set
-today. Set `pr` to `null` with `pr_skipped_reason` `combined test failed`, restore the tree, and go
-to Cleanup.
+- **`{"status": "ready_for_pr"}`** names the `attempt` that passed, `removed_keys[]`,
+  `left_behind[]` (the candidates attempt 2 excluded, `[]` when attempt 1 passed), the collateral
+  list and the advisory verdicts. The removals are left in the tree, which is the diff phase 8
+  commits.
+- **`{"status": "no_candidates"}`** carries `pr_skipped_reason` `no removable pins found`: nothing
+  was found removable, so there is nothing to open a PR about. Set `pr` to `null`, say so in the
+  report, and go to Cleanup.
+- **`{"status": "partial_map"}`** carries `pr_skipped_reason` `partial resolution map`. If phase
+  4's with-all-pins baseline map was unavailable, or its `unreadable_entries` was anything other
+  than zero, **no attempt runs at all**: every diff is measured against that baseline, so a
+  partial baseline makes both attempts unmeasurable rather than one of them. A partial view of the
+  tree also **fails the attempt closed**, never into a PR: in `report` mode a partial view degrades
+  to a narrower claim, which is still only words, while here the same gap would ship a deletion
+  nothing checked.
+- **`{"status": "combined_failed"}`** is a finding, not a failure: the audit did its job and the
+  answer is that this set cannot be removed as a set today. `pr_skipped_reason` is
+  `combined test failed` (or `partial resolution map`, when that is what the last attempt that ran
+  ended with), and `pr_skipped_detail` carries which attempt, which package and version were newly
+  admitted, and what verdict they earned — including the case where attempt 2's set was empty
+  because every removable finding carried sibling ambiguity. **The attempt number has no field of
+  its own when no PR was opened**, since `attempt` lives inside `pr` and `pr` is `null` here.
+- **Exit 3, phase `compose`** is an edit that did not land or an install that did not finish. A
+  set edit is several removals against one file, and one that silently matched nothing installs a
+  manifest still carrying that pin while everything downstream reports the set as removed; the
+  count catches the opposite mistake too, a removal that took a neighbouring entry with it. On an
+  install, it is a failure result (phase `compose`) quoting the install error, and there is
+  deliberately no fall-through to attempt 2: attempt 2 exists for a set that **installed** and came
+  back dirty, which is a fact about the pins, while an install that did not finish is a fact about
+  the environment, and rerunning it with a smaller set turns a registry timeout or a peer conflict
+  into a narrower PR nobody asked for.
+- **Exit 3, phase `advisories`** is a broken advisory lookup, and it is a failure result (phase
+  `advisories`) quoting the error, not a failed attempt. `combined test failed` is a claim about
+  the pins, and a broken adapter or a failed query says nothing about them; attempt 2 would ask the
+  same broken tool the same question and record its silence as a second verdict.
+- **Exit 3, phase `restore`** is phase 4's restore obligation on a different pathspec, and it ends
+  the run the same way.
 
 **One `pr_skipped_reason`, chosen by precedence**, because more than one can be true at once and a
 reader needs the one that actually stopped the PR: `open PR already exists` first (nothing else was
@@ -788,9 +704,8 @@ the **last attempt that ran** ended with, which is `partial resolution map` or
 `combined test failed`. Anything else that also applied goes in `pr_skipped_detail`, never in the
 field.
 
-When an attempt is clean, **leave its removals in the tree**, which is the diff phase 8 commits,
-and carry into phase 8: which attempt passed, the removed keys, the pins left behind with the
-attempt that excluded them, the collateral list, and the advisory verdicts.
+When an attempt is clean, carry into phase 8: which attempt passed, the removed keys, the pins left
+behind with the attempt that excluded them, the collateral list, and the advisory verdicts.
 
 ## Phase 8: Merge risk and the PR
 
@@ -900,15 +815,20 @@ band, which is the one a reviewer should read first.
 can still end the run: doing it first means a `verify` failure never leaves a branch behind, which
 is the same reason phase 1 creates none.
 
-**Stage exactly three things, by name.** `package.json`, the lockfile, and, in a zero-install Yarn
-Berry repository, every `.yarn/cache/` path that `status --porcelain` reports as modified, added or
-deleted: those archives are the lockfile's committed state, and a branch that moves one without the
-other does not install. Phase 7 restored that directory to `HEAD` before attempt 1, so what is
-there now is the combined install's doing and nothing else.
+**Stage exactly three things, by name.** The override file, the lockfile, and, in a zero-install
+Yarn Berry repository, every `.yarn/cache/` path that `status --porcelain` reports as modified,
+added or deleted: those archives are the lockfile's committed state, and a branch that moves one
+without the other does not install. Phase 7 restored that directory to `HEAD` before attempt 1, so
+what is there now is the combined install's doing and nothing else.
+
+**`<lockfile>` and `<override_file>` are the driver's, not yours to infer**: `together` returns
+both, `baseline` returned the lockfile, and phase 2 returned the override file. Substitute the
+literal names. When `override_file` is `pnpm-workspace.yaml` (issue #159), stage that file **and**
+`package.json`, exactly as phase 4's restore covered both.
 
 ```bash
 git -C "$WORK/audit" status --porcelain
-git -C "$WORK/audit" add package.json <lockfile> [<each changed .yarn/cache path>]
+git -C "$WORK/audit" add <override_file> <lockfile> [<each changed .yarn/cache path>]
 git -C "$WORK/audit" status --porcelain
 ```
 
@@ -1247,14 +1167,13 @@ End your final message with exactly one fenced JSON block:
   version `resolved_versions` reported after removal, verbatim; `attributable_versions` is the
   delta — what phase 5 judged. All three are `[]` when the package left the tree and `null` when
   the pin was not tested.
-- `collateral_changes` is phase 4 step 6's whole-lockfile diff: one entry per **other** package
+- `collateral_changes` is phase 4's whole-lockfile diff: one entry per **other** package
   whose resolved version set changed, `[]` when nothing else moved, and `null` when the pin was not
   tested, `resolution_map` was unavailable, or the map's `unreadable_entries` was non-zero.
   `collateral_verdict` is `none`, `safe`, `vulnerable`, `inconclusive`, `sampled-family`, or
-  `not-checked`, and `null` for an untested pin. `sampled-family` is phase 4 step 6's
-  platform-binary rule and is the only verdict that stands for packages not individually judged;
-  its entry names the member checked, the family size and the shared version, so the verdict says
-  exactly how far the checking went. `null` and `[]` are not interchangeable: one says nothing else moved,
+  `not-checked`, and `null` for an untested pin. Phase 4's platform-binary sample is the only
+  verdict that stands for packages not individually judged; its entry names the member checked,
+  the family size and the shared version, so the verdict says exactly how far the checking went. `null` and `[]` are not interchangeable: one says nothing else moved,
   the other says nobody looked. A partially-read map produces the second, never the first
   ([#48](https://github.com/SurveyMonkey/skills/issues/48)).
 - `advisory_verdict`, `advisory_count` and `matched_ranges` come from `check-advisories.sh`
@@ -1305,7 +1224,7 @@ End your final message with exactly one fenced JSON block:
 - On failure: `"status": "failure"`, `findings` holds everything completed before stopping, `pr` is
   `null`, and `failure` is
   `{"phase": "input | worktree | list | install | restore | advisories | compose | verify | push | pr", "detail": "..."}`.
-  `restore` is phase 4 step 7's: the tree could not be returned to its pre-pin state, so every
+  `restore` is phase 4's: the tree could not be returned to its pre-pin state, so every
   later pin would have been tested against a manifest carrying an earlier removal. The last four
   are `pr` mode's. `compose` is phase 7's: edits that did not land, or an install that did not
   finish. `verify` is phase 8's: a usage error from `score-merge-risk.sh`, or an unexplained
