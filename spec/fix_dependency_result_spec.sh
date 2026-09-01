@@ -134,6 +134,85 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
     End
   End
 
+  # `cleanup` runs after the commit, the push and `gh pr create`, so its exit 3
+  # arrives on top of work that may already have shipped. Both schema-valid
+  # moves without a dedicated field are wrong: `status: "success"` demotes the
+  # leak to prose, which is what let an orchestrator read a leaked worktree as
+  # a clean sweep, and `status: "failure"` forces `pr_url: null` — hiding a
+  # real open PR from phase 7 AND suppressing the orchestrator's reap, which
+  # runs only on a verified-open PR and is the second line of defence against
+  # this exact leak. Nothing in a script decides any of this; the agent does,
+  # so these sentences are the whole implementation.
+  Describe 'a cleanup leak is reported without costing the PR (#171)'
+    It 'carries cleanup as a required field in the result schema'
+      When call rule_in "$AGENT" '^  "cleanup": null,$'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'names cleanup as the one exception to the exit-3 mapping'
+      When call phrase_in "$AGENT" 'is the one exception, and the only one'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'maps a cleanup exit 3 by what shipped, not by the exit code'
+      When call phrase_in "$AGENT" 'Map it by what *actually shipped'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'keeps the PR on a cleanup failure when a PR was opened'
+      When call phrase_in "$AGENT" 'if you hold a .pr_url.*, your result is .*status.*: .success'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'still fails at worktree when no PR was opened'
+      When call phrase_in "$AGENT" 'If no PR was opened.*, it is .*status.*: .failure.*failure.phase.*: .worktree'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The reason the mapping is not free to go the other way.
+    It 'says a failure result would hide the PR and suppress the reap'
+      When call phrase_in "$AGENT" 'hides a real open *PR from phase 7 .and. suppresses the orchestrator.s reap'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'requires the field on every result, null only on a clean cleanup'
+      When call phrase_in "$AGENT" 'it is .null. only.*when Cleanup completed with an empty .errors'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'forbids summarizing the report into detail and leaving the field null'
+      When call phrase_in "$AGENT" 'Never summarize it into *.detail. and leave the field .null'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'exempts cleanup from the fields a failure result nulls'
+      When call phrase_in "$AGENT" 'it is never nulled by a failure'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # The Cleanup section itself no longer reads as "never a failure" flat.
+    It 'qualifies the not-a-failure rule with whether the work shipped'
+      When call phrase_in "$AGENT" 'whenever the work shipped'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says a cleanup failure with nothing shipped is a worktree failure'
+      When call phrase_in "$AGENT" 'when .*nothing.* shipped, a cleanup failure is all there is to report'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   Describe 'hook commit failures route to the push phase (#89)'
     It 'lists the failure phase enum without a commit member'
       When call phrase_in "$AGENT" 'phase.: .input . worktree . baseline . classify . apply . install . validate . push . pr.'

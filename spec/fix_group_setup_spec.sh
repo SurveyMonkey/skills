@@ -491,7 +491,9 @@ SH
     End
 
     # The other side of the same gate: a clean cleanup still exits 0 with an
-    # empty errors[] and no phase.
+    # empty errors[] and no phase. That empty `errors[]` is the whole test the
+    # agent applies for the result's `cleanup` field, which is `null` exactly
+    # here and an object everywhere else.
     It 'still reports a clean cleanup as ok with no errors and no phase'
       make_repo
       "$DRIVER" setup --group-json "$TEST_DIR/group.json" --repo-root "$REPO" \
@@ -499,6 +501,28 @@ SH
       When call drv_jq '{status, phase: (has("phase")), n: (.errors | length)}' cleanup --work "$WORK"
       The status should be success
       The output should equal '{"status":"ok","phase":false,"n":0}'
+    End
+
+    # The exit-3 report is what the agent copies into its result's `cleanup`
+    # field, minus `status` and `step`, so every key that field promises has to
+    # be there — on the failing path, which is the only path it is copied from.
+    It 'carries every key the result cleanup field promises'
+      prepare_failing_remove
+      When call drv_jq '[ (keys_unsorted[] | select(. != "status" and . != "step" and . != "phase")) ] | sort' cleanup --work "$WORK"
+      The status should equal 3
+      The output should equal '["branch","branch_deleted","branch_tip","detail","errors","reason","work_dir","worktree","worktree_removed"]'
+      The stderr should include 'cleanup failure'
+    End
+
+    # A `success` result carrying this object is the reason the leak never has
+    # to be demoted to prose: the paths and the cause are structured data, not
+    # a sentence in `detail`.
+    It 'names both paths and the cause in that report'
+      prepare_failing_remove
+      When call drv_jq '{wt: (.worktree.path | endswith("/fix")), wd: (.work_dir.path | endswith("fix-dependabot-lodash-4x")), e: ((.errors | join(" ")) | test("worktree remove"))}' cleanup --work "$WORK"
+      The status should equal 3
+      The output should equal '{"wt":true,"wd":true,"e":true}'
+      The stderr should include 'cleanup failure'
     End
 
     It 'leaves the workspace directory on disk while the registration is still live'

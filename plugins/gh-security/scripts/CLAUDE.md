@@ -97,7 +97,15 @@ What that header does not say, and what belongs here:
   `worktree_removed: true` with no field naming `$WORK` is the failure this file records on the
   reap's side of the same operation. **A populated `errors[]` exits non-zero**, as it does there
   (`reap-agent-artifacts.sh`'s last line is `[ -z "$errors" ] || exit 1`): the fields without that
-  line still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup. Note
+  line still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup.
+  **That exit 3 is a signal, not a verdict on the run**, and it is the one exit-3 the agent does
+  not map straight onto a failure result: `cleanup` runs after the push and the PR, so the agent
+  maps it by what shipped — a PR open means `status: "success"` with the report in the result's
+  own `cleanup` field, and nothing shipped means a `failure` at `worktree` carrying the same
+  report. Reporting the leak as a run failure while a PR is open costs more than it buys: the
+  result schema forces `pr_url: null` there, hiding an open PR from phase 7 and suppressing the
+  orchestrator's reap, which runs only on a verified-open PR and is the second line of defence
+  against this exact leak. Note
   what the containment conditions do *not* prove — `state.work` and `repo_root` both come out of
   the file inside the directory being deleted, so they rule out an uncontained path, a `..` or
   symlink path, and a moved workspace, not a forged state file.

@@ -39,13 +39,29 @@
 #           `evidence.phase: "install"`, never as an exit-3 phase of its own.
 #   exit 1  {"error":"..."}                 usage or internal error
 #
-# `cleanup` is the one step whose failure can follow completed work: a
-# populated `errors[]` makes it exit 3 with phase `worktree`, because a
-# workspace left on disk or a registration left live blocks every later run
-# against that repository until a human clears it. The agent reports that
-# failure AND whatever it had already finished — a PR it opened is still open.
-# Its full report is emitted either way, so `work_dir`, `worktree` and
-# `errors[]` are readable on both paths.
+# `cleanup` is the one step whose exit 3 does NOT mean the run failed, and the
+# one exception to the mapping above. It runs after the commit, the push and
+# `gh pr create`, so a populated `errors[]` — a workspace left on disk, a
+# registration left live — is a leak that blocks every later run against this
+# repository, arriving on top of work that may already have shipped. Exit 3 is
+# the right signal to the agent because it must not be missed; what the agent
+# does with it is decided by what shipped, and NOT by this exit code alone
+# (`agents/fix-dependency.md`, "Result"):
+#
+#   a PR was opened  -> the agent's result is `status: "success"` with its
+#                       `pr_url` intact, and this report goes in the result's
+#                       own `cleanup` field. The work shipped; the leak is a
+#                       separate fact, and demoting it to prose is what let an
+#                       orchestrator read a leaked worktree as a clean sweep.
+#   no PR was opened -> `status: "failure"`, `failure.phase: "worktree"`, and
+#                       the same report in `cleanup`.
+#
+# Reporting the leak as a run failure when a PR is open would be worse than
+# silence: the agent result schema forces `pr_url: null` on a failure, which
+# hides an open PR from phase 7 AND suppresses the orchestrator's reap, whose
+# whole job is to catch this leak second. The full report is emitted on both
+# exit paths, so `worktree`, `work_dir`, `branch`, `detail` and `errors[]` are
+# readable whatever the exit code.
 #
 # All JSON goes to stdout; human-readable detail goes to stderr.
 #

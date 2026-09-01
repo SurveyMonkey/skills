@@ -266,6 +266,16 @@ judgement about which applies.
   verbatim, run Cleanup, and stop. The phases it emits (`worktree`, `classify`, `baseline`,
   `apply`, `install`, `validate`) are the same vocabulary your result uses; `push` and `pr` name
   work only you do.
+  - **`cleanup` is the one exception, and the only one.** It runs after the push and the PR, so
+    its exit 3 says a worktree or workspace leaked, not that the run failed. Map it by what
+    actually shipped: **if you hold a `pr_url`**, your result is `"status": "success"` with that
+    `pr_url` and `failure: null`, and the driver's cleanup report goes in the result's `cleanup`
+    field. **If no PR was opened**, it is `"status": "failure"` with `failure.phase: "worktree"`,
+    and `cleanup` carries the same report. Never report a run whose PR is open as a failure to
+    disclose a leak: the schema forces `pr_url` to `null` on a failure, which hides a real open
+    PR from phase 7 *and* suppresses the orchestrator's reap — the second line of defence whose
+    entire job is to catch this leak, and which runs only on a verified-open PR from a `success`.
+    The `cleanup` field exists so the leak is never demoted to prose.
 - **Exit 1, `{"error": ...}`** — a usage or internal error in the driver itself. That is a
   failure result at the phase whose step you were running, with the error quoted.
 
@@ -395,6 +405,14 @@ The driver states these; you interpret them.
   both this observation and that signal quoted) and `manifest_pnpm_overrides_ignored` (the live block is
   pnpm-workspace.yaml while package.json still carries `pnpm.overrides` keys this fix deliberately
   did not merge — name them in the PR body).
+- **`cleanup` is required on every result**, exactly like `observations`, and it is `null` only
+  when Cleanup completed with an empty `errors[]`. Otherwise it is the driver's cleanup report
+  **verbatim**, minus its `status` and `step` keys — so it carries `worktree`, `work_dir`,
+  `branch`, `branch_deleted`, `branch_tip`, `reason`, `detail` and `errors`. Carry it whatever
+  your `status` is: on a `success` it is how an open PR and a leaked worktree get reported as the
+  two separate facts they are, and on a `failure` it is the leak itself. Never summarize it into
+  `detail` and leave the field `null` — a reader keying on `cleanup` is keying on it precisely
+  because prose is unreadable to them.
 - **`install_signals[]`** is what the installs in this run printed that a later phase has to react
   to, detected while the output was still in hand rather than left in a discarded stream. Today it
   carries one value, `pnpm_field_no_longer_read`; the reaction is in the `pnpm_major_unknown`
@@ -732,9 +750,13 @@ branch carrying a commit that never reached the remote is the one thing here tha
 recreated, and that judgment is not made from a distance at either end of the run.
 
 Report the driver's `detail` in your own `detail` whenever it is non-null (in your prose, when the
-result is a success and `failure` is `null`): a surviving branch, a `worktree remove` that failed,
-or a `branch -D` that errored are all facts the user needs and none of them is a failure result on
-its own, because by this point the work either shipped or already failed for its own reason.
+result is a success and `failure` is `null`) **whenever the work shipped**: a surviving branch, a
+`worktree remove` that failed, or a `branch -D` that errored are all facts the user needs, and
+with a PR open none of them is a failure result on its own, because by this point the work has
+already shipped. They are not demoted to prose either — the driver exits 3 on any of them and its
+report goes verbatim into the result's `cleanup` field, which is where an orchestrator reads them.
+The qualification matters: when **nothing** shipped, a cleanup failure is all there is to report,
+and the result is a `failure` at `worktree` carrying the same `cleanup` report.
 
 **You are the first line of defense here, not the only one.** After your result lands, the
 orchestrator verifies your pull request is open and then reaps this group's worktree directory and
@@ -763,6 +785,7 @@ End your final message with exactly one fenced JSON block:
   "observations": [],
   "requires_major_bump": [],
   "bare_override": "none",
+  "cleanup": null,
   "no_op": null,
   "failure": null
 }
@@ -811,7 +834,9 @@ End your final message with exactly one fenced JSON block:
   and both are `null` on success.
 - On failure: `"status": "failure"`, `pr_url`, `action`, `resolved_version`, and `risk` are
   `null`, and `failure` is `{"phase": "input | worktree | baseline | classify | apply | install | validate | push | pr", "detail": "..."}`.
-  Everything you completed before stopping still gets reported (`observations`).
+  Everything you completed before stopping still gets reported (`observations`, and `cleanup`
+  whenever Cleanup left anything behind — it is never nulled by a failure, because a leak
+  reported nowhere is a leak nobody reaps).
 - On a no-op (phase 4's true-no-op case): `"status": "no-op"`, `pr_url`, `action` and `risk`
   are `null`, `resolved_version` is what is installed, and
   `no_op` carries the reason and the evidence. Both fields are required; a reason without the
