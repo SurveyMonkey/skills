@@ -1,0 +1,2 @@
+A human re-dispatch accepted this move: the 1.x copy of `lodash` was retired upstream and
+no consumer on that line still exists, verified by inspecting `next`'s own manifest.

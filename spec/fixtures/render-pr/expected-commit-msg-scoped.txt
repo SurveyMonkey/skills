@@ -1,0 +1,10 @@
+fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x
+
+Scoped override to >=4.17.21 via package.json.
+
+Alerts resolved:
+- #42: CVE-2021-23337 (high)
+- #55: GHSA-p6mc-m468-83gw (medium)
+
+Refs: https://github.com/octo/app/security/dependabot/42
+Refs: https://github.com/octo/app/security/dependabot/55

@@ -1,0 +1,2 @@
+Scoped entries on `express` and `astro` left one copy of `lodash` resolving under
+`next > express`, and no single parent covered both paths, so the pin went unscoped.

@@ -326,8 +326,15 @@ Describe 'the rules that gate the removal PR'
   # plus `gh pr merge --auto` added to pr-status.sh, passed the full suite
   # green (#87). (The audit no longer rides along in a resolve-alerts batch at
   # all; since ADR 009 it dispatches only through /gh-security:audit-pins.)
+  #
+  # Since issue #172, fix-dependency.md no longer builds `gh pr create` itself
+  # — it calls `common/render-pr.sh create`, which is the actual `gh pr
+  # create` invocation now. The two assertions below moved with it; the agent
+  # doc keeps only the structural pointer (checked separately, and end-to-end
+  # with a mocked `gh` in spec/render_pr_spec.sh).
   Describe 'the PR-state rules in fix-dependency (#87)'
     FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
+    RENDER_PR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/render-pr.sh"
 
     # Paired deliberately with the presence assertion below. An absent-string
     # assertion alone passes when the line it guards is gone entirely, so on its
@@ -338,14 +345,20 @@ Describe 'the rules that gate the removal PR'
     # not appended later in a separate `gh pr edit --add-label`. Each suite
     # asserts the shared literal for its own reason, not because one copied
     # the other.
-    It 'passes no --draft, anywhere'
-      When call count_in "$FIX_AGENT" '--draft'
+    It 'passes no --draft, anywhere in render-pr.sh'
+      When call count_in "$RENDER_PR" '\-\-draft'
       The status should be success
       The output should equal '0'
     End
 
-    It 'still creates the PR, so the absence above is about the flag'
-      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band>'
+    It 'still builds the gh pr create call, so the absence above is about the flag'
+      When call phrase_in "$RENDER_PR" 'gh pr create --repo "[$]repo" --head "[$]head" .*--label security --label "merge-risk:[$]band_lower")'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'fix-dependency.md calls render-pr.sh create, rather than re-deriving gh pr create itself'
+      When call rule_in "$FIX_AGENT" 'render-pr\.sh create --repo <nwo> --head <branch_name> --band <band>'
       The status should be success
       The output should equal '1'
     End

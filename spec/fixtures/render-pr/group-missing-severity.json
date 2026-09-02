@@ -1,0 +1,35 @@
+{
+  "package": "lodash",
+  "ecosystem": "npm",
+  "major_line": "4",
+  "max_severity": "high",
+  "max_epss_percentile": 0.842,
+  "alert_count": 2,
+  "highest_fixed_version": "4.17.21",
+  "branch_name": "fix/dependabot-lodash-4x",
+  "alerts": [
+    {
+      "number": 42,
+      "cve": "CVE-2021-23337",
+      "ghsa": "GHSA-35jh-r3h4-6jhm",
+      "summary": "Command Injection in lodash",
+      "vulnerable_range": "<4.17.21",
+      "fixed_in": "4.17.21",
+      "epss_percentile": 0.842,
+      "relationship": "transitive",
+      "manifest": "package.json"
+    },
+    {
+      "number": 55,
+      "cve": null,
+      "ghsa": "GHSA-p6mc-m468-83gw",
+      "severity": "medium",
+      "summary": "Prototype Pollution in lodash",
+      "vulnerable_range": "<4.17.19",
+      "fixed_in": "4.17.19",
+      "epss_percentile": 0.05,
+      "relationship": "transitive",
+      "manifest": "package.json"
+    }
+  ]
+}

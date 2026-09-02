@@ -1,17 +1,27 @@
 #!/bin/sh
 # shellcheck shell=sh
 # Pins issue #109's closed set of three merge-risk labels across every place
-# it has to agree: the two agent definitions that create and apply the
-# labels, and the scorer whose `band` field is their only source. A drifted
-# hex, a fourth band, or a mismatched emoji in any one of the three fails
-# this suite.
+# it has to agree: `common/render-pr.sh` (which now renders and creates every
+# label the fix flow uses, issue #172), the `audit-pins` agent definition
+# (which still creates its own risk label inline), and the scorer whose
+# `band` field is their only source. A drifted hex, a fourth band, or a
+# mismatched color in any one of the three fails this suite.
+#
+# `fix-dependency.md` itself carries no label vocabulary any more — it calls
+# `render-pr.sh labels` and `render-pr.sh create`, and the label behavior
+# those calls produce (colors, descriptions, race tolerance, the `--label
+# security --label merge-risk:<band>` argv) is exercised end-to-end in
+# spec/render_pr_spec.sh, with a mocked `gh`. This file only pins the
+# rendering script's own source against drift, the same way it always pinned
+# the agent prose.
 #
 # This lives in its own file rather than spec/audit_pins_rules_spec.sh or
-# spec/common_scripts_spec.sh because the thing being pinned spans both
-# agents and the scorer; folding it into either existing file would bury a
+# spec/common_scripts_spec.sh because the thing being pinned spans an agent,
+# a script, and the scorer; folding it into either existing file would bury a
 # cross-cutting contract inside a suite named for one component.
 
 Describe 'the closed set of merge-risk labels (#109)'
+  RENDER_PR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/render-pr.sh"
   FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   AUDIT_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
   README="$SHELLSPEC_PROJECT_ROOT/README.md"
@@ -20,12 +30,22 @@ Describe 'the closed set of merge-risk labels (#109)'
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
   sorted_band_names() { grep -o -e 'merge-risk:[a-z][a-z]*' -- "$1" | sort -u; }
 
-  Describe 'label names and colors, pinned in both agent definitions'
+  Describe 'render-pr.sh: label names and colors, one case arm per band'
     Parameters
-      # agent file    label name           hex color
-      "$FIX_AGENT"    merge-risk:low       2da44e
-      "$FIX_AGENT"    merge-risk:medium    d4a72c
-      "$FIX_AGENT"    merge-risk:high      cf222e
+      low    "low)    color=2da44e; desc=\"Low merge risk\" ;;"
+      medium "medium) color=d4a72c; desc=\"Medium merge risk\" ;;"
+      high   "high)   color=cf222e; desc=\"High merge risk\" ;;"
+    End
+
+    It "creates merge-risk:$1 with the pinned color and description"
+      When call rule_in "$RENDER_PR" "$2"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'audit-pins.md: label names and colors, pinned in the agent definition'
+    Parameters
       "$AUDIT_AGENT"  merge-risk:low       2da44e
       "$AUDIT_AGENT"  merge-risk:medium    d4a72c
       "$AUDIT_AGENT"  merge-risk:high      cf222e
@@ -53,32 +73,60 @@ Describe 'the closed set of merge-risk labels (#109)'
     End
   End
 
-  Describe 'no fourth band is inventable: exactly three merge-risk label names, in each agent'
-    Parameters
-      "$FIX_AGENT"
-      "$AUDIT_AGENT"
+  Describe 'no fourth band is inventable: exactly three merge-risk label names'
+    sorted_band_case_arms() {
+      grep -oE '^ *(low|medium|high|[a-z]+)\)( +color=| ;;)' -- "$1" \
+        | sed -E 's/^ *//; s/\).*/\)/' | sort -u
+    }
+
+    It 'names exactly low, medium, and high in render-pr.sh'"'"'s labels case, never a fourth'
+      When call sorted_band_case_arms "$RENDER_PR"
+      The status should be success
+      The output should equal "high)
+low)
+medium)"
     End
 
-    It 'names exactly low, medium, and high, never a fourth'
-      When call sorted_band_names "$1"
+    It 'names exactly low, medium, and high in audit-pins.md, never a fourth'
+      When call sorted_band_names "$AUDIT_AGENT"
       The status should be success
       The output should equal "merge-risk:high
 merge-risk:low
 merge-risk:medium"
     End
 
-    It 'never uses a bare risk: prefix, which would read as alert severity'
-      When call phrase_in "$1" 'never a bare .risk:<band>., which would read as alert severity rather than merge risk'
+    It 'never uses a bare risk: prefix in fix-dependency.md, which would read as alert severity'
+      When call phrase_in "$FIX_AGENT" 'never a bare .risk:<band>., which would read as alert severity rather than merge risk'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'never uses a bare risk: prefix in audit-pins.md, which would read as alert severity'
+      When call phrase_in "$AUDIT_AGENT" 'never a bare .risk:<band>., which would read as alert severity rather than merge risk'
       The status should be success
       The output should equal '1'
     End
   End
 
-  Describe 'the fix agent applies its own band on the gh pr create call it just built'
-    It 'adds --label merge-risk:<band> alongside --label security'
-      When call rule_in "$FIX_AGENT" 'gh pr create --repo <nwo> --head <branch_name> --label security --label merge-risk:<band>'
+  Describe 'fix-dependency.md delegates label creation and PR opening to render-pr.sh'
+    It 'calls render-pr.sh labels with --repo and --band'
+      When call rule_in "$FIX_AGENT" 'render-pr\.sh labels --repo <nwo> --band <band>'
       The status should be success
       The output should equal '1'
+    End
+
+    It 'calls render-pr.sh create with --band'
+      When call rule_in "$FIX_AGENT" 'render-pr\.sh create --repo <nwo> --head <branch_name> --band <band>'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'render-pr.sh create never passes --draft: PRs open ready for review (ADR 008)'
+    It 'builds no --draft flag anywhere in its gh pr create argv'
+      When call rule_in "$RENDER_PR" '\-\-draft'
+      The status should equal 1
+      The output should equal '0'
     End
   End
 
@@ -96,20 +144,29 @@ merge-risk:medium"
     End
   End
 
-  Describe 'the race-tolerance rule, in both agent definitions'
-    Parameters
-      "$FIX_AGENT"
-      "$AUDIT_AGENT"
-    End
-
-    It 'treats a gh label create failing because the label now exists as success, not an error'
-      When call phrase_in "$1" 'gh label create. that fails because *the label now exists is success, *not an error'
+  Describe 'render-pr.sh: the race-tolerance rule for label creation'
+    It 'treats "already exists" in gh label create output as success, not an error'
+      When call rule_in "$RENDER_PR" '\*"already exists"\*) return 0 ;;'
       The status should be success
       The output should equal '1'
     End
 
     It 'says creating a label is a deliberate write of repo metadata beyond the PR itself'
-      When call phrase_in "$1" 'a deliberate write of repo metadata beyond the PR itself'
+      When call phrase_in "$RENDER_PR" 'a deliberate write of repo metadata beyond the PR itself'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'audit-pins.md: the race-tolerance rule, in the agent definition'
+    It 'treats a gh label create failing because the label now exists as success, not an error'
+      When call phrase_in "$AUDIT_AGENT" 'gh label create. that fails because *the label now exists is success, *not an error'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'says creating a label is a deliberate write of repo metadata beyond the PR itself'
+      When call phrase_in "$AUDIT_AGENT" 'a deliberate write of repo metadata beyond the PR itself'
       The status should be success
       The output should equal '1'
     End
