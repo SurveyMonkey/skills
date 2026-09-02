@@ -529,59 +529,68 @@ Describe 'the orchestrator-side reap (issue #131)'
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
+  # Issue #171/#173: the phase 6 reap procedure is collapsed into one
+  # `post-agent.sh` call, the way `fix-group.sh` already collapsed phases 1-5
+  # (scripts/CLAUDE.md, "The fix driver owns phases 1 to 5"). The path
+  # template, the `<package_path>` sanitization rule, and the two-step
+  # pr-status.sh/reap-agent-artifacts.sh breakdown are the script's to own
+  # now (`common/post-agent.sh`'s own header, and `spec/post_agent_spec.sh`);
+  # SKILL.md keeps only the orchestrator-level policy that still has to be
+  # decided here — when to call it, and that its failure is never fatal.
   Describe 'the step in phase 6'
-    It 'prescribes the reap with all three arguments'
-      When call rule_in "$SKILL" 'reap-agent-artifacts.sh --repo-root <repo_root> --branch <branch_name> --work'
+    It 'prescribes one post-agent.sh call carrying the --result and --repo-root arguments'
+      When call rule_in "$SKILL" 'post-agent.sh --result <path to the saved result>'
       The status should be success
       The output should equal '1'
     End
 
-    # The script name appears exactly twice: the frontmatter grant and the one
-    # prescribed invocation. A third is a second call site nobody decided on.
-    It 'names the script only in the grant and the prescribed call'
-      When call rule_in "$SKILL" 'reap-agent-artifacts.sh'
+    It 'passes package, major-line, and branch from the group'"'"'s own dispatch payload'
+      When call rule_in "$SKILL" '--package <group\.package> --major-line <group\.major_line> --branch <group\.branch_name>'
       The status should be success
-      The output should equal '2'
+      The output should equal '1'
+    End
+
+    # The invocation appears exactly once, in the prescribed command block. The
+    # script is also named in prose (the frontmatter grant, the env_prefix
+    # seam, and phase 7's report paragraph) — legitimate references to a
+    # script that does the work, not a second call site nobody decided on.
+    It 'invokes the script from exactly one command block'
+      When call rule_in "$SKILL" 'scripts/common/post-agent\.sh --result'
+      The status should be success
+      The output should equal '1'
     End
 
     It 'keeps the allowed-tools list accurate'
-      When call rule_in "$SKILL" 'allowed-tools:.*reap-agent-artifacts.sh'
+      When call rule_in "$SKILL" 'allowed-tools:.*post-agent.sh'
       The status should be success
       The output should equal '1'
     End
 
-    # The sanitized path template (issue #161). Nothing computes this path:
-    # the fix agent builds it from its own prose and the orchestrator rebuilds
-    # it from this step's, so the two sentences ARE the implementation and a
-    # divergence between them is the defect returning. Both files are pinned
-    # for every clause, in this one place, so neither can be edited alone.
-    # The template's own token carries the rule: every path site writes
-    # `<package_path>`, defined as `<package>` with every `/` replaced by
-    # `-`, so a site that copies the template cannot interpolate the raw name.
-    It 'defines <package_path> in the phase 6 step and again in the phase 7 rebuild'
-      When call phrase_in "$SKILL" '.<package_path>. is .<package>. with every ./. replaced by .-.'
+    # The two-step breakdown (parse the result, call pr-status.sh, then
+    # reap-agent-artifacts.sh) is gone with the collapse: it is exactly the
+    # prose re-derivation scripts/CLAUDE.md calls a bug once a driver script
+    # exists for it.
+    It 'no longer names reap-agent-artifacts.sh as a call site of its own'
+      no_reap_script_mentions() { grep -c 'reap-agent-artifacts.sh' "$1" || true; }
+      When call no_reap_script_mentions "$SKILL"
       The status should be success
-      The output should equal '2'
+      The output should equal '0'
     End
 
-    It 'defines <package_path> the same way in the agent workspace definition'
+    It 'no longer prescribes a bare pr-status.sh call inside the reap step'
+      raw_pr_status_in_reap_step() {
+        awk '/Reap that agent.s local artifacts between the two motions/{f=1} f{print} f && /Carry the script.s report into phase 7/{exit}' "$1" \
+          | grep -c 'scripts/common/pr-status.sh' || true
+      }
+      When call raw_pr_status_in_reap_step "$SKILL"
+      The status should be success
+      The output should equal '0'
+    End
+
+    # The AGENT workspace template is untouched: the fix agent still builds
+    # its own worktree path, and that responsibility never moved.
+    It 'still defines <package_path> in the agent workspace definition (untouched by the collapse)'
       When call phrase_in "$AGENT" '.<package_path>. is .<package>. with every ./. replaced by .-.'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Every path template site uses the token; the raw name never appears in
-    # a worktree path. The counts are the fence, the phase 6 rebuild sentence,
-    # and the phase 7 rebuild in SKILL.md, and the workspace definition in the
-    # agent.
-    It 'writes the token into every worktree path template in SKILL.md'
-      When call phrase_in "$SKILL" 'fix-dependabot-<package_path>-<major_line>x'
-      The status should be success
-      The output should equal '3'
-    End
-
-    It 'writes the token into the agent workspace template'
-      When call phrase_in "$AGENT" 'fix-dependabot-<package_path>-<major_line>x'
       The status should be success
       The output should equal '1'
     End
@@ -595,59 +604,16 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '0'
     End
 
-    # The worked example, identical in both, so a reader who skims the clause
-    # still cannot build the two-level path.
-    It 'works the scoped example the same way in both documents'
-      When call phrase_in "$SKILL" 'fix-dependabot-@scope-pkg-2x'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'works that scoped example in the agent too'
-      When call phrase_in "$AGENT" 'fix-dependabot-@scope-pkg-2x'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # And the hazard named, in both: the residue is silent precisely because
-    # the reap is handed the leaf and reports honestly on it.
-    It 'names the interposed directory the unsanitized path leaves behind'
-      When call phrase_in "$SKILL" 'interposed .fix-dependabot-@scope/. directory'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'names that interposed directory in the agent too'
-      When call phrase_in "$AGENT" 'interposed .fix-dependabot-@scope/. directory'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The half that must NOT change with it. A branch name carries the slash
-    # verbatim in either spelling, and a run that "fixed" it to match the path
-    # would rename branches nothing else in the flow expects.
-    It 'keeps branch_name out of the sanitization in SKILL.md'
-      When call phrase_in "$SKILL" 'is passed through untouched'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps branch_name out of the sanitization in the agent'
-      When call phrase_in "$AGENT" 'The sanitization is the \*\*path.s alone\*\*'
-      The status should be success
-      The output should equal '1'
-    End
-
     # The verification is the gate, and it is the caller's: the script makes no
     # network call and asks gh nothing.
     It 'verifies the pull request before reaping anything'
-      When call phrase_in "$SKILL" 'verified its pull request and before you refill its slot'
+      When call phrase_in "$SKILL" 'after the pull request is verified and before you refill its slot'
       The status should be success
       The output should equal '1'
     End
 
     It 'reaps only on an OPEN pull request'
-      When call phrase_in "$SKILL" 'Only when it reads .OPEN'
+      When call phrase_in "$SKILL" 'only when that PR reads .OPEN'
       The status should be success
       The output should equal '1'
     End
@@ -661,64 +627,36 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '1'
     End
 
-    # Sibling agents share the repo_root while the pool refills, which is
-    # exactly when this runs.
-    It 'states the local, single-artifact scope that makes it legal beside siblings'
-      When call phrase_in "$SKILL" 'local scope only and reaps one named worktree and one named ref'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'refills the slot even when the reap could not finish'
       When call phrase_in "$SKILL" 'A reap that could not finish must never stall the pool'
       The status should be success
       The output should equal '1'
     End
 
-    # The reap performs only local git operations, so it needs no account
-    # identity where the PR read in step 2 does. Unexplained, the asymmetry
-    # reads as an omission and invites someone to "fix" it either way.
-    It 'says why the reap takes no credential prefix where the PR read does'
-      When call rule_in "$SKILL" 'The reap takes no .env_prefix., and the asymmetry with step 2 is deliberate'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # What the reap adds to agent Cleanup, stated exactly. The looser earlier
-    # wording claimed it picked up any branch the agent left, which is wrong in
-    # the one case that matters: the script refuses a tip that is not on origin.
-    It 'claims only the two exit paths the reap actually covers'
-      When call rule_in "$SKILL" 'a success that crashed before its Cleanup ran, and a .branch -D. that errored there'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'does not claim a deliberately left branch is reaped later'
-      When call rule_in "$SKILL" 'is not on origin is left here too and reported, never deleted'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The one administrative write, named where the local-scope claim is made,
-    # so the claim stays true rather than becoming an omission.
-    It 'names the single registration entry as its one administrative write'
-      When call phrase_in "$SKILL" 'single registration entry of that one path'
+    # env_prefix's asymmetry is now the script's own contract
+    # (common/post-agent.sh, "Why env_prefix stops at the PR read"); SKILL.md
+    # states only that it is threaded to the PR read and not the reap, never
+    # re-deriving why.
+    It 'says env_prefix reaches the PR read inside the call and never the reap'
+      When call phrase_in "$SKILL" 'and never to the reap that follows it'
       The status should be success
       The output should equal '1'
     End
 
     # The gap a reviewer found: a reap rejected before it printed anything falls
-    # into neither phase 7 bucket, since this group's PR *was* verified.
-    It 'routes a reap that printed no report at all to phase 7 as well'
-      When call rule_in "$SKILL" 'A reap that exits without printing a report at all'
+    # into neither phase 7 bucket, since this group's PR *was* verified. The
+    # script now reports this itself; SKILL.md only has to say the pool keeps
+    # going.
+    It 'never lets a reap that printed nothing stall the pool either'
+      When call phrase_in "$SKILL" 'and neither does one that printed nothing at all'
       The status should be success
       The output should equal '1'
     End
   End
 
   Describe 'the report in phase 7'
-    It 'reports the reaped count and everything left in place'
-      When call phrase_in "$SKILL" 'say what phase 6.s reap removed and what it left'
+    It 'reports the reaped count and everything left in place, from the script'"'"'s own reports'
+      When call phrase_in "$SKILL" 'say what phase 6.s reap removed and what it left, from .post-agent.sh..s own reports'
       The status should be success
       The output should equal '1'
     End
@@ -729,10 +667,10 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '1'
     End
 
-    # Named from the agent's result block, because the reap that would have
-    # named them never printed a report.
-    It 'names the groups whose reap produced no report'
-      When call rule_in "$SKILL" 'group whose reap exited without printing a report at all'
+    # Every report already carries the derived path and branch; phase 7 is
+    # told not to rebuild either from a template of its own.
+    It 'says nothing here recomputes a path or branch from a template'
+      When call phrase_in "$SKILL" 'nothing here recomputes a path or a branch name from a template'
       The status should be success
       The output should equal '1'
     End
