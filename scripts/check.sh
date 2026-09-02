@@ -3,25 +3,29 @@
 # git hooks in .githooks/, the workflow in .github/workflows/gates.yml, and
 # humans running it directly.
 #
-# Usage: scripts/check.sh <lint|validate|spec|version|fast|all|targets>
+# Usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>
 #
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
 #             pre-push hook and CI both set it, ADR 005)
+#   js        the vitest suite over the Workflow script, with coverage
+#             thresholds at 100 on all four buckets (ADR 010). Needs an
+#             installed node_modules; run npm ci first.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
 #             pre-commit hook invokes lint and validate separately so each
 #             can warn about its own missing tool)
-#   all       lint + validate + spec + version
+#   all       lint + validate + spec + js + version
 #   targets   print the lint target list, for inspection
 #
 # This is dev tooling, not shipped plugin code: unlike the scripts under
 # plugins/gh-security/scripts/ it may assume git, jq, shellcheck, shellspec,
-# and the claude CLI. It still targets bash 3.2, because the hooks run it on
-# stock macOS.
+# the claude CLI, and — since ADR 010 — node and npm. It still targets bash
+# 3.2, because the hooks run it on stock macOS. The node dependency is a dev
+# and CI one only: no shipped plugin script gained a runtime.
 #
 # The version gate answers exactly one question: if the tip of this branch
 # became the default branch, would users be handed changed plugin code at a
@@ -84,6 +88,15 @@ shell_targets() {
 
 cmd_targets() {
   shell_targets
+}
+
+# The vitest suite's targets, from the index like every other gate's. Anchored
+# at spec/js/ deliberately: spec/fixtures/ carries dozens of hand-authored
+# package.json and node_modules trees that are lockfile specimens, and a
+# broader pattern would collect a fixture as if it were this repo's own
+# project code. vitest.config.mjs states the same anchor to the runner.
+js_targets() {
+  git ls-files -- 'spec/js/*.test.mjs'
 }
 
 cmd_lint() {
@@ -213,6 +226,110 @@ cmd_spec() {
   rm -f "$report"
 }
 
+# The file the coverage thresholds are about. Named here as well as in
+# vitest.config.mjs's `include`, because the whole hazard below is a report
+# that names nothing: a threshold satisfied by an empty file set.
+JS_COVERAGE_SUBJECT='spec/js/generated/workflow.mjs'
+
+# A 100% threshold over zero files passes. That is this repo's signature bug
+# class arriving inside the coverage gate, and it is a live risk here rather
+# than a theoretical one: the shipped Workflow script cannot be imported (its
+# contract requires a top-level `return`), so the suite measures an importable
+# projection of it, and an instrumentation change that stopped attributing
+# lines to that projection would leave vitest reporting 100% of nothing.
+#
+# So the summary is read rather than trusted. Three things it must show, and
+# the third is the one a threshold cannot express: at least one entry matching
+# the subject, all four buckets PRESENT on it, and each of them numeric and at
+# 100. "100 on whichever buckets the provider happened to emit" is not the
+# rule this gate claims to enforce.
+#
+# One predicate decides both questions. An earlier version proved presence
+# with `grep -F` (substring) and then selected the entry to check with
+# `endswith`, so a key that merely CONTAINED the subject satisfied the guard
+# and was invisible to the comparison: a report whose only file was
+# `.../workflow.mjs.orig` at 0% across the board exited 0. Vitest module ids
+# can carry `?v=`/`?t=` query suffixes, so that is a shape a provider change
+# could really produce. `endswith` is now the only test, used for both.
+js_coverage_problems() {
+  jq -r --arg subject "$1" '
+    def buckets: ["lines", "branches", "functions", "statements"];
+    [ to_entries[] | select(.key != "total") | select(.key | endswith($subject)) ] as $matched
+    | if ($matched | length) == 0
+      then "the report names no entry ending in \($subject)"
+      else
+        $matched[] as $e
+        | buckets[] as $b
+        | if ($e.value | has($b)) | not
+          then "\($e.key): the report carries no \($b) bucket at all"
+          elif (($e.value[$b] | type) != "object") or (($e.value[$b] | has("pct")) | not)
+          then "\($e.key): the \($b) bucket carries no pct"
+          elif ($e.value[$b].pct | type) != "number"
+          then "\($e.key): \($b) pct is \($e.value[$b].pct | tostring), not a number"
+          elif $e.value[$b].pct < 100
+          then "\($e.key): \($b) is \($e.value[$b].pct)%"
+          else empty
+          end
+      end
+  ' "$2"
+}
+
+js_assert_coverage() {
+  local summary=coverage/coverage-summary.json
+  [ -f "$summary" ] \
+    || die "the js gate produced no coverage summary at $summary"
+  local files
+  files=$(jq -r 'keys[] | select(. != "total")' "$summary") \
+    || die "could not read $summary"
+  [ -n "$files" ] \
+    || die 'the coverage report names no files; a threshold over an empty set is never a pass'
+  # Printed before the verdict, and with an explicit marker for an absent
+  # bucket rather than jq's `null`: the display is how a reviewer sees what was
+  # measured, so a missing bucket has to look missing.
+  printf 'check: coverage measured:\n'
+  jq -r '
+    def buckets: ["lines", "branches", "functions", "statements"];
+    to_entries[] | select(.key != "total")
+    | .key as $k | .value as $v
+    | "check:   \($k)  "
+      + ([ buckets[] as $b
+           | "\($b) " + (if ($v | has($b)) and (($v[$b] | type) == "object") and ($v[$b] | has("pct"))
+                          then "\($v[$b].pct)%" else "ABSENT" end) ] | join("  "))
+  ' "$summary"
+  local problems
+  problems=$(js_coverage_problems "$JS_COVERAGE_SUBJECT" "$summary") \
+    || die "could not read bucket percentages from $summary"
+  if [ -n "$problems" ]; then
+    printf '%s\n' "$problems" | while IFS= read -r problem; do
+      [ -z "$problem" ] || printf 'check: %s\n' "$problem" >&2
+    done
+    die "coverage of $JS_COVERAGE_SUBJECT is not 100 on all four buckets"
+  fi
+}
+
+cmd_js() {
+  local targets n=0 f
+  targets=$(js_targets)
+  while IFS= read -r f; do
+    if [ -n "$f" ]; then n=$((n + 1)); fi
+  done < <(printf '%s\n' "$targets")
+  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
+  [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
+  command -v npm >/dev/null 2>&1 \
+    || die 'npm is not installed; the js gate needs node (ADR 010)'
+  [ -d node_modules ] || die 'node_modules is absent; run npm ci before the js gate'
+  # A stale summary from an earlier run must never satisfy the assertions
+  # below, so the report is removed before the suite regenerates it.
+  rm -f coverage/coverage-summary.json
+  # `vitest run --coverage`, never watch mode: a gate that waits for a
+  # keypress is a gate that hangs CI. passWithNoTests is false in
+  # vitest.config.mjs, so a collection that finds nothing fails there too —
+  # the same floor stated twice, because this gate's discovery and the
+  # runner's are separate.
+  npm test --silent
+  js_assert_coverage
+}
+
 # The commit-ish the version gate compares against, before the merge-base is
 # taken. Every caller goes through the merge base, so an explicit
 # CHECK_VERSION_BASE may be a branch, a tag, or a raw sha: the workflow passes
@@ -319,6 +436,7 @@ cmd_all() {
   cmd_lint
   cmd_validate
   cmd_spec
+  cmd_js
   cmd_version
 }
 
@@ -327,8 +445,9 @@ case "${1:-}" in
   lint) cmd_lint ;;
   validate) cmd_validate ;;
   spec) cmd_spec ;;
+  js) cmd_js ;;
   version) cmd_version ;;
   fast) cmd_fast ;;
   all) cmd_all ;;
-  *) die 'usage: scripts/check.sh <lint|validate|spec|version|fast|all|targets>' ;;
+  *) die 'usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>' ;;
 esac

@@ -27,6 +27,8 @@ plugins/
     skills/         # orchestrators that run in the main session
     agents/         # subagents dispatched in parallel; each declares its model in frontmatter
     commands/       # explicit entry points
+    workflows/      # Workflow tool scripts (JavaScript), run by the harness, not the user's
+                    # shell; tested by vitest with coverage at 100 (ADR 010)
     scripts/
       common/       # ecosystem-agnostic: scope, discovery, adapter routing, risk scoring,
                     # capacity detection, PR state, advisory lookup
@@ -38,7 +40,11 @@ plugins/
 ## Scripts do, agents decide
 
 Deterministic work belongs in `scripts/` with a JSON contract; skills, agents, and commands carry
-only the judgment. Scripts depend on `bash`, `jq`, and `gh` alone, target bash 3.2 (the macOS
+only the judgment. Scripts depend on `bash`, `jq`, and `gh` alone — a rule about what runs on the
+user's machine, which is every script under `scripts/`; the one JavaScript file under
+`workflows/` is evaluated by the Claude Code harness, which is already node, and no script here
+may call into it ([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Scripts
+target bash 3.2 (the macOS
 default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
 pass**. Conventions and their reasoning live in
@@ -56,13 +62,16 @@ pass**. Conventions and their reasoning live in
   after it is created, and no agent may merge one or arm auto-merge on it.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
-  `.claude/worktrees/`, and a per-machine concurrency cap is enforced as a rolling pool: freed
-  slots are refilled from the work queue until that queue drains. Repo-global git state (like
+  `.claude/worktrees/`, and a per-machine concurrency cap bounds how many run at once. The
+  orchestrator no longer schedules that pool itself: phase 6 dispatches the whole approved batch
+  through one Workflow script whose worker count *is* the cap. Repo-global git state (like
   `.git/info/exclude`) is written only by the orchestrator, never by agents.
 - **Subagent model tiering** ([ADR 004](adr/004-subagent-model-tiering.md)). The fix subagent is
   pinned to sonnet in its frontmatter; the orchestrator inherits the session model.
-- **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md)). Four gates (shellspec suite,
-  ShellCheck, `claude plugin validate --strict`, and a plugin version gate) run through one entry
+- **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md),
+  [ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Five gates (shellspec
+  suite, ShellCheck, `claude plugin validate --strict`, the vitest suite with coverage at 100 on
+  the Workflow script, and a plugin version gate) run through one entry
   point, `scripts/check.sh`, from committed git hooks locally and from
   `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions. The version
   gate is CI-only: it requires a plugin whose files changed to carry a changed `plugin.json`

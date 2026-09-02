@@ -178,9 +178,11 @@ Describe 'reap-agent-artifacts.sh (issue #131)'
   End
 
   Describe 'nothing repository-wide, and nothing belonging to a sibling'
-    # Sibling agents are in flight by construction whenever the pool refills,
-    # which is exactly when this runs. One named worktree and one named ref is
-    # the whole entitlement.
+    # One named worktree and one named ref is the whole entitlement, and that
+    # is a property of what this script may touch rather than of when it is
+    # called: since issue #175 the reap runs after the dispatch workflow
+    # returns, so a sibling is usually finished, and none of that licenses
+    # widening the blast radius here.
     It 'leaves a sibling agent worktree and branch in place'
       make_repo
       add_agent_worktree
@@ -578,9 +580,13 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
 
     It 'no longer prescribes a bare pr-status.sh call inside the reap step'
+      # The window is located by its own opening sentence. A marker that stops
+      # matching would silently scan nothing and pass, so an empty window is
+      # reported as itself rather than as a zero.
       raw_pr_status_in_reap_step() {
-        awk '/Reap that agent.s local artifacts between the two motions/{f=1} f{print} f && /Carry the script.s report into phase 7/{exit}' "$1" \
-          | grep -c 'scripts/common/pr-status.sh' || true
+        reap_step_window=$(awk '/Reap each group.s local artifacts once its result is in hand/{f=1} f{print} f && /Carry the script.s report into phase 7/{exit}' "$1")
+        [ -n "$reap_step_window" ] || { echo 'reap-step window not found'; return 0; }
+        printf '%s\n' "$reap_step_window" | grep -c 'scripts/common/pr-status.sh' || true
       }
       When call raw_pr_status_in_reap_step "$SKILL"
       The status should be success
@@ -605,9 +611,22 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
 
     # The verification is the gate, and it is the caller's: the script makes no
-    # network call and asks gh nothing.
+    # network call and asks gh nothing. Issue #175 moved the reap out of a
+    # rolling pool's refill motion (the model no longer schedules anything)
+    # and onto the workflow's returned entries, so the ordering rule is now
+    # stated against the summary rather than against a slot.
     It 'verifies the pull request before reaping anything'
-      When call phrase_in "$SKILL" 'after the pull request is verified and before you refill its slot'
+      When call phrase_in "$SKILL" 'after the pull request is verified and before that result is folded into phase 7'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # One call per returned entry is the whole cadence, and it is the one
+    # thing #175 deliberately left outside the workflow script: a batched or
+    # per-repo reap would lose the per-group `left_behind` accounting phase 7
+    # reads.
+    It 'makes exactly one post-agent.sh call per returned entry'
+      When call phrase_in "$SKILL" 'one .post-agent.sh. call per returned entry, never one per repo and never one for the batch'
       The status should be success
       The output should equal '1'
     End
@@ -627,8 +646,8 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '1'
     End
 
-    It 'refills the slot even when the reap could not finish'
-      When call phrase_in "$SKILL" 'A reap that could not finish must never stall the pool'
+    It 'carries on to the next entry even when the reap could not finish'
+      When call phrase_in "$SKILL" 'A reap that could not finish must never stall the run'
       The status should be success
       The output should equal '1'
     End
@@ -645,9 +664,9 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     # The gap a reviewer found: a reap rejected before it printed anything falls
     # into neither phase 7 bucket, since this group's PR *was* verified. The
-    # script now reports this itself; SKILL.md only has to say the pool keeps
+    # script now reports this itself; SKILL.md only has to say the run keeps
     # going.
-    It 'never lets a reap that printed nothing stall the pool either'
+    It 'never lets a reap that printed nothing stall the run either'
       When call phrase_in "$SKILL" 'and neither does one that printed nothing at all'
       The status should be success
       The output should equal '1'

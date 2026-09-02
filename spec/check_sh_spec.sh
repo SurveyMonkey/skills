@@ -102,6 +102,207 @@ Describe 'scripts/check.sh'
       The status should eq 2
       The stderr should include 'no spec files found'
     End
+
+    # ADR 010's gate refuses the same way the others do, and its discovery is
+    # `git ls-files -- 'spec/js/*.test.mjs'` — anchored so the many
+    # hand-authored package.json and node_modules trees under spec/fixtures/
+    # can never be collected as this repo's own project code.
+    It 'fails js when no test files are tracked under spec/js'
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'no JS test files discovered'
+    End
+
+    It 'ignores a fixture package.json when deciding whether the js gate has targets'
+      mkdir -p spec/fixtures/some-repo
+      printf '{"name":"fixture"}' > spec/fixtures/some-repo/package.json
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'no JS test files discovered'
+    End
+
+    # Discovery passing does not mean the gate can run: an untracked
+    # node_modules and a missing package.json each get their own refusal
+    # rather than a confusing failure from inside npm.
+    It 'fails js when the project manifest is absent'
+      mkdir -p spec/js
+      printf 'x\n' > spec/js/x.test.mjs
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'package.json is missing'
+    End
+
+    It 'fails js when node_modules has not been installed'
+      mkdir -p spec/js
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      git add -A
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'run npm ci'
+    End
+  End
+
+  # The coverage assertions, with a stub npm so no suite runs: this tests how
+  # check.sh reads a coverage summary, the same way the executed-example floor
+  # tests how it reads a shellspec summary.
+  #
+  # The hazard is specific and was reproduced before these were written: point
+  # vitest's `coverage.include` at a path that matches nothing and it reports
+  # "Unknown%" over 0/0 files, satisfies its own 100% thresholds, and exits 0.
+  # A threshold cannot see an empty file set, so the gate has to.
+  Describe 'the coverage floor'
+    stub_npm() {
+      scratch_repo || return 1
+      mkdir -p spec/js bin coverage node_modules
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      git add -A
+      # cmd_js clears any stale summary before running the suite, so the
+      # stub npm is what publishes the one each example wants — exactly where
+      # the real vitest run would write it.
+      # `npm test` publishes whatever summary the example asked for, and fails
+      # if the example asked it to. Both halves matter: a stub that always
+      # exits 0 never exercises the failing-suite path at all.
+      cat > bin/npm <<'STUB'
+#!/bin/sh
+[ -f want.json ] && { mkdir -p coverage; cat want.json > coverage/coverage-summary.json; }
+[ -f want-suite-failure ] && exit 1
+exit 0
+STUB
+      chmod +x bin/npm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before stub_npm
+
+    summary() { cat > want.json; }
+    full() {
+      printf '{"lines":{"pct":%s},"branches":{"pct":%s},"functions":{"pct":%s},"statements":{"pct":%s}}' \
+        "$1" "$2" "$3" "$4"
+    }
+
+    It 'refuses a run that produced no coverage summary at all'
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'produced no coverage summary'
+    End
+
+    It 'refuses a report that names no files, however green its total'
+      summary <<JSON
+{"total":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'names no files'
+    End
+
+    It 'refuses a report that measured something other than the workflow projection'
+      summary <<JSON
+{"total":{},"/x/spec/js/harness.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'names no entry ending in spec/js/generated/workflow.mjs'
+      The output should include 'coverage measured'
+    End
+
+    It 'accepts a report whose subject is fully covered'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should be success
+      The output should include 'coverage measured'
+    End
+
+    # One column per bucket, so each example moves exactly one of them and no
+    # word-splitting is needed to spread a single field across four.
+    Describe 'any single bucket below 100 fails'
+      Parameters
+        # bucket      lines branches functions statements
+        lines          99    100      100       100
+        branches       100   99       100       100
+        functions      100   100      99        100
+        statements     100   100      100       99
+      End
+
+      It "refuses a shortfall in $1"
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full "$2" "$3" "$4" "$5")}
+JSON
+        When run "$CHECK" js
+        The status should eq 2
+        The stderr should include "$1 is 99%"
+        The stderr should include 'is not 100 on all four buckets'
+        The output should include 'coverage measured'
+      End
+    End
+
+    # "Unknown" is what vitest prints for a bucket it could not compute, and
+    # a numeric comparison against it must fail rather than pass by accident.
+    # A failing vitest run must fail the gate before any coverage assertion
+    # gets a chance to pass on a green report the run also happened to write.
+    It 'fails when the suite itself fails, whatever the coverage report says'
+      : > want-suite-failure
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      When run "$CHECK" js
+      The status should not eq 0
+      The status should not eq 2
+    End
+
+    # The stale-report hazard: a summary left by an earlier, greener run must
+    # not satisfy the assertions for a run that produced none. cmd_js deletes
+    # it before invoking the suite, so the refusal below is the deletion
+    # working — without it this example would pass on last run's numbers.
+    It 'refuses a stale summary left behind by an earlier run'
+      mkdir -p coverage
+      cat > coverage/coverage-summary.json <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+      # No want.json, so the stub npm publishes nothing this run.
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'produced no coverage summary'
+    End
+
+    It 'refuses a report missing a bucket entirely, not just one below 100'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'carries no branches bucket at all'
+      The output should include 'branches ABSENT'
+    End
+
+    # One predicate for both questions. An earlier version proved presence by
+    # substring and selected the entry to check by suffix, so this exact
+    # report — the only file key containing the subject without ending in it,
+    # every bucket at 0 — exited 0.
+    It 'refuses a key that merely contains the subject without ending in it'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs.orig":$(full 0 0 0 0)}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'names no entry ending in'
+      The output should include 'workflow.mjs.orig'
+    End
+
+    It 'refuses a bucket whose percentage is not a number'
+      summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":"Unknown"},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'pct is Unknown, not a number'
+      The output should include 'coverage measured'
+    End
   End
 
   # The example floor is the guard against shellspec's own "0 examples, 0

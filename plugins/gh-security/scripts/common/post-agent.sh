@@ -60,9 +60,11 @@
 # printed nothing at all — is reported in the JSON on stdout and this exits
 # 0 (like `fix-group.sh cleanup`): a completed group that could not be
 # reaped, or whose reap left something behind, is reported in the JSON, and
-# the exit status must never be what stalls the orchestrator's pool
-# (scripts/CLAUDE.md, "A reap that could not finish must never stall the
-# pool").
+# the exit status must never be what stalls the orchestrator's remaining
+# entries (skills/resolve-alerts/SKILL.md phase 6, "A reap that could not
+# finish must never stall the run"). Since issue #175 the orchestrator holds
+# no pool of its own — the dispatch workflow does — so this is about the
+# entries it has left to process, not about a slot to refill.
 #
 # Why env_prefix stops at the PR read
 # ------------------------------------

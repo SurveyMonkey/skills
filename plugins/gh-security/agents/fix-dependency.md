@@ -671,10 +671,19 @@ End your final message with exactly one fenced JSON block:
   3's drift commit alone — the manifest already admitted the fixed version and the control
   install resolved the vulnerable copy away — so there is no manifest edit, `bare_override` is
   `none`, and the PR is the pushed drift commit.
-- `bare_override` is `none`, `added`, or `tightened`, and it must agree with `action`: anything
-  other than `none` means `action` is `bare-override`, and `bare-override` never pairs with
-  `none`. `tightened` requires a matching pre-fix observation (`targets_this_package` true);
-  without one, what you did was `added`.
+- `bare_override` is `none`, `added`, or `tightened`. **On a `success` result it must agree with
+  `action`**: anything other than `none` means `action` is `bare-override`, and `bare-override`
+  never pairs with `none`. `tightened` requires a matching pre-fix observation
+  (`targets_this_package` true); without one, what you did was `added`.
+
+  **The agreement is scoped to success, because `action` is `null` on every failure while
+  `bare_override` still reports what you wrote.** `apply_constraint` writes the override entry
+  *before* `install`, so a failure at `install`, `validate`, `push` or `pr` truthfully carries
+  `bare_override: "added"` with `action: null`, and that is the correct report — **never downgrade
+  it to `none` to satisfy the agreement rule.** Doing so hides a repository-wide pin on exactly
+  the escalation a reviewer most needs to see, and destroys the `unscoped_override_added`
+  observation the pin audit reads. On a `no-op` you wrote nothing, so `bare_override` is `none`
+  there by fact rather than by rule.
 - `risk` is the scorer's own output: `band` and `score` verbatim, and `f4`/`f5` read off its
   `factors[]`. You compute none of them.
 - `requires_major_bump` is validate's array verbatim: copies below your line that no override can

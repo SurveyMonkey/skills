@@ -10,6 +10,12 @@ JSON contract; interpreting failures and writing prose stays with the agent.
 `python`. Semver comparison is implemented in jq rather than shelling out to `npx semver`, which
 would mean a cold-cache network fetch in the middle of a security fix.
 
+**Scope: this rule governs what runs on a user's machine, which is every script in this
+directory.** It is not a repository-wide ban on node. `plugins/gh-security/workflows/` ships one
+JavaScript file, and this repo's dev and CI toolchain runs vitest over it, because that file
+executes inside the Claude Code harness — which is already node — and never in a user's shell
+(ADR 010). Nothing here may call it, import it, or acquire a runtime because it exists.
+
 **Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
 Homebrew, so anything the two versions read differently goes green locally and red only in CI.
 **Parenthesize a `//` default before binding it**: `(A // B) as $x`, never `A // B as $x`. `as`
@@ -322,7 +328,7 @@ that this repo's commands belong bare.
 
 ## Repo-global git state belongs to the orchestrator, never to an agent
 
-Agents share a `repo_root` by design — the rolling pool runs multiple `fix-dependency` agents
+Agents share a `repo_root` by design — the dispatch workflow runs multiple `fix-dependency` agents
 against the same repo at once, and a pin audit dispatched separately may still coincide with one in
 the narrow window the preflight does not close (`docs/adr/009-decouple-pin-audit.md`) — and
 worktree *paths* not colliding is not the same as repository state not colliding
@@ -337,11 +343,13 @@ worktree *paths* not colliding is not the same as repository state not colliding
   and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
   removes the caller's own entry; that is the whole cleanup an agent is entitled to.
 - **What an agent leaves behind is reaped by the orchestrator, one agent at a time**, through
-  `common/reap-agent-artifacts.sh`: on each completion, after the orchestrator has verified that
-  agent's pull request is open, and never for an agent that ended any other way. The verified open
-  PR is what makes the local branch delete safe (its tip is on origin), and the script is local
-  scope only, touching exactly one worktree path and one local ref, so it is legal while siblings
-  are in flight. It never prunes either. Its one administrative write is the narrow form of the
+  `common/reap-agent-artifacts.sh`: once that agent's result is in hand and its pull request has
+  been verified open, and never for an agent that ended any other way. The verified open PR is what
+  makes the local branch delete safe (its tip is on origin). Since issue #175 the reap runs after
+  the dispatch workflow returns, so in practice no sibling is in flight — but **the local-scope
+  rule is what makes it safe, not the timing**: the script touches exactly one worktree path and
+  one local ref, which is why it would be legal mid-flight too, and why nothing here may be
+  widened on the strength of "everything has finished by now." It never prunes either. Its one administrative write is the narrow form of the
   same rule: a worktree directory that is gone while its registration survives blocks both a later
   `worktree add` on that path and any `branch -D` of its branch, and `git worktree remove` refuses
   it, so the reap removes the **single** entry under `<git-common-dir>/worktrees/` whose `gitdir`
