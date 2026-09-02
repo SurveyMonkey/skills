@@ -53,11 +53,13 @@ Describe 'the audit rules that read a partially-parsed map'
     The output should equal '1'
   End
 
-  # The phase-6 alias carve-out used to be illustrated with a `kind: alias`
-  # pin, which phase 2 files `not-a-version-pin` and never tests, so the
-  # illustration named a pin the audit cannot reach (issue #48).
+  # The alias carve-out used to be illustrated with a `kind: alias` pin, which
+  # phase 2 files `not-a-version-pin` and never tests, so the illustration
+  # named a pin the audit cannot reach (issue #48). The rule moved into a
+  # bullet when phase 4 collapsed onto the driver (#174), so the fragment is no
+  # longer at the start of its line.
   It 'illustrates the alias carve-out with a pin phase 2 actually tests'
-    When call rule '^">=4.18.0"` is a version pin'
+    When call rule '">=4.18.0"` is a version pin'
     The status should be success
     The output should equal '1'
   End
@@ -86,6 +88,12 @@ count_in() { grep -c -e "$2" -- "$1" || true; }
 # names one guard and fails if the sentence carrying it leaves the file.
 Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+  # Phases 2, 4, 5 and 7 are executed by common/audit-pins-driver.sh, so a rule
+  # that is purely procedural now lives in the driver and is asserted there
+  # (scripts/CLAUDE.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
+  # rules that still govern the agent's own reading of a driver answer stay in
+  # the definition, and each example below says which file it is checking.
+  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/audit-pins-driver.sh"
 
   # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
   # no set has ever been installed together, and a PR removes a set. Without
@@ -129,16 +137,16 @@ Describe 'the rules that gate the removal PR'
   # manifest is still valid, the install still succeeds, and both parsers read
   # a lockfile they have no way to know is wrong.
   It 'restores the tree between the two attempts'
-    When call rule_in "$AGENT" 'Restore the tree before attempt 2'
+    When call rule_in "$DRIVER" 'Restore the tree before attempt 2'
     The status should be success
     The output should equal '1'
   End
 
-  # An Edit that silently matched nothing installs the manifest you started
+  # A removal that silently matched nothing installs the manifest you started
   # with, and every downstream step then reports the set as removed. The
   # adapter is the only thing that can say what the manifest now declares.
   It 'verifies the edits landed before the combined install'
-    When call rule_in "$AGENT" 'Verify the edits landed before installing'
+    When call rule_in "$DRIVER" 'Verify the edits landed before installing'
     The status should be success
     The output should equal '1'
   End
@@ -276,12 +284,12 @@ Describe 'the rules that gate the removal PR'
 
     # A trailing comma left by removing the last entry in an override block
     # produced an invalid manifest that only `jq` would have caught cleanly.
-    # The third occurrence is the workspace-override-file note (issue #159)
-    # saying the check does not apply to pnpm-workspace.yaml.
+    # The check moved into the driver with the edit it guards, and it runs at
+    # both edit sites: the per-pin removal and the combined set.
     It 'validates the manifest after the edit, before list_pins (#79c)'
-      When call rule_in "$AGENT" 'jq \. package\.json'
+      When call rule_in "$DRIVER" 'jq \. package\.json'
       The status should be success
-      The output should equal '3'
+      The output should equal '2'
     End
 
     It 'templates a direct-commit provenance ref (#79d)'

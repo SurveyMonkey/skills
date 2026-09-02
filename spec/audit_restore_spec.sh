@@ -1,23 +1,29 @@
 #!/bin/sh
 # shellcheck shell=sh
-# The pin audit's restore step, run as prescribed.
+# The pin audit's restore step, run as the driver writes it.
 #
-# agents/audit-pins.md phase 4 step 7 restores the manifest and the lockfile
-# between every pin and then verifies the restore, and that verification is the
-# only thing standing between a half-completed restore and a batch result
-# reported as a per-pin one. It is prose rather than a script, so these examples
-# lift the two commands straight out of the definition and run them: a shape
-# changed there without its consequence being thought through fails here.
+# `common/audit-pins-driver.sh` restores the manifest and the lockfile between
+# every pin and then verifies the restore, and that verification is the only
+# thing standing between a half-completed restore and a batch result reported
+# as a per-pin one. These examples lift the two commands straight out of the
+# driver and run them: a shape changed there without its consequence being
+# thought through fails here.
+#
+# The pair used to be prose in `agents/audit-pins.md` phase 4 step 7 and moved
+# into the driver with the loop it belongs to (issue #174); the behavioural
+# consequence — a failed verification ending the RUN — is asserted through the
+# driver's own JSON in spec/audit_driver_spec.sh. What this file adds is that
+# the two commands, executed, actually do what the rule claims.
 #
 # What used to be wrong is subtle enough to have survived review: `git checkout
 # --` restores from the **index** and `git diff --quiet` compares against the
 # **index**, so the restore and the check that exists to catch a failed restore
 # shared one movable reference (issue #46).
 
-Describe 'the prescribed pin-audit restore'
+Describe 'the pin-audit restore, as the driver writes it'
   After 'cleanup_fixture'
 
-  AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
+  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/audit-pins-driver.sh"
 
   # A repository with one commit: package.json and yarn.lock as HEAD holds them.
   audit_repo() {
@@ -39,28 +45,29 @@ Describe 'the prescribed pin-audit restore'
     git -C "$REPO" add package.json
   }
 
-  # The two commands as the definition writes them, with the placeholders
-  # substituted exactly as the agent is told to substitute them.
+  # The two commands as the driver writes them, with its seams substituted
+  # exactly as the driver substitutes them at run time: `git_at "$WT"` composes
+  # `git -C <worktree>` (plus any env_prefix), and `"${paths[@]}"` is the
+  # override file plus the lockfile the adapter named.
   #
-  # The pattern requires the `package.json` pathspec, because step 7's pair is
-  # what this file is about and it is not the only restore the definition
-  # prescribes any more: phase 7 restores `.yarn/cache` once, before the
-  # combined test, on a different pathspec and for a different reason (issue
-  # #72). Matching every `checkout`/`diff --quiet` would fold that one in and
-  # silently change what the two examples below execute, since they run
-  # whatever `prescribed` returns.
+  # The pattern requires the `"${paths[@]}"` pathspec, because the per-pin pair
+  # is what this file is about and it is not the only restore the driver runs:
+  # phase 7 restores `.yarn/cache` once, before the combined test, on a
+  # different pathspec and for a different reason (issue #72). Matching every
+  # `checkout`/`diff --quiet` would fold that one in and silently change what
+  # the two examples below execute, since they run whatever `prescribed`
+  # returns.
   prescribed() {
     # `[$]` rather than `\$`: the character class keeps the dollar literal for
     # grep without looking like an unexpanded variable to ShellCheck (SC2016).
-    grep -E 'git -C .[$]WORK/audit. (checkout|diff --quiet).*package[.]json' "$AGENT" \
-      | sed -e 's/^[[:space:]]*//' \
-            -e "s|\"\$WORK/audit\"|$REPO|" \
-            -e 's|<lockfile>|yarn.lock|'
+    grep -oE 'git_at "[$]WT" (checkout HEAD|diff --quiet HEAD) -- "[$][{]paths\[@\][}]"' "$DRIVER" \
+      | sed -e "s|git_at \"\$WT\"|git -C $REPO|" \
+            -e 's|"[$]{paths\[@\]}"|package.json yarn.lock|'
   }
 
-  # Counted, not executed: the command's own example is below.
+  # Counted, not executed: phase 7's own restore.
   cache_restore() {
-    grep -cE 'git -C .[$]WORK/audit. checkout HEAD -- [.]yarn/cache$' "$AGENT"
+    grep -cE 'git_at "[$]WT" checkout HEAD -- [.]yarn/cache' "$DRIVER"
   }
 
   # stderr is NOT discarded: a git that fails for some reason other than the one
@@ -79,10 +86,10 @@ EOF
   }
 
   # The line count is asserted, not just the two lines. Without it a third
-  # matching line added to the definition would still pass this example, and
-  # would silently change what the two examples below execute — they run
-  # whatever `prescribed` returns.
-  It 'prescribes exactly one restore and one verification'
+  # matching line added to the driver would still pass this example, and would
+  # silently change what the two examples below execute — they run whatever
+  # `prescribed` returns.
+  It 'writes exactly one restore and one verification'
     audit_repo
     When call prescribed
     The status should be success
@@ -108,18 +115,18 @@ EOF
   End
 
   # Phase 7's cache restore is a separate, single, differently-scoped command,
-  # gated on `ls-files` reporting something tracked. Folding it into step 7's
+  # gated on `ls-files` reporting something tracked. Folding it into the per-pin
   # pathspec would run it after every pin; dropping it would let per-pin cache
   # residue reach the removal commit.
-  It 'prescribes the cache restore once, on its own pathspec'
+  It 'runs the cache restore once, on its own pathspec'
     When call cache_restore
     The status should be success
     The output should equal '1'
   End
 
   # And the verification on its own must fail for a tree that matches only the
-  # index: that is a restore which did not happen, which is exactly the case
-  # step 7 exists to stop the run on.
+  # index: that is a restore which did not happen, which is exactly the case the
+  # driver ends the run on.
   It 'fails verification on a tree that matches the index but not HEAD'
     audit_repo
     stage_removal
