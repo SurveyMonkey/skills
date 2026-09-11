@@ -20,8 +20,9 @@ claude plugin install gh-security@SurveyMonkey/skills
 
 ### gh-security
 
-Resolves Dependabot security alerts for one repository, an entire org, or all of your own repos.
-Discovery ranks open alerts by severity and EPSS exploitability, you choose how much to fix (one
+Resolves Dependabot security alerts for the repositories you have checked out: the current one, or
+every repository checked out directly under the current directory. Discovery ranks open alerts by
+severity and EPSS exploitability, you choose how much to fix (one
 package, the highest severity tier, or everything), and the orchestrator dispatches one subagent
 per package major line per repo, each working in an isolated git worktree through to a pull
 request, open for review, that carries a computed merge-risk rating.
@@ -55,8 +56,10 @@ a time.
 - **A capacity-bounded pool of fix subagents.** One subagent per package major line per repo, each
   in its own git worktree under the target repo, dispatched by a single workflow that keeps the
   pool at the machine's capacity: every time one finishes, the next queued fix takes its slot.
-- **Repo, org, or user scope.** Point it at the current repo, a whole GitHub org, or everything
-  you own; org runs filter to repos you can actually push to.
+- **Scope is the checkouts you already have.** Run it inside a repository and that repository is
+  the scope; run it one level up and the scope is every repository checked out directly under the
+  current directory. Nothing is cloned: a repository you want included is one you clone yourself,
+  which is what you would do anyway to review the pull request.
 - **Risk-ranked discovery.** Alerts are grouped by package and major line, then ranked by
   severity and EPSS exploitability so the worst goes first.
 - **A merge-risk rating on every PR.** Seven scored factors (version delta, runtime exposure,

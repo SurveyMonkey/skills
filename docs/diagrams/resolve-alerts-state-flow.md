@@ -43,9 +43,10 @@ them.
 ## Diagram 1: the orchestrator
 
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
-decides, and nothing dispatches without one. The ask sites are phase 1's what-to-operate-on when
-the working directory is in no repository, phase 3's how-much, phase 4's batch approval, phase 5's
-once-per-run clone destination, and phase 8's offer of the groups declined at phase 3.
+decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
+approval, and phase 8's offer of the groups declined at phase 3. Phase 1 asks nothing: scope is the
+checkouts on disk, read by `discover-repos.sh`, and nothing is ever cloned
+([ADR 011](../adr/011-scope-is-the-checkouts-on-disk.md)).
 
 **No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
 into being, and phase 8's offer dispatches further work, the groups declined at phase 3, rather
@@ -55,29 +56,43 @@ open ready for review and no phase acts on one afterwards ([ADR
 all ([issue #108](https://github.com/SurveyMonkey/skills/issues/108)): it is entered only via
 `/gh-security:audit-pins`, diagram 3.
 
-Three branches exclude one repo's groups without ending the run — phase 5's checkout conflict and
-unresolvable default branch, and phase 6's failed registry probe; they are drawn as plain nodes
-for that reason.
+Three branches exclude a whole checkout's groups without ending the run: phase 1's unusable
+checkouts (no `nwo` from origin, no resolvable default branch, or a branch-namespace probe that
+failed twice), phase 2's pipeline failing for that checkout (a non-zero exit from
+`discover-alerts.sh`, `select-adapter.sh` or `classify-lines.sh`), and phase 5's registry probe
+failing twice for that repo, the adapter `detect` that resolves the probe's package manager
+included. They are drawn as plain nodes for that reason, and the excluded checkout is reported by
+name while the others carry on. Separately, `classify-lines.sh` withdraws individual groups
+(`requires_major_bump`, `cross_line_collision`) without excluding their checkout; those are drawn at
+`P2W` and `P2WC`. Everything that can withdraw a group now runs before the ranked table, so the
+plan approved at phase 4 is final rather than provisional.
 
 ```mermaid
 flowchart TD
     START["/gh-security:resolve-alerts, or a natural-language ask"] --> P1
-    P1["Phase 1: detect-scope.sh"] --> P1Q{"inside a git repository?"}
-    P1Q -->|"yes: repo scope"| P1R{"nwo resolved from origin?"}
-    P1Q -->|"no: scope null"| P1ASK{"ask: this org, my repos,<br/>or one named repo?"}
-    P1ASK -->|"org / user"| P2
-    P1ASK -->|"one named repo"| P2
-    P1R -->|null| STOP0(["Stop: the checkout has no usable origin"])
-    P1R -->|yes| P1D{"default_branch resolved?"}
-    P1D -->|null| STOP1(["Stop: origin's default branch<br/>could not be resolved"])
-    P1D -->|yes| P1E["Resolve env_prefix at repo scope: the prefix session<br/>context states for this tree, if any. The orchestrator's<br/>own gh/git/script calls for the repo run under it from here on"] --> P2
+    P1["Phase 1: discover-repos.sh"] --> P1F{"discover-repos.sh exit status"}
+    P1F -->|"non-zero: a git failure, or a target that is<br/>unreadable or not a directory"| STOPD(["Stop: report the script's error;<br/>nothing is in scope"])
+    P1F -->|zero| P1Q{"any checkout roots?"}
+    P1Q -->|"none"| STOP0(["Stop: no git repositories<br/>directly inside the current directory"])
+    P1Q -->|"one or more"| P1E["Per checkout root: env_prefix first, from what session context<br/>states for that tree, then detect-scope.sh for nwo and<br/>default_branch, then the ls-remote branch-namespace probe.<br/>The orchestrator's own gh/git/script calls for that repo<br/>run under its prefix from the start"]
+    P1E --> P1R{"per root: nwo, default_branch<br/>and probe all usable?"}
+    P1R -->|"null nwo, null default_branch,<br/>or the probe failed twice"| P1X["Reported by name and excluded;<br/>the other roots continue"]
+    P1X --> P1S{"any root left?"}
+    P1S -->|no| STOP1(["Stop: every checkout was excluded,<br/>each reported by name"])
+    P1S -->|yes| P2
+    P1R -->|yes| P2
 
-    P2["Phase 2: discover-alerts.sh | select-adapter.sh<br/>| classify-lines.sh (repo scope only)"] --> P2REP["Report every skipped_repos entry by name,<br/>every time it is non-empty"]
+    P2["Phase 2: per surviving checkout: discover-alerts.sh<br/>| select-adapter.sh | classify-lines.sh --base-ref"] --> P2F{"pipeline exit status<br/>for that checkout"}
+    P2F -->|"non-zero from discover-alerts.sh,<br/>select-adapter.sh or classify-lines.sh"| P2FX["That checkout is reported by name and excluded;<br/>the other checkouts continue"] --> P7AGG
+    P2F -->|zero| P2R{"classify-lines verdict<br/>per group, before the table"}
+    P2R -->|requires_major_bump| P2W["Withdrawn before the plan is shown;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
+    P2R -->|cross_line_collision| P2WC["Withdrawn before the plan is shown; reported in<br/>phase 7 under 'shared parent across major lines'<br/>with collision_parents"] --> P7AGG
+    P2R -->|"remaining groups"| P2REP["Report every excluded checkout by name"]
     P2REP --> P2Q{"actionable groups?"}
-    P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and skipped repo"])
+    P2Q -->|none| STOP2(["Stop: report every skipped group<br/>and every excluded checkout"])
     P2Q -->|"one or more"| P3
 
-    P3["Phase 3: ranked table<br/>(Repo column at org/user scope only)"] --> P3ASK{"ask: how much to fix?"}
+    P3["Phase 3: ranked table<br/>(Repo column when more than one<br/>checkout is in scope)"] --> P3ASK{"ask: how much to fix?"}
     P3ASK -->|One| P4
     P3ASK -->|"Highest tier"| P4
     P3ASK -->|Everything| P4
@@ -85,29 +100,11 @@ flowchart TD
     P4["Phase 4: detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve the batch?"}
     P4ASK1 -->|approve| P4OK
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
-    P4OK["Batch approved"] --> P5Q{"scope"}
+    P4OK["Batch approved"] --> P5
 
-    P5Q -->|"repo scope from a local checkout"| P6
-    P5Q -->|"org / user, or one named repo"| P5ASK{"ask once for the run: where new clones go —<br/>a directory the user names and keeps,<br/>or a temporary one removed in phase 7"}
-    P5ASK --> P5["Phase 5: per distinct repo in the batch"]
-    P5 --> P5E["Resolve env_prefix per repo from what session context states<br/>for the checkout's tree; clone, fetch and the calls below run under it"]
-    P5E --> P5A{"checkout already at the destination path?"}
-    P5A -->|"git repo exists"| P5F["git -C fetch origin"] --> P5B
-    P5A -->|"nothing there"| P5C["gh repo clone into the chosen destination"] --> P5B
-    P5A -->|"wrong remote / not a repo"| P5X["Report the conflict, exclude that repo's<br/>groups; the other repos continue"]
-    P5B{"detect-scope.sh default_branch?"}
-    P5B -->|null| P5Y["Report that repo blocked, exclude its<br/>groups; the other repos continue"]
-    P5B -->|yes| P5R["Reconcile: classify-lines.sh --repo-root<br/>on that repo's approved groups"]
-    P5R --> P5RQ{"any group reclassifies<br/>to a skip?"}
-    P5RQ -->|requires_major_bump| P5W["Withdraw from the phase 6 queue;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
-    P5RQ -->|cross_line_collision| P5WC["Withdraw from the phase 6 queue;<br/>reported in phase 7 under 'shared parent across<br/>major lines' with collision_parents"] --> P7AGG
-    P5RQ -->|"remaining groups"| P6
-    P5X --> P6
-    P5Y --> P6
-
-    P6["Phase 6: ensure-worktree-exclude.sh once per repo, before<br/>the first agent for that repo (failure non-fatal, dispatch anyway)"] --> P6P{"Registry probe per repo, from inside repo_root,<br/>under env_prefix: pm_exec view on a scoped dependency,<br/>or the top-ranked package; one retry"}
+    P5["Phase 5: per distinct repo in the approved batch:<br/>ensure-worktree-exclude.sh before the first agent for that repo<br/>(failure non-fatal, dispatch anyway), then the registry probe"] --> P6P{"Registry probe per repo, from inside repo_root,<br/>under env_prefix: pm_exec view on a scoped dependency,<br/>or the top-ranked package; one retry"}
     P6P -->|"fails twice: auth 401/403, not-found 404,<br/>or network"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
-    P6P -->|green| P6Q["Dispatch list: every approved group across every repo,<br/>in ranked order, one payload each"]
+    P6P -->|green| P6Q["Phase 6 dispatch list: every approved group across<br/>every repo, in ranked order, one payload each"]
     P6Q --> P6D["One Workflow call, machine-wide: cap workers over the list,<br/>one fix-dependency agent per group, each result<br/>schema-validated against the agent Result contract"]
     P6D --> P6R["Per returned entry: one post-agent.sh call<br/>(PR verified, then reap or leave, always reported)"]
     P6R --> P7
@@ -121,7 +118,7 @@ flowchart TD
     P7N --> P7AGG
     P7F --> P7AGG
     P7U --> P7AGG
-    P7AGG["requires_major_bump[] first, then unaddressed skipped_repos<br/>and registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then what the reap removed and left,<br/>then the temporary clone destination removed only if<br/>every group in it verified an open PR and kept otherwise,<br/>then deduplicated observations by type"] --> P8
+    P7AGG["requires_major_bump[] first, then the checkouts excluded<br/>in phases 1 and 2 and the registry-preflight exclusions,<br/>then the shared-parent-across-major-lines skips<br/>with their collision_parents,<br/>then what the reap removed and left,<br/>then deduplicated observations by type"] --> P8
 
     P8{"Phase 8: actionable groups remain?"}
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
@@ -129,7 +126,7 @@ flowchart TD
     P8ASK0 -->|no| P8REP
     P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); pr-status.sh on every success PR:<br/>checks, merge_state, reported as information"]
     P8REP --> DONE
-    DONE(["Done: every PR URL with its band and check state,<br/>remaining skipped_repos, and what would unblock each"])
+    DONE(["Done: every PR URL with its band and check state,<br/>every excluded checkout, and what would unblock each"])
 
     subgraph WFBOX["workflows/fix-groups.mjs — tested JavaScript, not model-executed prose"]
         P6D
