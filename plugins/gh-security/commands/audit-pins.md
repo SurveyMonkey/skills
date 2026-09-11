@@ -18,8 +18,8 @@ repository, directly: this entry point does not discover or fix alerts.
 ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
 ```
 
-The audit is **repo-scoped**, and stays so even though alert resolution now reaches org and user
-scope: one `audit-pins` agent tests one repository's pins. `scope` is `repo` when the working
+The audit is **repo-scoped**, and stays so even when `resolve-alerts` runs across several
+checkouts: one `audit-pins` agent tests one repository's pins. `scope` is `repo` when the working
 directory is inside a git repository and `null` when it is not; nothing is inferred from what the
 directories are named (issue #134). If `scope` is null, say that this command audits a single
 repository and ask which one, or ask the user to run it from that repo's checkout; then continue

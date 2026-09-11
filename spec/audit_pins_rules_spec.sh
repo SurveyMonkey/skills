@@ -600,12 +600,12 @@ Describe 'the env_prefix dispatch contract (#106)'
   # Session context is the trigger for the whole contract: without this
   # sentence no dispatcher ever resolves a prefix and every pin below it
   # guards a field nothing populates. It replaced a probe for one environment
-  # manager's config file (#135). SKILL.md carries it twice (phase 1 at repo
-  # scope, phase 5 per repo at org and user scope) and the audit command once
-  # (step 1).
+  # manager's config file (#135). SKILL.md carries it once (phase 1, applied
+  # per checkout in scope, since every checkout exists before anything is
+  # asked, issue #188) and the audit command once (step 1).
   Describe 'the session-context trigger sentence at every dispatch site'
     Parameters
-      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md" 2
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md" 1
       "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md" 1
     End
 

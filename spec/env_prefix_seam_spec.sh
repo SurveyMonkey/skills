@@ -3,7 +3,7 @@
 # `env_prefix` is an opaque, optional seam (issue #135).
 #
 # The plugin used to name one environment manager and construct its prefix
-# itself: phase 1 and phase 5 probed for a `.envrc` at or above `repo_root`
+# itself: the orchestrator probed for a `.envrc` at or above `repo_root`
 # and built `direnv exec <repo_root>` from what they found, and the agent
 # definitions explained the composition rules in that manager's terms. A
 # generally applicable skill cannot assume one manager, or that per-directory
@@ -71,7 +71,7 @@ Describe 'env_prefix as an opaque seam (issue #135)'
   # The opacity is a property of the consumer, not of the whole plugin. The
   # dispatcher has to recognize a context statement and instantiate it against
   # a directory; an unscoped "never construct one" reads as forbidding the act
-  # phase 5 requires.
+  # phase 1 requires.
   It 'scopes the opacity to the agent rather than to the dispatcher'
     When call phrase_in "$CONV" 'The opacity is the agent.s, not the dispatcher.s'
     The status should be success
@@ -85,14 +85,11 @@ Describe 'env_prefix as an opaque seam (issue #135)'
   End
 
   Describe 'the orchestrator takes the prefix from session context'
-    It 'says so at repo scope, in phase 1'
+    # Once, in phase 1, and once per checkout in scope: every checkout is
+    # present before anything is asked (issue #188), so there is no second
+    # resolution site later in the run.
+    It 'says so once, in phase 1'
       When call phrase_in "$SKILL" 'take it from your session context'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says so per repo, in phase 5'
-      When call phrase_in "$SKILL" 'whatever prefix your session context states for the'
       The status should be success
       The output should equal '1'
     End
@@ -103,13 +100,12 @@ Describe 'env_prefix as an opaque seam (issue #135)'
       The output should equal '1'
     End
 
-    # A stated prefix is commonly path-parameterized, so phase 5 has to say
-    # which directory it is instantiated against. The checkout is the wrong
-    # answer: step 2 creates it, under this very prefix, so a prefix naming it
-    # fails on the clone that would bring it into existence.
-    It 'instantiates a path-taking prefix against the destination, not the checkout'
-      When call phrase_in "$SKILL" \
-        'instantiate it against the destination directory this run chose, never'
+    # A stated prefix is commonly path-parameterized, so phase 1 has to say
+    # which directory it is instantiated against. The checkout is now the
+    # only answer: nothing is ever cloned (issue #188), so the checkout always
+    # exists and there is no destination directory to name instead.
+    It 'instantiates a path-taking prefix against the checkout itself'
+      When call phrase_in "$SKILL" 'instantiate it against the checkout itself'
       The status should be success
       The output should equal '1'
     End

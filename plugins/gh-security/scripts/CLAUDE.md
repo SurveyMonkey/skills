@@ -36,7 +36,7 @@ only on other people's machines.
 
 | Path | Scope |
 |---|---|
-| `common/` | Ecosystem-agnostic: scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status, advisory lookup, worktree ignore setup, agent artifact reaping |
+| `common/` | Ecosystem-agnostic: checkout discovery, scope detection, alert discovery, adapter routing, risk scoring, capacity detection, PR status, advisory lookup, worktree ignore setup, agent artifact reaping |
 | `ecosystems/` | One adapter per GitHub advisory ecosystem. `node.sh` handles `npm` alerts |
 
 ## Adapter contract
@@ -296,14 +296,14 @@ supplies.
 
 **The opacity is the agent's, not the dispatcher's.** The dispatcher does have to recognize a
 context statement, and to instantiate the prefix against a directory where the statement takes one
-(SKILL.md phase 5 says which directory, and why it is not the checkout path). That happens once,
-before the repo's first command. From then on the prefix is a literal string that is threaded and
-prepended and never re-derived, by the dispatcher or by any agent it dispatches.
+(SKILL.md phase 1: the checkout itself, which always exists because nothing is ever cloned). That
+happens once, before the repo's first command. From then on the prefix is a literal string that is
+threaded and prepended and never re-derived, by the dispatcher or by any agent it dispatches.
 Absent any such context there is no prefix and nothing extra happens, which is the ordinary
 single-login case ([#135](https://github.com/SurveyMonkey/skills/issues/135)).
 
-The contract is one optional dispatch field. The dispatcher — `resolve-alerts` SKILL.md phase 1
-(repo scope) or phase 5 (org and user scope), or the `audit-pins` command's step 1 — resolves
+The contract is one optional dispatch field. The dispatcher — `resolve-alerts` SKILL.md phase 1,
+once per checkout in scope, or the `audit-pins` command's step 1 — resolves
 `env_prefix` from session context, runs its own `gh`/`git`/script invocations for that repo under
 it, and carries it in the dispatch payload. Each agent then prepends it verbatim to every `gh`,
 `git`, package-manager, and adapter-script invocation — composed **after** the command's own `cd`
