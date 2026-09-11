@@ -2,9 +2,12 @@
 # discover-alerts.sh: fetch and rank open Dependabot alerts by package major line
 #
 # Usage:
-#   discover-alerts.sh [--scope repo] [--branch-style slash|flat] <owner/repo>
-#   discover-alerts.sh --scope org [--branch-style slash|flat] <org>
-#   discover-alerts.sh --scope user [--branch-style slash|flat] [login]
+#   discover-alerts.sh [--branch-style slash|flat] <owner/repo>
+#
+# One repository per invocation. The repositories in scope are the checkouts
+# already on disk, and `discover-repos.sh` is what names them; this script is
+# run once per checkout, against the `owner/repo` that checkout's remote
+# resolves to.
 #
 # --branch-style selects the branch naming scheme every emitted `branch_name`
 # uses: `slash` (the default, `fix/dependabot-<pkg>-<line>x`) or `flat`
@@ -12,47 +15,21 @@
 # remote with a pre-existing branch literally named `fix` (`refs/heads/fix`)
 # rejects every `fix/*` push with `(directory file conflict)` — discovered on
 # a field run only after each fix agent had finished all of its work (issue
-# #123). The caller probes the remote (`git ls-remote --heads origin fix`,
-# resolve-alerts SKILL.md) and passes `flat` when the slash namespace is
-# blocked; this script applies the scheme, it never probes. The flag covers
-# every repo in the invocation, so cross-repo scopes — where the namespace is
-# a per-repo fact — rewrite per repo through classify-lines.sh instead.
+# #123). The caller probes the remote (`git ls-remote --heads origin
+# refs/heads/fix`, resolve-alerts SKILL.md) and passes `flat` when the slash
+# namespace is blocked; this script applies the scheme, it never probes. The
+# namespace is a per-repo fact, and the caller runs discovery once per
+# checkout and passes that checkout's own style.
 #
-# Scope strategy (RFC 001 Phase 3, issue #6):
-#   repo  GET /repos/{owner}/{repo}/dependabot/alerts (unchanged, single call)
-#   org   GET /orgs/{org}/dependabot/alerts (aggregate, paginated). On a 403
-#         (no org-level security visibility), falls back to enumerating
-#         GET /orgs/{org}/repos and fanning out per repo inside this script.
-#   user  No aggregate endpoint exists. Enumerates GET /user/repos?type=owner
-#         (the authenticated user's own repos) and fans out per repo inside
-#         this script.
+# Alerts come from GET /repos/{owner}/{repo}/dependabot/alerts (paginated).
 #
-# At org and user scope — including the org aggregate path, not only the
-# fallback — each candidate repo's push permission is checked, and forks are
-# excluded (archived repos too, on the fallback path; the aggregate response
-# cannot name one, see the org-scope 403 handling below). None of these are
-# ever dispatched; each is recorded in the top-level `skipped_repos` array by
-# name and reason so the caller can report it, never silently dropped (RFC
-# 001, "it must never be silent"; issue #43 for fork/archived). Org alert
-# visibility (security manager) and per-repo push access are separate grants,
-# so a repo the aggregate endpoint reports on is not necessarily one this user
-# can push to. `skipped_repos` is always present, and empty only at repo
-# scope.
-#
-# EMU orgs are out of scope (RFC 001 Non-Goals): this script does not detect
-# or special-case them. The boundary is the ambient credential set a gh/git
-# invocation resolves, not EMU-ness — a session with directory-scoped work
-# credentials can reach an EMU repo's alerts at repo scope end to end; asking
-# an EMU org for its aggregate alert list is what RFC 001 never covers.
-#
-# Output: JSON with three top-level keys:
+# Output: JSON with two top-level keys:
 #   actionable:   groups with a fix available and no open PR (sorted by
-#                 severity then EPSS; repo and package break remaining ties)
+#                 severity then EPSS; package and then major line break
+#                 remaining ties — `repo` is constant, one repository per
+#                 invocation)
 #   skipped:      groups excluded (no fix, PR already open, or unsupported
 #                 ecosystem), with reason
-#   skipped_repos: repos excluded from a cross-repo scope for lack of push
-#                 access, for being a fork or archived, or because their
-#                 alerts could not be fetched
 #
 # Each group:
 #   { repo, package, ecosystem, major_line, max_severity, max_epss_percentile,
@@ -87,19 +64,10 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-SCOPE="repo"
 BRANCH_STYLE="slash"
 TARGET=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --scope)
-      SCOPE="${2:?--scope requires a value}"
-      shift 2
-      ;;
-    --scope=*)
-      SCOPE="${1#--scope=}"
-      shift
-      ;;
     --branch-style)
       BRANCH_STYLE="${2:?--branch-style requires a value}"
       shift 2
@@ -119,14 +87,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$SCOPE" in
-  repo|org|user) ;;
-  *)
-    printf '{"error":"Unknown scope: %s (expected repo, org, or user)"}\n' "$SCOPE" >&2
-    exit 1
-    ;;
-esac
-
 case "$BRANCH_STYLE" in
   slash|flat) ;;
   *)
@@ -135,12 +95,8 @@ case "$BRANCH_STYLE" in
     ;;
 esac
 
-if [ "$SCOPE" = "repo" ] && [ -z "$TARGET" ]; then
-  printf '{"error":"Usage: discover-alerts.sh [--scope repo] <owner/repo>"}\n' >&2
-  exit 1
-fi
-if [ "$SCOPE" = "org" ] && [ -z "$TARGET" ]; then
-  printf '{"error":"Usage: discover-alerts.sh --scope org <org>"}\n' >&2
+if [ -z "$TARGET" ]; then
+  printf '{"error":"Usage: discover-alerts.sh [--branch-style slash|flat] <owner/repo>"}\n' >&2
   exit 1
 fi
 
@@ -153,9 +109,11 @@ trap 'rm -f "$ERR_FILE"' EXIT
 # line later does not rename the branch it already had.
 #
 # Two spellings of the same name, selected by --branch-style (header comment).
-# The flat scheme differs from the slash one only in the first separator, so a
-# name converts between them without re-deriving anything, which is what lets
-# classify-lines.sh rewrite per repo at cross-repo scopes.
+# The orchestrator passes the style to this script directly, so the names come
+# out in the right scheme to begin with. classify-lines.sh keeps a
+# --branch-style of its own for a caller that learns the namespace verdict
+# only after discovery has run, and that conversion needs no re-derivation
+# because the two spellings differ only in the first separator.
 slash_branch_name() {
   case "$2" in
     none) printf 'fix/dependabot-%s-unfixed' "$1" ;;
@@ -242,76 +200,31 @@ highest_version() {
   printf '%s\n' "$best"
 }
 
-# The API's own message out of a failed `gh api` invocation. gh formats an
-# error as `gh: <message> (HTTP <code>)`, where `<message>` is the response
-# body's `.message` when the body is JSON; anything it cannot parse is relayed
-# unchanged, so the fallback is the text itself. Classification reads this
-# rather than gh's whole formatted line, so neither the `gh:` prefix nor the
-# status code can match a content pattern.
-api_error_message() {
-  printf '%s\n' "$1" | sed -e 's/^gh: //' -e 's/ (HTTP [0-9][0-9]*)[[:space:]]*$//'
-}
-
-# The HTTP status gh reported, or empty when it reported none.
-http_status_of() {
-  printf '%s\n' "$1" | sed -n 's/.*(HTTP \([0-9][0-9]*\)).*/\1/p' | tail -1
-}
-
-# Word-boundary match of an ERE alternation (lowercase) against a message.
-#
-# Free substring matching misfires in both directions: an ordinary
-# permission-shaped 403 naming an org like `tessso-corp` contains `sso` and was
-# hard-failing as an SSO block instead of falling back (issue #39). The
-# boundaries are spelled with POSIX classes rather than `\b`, which BSD ERE
-# does not support.
-err_mentions() {
-  printf '%s\n' "$1" \
-    | tr '[:upper:]' '[:lower:]' \
-    | grep -Eq "(^|[^a-z0-9])($2)([^a-z0-9]|\$)"
-}
-
-# Classify a JSON payload against the "array of alerts" contract without
-# exiting, so a caller that must hard-stop (a top-level scope) and a caller
-# that must record a per-repo skip and continue (the fan-out) can share one
-# classification instead of the fan-out re-deriving a weaker check that
-# discards the API's own `.message`.
-#
-# Exit status: 0 clean array (nothing printed), 2 not valid JSON at all
-# (nothing printed; there is no `.message` to read from non-JSON), 3 valid
-# JSON but not an array (the API's own `.message`, when present, printed on
-# stdout).
-classify_alerts_json() {
-  json="$1"
-  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
-    return 2
-  fi
-  if ! printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    printf '%s' "$json" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null
-    return 3
-  fi
-  return 0
-}
-
-# Fail loudly on anything that is not a JSON array of alerts: an empty array is
-# a legitimate "no alerts" answer, but a JSON error object or non-JSON body
-# must never be silently treated as zero alerts.
+# Fail loudly on anything that is not the array `gh api --paginate --slurp`
+# produces: one entry per response page, each of them an array of alerts. An
+# empty array is a legitimate "no alerts" answer, but a JSON error object or
+# non-JSON body must never be silently treated as zero alerts. The API's own
+# `.message` is quoted when the body is JSON at all; a non-JSON body has none
+# to read, so the two cases report differently.
 validate_alerts_json() {
   label="$1"
   json="$2"
 
-  msg=$(classify_alerts_json "$json") && return 0
-  status=$?
-  if [ "$status" -eq 2 ]; then
+  if ! printf '%s' "$json" | jq empty 2>/dev/null; then
     printf '{"error":"Invalid JSON response for %s"}\n' "$label" >&2
-  else
-    printf '{"error":"Unexpected API response for %s: %s"}\n' "$label" "$msg" >&2
+    exit 1
   fi
-  exit 1
+  if ! printf '%s' "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    msg=$(printf '%s' "$json" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
+    printf '{"error":"Unexpected API response for %s: %s"}\n' "$label" "$msg" >&2
+    exit 1
+  fi
 }
 
-# Group one repo's flat alert array into the actionable/skipped contract,
-# tagging every group with `repo`. `alerts_json` is a flat JSON array of alert
-# objects (already flattened out of any paginated page nesting).
+# Group one repo's alerts into the actionable/skipped contract, tagging every
+# group with `repo`. `alerts_json` arrives as `gh api --paginate --slurp` left
+# it — an array of response pages, not a flat array of alerts — and the
+# `flatten` opening the jq program below is what collapses that page nesting.
 group_repo_alerts() {
   repo="$1"
   alerts_json="$2"
@@ -443,13 +356,13 @@ group_repo_alerts() {
     ecosystem=$(printf '%s' "$group" | jq -r '.ecosystem // "unknown"')
     if [ -n "$versions" ]; then
       # The failure check is explicit, never left to `set -e`: this whole
-      # function runs inside `res=$(group_repo_alerts ...) || exit 1` at its
-      # call sites, and bash suppresses errexit throughout the left side of
-      # `||`, so a compare_versions failure inside highest_version was
-      # swallowed and discovery reported success under the bash the shebang
-      # actually invokes. The suite only saw the correct refusal because
-      # /bin/sh (POSIX mode) propagates the failure where bash does not
-      # (issue #58); CI's bash leg is what caught it.
+      # function runs inside `RESULT=$(group_repo_alerts "$TARGET" "$ALERTS")
+      # || exit 1` at its call site, and bash suppresses errexit throughout
+      # the left side of `||`, so a compare_versions failure inside
+      # highest_version was swallowed and discovery reported success under the
+      # bash the shebang actually invokes. The suite only saw the correct
+      # refusal because /bin/sh (POSIX mode) propagates the failure where bash
+      # does not (issue #58); CI's bash leg is what caught it.
       highest=$(printf '%s\n' "$versions" | highest_version "$ecosystem") || exit 1
       [ -n "$highest" ] || highest="none"
     else
@@ -555,344 +468,17 @@ group_repo_alerts() {
   }
 }
 
-# Combine per-repo {actionable, skipped} blobs (one per line on stdin) into a
-# single result, globally re-ranked. Severity and EPSS still lead the sort;
-# repo and package break remaining ties so a multi-repo scope comes out in a
-# stable order.
-combine_results() {
-  jq -s '
-    def sev_rank:
-      if . == "critical" then 0
-      elif . == "high" then 1
-      elif . == "medium" then 2
-      elif . == "low" then 3
-      else 4 end;
-    {
-      actionable: ([.[].actionable[]] | sort_by(
-        [(.max_severity | sev_rank), -(.max_epss_percentile), .repo, .package, .major_line]
-      )),
-      skipped: [.[].skipped[]]
-    }
-  '
+ALERTS=$(gh api "repos/$TARGET/dependabot/alerts?state=open&per_page=100" \
+  --paginate --slurp 2>"$ERR_FILE") || {
+  printf '{"error":"Failed to fetch alerts for %s: %s"}\n' "$TARGET" "$(cat "$ERR_FILE")" >&2
+  exit 1
 }
-
-# Fetch and validate a `gh api` repo listing (org repos or the authenticated
-# user's repos), reducing every row to the three fields the callers need.
-#
-# `push_status` distinguishes a genuine denial ("false") from a row that
-# carries no usable `push` boolean ("unknown"): `// false` alone collapses both
-# to the same reason, misattributing an absent-data case as a denial (the same
-# absent-vs-false trap documented in scripts/CLAUDE.md for
-# score-merge-risk.sh). An explicit `"push": null` is absent data too, so the
-# test is on the value's *type*, not on the key being present (issue #40).
-repo_listing_rows() {
-  api_path="$1"
-
-  list=$(gh api "$api_path" --paginate --slurp 2>"$ERR_FILE") || {
-    printf '{"error":"Failed to list repos via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
-    exit 1
-  }
-  printf '%s' "$list" | jq empty 2>/dev/null || {
-    printf '{"error":"Invalid JSON response listing repos via %s"}\n' "$api_path" >&2
-    exit 1
-  }
-  printf '%s' "$list" | jq -e 'type == "array"' >/dev/null 2>&1 || {
-    msg=$(printf '%s' "$list" | jq -r '.message // "Response is not a JSON array"' 2>/dev/null)
-    printf '{"error":"Unexpected repo listing response via %s: %s"}\n' "$api_path" "$msg" >&2
-    exit 1
-  }
-
-  printf '%s' "$list" | jq -c '
-    flatten
-    | map({
-        full_name,
-        fork: (.fork // false),
-        archived: (.archived // false),
-        push_status: (
-          if ((.permissions | type) == "object")
-             and ((.permissions.push | type) == "boolean")
-          then (if .permissions.push then "true" else "false" end)
-          else "unknown"
-          end
-        )
-      })
-  ' 2>"$ERR_FILE" || {
-    printf '{"error":"Failed to process repo listing via %s: %s"}\n' "$api_path" "$(cat "$ERR_FILE")" >&2
-    exit 1
-  }
+validate_alerts_json "$TARGET" "$ALERTS"
+RESULT=$(group_repo_alerts "$TARGET" "$ALERTS") || exit 1
+# Both arms of group_repo_alerts arrive here: the early "no groups" literal
+# and the jq-assembled report. Both leave through the same jq, so an empty
+# answer and a populated one are formatted identically.
+printf '%s\n' "$RESULT" | jq . || {
+  printf '{"error":"Internal error: failed to format output JSON for %s"}\n' "$TARGET" >&2
+  exit 1
 }
-
-# One `skipped_repos` entry for a repo excluded on push grounds. Shared so the
-# aggregate path and the fan-out cannot drift on the reason strings a caller
-# reports.
-push_skip_entry() {
-  case "$2" in
-    false)
-      jq -n --arg repo "$1" --arg reason "no push access" \
-        '{repo: $repo, reason: $reason}'
-      ;;
-    *)
-      jq -n --arg repo "$1" \
-        --arg reason "permission data missing from API response" \
-        '{repo: $repo, reason: $reason}'
-      ;;
-  esac
-}
-
-# One `skipped_repos` entry for a repo excluded on a repo-attribute ground
-# (fork, archived). Same shape as `push_skip_entry`, shared so the aggregate
-# path and the fan-out cannot drift on the reason strings either (issue #43).
-attribute_skip_entry() {
-  jq -n --arg repo "$1" --arg reason "$2" '{repo: $repo, reason: $reason}'
-}
-
-# Assemble a cross-repo result: per-repo {actionable, skipped} blobs on stdin,
-# one per line, `skipped_repos` JSON as $1.
-emit_combined() {
-  blobs=$(cat)
-  if [ -n "$blobs" ]; then
-    combined=$(printf '%s\n' "$blobs" | combine_results)
-  else
-    combined='{"actionable":[],"skipped":[]}'
-  fi
-  printf '%s' "$combined" | jq --argjson sr "$1" '. + {skipped_repos: $sr}'
-}
-
-# Fetch, validate, group, and combine alerts across every repo listed by a
-# `gh api` listing endpoint (org repos or the authenticated user's repos).
-# Forks and archived repos are never dispatch targets, and repos without push
-# access are never dispatch targets either; all three are recorded in
-# `skipped_repos` with an explicit reason, never dropped silently, per the
-# RFC's "must never be silent" requirement (issue #43 for fork/archived,
-# issue #38 for push access).
-fan_out() {
-  api_path="$1"
-
-  CANDIDATES=$(repo_listing_rows "$api_path")
-
-  results=()
-  skipped_repos=()
-
-  rows=$(printf '%s' "$CANDIDATES" | jq -c '.[]')
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    full_name=$(printf '%s' "$row" | jq -r '.full_name')
-    is_fork=$(printf '%s' "$row" | jq -r '.fork')
-    is_archived=$(printf '%s' "$row" | jq -r '.archived')
-    push_status=$(printf '%s' "$row" | jq -r '.push_status')
-
-    if [ "$is_fork" = "true" ]; then
-      skipped_repos+=("$(attribute_skip_entry "$full_name" "fork repository")")
-      continue
-    fi
-    if [ "$is_archived" = "true" ]; then
-      skipped_repos+=("$(attribute_skip_entry "$full_name" "archived repository")")
-      continue
-    fi
-
-    if [ "$push_status" != "true" ]; then
-      skipped_repos+=("$(push_skip_entry "$full_name" "$push_status")")
-      continue
-    fi
-
-    repo_alerts_err=$(mktemp)
-    if ! repo_alerts=$(gh api "repos/$full_name/dependabot/alerts?state=open&per_page=100" \
-      --paginate --slurp 2>"$repo_alerts_err"); then
-      skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "alert fetch failed" \
-        --arg err "$(cat "$repo_alerts_err")" '{repo: $repo, reason: $reason, error: $err}')")
-      rm -f "$repo_alerts_err"
-      continue
-    fi
-    rm -f "$repo_alerts_err"
-
-    if problem_msg=$(classify_alerts_json "$repo_alerts"); then
-      res=$(group_repo_alerts "$full_name" "$repo_alerts") || exit 1
-      results+=("$res")
-    else
-      classify_status=$?
-      if [ "$classify_status" -eq 2 ]; then
-        detail="invalid JSON in alert response"
-      else
-        detail="$problem_msg"
-      fi
-      skipped_repos+=("$(jq -n --arg repo "$full_name" --arg reason "invalid alert response" \
-        --arg err "$detail" '{repo: $repo, reason: $reason, error: $err}')")
-    fi
-  done <<< "$rows"
-
-  skipped_repos_json="[]"
-  if [ ${#skipped_repos[@]} -gt 0 ]; then
-    skipped_repos_json=$(printf '%s\n' "${skipped_repos[@]}" | jq -s '.')
-  fi
-
-  if [ ${#results[@]} -eq 0 ]; then
-    emit_combined "$skipped_repos_json" < /dev/null
-  else
-    printf '%s\n' "${results[@]}" | emit_combined "$skipped_repos_json"
-  fi
-}
-
-case "$SCOPE" in
-  repo)
-    ALERTS=$(gh api "repos/$TARGET/dependabot/alerts?state=open&per_page=100" \
-      --paginate --slurp 2>"$ERR_FILE") || {
-      printf '{"error":"Failed to fetch alerts for %s: %s"}\n' "$TARGET" "$(cat "$ERR_FILE")" >&2
-      exit 1
-    }
-    validate_alerts_json "$TARGET" "$ALERTS"
-    RESULT=$(group_repo_alerts "$TARGET" "$ALERTS") || exit 1
-    printf '%s' "$RESULT" | jq '. + {skipped_repos: []}'
-    ;;
-
-  org)
-    if AGG=$(gh api "orgs/$TARGET/dependabot/alerts?state=open&per_page=100" \
-      --paginate --slurp 2>"$ERR_FILE"); then
-      validate_alerts_json "$TARGET" "$AGG"
-      FLAT=$(printf '%s' "$AGG" | jq -c 'flatten')
-
-      # Push filtering applies here too, not only on the fallback path. Org
-      # alert visibility and per-repo push access are separate grants, so a
-      # security manager sees alerts for repos they cannot push to, and
-      # dispatching one of those fails only at the fix agent's `git push` —
-      # after a clone, a worktree, an install and a verification run.
-      #
-      # The cost is one extra API call: the aggregate response carries no
-      # permission data, so the org repo listing is fetched purely to compute
-      # `push_status`. Correctness over call count; the listing is paginated
-      # at 100/page and reused for every repo in the response.
-      repos=$(printf '%s' "$FLAT" | jq -r '[.[].repository.full_name] | unique | .[]')
-
-      PERMS='{}'
-      FORKS='{}'
-      if [ -n "$repos" ]; then
-        LISTING=$(repo_listing_rows "orgs/$TARGET/repos?per_page=100")
-        PERMS=$(printf '%s' "$LISTING" | jq -c 'map({key: .full_name, value: .push_status}) | from_entries')
-        FORKS=$(printf '%s' "$LISTING" | jq -c 'map({key: .full_name, value: .fork}) | from_entries')
-      fi
-
-      results=()
-      skipped_repos=()
-      while IFS= read -r r; do
-        [ -n "$r" ] || continue
-        # A fork with its own open alerts still reaches this loop: the
-        # aggregate's candidate set is "repos with alerts", not the org
-        # listing, so the fan-out's enumeration-time fork exclusion does not
-        # apply here on its own. Skip it the same way, visibly, so the same
-        # repo gets the same treatment regardless of which path discovered it
-        # (issue #43) rather than silently riding into `actionable`.
-        is_fork=$(printf '%s' "$FORKS" | jq -r --arg r "$r" '.[$r] // false')
-        if [ "$is_fork" = "true" ]; then
-          skipped_repos+=("$(attribute_skip_entry "$r" "fork repository")")
-          continue
-        fi
-        # No equivalent archived check belongs here: GitHub refuses Dependabot
-        # alerts for archived repositories outright, verified live against
-        # an archived field-test repository —
-        # `gh api repos/<owner>/<archived-repo>/dependabot/alerts?state=open`
-        # returns HTTP 403 "Dependabot alerts are not available for archived
-        # repositories" — so the aggregate response can never name one
-        # (issue #43).
-        #
-        # A repo the aggregate reports on but the listing does not name has no
-        # permission data at all, which is the "unknown" case, not a denial.
-        push_status=$(printf '%s' "$PERMS" | jq -r --arg r "$r" '.[$r] // "unknown"')
-        if [ "$push_status" != "true" ]; then
-          skipped_repos+=("$(push_skip_entry "$r" "$push_status")")
-          continue
-        fi
-        repo_alerts=$(printf '%s' "$FLAT" | jq -c --arg r "$r" \
-          '[.[] | select(.repository.full_name == $r)]')
-        res=$(group_repo_alerts "$r" "$repo_alerts") || exit 1
-        results+=("$res")
-      done <<< "$repos"
-
-      skipped_repos_json="[]"
-      if [ ${#skipped_repos[@]} -gt 0 ]; then
-        skipped_repos_json=$(printf '%s\n' "${skipped_repos[@]}" | jq -s '.')
-      fi
-
-      if [ ${#results[@]} -eq 0 ]; then
-        emit_combined "$skipped_repos_json" < /dev/null
-      else
-        printf '%s\n' "${results[@]}" | emit_combined "$skipped_repos_json"
-      fi
-    else
-      agg_err=$(cat "$ERR_FILE")
-      # A bare `403` is not proof of "no org-level security visibility": a rate
-      # limit, a SAML/SSO enforcement block and an IP allow list all surface as
-      # 403s too, and silently reinterpreting any of them as the permission
-      # case fans out to per-repo calls that mostly also fail, or succeed
-      # against a partial repo set, and come back looking like a clean, wrong
-      # answer. All three are checked, and hard-fail, before the
-      # permission-shaped fallback.
-      agg_msg=$(api_error_message "$agg_err")
-      # Bare `sso`, `saml` and `abuse` all collide with a hyphen-delimited org
-      # name segment (`sso-analytics`, `abuse-tools`), since a hyphen is a
-      # non-alphanumeric word boundary just like the space `err_mentions`
-      # anchors on (issue #43). The fix is to require a multi-word phrase that
-      # GitHub's own message text actually uses, which cannot appear as a bare
-      # org-name segment. Each phrase below is checked against GitHub's real
-      # 403 wording, not guessed:
-      #   - "rate limit" — "API rate limit exceeded ..." (primary) and "You
-      #     have exceeded a secondary rate limit ..." (secondary) both use it;
-      #     already multi-word, unchanged from before this fix.
-      #   - "abuse detection" — "You have triggered an abuse detection
-      #     mechanism ..." is GitHub's actual abuse-block wording; the
-      #     previous bare "abuse" is the riskiest bare keyword the issue
-      #     flagged, since "abuse" is a plausible org-name segment.
-      #   - "saml enforcement" / "sso enforcement" — "Resource protected by
-      #     organization SAML enforcement ..." / "... SSO enforcement ..." are
-      #     GitHub's actual messages; the previous bare "saml"/"sso" are
-      #     dropped. "single sign-on" / "single sign on" are kept as
-      #     already-safe multi-word phrases for the same block.
-      #   - "ip allow list" was already multi-word and unchanged: GitHub's
-      #     message reads "... has an IP allow list enabled ...".
-      if err_mentions "$agg_msg" 'rate limit|abuse detection'; then
-        printf '{"error":"Org alert aggregate call for %s was rate-limited: %s"}\n' \
-          "$TARGET" "$agg_err" >&2
-        exit 1
-      elif err_mentions "$agg_msg" 'saml enforcement|sso enforcement|single sign-on|single sign on'; then
-        printf '{"error":"Org alert aggregate call for %s blocked by SAML/SSO enforcement: %s"}\n' \
-          "$TARGET" "$agg_err" >&2
-        exit 1
-      elif err_mentions "$agg_msg" 'ip allow list|ip allowlist'; then
-        # An IP allow list blocks the credential, not this endpoint: every
-        # per-repo call in the fallback is refused for the same reason, so
-        # falling back would bury one clear cause under a pile of generic
-        # `alert fetch failed` entries. Hard-fail and name it, which is also
-        # the only outcome the user can act on (allow the address, or run
-        # from a permitted network).
-        printf '{"error":"Org alert aggregate call for %s blocked by an IP allow list: %s"}\n' \
-          "$TARGET" "$agg_err" >&2
-        exit 1
-      elif [ "$(http_status_of "$agg_err")" = "403" ]; then
-        # No org-level security visibility (security manager or admin
-        # required). Fall back to per-repo enumeration of repos the
-        # authenticated user can access, applying push-access filtering.
-        fan_out "orgs/$TARGET/repos?per_page=100"
-      else
-        printf '{"error":"Failed to fetch org alerts for %s: %s"}\n' "$TARGET" "$agg_err" >&2
-        exit 1
-      fi
-    fi
-    ;;
-
-  user)
-    # No aggregate endpoint exists for user scope. /user/repos only ever lists
-    # the authenticated user's own repos, so an explicit login must match the
-    # active gh session; scanning another user's repos needs org scope or a
-    # session for that user.
-    if [ -n "$TARGET" ]; then
-      login=$(gh api user --jq '.login' 2>"$ERR_FILE") || {
-        printf '{"error":"Failed to resolve the authenticated user: %s"}\n' "$(cat "$ERR_FILE")" >&2
-        exit 1
-      }
-      if [ "$TARGET" != "$login" ]; then
-        printf '{"error":"User scope only supports the authenticated user (%s); requested %s"}\n' \
-          "$login" "$TARGET" >&2
-        exit 1
-      fi
-    fi
-    fan_out "user/repos?type=owner&per_page=100"
-    ;;
-esac
