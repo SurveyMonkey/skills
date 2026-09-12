@@ -571,6 +571,20 @@ describe('crossFieldViolations', () => {
     expect(crossFieldViolations(r)).not.toEqual([])
   })
 
+  // Each side of `bothNull` alone, not just both set together above: a
+  // success with only no_op set (failure still null) or only failure set
+  // (no_op still null) is exactly as invalid as one with both set, and an
+  // `||` in place of `&&` would wrongly call either of these consistent.
+  it('flags a success carrying only no_op', () => {
+    const r = successResult({ no_op: { reason: 'r', evidence: {} } })
+    expect(crossFieldViolations(r)).not.toEqual([])
+  })
+
+  it('flags a success carrying only failure', () => {
+    const r = successResult({ failure: { phase: 'install', detail: 'd' } })
+    expect(crossFieldViolations(r)).not.toEqual([])
+  })
+
   it('flags a failure carrying both no_op and failure', () => {
     const r = failureResult({ no_op: { reason: 'r', evidence: {} } })
     expect(crossFieldViolations(r)).not.toEqual([])
