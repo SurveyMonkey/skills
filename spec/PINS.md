@@ -31,7 +31,9 @@ where `<script>` is one of the seven successor scripts named in issue #193:
 `prepare-checkout.sh`, `merge-envelopes.sh`, `preflight-repo.sh`, `build-dispatches.sh`,
 `reap-batch.sh`, `summarize-run.sh`, `pr-status.sh --env-prefix`.
 
-The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security, which took over issue #193; the script name is the mapping key) finds every pin it must delete with one grep:
+The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security,
+which took over issue #193; the script name is the mapping key) finds every pin it must delete
+with one grep:
 
 ```
 grep -rn 'pin: mechanical, retired by <script>' spec/
@@ -43,7 +45,7 @@ grep -rn 'pin: mechanical, retired by <script>' spec/
 
 ## Totals
 
-362 pins across 14 files: 278 `judgment`, 84 `mechanical`.
+365 pins across 15 files: 281 `judgment`, 84 `mechanical`.
 
 Mechanical pins by successor script:
 
@@ -492,3 +494,11 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 195 | states it manager-agnostically in $2 | judgment | - |
 | 205 | names a missed context statement as a cause of those symptoms | judgment | - |
 | 211 | sends the reader back to session context on any of them | judgment | - |
+
+### `spec/testing_skill_spec.sh` — 3 pins (3 judgment, 0 mechanical)
+
+| Line | `It` title | Class | Successor script |
+|---|---|---|---|
+| 170 | anchors its paths glob the way every other rule in this repo does | judgment | - |
+| 182 | names the skill it points at | judgment | - |
+| 197 | links from the root CLAUDE.md to the New script section | judgment | - |

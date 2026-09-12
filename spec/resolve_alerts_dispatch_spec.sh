@@ -180,7 +180,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     # The payload is assembled by the model from phases 1, 2 and 5, so its
     # field list is prose, not script.
-    # pin: mechanical, retired by build-dispatches.sh
     Describe 'the dispatch payload the orchestrator assembles'
       Parameters
         'nwo'
@@ -190,6 +189,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
         'scripts_dir'
       End
 
+      # pin: mechanical, retired by build-dispatches.sh
       It "still carries $1"
         When call phrase_in "$SKILL" "Each payload is the group JSON verbatim under .group., plus .*$1"
         The status should be success

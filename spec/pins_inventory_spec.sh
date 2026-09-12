@@ -15,6 +15,12 @@
 # pin added, removed, or reclassified without PINS.md following it. Neither
 # needs the file's exact `It` text, only counts, so both stay dialect-safe
 # and immune to a title being reworded in a later tightening pass.
+#
+# The reconciliation check discovers spec files itself (other_spec_files)
+# rather than checking a fixed list: a fixed list only catches drift in the
+# files someone remembers to add to it, so a brand-new spec file that gains
+# a phrase_in/count_in/rule_in example the day it is written would otherwise
+# be invisible to this gate until somebody thought to list it here.
 
 Describe 'the prose pin inventory (issue #197)'
   SPEC_DIR="$SHELLSPEC_PROJECT_ROOT/spec"
@@ -30,26 +36,6 @@ build-dispatches.sh
 reap-batch.sh
 summarize-run.sh
 pr-status.sh --env-prefix'
-
-  # The 14 files issue #197 scoped this inventory to (confirmed against
-  # `grep -l` in the issue's own working notes). A file added to this list
-  # without a PINS.md section fails the second Describe below by name.
-  Parameters
-    resolve_alerts_scope_spec.sh
-    resolve_alerts_branch_style_spec.sh
-    audit_pins_scratch_spec.sh
-    resolve_alerts_dispatch_spec.sh
-    audit_pins_rules_spec.sh
-    reap_agent_artifacts_spec.sh
-    resolve_alerts_defect_reports_spec.sh
-    merge_risk_labels_spec.sh
-    classify_lines_spec.sh
-    fix_dependency_result_spec.sh
-    fix_dependency_baseline_spec.sh
-    fix_dependency_branch_spec.sh
-    fix_dependency_scratch_spec.sh
-    env_prefix_seam_spec.sh
-  End
 
   # Every spec file except this one: this file's own comments and code
   # necessarily quote the marker grammar verbatim, which would otherwise
@@ -130,7 +116,8 @@ pr-status.sh --env-prefix'
   }
 
   # The PINS.md section for one file: every line between its own
-  # `### `spec/<file>`` heading and the next heading (or EOF).
+  # `### `spec/<file>`` heading and the next heading (or EOF). A file with
+  # no such heading (nothing to reconcile) yields an empty section.
   pins_section() {
     awk -v want="### \`spec/$1\`" '
       index($0, want) == 1 { grab = 1; next }
@@ -163,7 +150,8 @@ pr-status.sh --env-prefix'
   # judgment row: marker-count + judgment-count must equal the example
   # count. And PINS.md's own mechanical count must match the markers
   # actually in the file, so PINS.md cannot drift from the markers it
-  # documents.
+  # documents. A file with zero examples and no PINS.md section reconciles
+  # trivially (0 + 0 == 0), so this needs no exclusion list of its own.
   reconciled() {
     line=$(pin_totals "$1")
     markers=$(printf '%s' "$line" | cut -f1)
@@ -178,8 +166,20 @@ pr-status.sh --env-prefix'
     fi
   }
 
-  It "keeps every phrase_in/count_in/rule_in example in \$1 marked or inventoried"
-    When call reconciled "$1"
-    The output should equal 'reconciled'
+  # Every spec file (this one excepted), discovered dynamically rather than
+  # from a fixed list, that is not reconciled: "<file>: <reconciled's own
+  # unreconciled message>", one per offending file. Empty when every file
+  # reconciles.
+  unreconciled_files() {
+    other_spec_files | while IFS= read -r f; do
+      name=$(basename "$f")
+      result=$(reconciled "$name")
+      [ "$result" = reconciled ] || printf '%s: %s\n' "$name" "$result"
+    done
+  }
+
+  It 'keeps every phrase_in/count_in/rule_in example, in every spec file, marked or inventoried'
+    When call unreconciled_files
+    The output should equal ''
   End
 End
