@@ -135,10 +135,18 @@ Describe 'scripts/check.sh'
     End
 
     It 'fails js when node_modules has not been installed'
-      mkdir -p spec/js
+      mkdir -p spec/js bin
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
       git add -A
+      # A minimal pnpm stub on PATH: this example is about node_modules
+      # being absent, not about whether pnpm itself is installed, and the
+      # real binary is not guaranteed to be on PATH here — the CI spec job
+      # never installs it, only the js job does.
+      printf '#!/bin/sh\nexit 0\n' > bin/pnpm
+      chmod +x bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
       When run "$CHECK" js
       The status should eq 2
       The stderr should include 'run pnpm install'
