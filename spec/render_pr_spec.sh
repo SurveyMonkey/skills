@@ -632,6 +632,7 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       mock_gh_fail 'label create merge-risk:high' 'HTTP 422: Validation Failed: name already exists'
     }
     Before 'setup_mock'
+    After 'mock_gh_cleanup'
 
     Mock gh
       "$GH_MOCK_DISPATCH" "$@"
@@ -730,6 +731,7 @@ SH
       mock_gh_reply 'pr create' "$GH_MOCK_DIR/pr-url"
     }
     Before 'setup_mock'
+    After 'mock_gh_cleanup'
 
     Mock gh
       "$GH_MOCK_DISPATCH" "$@"

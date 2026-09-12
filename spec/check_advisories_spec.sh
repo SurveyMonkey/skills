@@ -70,6 +70,7 @@ JSON
   }
 
   Before 'setup_mock'
+  After 'mock_gh_cleanup'
 
   Mock gh
     "$GH_MOCK_DISPATCH" "$@"

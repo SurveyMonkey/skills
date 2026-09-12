@@ -149,6 +149,7 @@ description'
       adapter_jq
       use_fixture
       mock_gh_reset
+      mock_gh_cleanup
       mock_gh_reply
       mock_gh_fail
       mock_gh_requests

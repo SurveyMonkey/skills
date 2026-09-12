@@ -108,6 +108,17 @@ mock_gh_reset() {
   export GH_MOCK_DIR
 }
 
+# Removes the scratch directory mock_gh_reset created. Register via `After` in
+# every migrated spec, paired with `Before 'setup_mock'` the same way
+# use_fixture is paired with `After 'cleanup_fixture'` elsewhere in this file
+# — without it, every example that resets the mock leaks one mktemp directory
+# for the life of the shellspec process.
+mock_gh_cleanup() {
+  if [ -n "${GH_MOCK_DIR:-}" ] && [ -d "$GH_MOCK_DIR" ]; then
+    rm -rf "$GH_MOCK_DIR"
+  fi
+}
+
 # Register the stdout for one endpoint, keyed by the leading `gh` arguments
 # (`api repos/octo/app/dependabot/alerts`, `pr list`, `label create
 # merge-risk:low`): each space-separated token in the key must match an

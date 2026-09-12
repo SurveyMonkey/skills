@@ -11,6 +11,7 @@ Describe 'pr-status.sh'
   }
 
   Before 'setup_mock'
+  After 'mock_gh_cleanup'
 
   # Only `pr view` calls stubbed by stub_view get a reply. That is the point:
   # every other gh subcommand — `pr ready`, `pr update-branch`, `pr merge`,

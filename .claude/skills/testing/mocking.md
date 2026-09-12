@@ -79,6 +79,10 @@ script the mock block simply invokes.
 
 - `mock_gh_reset` starts a fresh scratch directory (`$GH_MOCK_DIR`) with an empty registry and
   request log. Call it once per example, typically from the spec file's own `Before` hook.
+- `mock_gh_cleanup` removes that scratch directory. Pair it with `mock_gh_reset` via `After`, the
+  same way `use_fixture` is paired with `After 'cleanup_fixture'` elsewhere in `spec_helper.sh` —
+  without it, every example that resets the mock leaks a `mktemp` directory for the life of the
+  shellspec process.
 - `mock_gh_reply <verb path> <file> [stderr file]` registers the stdout for **one endpoint**,
   keyed by the leading `gh` arguments (`api repos/octo/app/dependabot/alerts`, `pr list`,
   `label create merge-risk:low`). One reply per endpoint, no conditional logic in the test. `file`
