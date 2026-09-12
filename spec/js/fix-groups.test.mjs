@@ -816,6 +816,20 @@ describe('the workflow body, run with stubbed collaborators', () => {
     expect(logs.join('\n')).not.toMatch(/Cross-field inconsistency/)
   })
 
+  // A mispaired result belongs to a different group than the one it is
+  // checked under. Running it through crossFieldViolations anyway would
+  // attribute someone else's data (or lack of a violation in it) to this
+  // group's label, so it must be skipped the same way pairEntry nulls it.
+  it('logs nothing about cross-field inconsistency for a mispaired result, even an inconsistent one', async () => {
+    const dispatches = batch(2)
+    const swap = (prompt, opts, i) =>
+      (i === 1 ? successResult({ package: 'someone-else', action: null }) : echo(prompt, opts, i))
+    const { entries, logs } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: swap })
+    expect(entries[1].mispaired).toBe(true)
+    expect(entries[1].result).toBeNull()
+    expect(logs.join('\n')).not.toMatch(/Cross-field inconsistency/)
+  })
+
   it('announces the batch size and the width it runs at', async () => {
     const { logs } = await runWorkflow({ main, args: { cap: 3, dispatches: batch(9) }, agent: echo })
     expect(logs).toContain('Dispatching 9 group(s), 3 at a time')

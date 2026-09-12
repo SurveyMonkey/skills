@@ -381,7 +381,13 @@ const worker = async () => {
     // over an inconsistency they will surface anyway would lose a completed
     // fix — including one that already opened a pull request — for a defect
     // in the agent's own bookkeeping.
-    if (results[i]) {
+    //
+    // Skip a mispaired result: it belongs to a different group than `d`, so
+    // a log line built from its fields under `agentLabel(d)` would misattribute
+    // someone else's inconsistency (or lack of one) to this group, and
+    // `pairEntry` already nulls it out of the entry for the same reason —
+    // "unreachable, not merely discouraged."
+    if (results[i] && !pairEntry(d, results[i]).mispaired) {
       const violations = crossFieldViolations(results[i])
       if (violations.length) {
         log('Cross-field inconsistency in the result for ' + agentLabel(d) + ': ' + violations.join('; '))
