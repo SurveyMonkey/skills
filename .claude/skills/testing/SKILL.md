@@ -18,9 +18,16 @@ Paired worked examples from this suite: [tests.md](tests.md). Mocking: [mocking.
 
 ## Seams
 
-**A script's CLI and the JSON it writes to stdout are the seam.** That pair is the contract every
-consumer reads, so it is the only thing a spec may observe. Never reach inside: no temp file, no
-intermediate variable, no sourcing a script to call one of its functions.
+**For a shell script, the CLI and the JSON it writes to stdout are the seam.** That pair is the
+contract every consumer reads, so it is the only thing a spec may observe. Never reach inside: no
+temp file, no intermediate variable, no sourcing a script to call one of its functions.
+
+**For the one JavaScript file this repo ships, the seam is the module's exported surface**, because
+the Workflow script has no CLI: `spec/js/` imports the functions under test from
+`spec/js/generated/workflow.mjs`, the importable projection of the shipped file, and the byte
+identity between projection and shipped file is itself asserted so that covering the one covers the
+other (ADR 010). Importing a named export there is the seam, not a reach inside it; reaching past
+the exports into module-private state still is.
 
 - **Assert a `jq` projection through `common_jq` / `adapter_jq`** (`spec/spec_helper.sh`), not
   string matching against pretty-printed output. Both preserve the script's exit status, which
@@ -60,9 +67,12 @@ The expected value must be able to disagree with the code. It may be:
 - a published spec (the ordering chain in `spec/node_semver_spec.sh` is semver.org section 11);
 - a specimen trimmed from a real run.
 
-It must never be recomputed the way the code computes it, and it must never be hand-authored when a
-real sample exists: invented pnpm and yarn audit fixtures encoded formats those tools never emit,
-which is exactly why the suite could not see the bug. **A parser gaining a format branch needs a
+It must never be recomputed the way the code computes it.
+
+**A shape found in the wild is the specimen.** It must never be hand-authored when a real sample
+exists: invented pnpm and yarn audit fixtures encoded formats those tools never emit, which is
+exactly why the suite could not see the bug. An alert pointing into `spec/fixtures/` is about a
+specimen, so it is not the fixture that gets "fixed". **A parser gaining a format branch needs a
 real specimen of that branch** (aliases, `patch:` locators, workspace and portal targets, binding
 parameters, nesting), not a comment claiming the branch is excluded.
 
@@ -89,9 +99,11 @@ behavior and go insensitive to real changes.
 
 ## Mocking
 
-Mock at the system boundary and nowhere else. No sibling script, no adapter, no git, no filesystem:
-real `git init` repositories, real files, real scratch directories. Full rules and the shared `gh`
-helper: [mocking.md](mocking.md).
+Mock at the system boundary and nowhere else: `gh`, the machine probes, and the Workflow runtime.
+Not a sibling script the caller resolves by path, not an adapter in its own specs, not git, not the
+filesystem: real `git init` repositories, real files, real scratch directories. A collaborator the
+script accepts as a path is substituted through that flag, which is its seam rather than a way
+around it. Full rules and the shared `gh` helper: [mocking.md](mocking.md).
 
 ## Prose pins
 
@@ -122,9 +134,11 @@ Paired examples from this suite, each with a file path: [tests.md](tests.md).
 
 For a spec under review, including by the `pr-test-analyzer` agent:
 
-1. **Seam or internals?** CLI and stdout, or a temp file, an internal function, a side channel.
+1. **Seam or internals?** CLI and stdout (or, in `spec/js/`, a named export), or a temp file,
+   module-private state, a side channel.
 2. **Literal or recomputed?** Could the expected value ever disagree with the code.
-3. **Boundary or collaborator?** Only `gh` and the machine probes are mocked (see `mocking.md`).
+3. **Boundary or collaborator?** Only `gh`, the machine probes and the Workflow runtime are mocked;
+   a collaborator behind a documented flag is substituted through it (see `mocking.md`).
 4. **Verdict or parse?** Does the assertion run through the rule that consumes the output.
 5. **Would the named mutant fail?** Name the defect the example exists for and check that it dies.
 6. **Does the `It` title claim more than the assertion checks?**
