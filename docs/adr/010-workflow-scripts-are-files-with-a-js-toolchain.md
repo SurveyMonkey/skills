@@ -1,13 +1,27 @@
 ---
 type: ADR
-description: Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) with coverage thresholds at 100 on all four buckets to test them, while shipped plugin scripts stay bash + jq + gh.
-status: stable
+description: 'Superseded in part by ADR 012. Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) with coverage thresholds at 100 on all four buckets to test them, while shipped plugin scripts stay bash + jq + gh.'
+status: deprecated
 created: 2026-09-01
 owner: brianespinosa
 related_issues: [175]
 ---
 
 # Workflow scripts are files, and JavaScript gets a real toolchain
+
+> **Superseded by [ADR 012](012-typescript-on-node-22-18.md)**
+> ([#213](https://github.com/SurveyMonkey/skills/issues/213)), on the one question this ADR drew a
+> boundary around: **shipped plugin scripts no longer stay `bash` + `jq` + `gh`.** The premise was
+> that a plugin script must not need a runtime the user lacks; the fix flow cannot complete without
+> npm, pnpm or yarn, every one of which is node, and Claude Code is itself node. That is the case
+> this ADR's last line says to revisit it for, and ADR 012 is the revisit.
+>
+> **Everything else below still holds and is not edited.** A Workflow script is still a file rather
+> than a markdown fence; `workflows/fix-groups.mjs` is untouched by the port, still evaluated by the
+> harness, still projected for coverage, still gated at 100 on all four buckets; and the found-
+> nothing-is-a-pass refusals in `check.sh js` are unchanged. Read the harness-versus-user-shell
+> distinction below as the argument that was correct for a Workflow script and turned out not to
+> generalize to plugin scripts, rather than as current policy on what a plugin script may be.
 
 ## Context
 
