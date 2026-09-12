@@ -180,5 +180,5 @@ lefthook, proposed on #10, is not used: it adds a dependency to a repo whose sta
   3.2. If that changes, `REQUIRE_BASH32=1` makes the change loud instead of silent.
 - Dependabot alerts are enabled on this repo while security updates are not, and
   `spec/fixtures/` deliberately pins vulnerable versions. An alert pointing into `spec/fixtures/`
-  is about a specimen: do not "fix" the fixture, per root `CLAUDE.md` (a shape found in the wild
+  is about a specimen: do not "fix" the fixture, per the `testing` skill (a shape found in the wild
   is the specimen).

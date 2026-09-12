@@ -11,7 +11,7 @@
 #
 # The adapter and the risk scorer are both mocked with scratch executables that
 # serve canned JSON and record their argv: specs never hit the network or run
-# an install (root CLAUDE.md).
+# an install (the `testing` skill).
 
 Describe 'fix-group.sh apply and score'
   DRIVER="$COMMON/fix-group.sh"

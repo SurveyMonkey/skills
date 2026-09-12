@@ -5,7 +5,7 @@
 #
 # The adapter is mocked with a scratch executable that serves canned JSON per
 # verb and records its argv: specs never hit the network or run an install
-# (root CLAUDE.md). The verdicts asserted here are the ones the prose used to
+# (the `testing` skill). The verdicts asserted here are the ones the prose used to
 # only describe — the peer-only stop, which parents become eligible, what the
 # drift commit is allowed to carry, and what a residual working tree does.
 

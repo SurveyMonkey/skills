@@ -5,7 +5,7 @@
 # (fix-group.sh score, exit 0) and the group JSON (issue #172).
 #
 # Byte-equality is asserted against fixture files under
-# spec/fixtures/render-pr/ rather than substring matching, per CLAUDE.md's
+# spec/fixtures/render-pr/ rather than substring matching, per the `testing` skill's
 # "assert JSON/text exactly" rule extended to this script's rendered text.
 
 Describe 'render-pr.sh'

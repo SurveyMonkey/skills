@@ -15,7 +15,7 @@
 # pr-status.sh runs here as a genuine subprocess of post-agent.sh, one level
 # deeper than shellspec's own interception reaches. reap-agent-artifacts.sh
 # is driven against real throwaway git repositories, the same fixtures
-# spec/reap_agent_artifacts_spec.sh builds. Per the root CLAUDE.md rule that a
+# spec/reap_agent_artifacts_spec.sh builds. Per the `testing` skill's rule that a
 # shape found in the wild is the specimen, this is what makes the "well-shaped
 # JSON that is not the promised report" and "the real script's exit status
 # always agrees with its own errors[]" assertions meaningful: a hand-authored

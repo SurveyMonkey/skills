@@ -4,8 +4,8 @@
 # the pin audit (#42, #44, #46, #48, #79, #159, #174).
 #
 # The adapter and `check-advisories.sh` are both mocked with scratch
-# executables: specs never hit the network and never run an install (root
-# CLAUDE.md). The adapter's `list_pins` mock is deliberately NOT a canned
+# executables: specs never hit the network and never run an install (the
+# `testing` skill). The adapter's `list_pins` mock is deliberately NOT a canned
 # answer — it recomputes the pin list from the manifest on disk, so the
 # driver's own jq removal is what the count-minus-one verification is checked
 # against. A spec that canned both sides would assert the driver against
