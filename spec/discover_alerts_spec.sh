@@ -15,49 +15,27 @@ Describe 'discover-alerts.sh'
   REPO='octo/app'
 
   setup_mock() {
-    MOCK_DIR="$SHELLSPEC_WORKDIR/discover-mock"
-    rm -rf "$MOCK_DIR"
-    mkdir -p "$MOCK_DIR"
-    : > "$MOCK_DIR/log"
-    cp "$FIXTURES/alerts/multi-major.json" "$MOCK_DIR/alerts.json"
-    export MOCK_DIR
+    mock_gh_reset
+    cp "$FIXTURES/alerts/multi-major.json" "$GH_MOCK_DIR/alerts.json"
+    mock_gh_reply "api repos/$REPO/dependabot/alerts" "$GH_MOCK_DIR/alerts.json"
+    # No stub_open_pr registration for a branch means no open PR for it: a
+    # broad default answering every `gh pr list` with empty stdout,
+    # registered first so a later, more specific stub_open_pr registration
+    # (or a mock_gh_fail "pr list" override) wins for the branch it names.
+    : > "$GH_MOCK_DIR/no-pr"
+    mock_gh_reply 'pr list' "$GH_MOCK_DIR/no-pr"
   }
 
   Before 'setup_mock'
 
-  # `gh pr list` replies are scripted per branch: a file named after the branch
-  # (slashes flattened) holds the URL to report, its absence means no open PR.
   Mock gh
-    case "$1" in
-      api)
-        printf 'api\n' >> "$MOCK_DIR/log"
-        if [ -f "$MOCK_DIR/api-fail" ]; then
-          printf 'gh: Not Found (HTTP 404)\n' >&2
-          exit 1
-        fi
-        cat "$MOCK_DIR/alerts.json"
-        ;;
-      pr)
-        br=''
-        for arg in "$@"; do
-          case "$arg" in head:*) br="${arg#head:}" ;; esac
-        done
-        printf 'pr-list %s\n' "$br" >> "$MOCK_DIR/log"
-        if [ -f "$MOCK_DIR/pr-fail" ]; then
-          printf 'gh: could not resolve to a Repository\n' >&2
-          exit 1
-        fi
-        key=$(printf '%s' "$br" | tr / _)
-        if [ -f "$MOCK_DIR/pr-$key" ]; then
-          cat "$MOCK_DIR/pr-$key"
-        fi
-        ;;
-      *) exit 1 ;;
-    esac
+    "$GH_MOCK_DISPATCH" "$@"
   End
 
   stub_open_pr() {
-    printf '%s\n' "$2" > "$MOCK_DIR/pr-$(printf '%s' "$1" | tr / _)"
+    _key=$(printf '%s' "$1" | tr / _)
+    printf '%s\n' "$2" > "$GH_MOCK_DIR/pr-$_key"
+    mock_gh_reply "pr list --search head:$1" "$GH_MOCK_DIR/pr-$_key"
   }
 
   discover() { common_jq discover-alerts.sh "$1" "$REPO"; }
@@ -146,7 +124,7 @@ Describe 'discover-alerts.sh'
                            epss: {percentile: 0.1}},
        security_vulnerability: {vulnerable_version_range: "<= 5.28.0",
                                 first_patched_version: null}}
-    ]]' > "$MOCK_DIR/alerts.json"
+    ]]' > "$GH_MOCK_DIR/alerts.json"
     When call discover '{a: [.actionable[].sibling_alerts], s: [.skipped[].sibling_alerts]}'
     The status should be success
     The output should equal '{"a":[[{"major":null,"vulnerable_ranges":["<= 5.28.0"]}]],"s":[[{"major":7,"vulnerable_ranges":["< 7.29.0"]}]]}'
@@ -277,7 +255,7 @@ Describe 'discover-alerts.sh'
     End
 
     It 'reports a failed PR lookup as a skip reason, not a crash'
-      : > "$MOCK_DIR/pr-fail"
+      mock_gh_fail 'pr list' 'gh: could not resolve to a Repository'
       When call discover '{actionable: (.actionable | length), reasons: ([.skipped[].reason] | unique)}'
       The status should be success
       The output should equal '{"actionable":0,"reasons":["PR check failed","no fix available"]}'
@@ -307,7 +285,7 @@ Describe 'discover-alerts.sh'
     # candidate is never queried at all.
     flat_slash_queries() {
       common_jq discover-alerts.sh '.' --branch-style flat "$REPO" >/dev/null || return 1
-      grep -c 'pr-list fix/' "$MOCK_DIR/log" || true
+      mock_gh_requests | grep -c 'search head:fix/' || true
     }
 
     It 'queries no slash-named candidate under the flat style'
@@ -339,7 +317,7 @@ Describe 'discover-alerts.sh'
           vulnerable_version_range: "< 7.29.0",
           first_patched_version: {identifier: $id}
         }
-      }]]' > "$MOCK_DIR/alerts.json"
+      }]]' > "$GH_MOCK_DIR/alerts.json"
     }
 
     Parameters
@@ -358,7 +336,7 @@ Describe 'discover-alerts.sh'
   End
 
   It 'emits empty arrays when there are no alerts'
-    printf '[]' > "$MOCK_DIR/alerts.json"
+    printf '[]' > "$GH_MOCK_DIR/alerts.json"
     When call discover '{a: (.actionable | length), s: (.skipped | length)}'
     The status should be success
     The output should equal '{"a":0,"s":0}'
@@ -375,36 +353,36 @@ Describe 'discover-alerts.sh'
   # resolves the adapter relative to its own directory.
   Describe 'adapter version comparison failures'
     stub_adapter() {
-      mkdir -p "$MOCK_DIR/scripts/common" "$MOCK_DIR/scripts/ecosystems"
-      cp "$COMMON/discover-alerts.sh" "$COMMON/select-adapter.sh" "$MOCK_DIR/scripts/common/"
-      printf '#!/usr/bin/env sh\n%s\n' "$1" > "$MOCK_DIR/scripts/ecosystems/node.sh"
-      chmod +x "$MOCK_DIR/scripts/ecosystems/node.sh"
+      mkdir -p "$GH_MOCK_DIR/scripts/common" "$GH_MOCK_DIR/scripts/ecosystems"
+      cp "$COMMON/discover-alerts.sh" "$COMMON/select-adapter.sh" "$GH_MOCK_DIR/scripts/common/"
+      printf '#!/usr/bin/env sh\n%s\n' "$1" > "$GH_MOCK_DIR/scripts/ecosystems/node.sh"
+      chmod +x "$GH_MOCK_DIR/scripts/ecosystems/node.sh"
     }
 
     It 'fails when the adapter exits non-zero on a comparison'
       stub_adapter 'printf "{\"error\":\"adapter exploded\"}\n" >&2; exit 1'
-      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      When run script "$GH_MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
       The status should not equal 0
       The stderr should include 'compare_versions failed'
     End
 
     It 'fails when the adapter answers 0 with an error object instead of a result'
       stub_adapter 'printf "{\"error\":\"adapter refused\"}\n"; exit 0'
-      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      When run script "$GH_MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
       The status should not equal 0
       The stderr should include 'no usable result'
     End
 
     It 'fails when the adapter answers 0 with empty stdout'
       stub_adapter 'exit 0'
-      When run script "$MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
+      When run script "$GH_MOCK_DIR/scripts/common/discover-alerts.sh" "$REPO"
       The status should not equal 0
       The stderr should include 'no usable result'
     End
   End
 
   It 'fails loudly when the API response is not an array'
-    printf '{"message":"Not Found"}' > "$MOCK_DIR/alerts.json"
+    printf '{"message":"Not Found"}' > "$GH_MOCK_DIR/alerts.json"
     When run script "$COMMON/discover-alerts.sh" "$REPO"
     The status should not equal 0
     The stderr should include 'Not Found'
@@ -416,7 +394,7 @@ Describe 'discover-alerts.sh'
   # and the body that never parsed both name the repository they failed on.
   Describe 'the fetch itself failing'
     It 'reports a failed fetch rather than an empty result'
-      : > "$MOCK_DIR/api-fail"
+      mock_gh_fail "api repos/$REPO/dependabot/alerts" 'gh: Not Found (HTTP 404)'
       When run script "$COMMON/discover-alerts.sh" "$REPO"
       The status should equal 1
       The stdout should equal ''
@@ -424,7 +402,7 @@ Describe 'discover-alerts.sh'
     End
 
     It 'reports a body that is not JSON at all'
-      printf 'not json' > "$MOCK_DIR/alerts.json"
+      printf 'not json' > "$GH_MOCK_DIR/alerts.json"
       When run script "$COMMON/discover-alerts.sh" "$REPO"
       The status should equal 1
       The stdout should equal ''
@@ -451,7 +429,7 @@ Describe 'discover-alerts.sh'
                              epss: {percentile: 0.2}},
          security_vulnerability: {vulnerable_version_range: "< 4.0.3",
                                   first_patched_version: {identifier: "4.0.3"}}}
-      ]]' > "$MOCK_DIR/alerts.json"
+      ]]' > "$GH_MOCK_DIR/alerts.json"
       siblings=$(discover '.actionable[] | select(.package == "picomatch") | .sibling_alerts')
 
       DEDUP_BASELINE='{"pm":"pnpm","package":"picomatch","present":true,"count":3,"versions":[{"version":"2.3.1","path":"picomatch@2.3.1"},{"version":"2.3.2","path":"picomatch@2.3.2"},{"version":"4.0.1","path":"picomatch@4.0.1"}],"lockfile_entries":5}'
@@ -473,7 +451,7 @@ Describe 'discover-alerts.sh'
   # such ref per package/line.
   Describe 'a scoped package name (issue #123 follow-up)'
     setup_scoped_mock() {
-      cp "$FIXTURES/alerts/scoped-package.json" "$MOCK_DIR/alerts.json"
+      cp "$FIXTURES/alerts/scoped-package.json" "$GH_MOCK_DIR/alerts.json"
     }
     Before 'setup_scoped_mock'
 

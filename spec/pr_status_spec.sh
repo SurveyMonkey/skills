@@ -6,49 +6,22 @@ Describe 'pr-status.sh'
   URL12='https://github.com/octo/app/pull/12'
   URL34='https://github.com/octo/app/pull/34'
 
-  # The gh mock is driven by files under $MOCK_DIR so each example scripts its
-  # own PR behavior, and every call is appended to $MOCK_DIR/log so examples
-  # can assert what was — and was not — invoked.
   setup_mock() {
-    MOCK_DIR="$SHELLSPEC_WORKDIR/gh-mock"
-    rm -rf "$MOCK_DIR"
-    mkdir -p "$MOCK_DIR"
-    : > "$MOCK_DIR/log"
-    export MOCK_DIR
+    mock_gh_reset
   }
 
   Before 'setup_mock'
 
-  # Only `pr view` is mocked, and that is the point: every other gh
-  # subcommand exits 1, so an unguarded call to `pr ready`, `pr
-  # update-branch`, `pr merge`, `pr edit`, or `api` fails the suite outright.
-  # A guarded one (`|| printf ''`) would not; the call log below is what
-  # catches that case, since the catch-all logs what it refuses before
-  # exiting. This script is read-only (ADR 008) and the mock is what holds it
-  # to that.
+  # Only `pr view` calls stubbed by stub_view get a reply. That is the point:
+  # every other gh subcommand — `pr ready`, `pr update-branch`, `pr merge`,
+  # `pr edit`, `api` — and any `pr view` for a PR this file never stubbed is
+  # unhandled and fails outright, so an unguarded mutating call fails the
+  # suite. A guarded one (`|| printf ''`) would not; mutating_calls reads the
+  # request log instead, which holds under any error suppression and depends
+  # on the dispatcher logging every call, handled or not, before it decides.
+  # This script is read-only (ADR 008) and the mock is what holds it to that.
   Mock gh
-    case "$1 $2" in
-      'pr view')
-        num="${3##*/}"
-        printf 'view %s %s\n' "$num" "$5" >> "$MOCK_DIR/log"
-        # Real gh writes its release-upgrade notice to stderr and still exits
-        # 0. A stub file makes that shape reproducible per PR.
-        if [ -f "$MOCK_DIR/stderr-$num" ]; then
-          cat "$MOCK_DIR/stderr-$num" >&2
-        fi
-        cat "$MOCK_DIR/view-$num.json"
-        ;;
-      # Logs before refusing, deliberately. `exit 1` alone makes a rejected
-      # call invisible to the allowlist below, so a suppressed mutating call
-      # (`gh pr merge --auto || true`) would leave a clean log and a green
-      # suite — which is how the first version of that assertion passed under
-      # mutation (#87). This also catches `gh api`: pr-status.sh no longer
-      # makes that call (#91), and a re-added one fails here.
-      *)
-        printf 'other %s %s\n' "$1" "$2" >> "$MOCK_DIR/log"
-        exit 1
-        ;;
-    esac
+    "$GH_MOCK_DISPATCH" "$@"
   End
 
   # Build a `gh pr view` payload. Args: rollup-json, autoMergeRequest-json,
@@ -66,25 +39,30 @@ Describe 'pr-status.sh'
       number: ($num | tonumber), state: "OPEN", isDraft: $draft,
       headRefName: "fix/dependabot-lodash", baseRefName: "main",
       mergeStateStatus: $ms, statusCheckRollup: $roll, autoMergeRequest: $amr
-    }' > "$MOCK_DIR/view-$_num.json"
+    }' > "$GH_MOCK_DIR/view-$_num.json"
+    mock_gh_reply "pr view https://github.com/octo/app/pull/$_num" "$GH_MOCK_DIR/view-$_num.json"
   }
 
-  # Every gh call the mock saw, minus the one read-only one. The mock's
-  # `*) exit 1` arm is not enough on its own: it only bites an UNGUARDED call
-  # under `set -e`, so `gh pr merge --auto || true` slips straight past it —
-  # proven by a mutation run that added exactly that and stayed green (#87).
-  # This reads the call log instead, which holds under any error suppression,
-  # and depends on the catch-all above logging what it refuses. `api` counts
-  # as mutating here too: pr-status.sh has no legitimate reason to call it
-  # (#91), so a re-added call must show up as one.
-  mutating_calls() { grep -vc '^view ' "$MOCK_DIR/log" || true; }
+  # Every gh call the mock saw, minus the one read-only one. Reading the
+  # request log holds under any error suppression (`gh pr merge --auto ||
+  # true` slips past a bare `exit 1` in a case arm, proven by a mutation run
+  # that added exactly that and stayed green — #87), and depends on the
+  # dispatcher logging every call before it decides whether to answer it.
+  # `api` counts as mutating here too: pr-status.sh has no legitimate reason
+  # to call it (#91), so a re-added call must show up as one.
+  mutating_calls() { mock_gh_requests | grep -vc '^pr view ' || true; }
 
   # Trimmed from a live `gh pr view` run: the notice gh 2.98.0 prints to stderr
   # on every command once a newer release exists. It arrives WITH a zero exit,
-  # which is what made capturing it into the payload fatal.
+  # which is what made capturing it into the payload fatal. Re-registers the
+  # same endpoint stub_view already registered, this time with the stderr
+  # file attached — the later registration wins.
   stub_stderr() {
+    _num=$1
     printf 'A new release of gh is available: 2.98.0 -> 2.99.0\nTo upgrade, run: brew upgrade gh\nhttps://github.com/cli/cli/releases/tag/v2.99.0\n' \
-      > "$MOCK_DIR/stderr-$1"
+      > "$GH_MOCK_DIR/stderr-$_num"
+    mock_gh_reply "pr view https://github.com/octo/app/pull/$_num" \
+      "$GH_MOCK_DIR/view-$_num.json" "$GH_MOCK_DIR/stderr-$_num"
   }
 
   rollup() {
@@ -185,7 +163,7 @@ Describe 'pr-status.sh'
     When call common_jq pr-status.sh '.prs[0].number' "$URL12"
     The status should be success
     The output should equal '12'
-    The value "$(grep -c '^other api ' "$MOCK_DIR/log" || true)" should equal 0
+    The value "$(mock_gh_requests | grep -c '^api ' || true)" should equal 0
   End
 
   It 'does not request autoMergeRequest in the --json field list'
@@ -193,7 +171,7 @@ Describe 'pr-status.sh'
     When call common_jq pr-status.sh '.prs[0].number' "$URL12"
     The status should be success
     The output should equal '12'
-    The value "$(grep '^view ' "$MOCK_DIR/log")" should not include 'autoMergeRequest'
+    The value "$(mock_gh_requests | grep '^pr view ')" should not include 'autoMergeRequest'
   End
 
   # Any re-added field, however named, fails this exact-key-set assertion:
@@ -241,7 +219,11 @@ Describe 'pr-status.sh'
   # it, because entries print only after the loop.
   It 'keeps every other entry when one PR''s output cannot be parsed'
     stub_view 12 "$(rollup success)" null
-    printf 'not json at all\n' > "$MOCK_DIR/view-34.json"
+    # Registers a reply for 34, then overwrites its content: mock_gh_reply
+    # reads the file at call time, so this lands as a real gh success whose
+    # body is unparseable, not an unhandled call.
+    mock_gh_reply "pr view $URL34" "$GH_MOCK_DIR/view-34.json"
+    printf 'not json at all\n' > "$GH_MOCK_DIR/view-34.json"
     When call common_jq pr-status.sh '[.prs[] | .number // .error[0:37]]' "$URL12" "$URL34"
     The status should equal 1
     The output should equal '[12,"gh pr view output could not be parsed"]'

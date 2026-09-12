@@ -139,14 +139,19 @@ description'
   End
 
   Describe 'cited helpers'
-    # `common_jq`, `adapter_jq` and `use_fixture` are each named in the skill
-    # as living in spec_helper.sh, which is what makes the title below true of
-    # every row. `phrase_in`, `count_in` and `rule_in` are named as prose-pin
-    # helpers and are deliberately per-file, so they are not asserted here.
+    # `common_jq`, `adapter_jq`, `use_fixture` and the `mock_gh_*` registration
+    # functions are each named in the skill as living in spec_helper.sh, which
+    # is what makes the title below true of every row. `phrase_in`, `count_in`
+    # and `rule_in` are named as prose-pin helpers and are deliberately
+    # per-file, so they are not asserted here.
     Parameters
       common_jq
       adapter_jq
       use_fixture
+      mock_gh_reset
+      mock_gh_reply
+      mock_gh_fail
+      mock_gh_requests
     End
 
     It "finds $1 where the skill says it lives"

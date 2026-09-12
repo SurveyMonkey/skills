@@ -488,15 +488,11 @@ Refs: https://github.com/octo/app/security/dependabot/55"
   End
 
   Describe 'round 2, finding 5: create_label matches "already exists" only on stderr, never combined output'
-    setup_mock() {
-      MOCK_DIR="$SHELLSPEC_WORKDIR/render-pr-gh5-mock"
-      rm -rf "$MOCK_DIR"
-      mkdir -p "$MOCK_DIR"
-      export MOCK_DIR
-    }
-    Before 'setup_mock'
-
     It 'treats "already exists" appearing only on stdout as a real failure, not success'
+      # Bespoke: mock_gh_fail only ever writes to stderr, matching every real
+      # gh failure this suite otherwise reproduces, but this example needs a
+      # FAILING call that also writes to stdout — the one shape the shared
+      # helper cannot express (issue #196).
       Mock gh
         # A real failure whose STDOUT happens to contain the phrase, and
         # whose STDERR carries the actual, unrelated error.
@@ -619,43 +615,35 @@ Refs: https://github.com/octo/app/security/dependabot/55"
 
   Describe 'labels'
     setup_mock() {
-      MOCK_DIR="$SHELLSPEC_WORKDIR/render-pr-gh-mock"
-      rm -rf "$MOCK_DIR"
-      mkdir -p "$MOCK_DIR"
-      : > "$MOCK_DIR/log"
-      export MOCK_DIR
+      mock_gh_reset
+      # A generic default, registered first so a more specific registration
+      # below wins for the labels it names: any other label create — the
+      # extra --label example below relies on exactly this — just succeeds.
+      : > "$GH_MOCK_DIR/created"
+      mock_gh_reply 'label create' "$GH_MOCK_DIR/created"
+      printf 'created label security\n' > "$GH_MOCK_DIR/created-security"
+      mock_gh_reply 'label create security' "$GH_MOCK_DIR/created-security"
+      printf 'created label dependencies\n' > "$GH_MOCK_DIR/created-dependencies"
+      mock_gh_reply 'label create dependencies' "$GH_MOCK_DIR/created-dependencies"
+      # This fixture's target repo already carries every band label; create_label
+      # must treat that "already exists" shape as success.
+      mock_gh_fail 'label create merge-risk:low' 'HTTP 422: Validation Failed: name already exists'
+      mock_gh_fail 'label create merge-risk:medium' 'HTTP 422: Validation Failed: name already exists'
+      mock_gh_fail 'label create merge-risk:high' 'HTTP 422: Validation Failed: name already exists'
     }
     Before 'setup_mock'
 
     Mock gh
-      printf '%s\n' "$*" >> "$MOCK_DIR/log"
-      case "$1 $2 $3" in
-        'label create security')
-          if [ -f "$MOCK_DIR/security-fails" ]; then
-            printf 'HTTP 403: Resource not accessible\n' >&2
-            exit 1
-          fi
-          printf 'created label security\n' ;;
-        'label create dependencies')
-          if [ -f "$MOCK_DIR/dependencies-fails" ]; then
-            printf 'HTTP 403: Resource not accessible (dependencies)\n' >&2
-            exit 1
-          fi
-          printf 'created label dependencies\n' ;;
-        'label create merge-risk:low'|'label create merge-risk:medium'|'label create merge-risk:high')
-          printf 'HTTP 422: Validation Failed: name already exists\n' >&2
-          exit 1 ;;
-        *) printf 'unhandled: %s\n' "$*" >&2; exit 1 ;;
-      esac
+      "$GH_MOCK_DISPATCH" "$@"
     End
 
     It 'creates security, dependencies, and the one merge-risk label matching the band, with the right colors and descriptions'
       When call common_jq render-pr.sh '.' labels --repo "$REPO" --band low
       The status should be success
       The output should equal '{"status":"ok","labels":["security","dependencies","merge-risk:low"]}'
-      The contents of file "$MOCK_DIR/log" should include 'label create security --repo octo/app --color D93F0B --description Security fix'
-      The contents of file "$MOCK_DIR/log" should include 'label create dependencies --repo octo/app --color 0366d6 --description Pull requests that update a dependency file'
-      The contents of file "$MOCK_DIR/log" should include 'label create merge-risk:low --repo octo/app --color 2da44e --description Low merge risk'
+      The value "$(mock_gh_requests)" should include 'label create security --repo octo/app --color D93F0B --description Security fix'
+      The value "$(mock_gh_requests)" should include 'label create dependencies --repo octo/app --color 0366d6 --description Pull requests that update a dependency file'
+      The value "$(mock_gh_requests)" should include 'label create merge-risk:low --repo octo/app --color 2da44e --description Low merge risk'
     End
 
     Describe 'band colors'
@@ -669,7 +657,7 @@ Refs: https://github.com/octo/app/security/dependabot/55"
         When call common_jq render-pr.sh '.labels[2]' labels --repo "$REPO" --band "$1"
         The status should be success
         The output should equal "\"merge-risk:$1\""
-        The contents of file "$MOCK_DIR/log" should include "label create merge-risk:$1 --repo octo/app --color $2 --description $3"
+        The value "$(mock_gh_requests)" should include "label create merge-risk:$1 --repo octo/app --color $2 --description $3"
       End
     End
 
@@ -680,7 +668,7 @@ Refs: https://github.com/octo/app/security/dependabot/55"
     End
 
     It 'fails on a real gh label create error, quoting it'
-      touch "$MOCK_DIR/security-fails"
+      mock_gh_fail 'label create security' 'HTTP 403: Resource not accessible'
       When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
       The status should equal 1
       The output should include 'Resource not accessible'
@@ -688,7 +676,7 @@ Refs: https://github.com/octo/app/security/dependabot/55"
     End
 
     It 'fails on a real gh label create error for dependencies, quoting it'
-      touch "$MOCK_DIR/dependencies-fails"
+      mock_gh_fail 'label create dependencies' 'HTTP 403: Resource not accessible (dependencies)'
       When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
       The status should equal 1
       The output should include 'Resource not accessible (dependencies)'
@@ -703,15 +691,15 @@ Refs: https://github.com/octo/app/security/dependabot/55"
     End
 
     It 'threads --env-prefix in front of every gh call'
-      ENV_LOG="$MOCK_DIR/env-log"
+      ENV_LOG="$GH_MOCK_DIR/env-log"
       : > "$ENV_LOG"
-      cat > "$MOCK_DIR/wrapper" <<SH
+      cat > "$GH_MOCK_DIR/wrapper" <<SH
 #!/bin/sh
 echo "wrapped: \$*" >> "$ENV_LOG"
 exec "\$@"
 SH
-      chmod +x "$MOCK_DIR/wrapper"
-      When call common_jq render-pr.sh '.status' labels --repo "$REPO" --band low --env-prefix "$MOCK_DIR/wrapper"
+      chmod +x "$GH_MOCK_DIR/wrapper"
+      When call common_jq render-pr.sh '.status' labels --repo "$REPO" --band low --env-prefix "$GH_MOCK_DIR/wrapper"
       The status should be success
       The output should equal '"ok"'
       The contents of file "$ENV_LOG" should include 'wrapped: gh label create security'
@@ -721,42 +709,30 @@ SH
     # security and the band. `gh pr create` fails outright on a label that
     # does not already exist, so `labels` — not just `create` — has to
     # ensure them, with a neutral color since it does not know what the
-    # label means.
+    # label means. The generic 'label create' default from setup_mock
+    # answers these two the same way it answers any other unregistered
+    # label, so no extra registration is needed here.
     It 'creates every extra --label given, alongside security, dependencies, and the band label'
-      Mock gh
-        printf '%s\n' "$*" >> "$MOCK_DIR/log"
-        case "$1 $2" in
-          'label create') printf 'created\n' ;;
-          *) printf 'unhandled: %s\n' "$*" >&2; exit 1 ;;
-        esac
-      End
       When call common_jq render-pr.sh '.' labels --repo "$REPO" --band low \
         --label needs-review --label breaking-change
       The status should be success
       The output should equal '{"status":"ok","labels":["security","dependencies","merge-risk:low","needs-review","breaking-change"]}'
-      The contents of file "$MOCK_DIR/log" should include 'label create dependencies --repo octo/app --color 0366d6 --description'
-      The contents of file "$MOCK_DIR/log" should include 'label create needs-review --repo octo/app --color ededed --description'
-      The contents of file "$MOCK_DIR/log" should include 'label create breaking-change --repo octo/app --color ededed --description'
+      The value "$(mock_gh_requests)" should include 'label create dependencies --repo octo/app --color 0366d6 --description'
+      The value "$(mock_gh_requests)" should include 'label create needs-review --repo octo/app --color ededed --description'
+      The value "$(mock_gh_requests)" should include 'label create breaking-change --repo octo/app --color ededed --description'
     End
   End
 
   Describe 'create'
     setup_mock() {
-      MOCK_DIR="$SHELLSPEC_WORKDIR/render-pr-create-mock"
-      rm -rf "$MOCK_DIR"
-      mkdir -p "$MOCK_DIR"
-      : > "$MOCK_DIR/log"
-      export MOCK_DIR
+      mock_gh_reset
+      printf 'https://github.com/octo/app/pull/99\n' > "$GH_MOCK_DIR/pr-url"
+      mock_gh_reply 'pr create' "$GH_MOCK_DIR/pr-url"
     }
     Before 'setup_mock'
 
     Mock gh
-      printf '%s\n' "$*" >> "$MOCK_DIR/log"
-      case "$1 $2" in
-        'pr create')
-          printf 'https://github.com/octo/app/pull/99\n' ;;
-        *) printf 'unhandled: %s\n' "$*" >&2; exit 1 ;;
-      esac
+      "$GH_MOCK_DISPATCH" "$@"
     End
 
     It 'passes the security, dependencies, and band labels, title, and body-file, with no draft flag'
@@ -765,8 +741,8 @@ SH
         --body-file "$FX/expected-body-scoped.md" --band low
       The status should be success
       The output should equal '{"status":"ok","pr_url":"https://github.com/octo/app/pull/99"}'
-      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:low --title fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x --body-file $FX/expected-body-scoped.md"
-      The contents of file "$MOCK_DIR/log" should not include '--draft'
+      The value "$(mock_gh_requests)" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:low --title fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x --body-file $FX/expected-body-scoped.md"
+      The value "$(mock_gh_requests)" should not include '--draft'
     End
 
     It 'appends every extra --label given, after security, dependencies, and the band label'
@@ -775,15 +751,11 @@ SH
         --label needs-review --label breaking-change
       The status should be success
       The output should equal '{"status":"ok","pr_url":"https://github.com/octo/app/pull/99"}'
-      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:high --label needs-review --label breaking-change --title t --body-file $FX/expected-body-scoped.md"
+      The value "$(mock_gh_requests)" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:high --label needs-review --label breaking-change --title t --body-file $FX/expected-body-scoped.md"
     End
 
     It 'fails clearly when gh pr create fails'
-      Mock gh
-        printf '%s\n' "$*" >> "$MOCK_DIR/log"
-        printf 'a label does not exist\n' >&2
-        exit 1
-      End
+      mock_gh_fail 'pr create' 'a label does not exist'
       When run script "$COMMON/render-pr.sh" create --repo "$REPO" --head fix/dependabot-lodash-4x \
         --title t --body-file "$FX/expected-body-scoped.md" --band low
       The status should equal 1
