@@ -31,7 +31,7 @@ where `<script>` is one of the seven successor scripts named in issue #193:
 `prepare-checkout.sh`, `merge-envelopes.sh`, `preflight-repo.sh`, `build-dispatches.sh`,
 `reap-batch.sh`, `summarize-run.sh`, `pr-status.sh --env-prefix`.
 
-A PR landing one of those scripts finds every pin it must delete with one grep:
+The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security, which took over issue #193; the script name is the mapping key) finds every pin it must delete with one grep:
 
 ```
 grep -rn 'pin: mechanical, retired by <script>' spec/
@@ -57,9 +57,9 @@ Mechanical pins by successor script:
 | `merge-envelopes.sh` | 1 |
 | `pr-status.sh --env-prefix` | 1 |
 
-Each mechanical pin is retired in the same change that lands its successor script (issue
-#193's per-script layers); until then it stays here, marked, as the record of the rule the
-script must reproduce.
+Each mechanical pin is retired in the same change that lands its successor, which is now a
+command in the TypeScript port of gh-security rather than a bash script in this repository;
+until then it stays here, marked, as the record of the rule the port must reproduce.
 
 ### `spec/resolve_alerts_scope_spec.sh` — 66 pins (42 judgment, 24 mechanical)
 
