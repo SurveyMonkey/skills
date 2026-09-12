@@ -132,7 +132,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       Parameters
         worker-pool   'min(cap, N). workers hold the pool'
         args-guard    'Malformed .args. is refused loudly'
-        model-pin     'Each agent runs as .fix-dependency. on .sonnet.'
+        model-pin     'Each agent runs as .gh-security:fix-dependency. on .sonnet.'
         ordering      'Entries come back in dispatch order'
         mispairing    'A result that does not name its own dispatch is dropped, not trusted'
       End

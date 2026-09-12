@@ -408,8 +408,8 @@ the phase 7 summary stay outside it.
 
 **The Workflow tool only accepts a `scriptPath` it can already read** — a path it returned itself,
 or one under the working directory or a directory you have added. This skill always runs with the
-working directory set to one of the user's own checkouts (phase 1's scope), which is outside the
-plugin tree, so
+working directory set to a user checkout or to a directory containing them (phase 1's scope); either
+way it is outside the plugin tree, so
 `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` is refused there even though the file exists and
 you can read it directly. Stage a verified copy instead of hand-authoring a substitute:
 
@@ -450,8 +450,9 @@ What it guarantees, so nothing here re-derives it:
   machine-wide.
 - **Malformed `args` is refused loudly**, before a single agent is dispatched: a `dispatches` that
   is absent, not an array, or empty, and a `cap` that is not a number of at least one.
-- **Each agent runs as `fix-dependency` on `sonnet`** (ADR 004's pin, passed explicitly because a
-  workflow agent call without it inherits the session model) with the Result schema attached.
+- **Each agent runs as `gh-security:fix-dependency` on `sonnet`** (ADR 004's pin, passed explicitly
+  because a workflow agent call without it inherits the session model) with the Result schema
+  attached.
 - **Entries come back in dispatch order**, one per group, each carrying its own `dispatch` payload
   beside its `result`.
 - **A result that does not name its own dispatch is dropped, not trusted** (`mispaired: true`,
