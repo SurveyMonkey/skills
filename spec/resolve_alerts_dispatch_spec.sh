@@ -164,12 +164,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # The script refuses a malformed args object (spec/js/), but only the
     # model can pass a well-formed one in the first place, and a stringified
     # args is a caller mistake no callee can prevent.
+    # pin: mechanical, retired by build-dispatches.sh
     It 'tells the caller to pass args as JSON, never as a JSON-encoded string'
       When call phrase_in "$SKILL" 'Pass .args. as an actual JSON value, never as a JSON-encoded string'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by build-dispatches.sh
     It 'names the silent empty-batch inversion that guard prevents'
       When call blob_in "$SKILL" 'report as a whole batch of crashed agents when nothing was ever dispatched'
       The status should be success
@@ -178,6 +180,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     # The payload is assembled by the model from phases 1, 2 and 5, so its
     # field list is prose, not script.
+    # pin: mechanical, retired by build-dispatches.sh
     Describe 'the dispatch payload the orchestrator assembles'
       Parameters
         'nwo'
@@ -195,6 +198,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
 
     # An omitted key, never a null: the one field whose absence is meaningful.
+    # pin: mechanical, retired by build-dispatches.sh
     It 'still omits env_prefix rather than sending null'
       When call phrase_in "$SKILL" 'omit the key rather than send null'
       The status should be success
@@ -317,6 +321,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'reports groups with no result as unknown rather than as failures'
       When call phrase_in "$SKILL" 'names the groups with no result at all as unknown rather than as'
       The status should be success
@@ -331,24 +336,28 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   End
 
   Describe 'how the model handles the entries it gets back'
+    # pin: mechanical, retired by summarize-run.sh
     It 'reads phase 7 off the returned entries rather than a fence'
       When call phrase_in "$SKILL" 'The workflow returns .*one entry per approved group'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'treats a null entry as that group failure report, still reported'
       When call phrase_in "$SKILL" 'is a failure report for that group, and is still reported'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'reaps a null entry with an empty result file so post-agent.sh reports it missing'
       When call phrase_in "$SKILL" 'with an empty result file, and .post-agent.sh. reports it .missing'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'never drops, hand-retries, or counts a null or mispaired entry as a success'
       When call blob_in "$SKILL" 'never dropped, never retried by hand, and never counted as a success, and neither is a .mispaired. one'
       The status should be success
@@ -357,12 +366,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     # The script empties a mispaired result (spec/js/); the model still has
     # to route the group somewhere, and this is where that is said.
+    # pin: mechanical, retired by reap-batch.sh
     It 'handles a mispaired entry exactly like a null one'
       When call blob_in "$SKILL" 'Treat a .mispaired. entry exactly like a .null. one'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'never reads a mispaired entry pr_url or branch'
       When call blob_in "$SKILL" 'never read its .pr_url. or .branch., which belong to a different group'
       The status should be success
@@ -388,18 +399,21 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # exits 3 when it leaves a worktree behind. A success carrying a cleanup
     # report is the expected shape, and burying it would hide exactly the
     # leak that exit code exists to surface.
+    # pin: mechanical, retired by summarize-run.sh
     It 'reports every non-null cleanup alongside the reap accounting'
       When call blob_in "$SKILL" 'report every non-null .cleanup. on a result, in the same breath'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'singles out a success whose cleanup failed'
       When call blob_in "$SKILL" 'A .success. with a non-null .cleanup. is the case to say out loud'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'refuses to report a leaked worktree as a failed group'
       When call blob_in "$SKILL" 'never as a failed group, and never let the leak go unmentioned'
       The status should be success
@@ -408,18 +422,21 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     # The two sources must be related, not printed twice: left_behind stays
     # the key, cleanup explains it and covers what the reap never saw.
+    # pin: mechanical, retired by summarize-run.sh
     It 'relates cleanup to post-agent.sh left_behind rather than duplicating it'
       When call blob_in "$SKILL" 'two views of the same disk, not two lists to print twice'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'keeps left_behind as the key and cleanup as the explanation'
       When call blob_in "$SKILL" 'key the report on .left_behind., as above, and use .cleanup. to explain it'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'names the case where the reap cleared what the agent could not'
       When call blob_in "$SKILL" 'the reap cleared what the agent could not'
       The status should be success
@@ -429,12 +446,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # Layer 1's handoff: the reap must still run on a success whose cleanup
     # failed. Gating it on `cleanup == null` would skip exactly the groups
     # whose leftovers the agent already failed to remove.
+    # pin: mechanical, retired by reap-batch.sh
     It 'never gates the reap on cleanup being null'
       When call blob_in "$SKILL" 'A non-null .cleanup. on the result never changes whether this call runs'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'says a leaked success is the group that most needs reaping'
       When call blob_in "$SKILL" 'exactly the group whose leftovers most need collecting'
       The status should be success
@@ -444,24 +463,28 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # The driver reports RESOLVED paths; post-agent.sh derives an unresolved
     # one. On macOS that is /private/var against /var for one directory, so a
     # string comparison reports one leak as two.
+    # pin: mechanical, retired by summarize-run.sh
     It 'warns that the same directory is not the same string'
       When call blob_in "$SKILL" 'The same path. is not the same string'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'names the consequence of comparing the two as text'
       When call blob_in "$SKILL" 'comparing them as text reports one leaked worktree as two'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'prescribes suffix matching or resolution before comparing'
       When call blob_in "$SKILL" 'Match on suffix, or resolve both before.*comparing'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'reports one artifact when the two agree, showing the resolved path'
       When call blob_in "$SKILL" 'the resolved path is the one to show'
       The status should be success
@@ -474,12 +497,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # the repository and the batch that hold however dispatch is scheduled.
     # Pinned here because a later editor clearing out pool-era prose is
     # exactly who would take them by mistake.
+    # pin: mechanical, retired by preflight-repo.sh
     It 'still writes the worktree exclude once per repo, before any dispatch for it'
       When call phrase_in "$SKILL" 'Once per distinct repo in the approved batch, before the first agent for that repo is'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by preflight-repo.sh
     It 'still gives the registry preflight one retry before it means anything'
       When call phrase_in "$SKILL" 'one retry.. before it means anything'
       The status should be success
@@ -504,12 +529,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # wording. The reap moved from per-completion (inside a refill motion the
     # model kept) to per-returned-entry after the workflow returns, and both
     # binding documents that carried the old reason were corrected with it.
+    # pin: mechanical, retired by reap-batch.sh
     It 'ties the reap to the result being in hand, not to a completion notification'
       When call phrase_in "$SKILL" 'Reap each group.s local artifacts once its result is in hand'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'no longer claims in scripts/CLAUDE.md that the reap runs on each completion'
       no_completion_reap() { grep -c 'on each completion' "$1" || true; }
       When call no_completion_reap "$SCRIPTS_DOC"
@@ -518,7 +545,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
 
     It 'keeps the never-prune rule in scripts/CLAUDE.md on the entitlement, not the timing'
-      When call phrase_in "$SCRIPTS_DOC" 'the local-scope\s*rule is what makes it safe, not the timing'
+      When call phrase_in "$SCRIPTS_DOC" 'the local-scope[ ]*rule is what makes it safe, not the timing'
       The status should be success
       The output should equal '1'
     End
