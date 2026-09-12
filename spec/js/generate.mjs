@@ -69,6 +69,7 @@ export const PURE_EXPORTS = [
   'dispatchPrompt',
   'agentLabel',
   'pairEntry',
+  'crossFieldViolations',
 ]
 
 // Slice between two markers. An absent marker or an empty region is a hard
