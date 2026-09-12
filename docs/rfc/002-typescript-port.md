@@ -18,18 +18,18 @@ implementation are now measured rather than anticipated. The first is wall clock
 is process-bound rather than compute-bound, which [ADR 005](../adr/005-quality-gate-venues.md)
 established from a CI run where the macOS spec leg burned 204.5s of CPU against 220.97s of wall
 clock on one core with `sys` at 45% of it, the fork/exec signature; every adapter verb re-parses
-the 4,273-line adapter and re-forks its thirteen top-of-file heredoc library loads before it does
-any work, and [#212](https://github.com/SurveyMonkey/skills/issues/212) records the slowest single
-spec file at 598s serial. The second cost is a defect class. The scripts' data layer is jq strings
-passed through shell word splitting, and the failures it produces are silent-success failures:
-`jq -r` on a missing key yields the string `null`, whose numeric test fails on stderr inside an
-`if` that `set -e` never sees; a `die` inside `$( )` ends only the subshell; a jq that errors feeds
-a heredoc-driven loop nothing, so the loop body never runs and `all` over the resulting empty array
-is `true`. Each of those shapes has shipped a wrong answer as a confident one, and
-`plugins/gh-security/scripts/CLAUDE.md` is now largely a list of them with the discipline each one
-forced. A third cost is paid by everyone working in the tree and is harder to put a number on:
-there is no language server for bash, so no rename, no go-to-definition, and no type across the
-JSON contracts that every script both promises and consumes.
+the 4,273-line adapter and re-forks the thirteen top-level heredoc library loads scattered through
+it before it does any work, and [#212](https://github.com/SurveyMonkey/skills/issues/212) records
+the slowest single spec file at 598s serial. The second cost is a defect class. The scripts' data
+layer is jq strings passed through shell word splitting, and the failures it produces are
+silent-success failures: `jq -r` on a missing key yields the string `null`, whose numeric test
+fails on stderr inside an `if` that `set -e` never sees; a `die` inside `$( )` ends only the
+subshell; a jq that errors feeds a heredoc-driven loop nothing, so the loop body never runs and
+`all` over the resulting empty array is `true`. Each of those shapes has shipped a wrong answer as
+a confident one, and `plugins/gh-security/scripts/CLAUDE.md` is now largely a list of them with
+the discipline each one forced. A third cost is paid by everyone working in the tree and is harder
+to put a number on: there is no language server for bash, so no rename, no go-to-definition, and
+no type across the JSON contracts that every script both promises and consumes.
 
 ## Motivation
 
@@ -41,10 +41,10 @@ a change to them.
 
 **The cost is concentrated where the work is growing.** Milestone 7 adds a Python adapter behind
 the same contract, and [#193](https://github.com/SurveyMonkey/skills/issues/193) moves roughly 700
-lines of mechanical prose out of `skills/resolve-alerts/SKILL.md` and into commands. Both land as
-new deterministic surface. Adding either to the current substrate means another lockfile parser
-written as line-oriented `awk` and jq, and another set of the guards above written by hand, each
-one a rule a reviewer has to remember rather than a thing a compiler checks.
+lines of mechanical prose out of `plugins/gh-security/skills/resolve-alerts/SKILL.md` and into
+commands. Both land as new deterministic surface. Adding either to the current substrate means
+another lockfile parser written as line-oriented `awk` and jq, and another set of the guards above
+written by hand, each one a rule a reviewer has to remember rather than a thing a compiler checks.
 
 **The process cost is structural, not incidental.** A verb like `classify-lines` runs one adapter
 process per resolved copy, and `score-merge-risk.sh` runs one `range_facts` process per declared
@@ -74,7 +74,9 @@ ported immediately after.
 - Every deterministic script that runs as part of a fix or audit run is TypeScript, executed
   directly by Node, behind one CLI entry point at `plugins/gh-security/bin/gh-security.ts`.
 - The runtime floor is Node 22.18, the first release whose type stripping runs without a flag and
-  without a warning on stderr (spike table and reasoning in ADR 012).
+  without a warning on stderr (spike table and reasoning in ADR 012, which
+  [#213](https://github.com/SurveyMonkey/skills/issues/213) spawns in Phase 0; it is not written
+  yet, so every reference to it here is forward-looking).
 - The adapter contract ([ADR 001](../adr/001-ecosystem-adapter-contract.md)) survives as a
   contract, but as an in-process interface rather than a process boundary.
 - The fixture corpus is carried over unchanged, and bash and TypeScript answer the same fixtures
@@ -273,12 +275,13 @@ issues carry. Each phase leaves the plugin working.
 | P2-3 | [#222](https://github.com/SurveyMonkey/skills/issues/222) | `apply_constraint` and `validate` |
 | P2-4 | [#223](https://github.com/SurveyMonkey/skills/issues/223) | Retire `node.sh`, `select-adapter.sh` and their specs |
 
-**Phase 3: the commands**, including the #193 contracts, which are built here rather than ported.
+**Phase 3: the commands**, including the #193 contracts, which are built here rather than
+ported. P3-4 is the retirement issue and runs last, which is why its row sits at the bottom.
 
 | Key | Issue | Scope |
 |---|---|---|
 | P3-1 | [#224](https://github.com/SurveyMonkey/skills/issues/224) | The CLI entry point and subcommand registry |
-| P3-2 | [#225](https://github.com/SurveyMonkey/skills/issues/225) | The discovery commands, folding in [#54](https://github.com/SurveyMonkey/skills/issues/54) and [#167](https://github.com/SurveyMonkey/skills/issues/167) |
+| P3-2 | [#225](https://github.com/SurveyMonkey/skills/issues/225) | The discovery commands, folding in [#54](https://github.com/SurveyMonkey/skills/issues/54) (alert JSON on stdin, so grouping re-runs without re-fetching) and [#167](https://github.com/SurveyMonkey/skills/issues/167) (`default_branch` resolved from GitHub rather than a stale `origin/HEAD`) |
 | P3-3 | [#226](https://github.com/SurveyMonkey/skills/issues/226) | `pr-status`, `ensure-worktree-exclude`, `require-linked-worktree` |
 | P3-5 | [#227](https://github.com/SurveyMonkey/skills/issues/227) | `prepare-checkout` and `merge-envelopes` |
 | P3-6 | [#228](https://github.com/SurveyMonkey/skills/issues/228) | `preflight-repo` and `build-dispatches` |
@@ -320,7 +323,10 @@ gate-change checklist), [#211](https://github.com/SurveyMonkey/skills/issues/211
 gate for `src`), plus the dev-toolchain switches
 [#249](https://github.com/SurveyMonkey/skills/issues/249) (lefthook),
 [#250](https://github.com/SurveyMonkey/skills/issues/250) (Biome) and
-[#251](https://github.com/SurveyMonkey/skills/issues/251) (pnpm). Every one of them moves the
+[#251](https://github.com/SurveyMonkey/skills/issues/251) (pnpm). #249 reverses ADR 005's
+rejection of lefthook and carries the amendment that records the reversal: the objection there was
+that lefthook adds a dependency to a repo whose stated constraint is `bash`, `jq` and `gh`, and
+this port is what removes that constraint. Every one of them moves the
 aggregate `gates` job's `needs:` list and its arity floor; none of them touches the repository
 ruleset, which requires only the job id `gates`. C4's checklist is the record of that rule.
 
@@ -346,7 +352,8 @@ ruleset, which requires only the job id `gates`. C4's checklist is the record of
 - **`notice-scan.sh` and `detect-capacity.sh` stay bash**, on the per-call cost of the first and
   the triviality of the second, not on any reservation about the port.
 - **`workflows/fix-groups.mjs` is untouched**, and ADR 010's harness-versus-user-shell boundary
-  survives this RFC intact even though ADR 012 supersedes the ADR that drew it.
+  survives this RFC intact even though ADR 012 supersedes the ADR that drew it: what is
+  superseded is ADR 010's bash-only rule for shipped scripts, not the boundary.
 - **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), with exclusion by
   name and a reason as the only relief. The existing 100 floor on the workflow file does not move.
 - **The mechanical prose pins retire with the scripts they pin** (#197, #231). A pin is never kept
