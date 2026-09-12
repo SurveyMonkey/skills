@@ -139,9 +139,10 @@ description'
   End
 
   Describe 'cited helpers'
-    # `common_jq` and `adapter_jq` are named as living in spec_helper.sh.
-    # `phrase_in`, `count_in` and `rule_in` are named as prose-pin helpers
-    # and are deliberately per-file, so they are not asserted here.
+    # `common_jq`, `adapter_jq` and `use_fixture` are each named in the skill
+    # as living in spec_helper.sh, which is what makes the title below true of
+    # every row. `phrase_in`, `count_in` and `rule_in` are named as prose-pin
+    # helpers and are deliberately per-file, so they are not asserted here.
     Parameters
       common_jq
       adapter_jq
@@ -155,7 +156,7 @@ description'
     End
   End
 
-  Describe 'the path rule that auto-loads it'
+  Describe 'the path rule that points at it'
     # An unanchored `spec/**` is the one form whose behavior is not documented
     # (matched relative to the project root, or against an absolute path?), and
     # a pattern that matches nothing fails silently: the skill simply never
