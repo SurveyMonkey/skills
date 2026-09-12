@@ -43,8 +43,8 @@ Bash scripts are covered by [shellspec](https://shellspec.info): `brew install s
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
 The one JavaScript file this repo ships — the dispatch Workflow script under
-`plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `npm ci`,
-then `npm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
+`plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
+then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
 buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). That is a dev
 and CI dependency only; the shipped plugin *scripts* remain `bash` + `jq` + `gh`.
 
@@ -58,7 +58,7 @@ git hooks run the fast gates on commit and both suites on push, enabled once per
 `git config core.hooksPath .githooks`; CI runs them all (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
-gate — `node` and `npm`, but still targets bash 3.2 because the hooks run it on stock macOS.
+gate — `node` and `pnpm`, but still targets bash 3.2 because the hooks run it on stock macOS.
 
 **How this suite tests is the [`testing` skill](.claude/skills/testing/SKILL.md).** Seams, asserting
 the verdict rather than the parse, where an expected value may come from, red-first and the fixture

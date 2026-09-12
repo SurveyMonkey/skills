@@ -12,7 +12,7 @@
 #             pre-push hook and CI both set it, ADR 005)
 #   js        the vitest suite over the Workflow script, with coverage
 #             thresholds at 100 on all four buckets (ADR 010). Needs an
-#             installed node_modules; run npm ci first.
+#             installed node_modules; run pnpm install first.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
@@ -23,7 +23,7 @@
 #
 # This is dev tooling, not shipped plugin code: unlike the scripts under
 # plugins/gh-security/scripts/ it may assume git, jq, shellcheck, shellspec,
-# the claude CLI, and — since ADR 010 — node and npm. It still targets bash
+# the claude CLI, and — since ADR 010 — node and pnpm. It still targets bash
 # 3.2, because the hooks run it on stock macOS. The node dependency is a dev
 # and CI one only: no shipped plugin script gained a runtime.
 #
@@ -315,9 +315,9 @@ cmd_js() {
   done < <(printf '%s\n' "$targets")
   [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
   [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
-  command -v npm >/dev/null 2>&1 \
-    || die 'npm is not installed; the js gate needs node (ADR 010)'
-  [ -d node_modules ] || die 'node_modules is absent; run npm ci before the js gate'
+  command -v pnpm >/dev/null 2>&1 \
+    || die 'pnpm is not installed; the js gate needs node (ADR 010)'
+  [ -d node_modules ] || die 'node_modules is absent; run pnpm install before the js gate'
   # A stale summary from an earlier run must never satisfy the assertions
   # below, so the report is removed before the suite regenerates it.
   rm -f coverage/coverage-summary.json
@@ -326,7 +326,7 @@ cmd_js() {
   # vitest.config.mjs, so a collection that finds nothing fails there too —
   # the same floor stated twice, because this gate's discovery and the
   # runner's are separate.
-  npm test --silent
+  pnpm --silent test
   js_assert_coverage
 }
 
