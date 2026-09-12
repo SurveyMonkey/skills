@@ -633,6 +633,20 @@ describe('crossFieldViolations', () => {
     expect(crossFieldViolations(r)).toEqual([])
   })
 
+  // Both agreement checks test `['added', 'tightened'].includes(...)`, not
+  // just the 'added' value: a mutant that narrows either array literal to
+  // ['added'] would pass every example above while silently mishandling a
+  // truthful 'tightened' report — the one other value the agent contract
+  // actually uses.
+  it('flags a success with bare_override tightened but a scoped action', () => {
+    expect(crossFieldViolations(successResult({ bare_override: 'tightened' }))).not.toEqual([])
+  })
+
+  it('finds nothing wrong with a success where bare_override tightened and action bare-override agree', () => {
+    const r = successResult({ action: 'bare-override', bare_override: 'tightened' })
+    expect(crossFieldViolations(r)).toEqual([])
+  })
+
   // Not enforced on failure: action is null on every failure while
   // bare_override still reports what was truthfully written.
   it('does not require bare_override/action agreement on a failure', () => {
