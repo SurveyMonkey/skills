@@ -324,11 +324,14 @@ gate for `src`), plus the dev-toolchain switches
 [#249](https://github.com/SurveyMonkey/skills/issues/249) (lefthook),
 [#250](https://github.com/SurveyMonkey/skills/issues/250) (Biome) and
 [#251](https://github.com/SurveyMonkey/skills/issues/251) (pnpm). #249 reverses ADR 005's
-rejection of lefthook and carries the amendment that records the reversal: the objection there was
-that lefthook adds a dependency to a repo whose stated constraint is `bash`, `jq` and `gh`, and
-this port is what removes that constraint. Every one of them moves the
-aggregate `gates` job's `needs:` list and its arity floor; none of them touches the repository
-ruleset, which requires only the job id `gates`. C4's checklist is the record of that rule.
+rejection of lefthook and carries the amendment that records the reversal. ADR 005 refused it on
+two grounds: that lefthook adds a dependency to a repo whose stated constraint is `bash`, `jq` and
+`gh`, and that `core.hooksPath` does the job with none. This port answers the first, because a
+deterministic layer in TypeScript needs node anyway; #249 answers the second on its own ground,
+which is speed rather than dependencies, because the pre-push shellspec run is the slowest thing
+in the local loop and hooks become staged-only. The ones that add or drop a job move the aggregate
+`gates` job's `needs:` list and its arity floor; none of them touches the repository ruleset,
+which requires only the job id `gates`. C4's checklist is the record of that rule.
 
 ## Open Questions
 
