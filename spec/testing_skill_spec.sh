@@ -189,7 +189,7 @@ description'
     ROOT_CLAUDE="$SHELLSPEC_PROJECT_ROOT/CLAUDE.md"
 
     It 'links from the root CLAUDE.md to the New script section'
-      When call grep -c '\.claude/skills/testing/SKILL\.md#new-script' "$ROOT_CLAUDE"
+      When call grep -c '\.claude/skills/testing/SKILL\.md#new-script)' "$ROOT_CLAUDE"
       The status should be success
       The output should equal '1'
     End
