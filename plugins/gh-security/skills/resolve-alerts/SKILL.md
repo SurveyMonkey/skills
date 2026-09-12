@@ -593,6 +593,11 @@ and give it the same reap and the same line in the tables as any other entry. Ag
 never to park a turn waiting on a hung verb, so a null entry means the agent crashed or could not
 produce a result matching its own schema, not that it needs more time.
 
+**A group the workflow's log warned about for a cross-field inconsistency gets a Notes call-out**,
+naming it as unverified bookkeeping rather than a reason to drop the entry: the warning is the only
+place that inconsistency surfaces, and phase 7 reads the returned entries, not the log, so nothing
+else carries it into the summary a user actually reads.
+
 Present one table for the run:
 
 > | Repo | Package | Line | PR | Risk | F4/F5 | Notes |
