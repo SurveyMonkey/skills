@@ -637,6 +637,10 @@ Refs: https://github.com/octo/app/security/dependabot/55"
           fi
           printf 'created label security\n' ;;
         'label create dependencies')
+          if [ -f "$MOCK_DIR/dependencies-fails" ]; then
+            printf 'HTTP 403: Resource not accessible (dependencies)\n' >&2
+            exit 1
+          fi
           printf 'created label dependencies\n' ;;
         'label create merge-risk:low'|'label create merge-risk:medium'|'label create merge-risk:high')
           printf 'HTTP 422: Validation Failed: name already exists\n' >&2
@@ -681,6 +685,14 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The status should equal 1
       The output should include 'Resource not accessible'
       The stderr should include 'Resource not accessible'
+    End
+
+    It 'fails on a real gh label create error for dependencies, quoting it'
+      touch "$MOCK_DIR/dependencies-fails"
+      When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
+      The status should equal 1
+      The output should include 'Resource not accessible (dependencies)'
+      The stderr should include 'Resource not accessible (dependencies)'
     End
 
     It 'rejects an unknown band'
