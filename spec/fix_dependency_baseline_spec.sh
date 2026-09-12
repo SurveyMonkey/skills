@@ -97,6 +97,7 @@ Describe 'the control-install baseline rules (#146, #171)'
   End
 
   Describe 'the orchestrator reads both outcomes'
+    # pin: mechanical, retired by summarize-run.sh
     It 'recognizes a lockfile-refresh action'
       When call phrase_in "$SKILL" 'lockfile-refresh'
       The status should be success
@@ -106,6 +107,7 @@ Describe 'the control-install baseline rules (#146, #171)'
     # Every ambient phase-baseline shape — a failed control install, residual
     # non-lockfile changes, a hook that failed the drift commit — says the
     # repository, not the group, is the problem.
+    # pin: mechanical, retired by summarize-run.sh
     It 'routes every ambient baseline failure shape to one repo-level triage label'
       When call phrase_in "$SKILL" 'baseline could not be established (ambient, affects every group)'
       The status should be success
