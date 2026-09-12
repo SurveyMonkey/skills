@@ -30,8 +30,9 @@ plugins/
     workflows/      # Workflow tool scripts (JavaScript), run by the harness, not the user's
                     # shell; tested by vitest with coverage at 100 (ADR 010)
     scripts/
-      common/       # ecosystem-agnostic: scope, discovery, adapter routing, risk scoring,
-                    # capacity detection, PR state, advisory lookup
+      common/       # ecosystem-agnostic: checkout discovery, scope, alert discovery,
+                    # adapter routing, risk scoring, capacity detection, PR state,
+                    # advisory lookup
       ecosystems/   # one adapter per GitHub advisory ecosystem (node.sh handles npm alerts)
     hooks/
       hooks.json    # PostToolUse hook registration (Bash/BashOutput -> notice-scan.sh)
@@ -58,7 +59,7 @@ pass**. Conventions and their reasoning live in
   ecosystem means adding an adapter, not touching `common/`.
 - **PR flow** ([ADR 008](adr/008-prs-open-ready-for-review.md), superseding
   [ADR 002](adr/002-pr-draft-state-and-approval-flow.md)). Fix and pin-removal PRs open ready for
-  review. The phase 5 dispatch approval is the only checkpoint, no phase acts on a pull request
+  review. The phase 4 batch approval is the only checkpoint, no phase acts on a pull request
   after it is created, and no agent may merge one or arm auto-merge on it.
 - **Worktree isolation and concurrency** ([ADR 003](adr/003-worktree-isolation-and-concurrency-cap.md)).
   Each fix subagent works in its own linked worktree under the target repo's
