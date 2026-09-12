@@ -27,36 +27,37 @@ Describe 'the branch-namespace preflight (issue #123)'
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'the probe in SKILL.md'
-    # Once at repo scope (phase 1) and once per repo at org/user scope
-    # (phase 5 step 4): exactly one probe per repo at every scope, resolved
-    # alongside env_prefix and default_branch.
-    It 'prescribes one fully-qualified ls-remote probe at each scope resolution point'
+    # Once, in phase 1, per checkout in scope: every checkout exists before
+    # anything is asked (issue #188), so there is one resolution point,
+    # alongside env_prefix and default_branch, and no per-repo repeat later.
+    It 'prescribes one fully-qualified ls-remote probe at the one resolution point'
       When call phrase_in "$SKILL" 'git -C <repo_root> ls-remote --heads origin refs/heads/fix'
-      The status should be success
-      The output should equal '2'
-    End
-
-    # The hit flips the batch's naming, it never excludes the repo: the
-    # semantics that distinguish this preflight from the registry one.
-    # Phase 1 states the mapping, phase 2 applies it to discovery, phase 5
-    # step 4 states it per repo and step 5 applies it to classify-lines.
-    It 'maps a refs/heads/fix hit onto --branch-style flat at every consuming site'
-      When call phrase_in "$SKILL" '--branch-style flat'
-      The status should be success
-      The output should equal '4'
-    End
-
-    It 'gives the probe the registry preflight retry'
-      When call phrase_in "$SKILL" 'exactly like phase 6.s registry probe'
       The status should be success
       The output should equal '1'
     End
 
-    # A probe that fails twice means origin is unreachable for the fetch and
-    # push every agent needs — the exclusion route, mirroring a null
-    # default_branch, not the flip route.
-    It 'excludes a repo whose probe fails twice, reporting the probe stderr rather than a diagnosis'
-      When call phrase_in "$SKILL" 'excluded from dispatch and reported in phase 7 with the probe.s stderr verbatim'
+    # The hit flips that checkout's naming, it never excludes the repo: the
+    # semantics that distinguish this preflight from the registry one.
+    # Phase 1 states the mapping and phase 2 applies it to discovery, once
+    # per checkout; there is no later per-repo rewrite any more.
+    It 'maps a refs/heads/fix hit onto --branch-style flat at every consuming site'
+      When call phrase_in "$SKILL" '--branch-style flat'
+      The status should be success
+      The output should equal '2'
+    End
+
+    It 'gives the probe the registry preflight retry'
+      When call phrase_in "$SKILL" 'exactly like phase 5.s registry probe'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # A probe that fails twice takes the exclusion route, mirroring a null
+    # default_branch, not the flip route: the checkout is excluded (no groups
+    # exist for it yet) and the probe's own stderr is the report, never a
+    # guessed cause.
+    It 'excludes a checkout whose probe fails twice, reporting the probe stderr rather than a diagnosis'
+      When call phrase_in "$SKILL" 'a second failure excludes the checkout (no groups exist for it yet), reported in phase 2 and phase 7 with the probe.s stderr verbatim'
       The status should be success
       The output should equal '1'
     End

@@ -1,24 +1,30 @@
 ---
 name: resolve-alerts
 description: >
-  Resolve Dependabot security alerts for the current repository, or across an
-  entire org or the user's own repos. Discovers open alerts, ranks them by
-  severity and EPSS exploitability, and fixes one package, the highest
-  severity tier, or everything — one subagent per group (one major line of
-  one package, in one repo) in an isolated worktree through to a pull request,
-  open for review, carrying a computed merge-risk rating. Use when asked to fix security
-  vulnerabilities in dependencies, resolve Dependabot alerts across a repo,
-  org, or the user's own repos, or clean up npm audit findings.
-allowed-tools: Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*post-agent.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh repo clone*), Bash(*git -C * fetch*), Bash(mktemp -d -t gh-security-clones*), Bash(rm -rf *gh-security-clones*), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Workflow, AskUserQuestion
+  Resolve Dependabot security alerts for the current repository, or for every
+  repository checked out directly under the current directory. Discovers open
+  alerts, ranks them by severity and EPSS exploitability, and fixes one
+  package, the highest severity tier, or everything: one subagent per group
+  (one major line of one package, in one repo) in an isolated worktree through
+  to a pull request, open for review, carrying a computed merge-risk rating.
+  Use when asked to fix security vulnerabilities in dependencies, resolve
+  Dependabot alerts for a repo or for a directory of checkouts, or clean up
+  npm audit findings.
+allowed-tools: Bash(*discover-repos.sh*), Bash(*detect-scope.sh*), Bash(*discover-alerts.sh*), Bash(*select-adapter.sh*), Bash(*classify-lines.sh*), Bash(*detect-capacity.sh*), Bash(*git -C * ls-remote*), Bash(*pr-status.sh*), Bash(*ensure-worktree-exclude.sh*), Bash(*post-agent.sh*), Bash(*node.sh detect*), Bash(*pnpm view *), Bash(*npm view *), Bash(*yarn npm info *), Bash(*gh issue list*), Bash(*gh issue create*), Bash(*gh issue comment*), Read, Workflow, AskUserQuestion
 ---
 
-Orchestrate the resolution of Dependabot security alerts, at repo, org, or user scope: discover
-and rank, ask how much to fix, dispatch one `fix-dependency` subagent per group (one major line of
-one package, in one repo) in parallel, and report the pull requests they open.
+Orchestrate the resolution of Dependabot security alerts for the current repository, or for every
+repository checked out directly under the current directory: discover and rank, ask how much to
+fix, dispatch one `fix-dependency` subagent per group (one major line of one package, in one repo)
+in parallel, and report the pull requests they open.
 
 The deterministic work lives in scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/common/`. Call them;
 do not reimplement them. Every script emits JSON on stdout and exits non-zero with an `error` key
-on failure; if one fails, report its error and stop.
+on failure. **What a failure costs depends on what the script was run for.** A run-level script
+(`discover-repos.sh`, `detect-capacity.sh`) failing means report its error and stop. A script run
+for one checkout (`detect-scope.sh`, `discover-alerts.sh`, `select-adapter.sh`,
+`classify-lines.sh`, the adapter's `detect`, and the two probes) failing means report its error
+and exclude that checkout, by phase 1's rule, and carry on with the others.
 
 You are the control point the user approves. Subagents run unattended through PR creation, so
 **nothing dispatches before the user approves the plan in phase 4**, and that approval is the
@@ -26,48 +32,65 @@ whole of it: PRs open **ready for review** and **nothing here acts on a pull req
 created** (ADR 008). The decision to merge one is the reviewer's, on GitHub, with the diff in
 front of them.
 
-## Phase 1: Detect scope
+## Phase 1: Discover the checkouts
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
+${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-repos.sh
 ```
 
-**Scope comes from git, never from what the directories are named** (issue #134). `scope` is
-`repo` when the working directory is inside a git repository and `null` when it is not, and the
-script infers nothing from a path segment.
+**Scope is the checkouts on disk, and nothing else** (issue #188, ADR 011). The script answers
+`repos`: when the working directory is inside a git repository, that checkout's root and nothing
+else; when it is not, every immediate subdirectory that is itself the root of a checkout,
+non-recursively. Subdirectories that are not repositories, and ones merely inside a repository
+rather than at its root, are skipped without comment. **Do not classify the directory yourself; the
+script already did.** Scope comes from git, never from what the directories are named (issue #134):
+a checkout root is a fact `git rev-parse --show-toplevel` answers, and the script infers nothing
+from a path segment. A symlinked entry is followed and listed once, under its resolved root, so
+two links to one checkout are one repository in scope. A non-zero exit carries an `error`: the
+target is not a directory or could not be read, or git itself failed for a reason other than "not
+a git repository" (git missing from `PATH`, a `safe.directory` refusal, an unreadable or corrupt
+`.git`). Report it and stop: the scope itself could not be established, so there is no checkout
+to exclude and carry on from. An empty `repos` is exit 0, not an error: say "No git repositories
+directly inside `<cwd>`" and stop.
 
-- **repo scope**: use `nwo` for everything downstream. It is parsed from `origin`'s remote URL,
-  which is now its only source, so there is no directory convention to disagree with it and no
-  tiebreak to make: being in a checkout is what repo scope means, and the remote is what that
-  checkout is. If `nwo` is null the repository has no usable `origin`; report that and stop, since
-  every call downstream names the repo. Carry `default_branch` from the same output into dispatch.
-  If it is null, the script could not resolve origin's default branch; report that and stop.
-- **null scope**: the working directory is in no repository, so there is nothing to detect and
-  nothing to guess. **Ask what to operate on**, with AskUserQuestion in the phase 3 style, and say
-  first that no repository was found at the current path. Three options:
-  - **This org** — org scope; the user names the org, which becomes `owner`.
-  - **My repos** — user scope, the authenticated user's own repositories. `discover-alerts.sh
-    --scope user` always operates on those regardless of what `owner` resolves to, so nothing here
-    needs the login resolved.
-  - **One repo** — repo scope against a repo the user names as `owner/name`, which becomes `nwo`.
+**Nothing is ever cloned.** Not by default, not behind a flag, not into a directory the user names.
+A repository the user wants in scope is one they clone themselves, which they were going to do
+anyway to review the resulting pull request. An org with forty repositories and six local checkouts
+has six in scope, and that is the answer, not a shortfall: this skill acts by making commits, so a
+repository the user has not cloned is one they have not chosen to work on. There is no org to name,
+no login to resolve, and no question to ask here. The skill runs against one repository or many,
+and which it is follows from where it was invoked; a directory of checkouts is not an ambiguous
+case to classify, it is the many-repo case.
 
-  Whatever the answer, `nwo`, `repo_root` and `default_branch` for each repo are resolved in phase
-  5, once discovery says which repos are actually in play and a local checkout exists to read them
-  from.
+**Then, for every checkout in `repos`, resolve three facts before anything else talks to it**, in
+the order below. Resolve them for every checkout now, before phase 3 asks anything, so the plan
+the user approves is final: every branch name is settled and every group is classified before it
+is offered, and nothing is withdrawn after approval.
 
-**At repo scope detected from a local checkout, resolve `env_prefix` here, before anything else
-talks to the repo.** `env_prefix` is **a command prefix the environment requires for repo-targeted
-commands** — nothing more is known or assumed about it here. It is optional, it is opaque, and it
-is never derived: **take it from your session context.** When the CLAUDE.md or rules covering this
-repo's directory state that commands in that tree need a prefix, that stated prefix is this repo's
-`env_prefix`, used verbatim. When no such context exists — the ordinary single-login case — the
-repo has none and every command for it runs bare, with no wrapping invented here.
+**An excluded checkout never ends the run on its own.** Steps 2 and 3 below each name a condition
+under which a checkout is excluded; when one is, report it by name with the reason, keep going
+with the others, and stop only when no checkout survives. With one checkout in scope that is the
+same
+"report and stop" it always was. Every checkout excluded here is named again in phase 2's report
+and in phase 7's summary, so a repository silently left out of the batch never happens.
+
+### 1. `env_prefix`
+
+**Resolve `env_prefix` for this checkout here, before anything else talks to the repo.**
+`env_prefix` is **a command prefix the environment requires for repo-targeted commands** — nothing
+more is known or assumed about it here. It is optional, it is opaque, and it is never derived:
+**take it from your session context.** When the CLAUDE.md or rules covering this repo's directory
+state that commands in that tree need a prefix, that stated prefix is this repo's `env_prefix`,
+used verbatim. When no such context exists — the ordinary single-login case — the repo has none
+and every command for it runs bare, with no wrapping invented here.
 
 **Any context that names a wrapper command for tools run in a directory tree is such a statement**,
 however it is phrased. It does not have to use the word `env_prefix`, name this plugin, or mention
 security work: a rule saying that commands in some tree must be run through a wrapper is stating
 this repo's `env_prefix` whenever the repo sits in that tree. Where the stated prefix takes a
-directory, instantiate it against this repo's directory, which already exists at repo scope.
+directory, **instantiate it against the checkout itself**, `repo_root`, which always exists: nothing
+in this skill creates a checkout, so there is no destination directory to reason about and no
+ordering hazard between resolving the prefix and having a directory to resolve it against.
 Recognizing one is your job and missing one is silent, which is what the failure class below
 describes.
 
@@ -76,23 +99,43 @@ package manager get their identity per directory rather than from a single ambie
 that arrange that load through interactive shell hooks that a non-interactive tool shell never
 runs, so a bare `gh`, `git`, or install silently resolves the wrong identity or a dead registry
 token. **The prefix covers your own commands, not just the agents'**: from here on, every `gh`,
-`git`, and plugin-script invocation you make for this repo — `discover-alerts.sh` and
-`classify-lines.sh` in phase 2, `detect-scope.sh` when re-run, `post-agent.sh` in phase 6's reap
-step (which threads it to its own `pr-status.sh` call and never to the reap it runs after) and
-`pr-status.sh` again in phase 8 — runs under it, or discovery itself reads the wrong account's alerts
-before any dispatch exists. Note
+`git`, and plugin-script invocation you make for this repo — `detect-scope.sh` next, the
+namespace probe after it, every stage of the phase 2 pipeline, the adapter's `detect` and the
+registry probe in phase 5, `post-agent.sh` in phase 6's reap step (which threads it to its own
+`pr-status.sh` call and never to the reap it runs after) and this repo's `pr-status.sh` call in
+phase 8 — runs under it, or discovery itself reads the wrong account's alerts before any dispatch
+exists. Note
 that `<env_prefix> <cmd>` runs `<cmd>` in the caller's current directory — it injects the
 environment, it does not chdir — so it composes with, never replaces, whatever `cd` or `-C`
-locator a command already carries. Wherever there is no `repo_root` yet — org and user scope, and
-a repo the user named when the scope came back null — resolution happens per repo in phase 5.
-The command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
+locator a command already carries. With several checkouts in scope each resolves its own prefix,
+by the same rule, from whatever context covers its own directory; two neighbors can differ. The
+command snippets in the phases below omit `env_prefix` for readability, exactly as the agent
 definitions do; add it to every command you run for a repo that resolved one.
 
-**At repo scope detected from a local checkout, probe the branch namespace here, once, right after
-`env_prefix` resolves.** Git refs are a filesystem namespace, so a remote branch literally named
-`fix` (`refs/heads/fix`) rejects every `fix/*` push with a `(directory file conflict)` — on the
-field run that surfaced this, every agent in the batch finished its whole fix and then failed at
-push (issue #123). One read-only probe, under `env_prefix` when this repo has one:
+### 2. Identity and default branch
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh <repo_root>
+```
+
+Under `env_prefix` when this checkout resolved one: the script falls back to `git remote show
+origin`, a network call, when the checkout records no `refs/remotes/origin/HEAD`, and a bare call
+there resolves the wrong identity and answers a null `default_branch` for a checkout that is fine.
+Use `nwo` for everything downstream for this repo. It is parsed from `origin`'s remote URL, which
+is now its only source, so there is no directory convention to disagree with it and no tiebreak to
+make: being in a checkout is what repo scope means, and the remote is what that checkout is. If
+`nwo` is null the repository has no usable `origin`; report that and exclude the checkout, since
+every call downstream names the repo. Carry `default_branch` from the same output into dispatch.
+If it is null, the script could not resolve origin's default branch; report that and exclude the
+checkout rather than guessing a branch name.
+
+### 3. Branch namespace
+
+**Probe this checkout's branch namespace here, once, right after its identity resolves.** Git refs
+are a filesystem namespace, so a remote branch literally named `fix` (`refs/heads/fix`) rejects
+every `fix/*` push with a `(directory file conflict)` — on the field run that surfaced this, every
+agent in the batch finished its whole fix and then failed at push (issue #123). One read-only
+probe, under `env_prefix` when this repo has one:
 
 ```bash
 git -C <repo_root> ls-remote --heads origin refs/heads/fix
@@ -103,69 +146,65 @@ a repo with `topic/fix` and no bare `fix` returns nothing here (verified empty).
 means the slash namespace is blocked: this repo's **branch style is `flat`**, phase 2 passes
 `--branch-style flat` to `discover-alerts.sh` so every emitted `branch_name` uses the
 collision-safe `fix-dependabot-<pkg>-<line>x` scheme, and the phase 4 plan says so. Empty output is
-the ordinary case: the style is `slash` (the default; pass no flag). A non-zero exit gets **one
-retry**, exactly like phase 6's registry probe; a second failure means report the probe's stderr
-verbatim and stop, as with a null `default_branch` — the same way phase 6 distinguishes causes by
-what the output says, rather than a pre-baked "origin unreachable" diagnosis: auth, a wrong
-`env_prefix`, and a non-git `repo_root` all fail here too, not only an unreachable `origin`. A
-failed probe also prints nothing on stdout; never read a failed probe's empty stdout as the slash
-verdict. The probe covers the shape seen in the wild; the
-inverse collision (a pre-existing `fix/dependabot-<pkg>-<line>x/<anything>` branch blocking one
-group's exact name) is not probed — a push it rejects fails that one group with the same
-`(directory file conflict)` rejection, which that agent reports as its own failure.
+the ordinary case: the style is `slash` (the default; pass no flag). The verdict is per checkout: a
+neighbor whose probe came back empty runs with no flag. A non-zero exit gets **one retry**, exactly
+like phase 5's registry probe; a second failure excludes the checkout (no groups exist for it
+yet), reported in phase 2 and phase 7 with the probe's stderr verbatim, as with a null
+`default_branch` — the
+same way phase 5 distinguishes causes by what the output says, rather than a pre-baked "origin
+unreachable" diagnosis: auth, a wrong `env_prefix`, and a non-git `repo_root` all fail here too,
+not only an unreachable `origin`. A failed probe also prints nothing on stdout; never read a failed
+probe's empty stdout as the slash verdict. Record every repo that flipped to flat; phase 7 names
+them. The probe covers the shape seen in the wild; the inverse collision (a pre-existing
+`fix/dependabot-<pkg>-<line>x/<anything>` branch blocking one group's exact name) is not probed — a
+push it rejects fails that one group with the same `(directory file conflict)` rejection, which
+that agent reports as its own failure.
 
-EMU orgs are out of scope (RFC 001 Non-Goals): this skill does not detect or special-case
-org-scope discovery against one. That is a narrower claim than it once was — the boundary is the
-ambient credential set a `gh`/`git` invocation resolves, not EMU-ness, and nothing about it is
-read off a directory name now that scope comes from git. A session whose `gh` invocations resolve
-credentials that can see an EMU repo (see `env_prefix`, above) reaches that repo's alerts end to
-end at **repo** scope; what stays out of scope is asking an EMU **org** for its aggregate alert
-list, which RFC 001 never covers.
+EMU orgs stay out of scope (RFC 001 Non-Goals) in the only sense that was ever load-bearing: the
+boundary is the ambient credential set a `gh`/`git` invocation resolves, not EMU-ness, and nothing
+about it is read off a directory name. A session whose `gh` invocations resolve credentials that can
+see an EMU repo (see `env_prefix`, above) reaches that checkout's alerts end to end. What RFC 001
+never covered was asking an EMU **org** for its aggregate alert list, and no org-level discovery of
+any kind exists here any more, so there is nothing EMU-specific left to detect or special-case.
 
 ## Phase 2: Discover and route
 
-At repo scope, when phase 1 detected it from a local checkout:
+Once per checkout phase 1 kept, under that checkout's `env_prefix`:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh --scope <scope> <target> \
+${CLAUDE_PLUGIN_ROOT}/scripts/common/discover-alerts.sh <nwo> \
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/select-adapter.sh --from-discovery \
   | ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>
 ```
 
-When phase 1's namespace probe found `refs/heads/fix`, add `--branch-style flat` to the
-`discover-alerts.sh` call, so every `branch_name` the groups carry — and everything downstream
-that consumes them, the fix agents included — is born with the flat scheme. At org and user scope
-no probe has run yet (there is no checkout), so discovery takes no style flag there; the per-repo
-rewrite happens in phase 5.
+**`<env_prefix>` wraps each of the three commands, not only the first.** A pipeline prefixed once
+runs classification bare, and `classify-lines.sh` fetches from `origin`, so its fetch fails under
+the wrong identity and the checkout is excluded for a cause that is not true of it. A non-zero
+exit from `discover-alerts.sh` or `select-adapter.sh` here excludes the checkout the same way
+`classify-lines.sh`'s does below: report the script's `{"error": ...}` line, continue with the
+others.
+
+When phase 1's namespace probe found `refs/heads/fix` for this checkout, add `--branch-style flat`
+to its `discover-alerts.sh` call, so every `branch_name` the groups carry — and everything
+downstream that consumes them, the fix agents included — is born with the flat scheme. The flag
+belongs to the checkout whose probe hit, not to the batch.
 
 `--base-ref origin/<default_branch>` uses phase 1's `default_branch` and is not optional here:
 it is what pins the classification to the same tree the fix agents will branch from. The script
 fetches that branch, reads the lockfile from a short-lived detached worktree at the fetched ref,
 and cleans the worktree up itself, so whatever branch the user happens to have checked out — and
 whatever uncommitted lockfile edits it carries — cannot silently reclassify a group
-(issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it as
-blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`, which
+(issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo, not for the
+run: report it as blocked with the script's `{"error": ...}` line, exclude the checkout exactly as
+phase 1 excludes one, continue with the others, and never re-run without `--base-ref`, which
 would judge the user's checkout and reintroduce the defect the flag exists to close.
 
-Wherever there is no local checkout yet — org and user scope, and a repo the user named when
-phase 1's scope came back null — stop after `select-adapter.sh` instead: line reconciliation
-happens after checkout, in phase 5, per repo. **Discovery for a named repo therefore runs before
-any per-repo environment resolution exists**: phase 5 is where that repo's `env_prefix` and
-`repo_root` are settled, so this call, like every org and user scope discovery call, is made with
-whatever identity your own shell resolves. In a workspace whose credentials are scoped to its
-directories, run this skill from inside the relevant directory so that identity is the right one,
-or expect discovery to read the wrong account's alerts.
-
-`target` is `nwo` at repo scope, `owner` at org scope, and omitted (or the authenticated login) at
-user scope. Returns `actionable` (ranked by severity then EPSS, each group annotated with its
-`adapter_path` and, at every scope, its own `repo`) and `skipped` (each with a `reason`), plus
-`skipped_repos` — repos excluded at org or user scope, because the user cannot push to them
-(`no push access`), because the API did not say whether they can (`permission data missing from
-API response`), because the repo is a fork (`fork repository`, on both the aggregate and fan-out
-paths) or archived (`archived repository`, fan-out path only — the aggregate response can never
-name an archived repo, since GitHub refuses Dependabot alerts for archived repositories outright),
-or because their alerts could not be read (`alert fetch failed`, `invalid alert response`).
-`skipped_repos` is always present and empty at repo scope.
+Each call returns `actionable` (ranked by severity then EPSS, each group annotated with its
+`adapter_path` and its own `repo`) and `skipped` (each with a `reason`). With more than one checkout
+in scope, concatenate the per-checkout envelopes into one and re-rank `actionable` by severity,
+then EPSS descending, then `repo`, `package` and `major_line` to break ties, so a batch spanning
+repos comes out in one stable order. Every group carries its `repo`, so nothing is lost in the
+merge and nothing downstream has to remember which call produced it.
 
 A group is **one major line of one package in one repo**, not one package: a package resolved at
 several majors at once has a different patched version per line, and one group per line is what
@@ -173,8 +212,8 @@ lets each get its own branch, worktree and PR (issue #19). Two groups with the s
 different `major_line`, or the same `package`/`major_line` in different `repo`s, are independent
 work, never a duplicate.
 
-If `actionable` is empty, report every skipped group and every skipped repo, and stop. Reasons you
-will see:
+If `actionable` is empty, report every skipped group and every excluded checkout, and stop.
+Reasons you will see:
 
 - `no fix available` — no patched version published yet
 - `open PR exists` — a fix PR is already open (URL in `open_pr_url`)
@@ -196,23 +235,23 @@ will see:
   parent, or dropping the dependent that pins it. A shared parent whose copies version-qualified
   keys CAN separate stays actionable; the adapter writes those keys itself.
 
+A group `classify-lines.sh` moves to `skipped` here is withdrawn from the phase 6 queue before the
+question is ever asked: it never appears as a row the user can approve, so the user never approves
+work that cannot be done. That ordering is the point of resolving every checkout in phase 1: on the
+field run behind issue #188 a group was approved and then withdrawn as `requires major version
+bump`, because the checkout that could have classified it did not exist until after the approval.
+
 `classify-lines.sh` also annotates each still-actionable group with `resolved_majors` and a
 `line_status` (`resolved`, `line_absent`, or `unknown`); all three dispatch normally — `unknown`
 deliberately so, since validate fail-closes later and withholding a fixable group is the wrong
 direction.
 
-`skipped_repos` reasons:
-
-- `no push access` — the authenticated user cannot push to the repo; never dispatched
-- `permission data missing from API response` — the API did not say whether the user can push
-- `fork repository` — never a dispatch target, on both the aggregate and fan-out paths
-- `archived repository` — never a dispatch target; fan-out path only
-- `alert fetch failed` / `invalid alert response` — the per-repo alert call itself failed
-  (`error` field where present)
-
-**Report every skipped repo by name, every time it is non-empty**, whether or not `actionable` is
-empty. A repo silently left out of the batch is exactly the failure mode the RFC's push-access
-filtering requirement exists to prevent.
+**Report every excluded checkout by name, every time phase 1 or this phase excluded one**, whether
+or not `actionable` is empty, with its reason: no usable `origin`, no resolvable default branch, a
+namespace probe that failed twice, or a `discover-alerts.sh`, `select-adapter.sh` or
+`classify-lines.sh` failure. A checkout silently left out
+of the batch is exactly the failure mode RFC 001's "it must never be silent" requirement exists to
+prevent, and the requirement outlives the API-side filtering it was written for.
 
 ## Phase 3: Ask how much to fix
 
@@ -221,20 +260,21 @@ Present the ranked table:
 > | # | Repo | Package | Line | Severity | EPSS | Alerts | Relationship |
 > |---|---|---|---|---|---|---|---|
 
-Omit the `Repo` column at repo scope — every row shares the same repo, and a constant column is
-noise. Include it always at org and user scope, for the same reason `Line` is always shown: hiding
-a dimension that can differ between rows is how a collapsed report reads as normal.
+Omit the `Repo` column when one checkout is in scope — every row shares the same repo, and a
+constant column is noise. Include it always when more than one is, for the same reason `Line` is
+always shown: hiding a dimension that can differ between rows is how a collapsed report reads as
+normal.
 
 `Line` is the group's `major_line` (`6.x`, `7.x`). Show it always, not only when a package has
 more than one: a row that says `undici 6.x` and another that says `undici 7.x` is the difference
 between two fixes and one, and hiding it is how the collapsed-group bug read as normal.
 
-Note skipped groups and skipped repos briefly. A `requires major version bump` group appears among
-those skip notes with its `resolved_majors` context ("only 0.2.5 is installed; the fix line is
+Note skipped groups and excluded checkouts briefly. A `requires major version bump` group appears
+among those skip notes with its `resolved_majors` context ("only 0.2.5 is installed; the fix line is
 1.x"), never as a rankable row: it was moved to `skipped` in phase 2, and offering it for approval
-is asking the user to approve doomed work (issue #101). At org and user scope no group carries a
-`line_status` yet — line reconciliation happens after checkout, in phase 5 — so say a group may
-still be withdrawn there. Then AskUserQuestion with three options:
+is asking the user to approve doomed work (issue #101). Every group in the table is already
+classified against its own checkout, so nothing offered here is withdrawn later. Then
+AskUserQuestion with three options:
 
 - **One** — fix only the top-ranked group (one line of one package in one repo, not every line or
   every repo).
@@ -256,22 +296,14 @@ repos at once still saturate the same laptop. Show the plan for the chosen batch
 >
 > N group(s) across M repo(s), concurrency cap C.
 
-Omit the `Repo` column at repo scope, as in phase 3. "Likely action" comes from the alerts'
-`relationship` field (direct → version bump, transitive → scoped override) and is best-effort: the
-subagent's own `why` classification is authoritative. An agent can also come back with
-`action: "lockfile-refresh"` — its control install alone resolved the fix, because the manifest
-already admitted the fixed version and only the stale lockfile pinned the vulnerable one — which
-no prediction here anticipates. `Branch` shows each group's `branch_name`;
-at repo scope it is final (phase 1's namespace probe already ran — say so when the batch runs
-flat), while at org and user scope it is provisional until phase 5's per-repo probe, which can
-flip a repo's names to the flat `fix-dependabot-...` scheme; say that too.
-
-At org or user scope, name every distinct repo the plan touches and say plainly that a repo not
-yet checked out locally will be cloned before dispatch, into a destination phase 5 asks about
-once: a directory the user names and keeps, or a temporary directory removed at the end of the run
-when every group in it opened a PR, and kept and reported otherwise. Say that the cloning is part
-of what this approval covers, and that the destination question
-is the one thing still to be settled, not a separate consent step for the work itself.
+Omit the `Repo` column when one checkout is in scope, as in phase 3. "Likely action" comes from
+the alerts' `relationship` field (direct → version bump, transitive → scoped override) and is
+best-effort: the subagent's own `why` classification is authoritative. An agent can also come back
+with `action: "lockfile-refresh"` — its control install alone resolved the fix, because the
+manifest already admitted the fixed version and only the stale lockfile pinned the vulnerable one —
+which no prediction here anticipates. `Branch` shows each group's `branch_name`, and it is final:
+phase 1's namespace probe already ran for every checkout, so name each repo whose batch runs flat,
+if any, rather than leaving the user to notice the different spelling in the PRs.
 
 Ask for **one** approval of the whole batch. This is **the last checkpoint before pull requests
 exist**: subagents run unattended from here through PR creation, and no phase after this one asks
@@ -284,129 +316,7 @@ the user approving the batch knows that approving it is approving every group in
 withdrawn later never needed re-approval either, and no group is ever added to the batch after
 this point.
 
-## Phase 5: Resolve local checkouts
-
-Skip this phase entirely when phase 1 detected repo scope from a local checkout — `repo_root`,
-`nwo`, and `default_branch` are already known from there. Run it otherwise: at org and user scope,
-and for the single repo a user named when phase 1's scope came back null, which has no local
-checkout either.
-
-**Ask once, before the first repo is resolved, where new clones go.** The machine may have no copy
-of some repo in the batch, and there is no convention that says where a new one belongs, so this
-is **one question for the whole run**, never one per repo: AskUserQuestion in the phase 3 style,
-with two options.
-
-- **A directory I name** — clones land at `<destination>/<repo-name>` and stay there afterwards.
-  Take the directory from the question's free-form answer. When the current directory holds
-  `@`-prefixed owner directories, offer `<current directory>/@<repo-owner>`
-  as the suggested default: a layout the machine already has is a reasonable guess, and it is only
-  ever a default the user can replace. Nothing else in this skill reads that convention.
-- **A temporary directory, cleaned up when every group in it opens a PR** — create it with the
-  exact command below, clone into it, and let phase 7 decide whether it can be removed. The label
-  is literal: phase 7 keeps and reports the whole directory when any group in it ended without a
-  verified open PR, because its worktree and branch are then the only copies of that work.
-
-  ```bash
-  mktemp -d -t gh-security-clones
-  ```
-
-  **Record the path that command printed, verbatim, and treat it as this run's only removable
-  path.** Phase 7 removes exactly that recorded string and refuses any other; the
-  `gh-security-clones` component is what makes a removal recognizable as this skill's own, in the
-  transcript and in the tool grant.
-
-  **Say what this option costs before the user picks it.** Clones under a temporary directory sit
-  outside every workspace directory, so in a workspace whose credentials are scoped to its
-  directories, **a repo cloned there runs without the command prefix your environment requires**,
-  and `gh`, `git` and the package manager resolve whatever identity the bare shell has. The
-  failures that produces are misleading rather than obvious: a fetch that reports the repository
-  as missing, an install that 401s against the wrong registry.
-  **In such a workspace, name a directory instead.**
-
-Ask it even when every repo turns out to already have a checkout; the answer costs one question
-and the alternative is discovering the need for it halfway through resolving repos.
-
-For each **distinct repo** named in the approved batch:
-
-1. **Resolve `env_prefix` for the repo, before its clone or fetch.** The same resolution phase 1
-   makes at repo scope, and by the same rule: whatever prefix your session context states for the
-   directory this repo's checkout will live in is that repo's `env_prefix`, taken verbatim; where
-   the context states none, the repo has none and its commands run bare. Nothing is probed here
-   either, so no checkout has to exist for the statement to be read. **Where the stated prefix
-   takes a directory, instantiate it against the destination directory this run chose, never
-   against the checkout path.** Phase 1 can name the checkout because it has one; here the checkout
-   is what step 2 is about to create under this very prefix, and a prefix instantiated against a
-   path that does not exist yet fails on that clone. The destination exists first and contains the
-   checkout, so the environment it selects is the one the checkout inherits.
-   **Your own commands for this repo run under it too**, not just the dispatches: the clone or
-   fetch in step 2, `detect-scope.sh` in step 3, the namespace probe in step 4,
-   `classify-lines.sh` in step 5, and `pr-status.sh` in phase 6's reap step and again in phase 8.
-   The prefix injects environment without changing directory, so it composes with the `-C` or `cd`
-   locator each of those already carries.
-2. **Reuse a checkout wherever one is found; clone only what is missing.** The expected path is
-   `<destination>/<repo-name>`, where `<destination>` is the answer to the clone-destination
-   question above, plus any path the user named for this repo specifically in conversation.
-   - If a git repository already exists at that path, use it as `repo_root` and refresh it:
-     `git -C <repo_root> fetch origin`. A checkout the run did not create is never removed by it,
-     whichever destination was chosen.
-   - If nothing exists there, clone it there: `gh repo clone <repo> <repo_root>`.
-   - If a directory exists at that path but is not the expected git repository (wrong remote, or
-     not a repository at all), stop and report the conflict for that repo rather than guessing;
-     do not dispatch groups for it. Step 3's `detect-scope.sh` call answers "is this the right
-     repository" from `origin` itself, which is where its `nwo` comes from.
-3. **Resolve `default_branch` and confirm the identity** of that `repo_root`:
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh <repo_root>
-   ```
-   Use its `default_branch`. If null, report that repo as blocked and exclude its groups from
-   dispatch rather than guessing a branch name. Its `nwo` is read from that checkout's own
-   `origin`, so an `nwo` that is not the repo this batch meant is the wrong-repository conflict
-   from step 2 arriving one step late: report it and exclude that repo's groups the same way.
-4. **Probe that repo's branch namespace** — the same probe phase 1 makes at repo scope, with the
-   same semantics, one per repo:
-   ```bash
-   git -C <repo_root> ls-remote --heads origin refs/heads/fix
-   ```
-   The fully-qualified refname matters here too: git matches the whole ref, not the tail
-   component, so a repo with `topic/fix` and no bare `fix` returns nothing. Non-empty output means
-   the remote rejects every `fix/*` push (`(directory file conflict)`, issue #123): this repo's
-   branch style is `flat`, and the next step's `classify-lines.sh` call takes
-   `--branch-style flat`, which rewrites that repo's `branch_name`s to the
-   `fix-dependabot-<pkg>-<line>x` scheme before anything dispatches — the fix agents consume the
-   rewritten names verbatim and never decide naming themselves. Empty output keeps the default
-   slash scheme (no flag). A non-zero exit gets one retry; a second failure gets that repo's groups
-   excluded from dispatch and reported in phase 7 with the probe's stderr verbatim, as with a null
-   `default_branch` — not a pre-baked "origin unreachable" diagnosis, since auth, a wrong
-   `env_prefix`, and a non-git `repo_root` all fail here too. A failed probe also prints nothing on
-   stdout; never read a failed probe's empty stdout as the slash verdict. Record every repo that
-   flipped to flat; phase 7 names them.
-5. **Reconcile each approved group with what the default branch actually resolves.** Once the
-   repo's `{repo, repo_root, default_branch}` triple is resolved, run:
-   ```bash
-   ${CLAUDE_PLUGIN_ROOT}/scripts/common/classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>
-   ```
-   (plus `--branch-style flat` when step 4 flipped this repo)
-   with that repo's APPROVED groups on stdin, as the phase 2 envelope filtered to them
-   (`{actionable: <that repo's approved groups>, skipped: []}`). `--base-ref` carries step 3's
-   `default_branch`, exactly as phase 2 does at repo scope: the script fetches that branch and
-   classifies against a short-lived detached worktree at the fetched ref, so a checkout step 2
-   reused — whatever branch it sits on — classifies the same as a fresh clone
-   (issue #158). A non-zero exit from `classify-lines.sh` here is a stop for this repo: report it
-   as blocked with the script's `{"error": ...}` line, and never re-run without `--base-ref`,
-   which would judge the user's checkout and reintroduce the defect the flag exists to close.
-   A group that reclassifies
-   `requires_major_bump` is **withdrawn from the phase 6 queue** — no re-approval needed: the
-   approval covered fixing the group, and this discovers the fix does not exist — and reported in
-   phase 7 as skipped with the same `requires major version bump` reason and its
-   `resolved_majors` context. A group that reclassifies `cross_line_collision` is withdrawn the
-   same way and reported under `shared parent across major lines` with its `collision_parents`
-   (issue #132). Every other `line_status`, `unknown` included, dispatches as
-   approved.
-
-Carry the resolved `{repo, repo_root, default_branch}` triples into phase 6; every group dispatched
-for a given repo shares its triple.
-
-## Phase 6: Dispatch the fix workflow
+## Phase 5: Prepare each repo for dispatch
 
 **Once per distinct repo in the approved batch, before the first agent for that repo is
 dispatched:**
@@ -422,21 +332,26 @@ read-then-append from each can duplicate the line or tear the file (issue #35). 
 set, so one call per repo removes the race by construction. A failure here is not fatal — report it
 and dispatch anyway; the worst case is worktree directories showing up in `git status`.
 
-**Carry that repo's `env_prefix` into this phase.** It was resolved in phase 1 (repo scope) or
-phase 5 step 1 (org and user scope), never here: by the time anything dispatches, every one of
-your own commands for the repo has already been running under it. This phase only applies it — to
-the registry preflight next and to every group dispatched for the repo — and omits the field from
-the dispatches of a repo that resolved none.
+**Carry that repo's `env_prefix` into this phase and the next.** It was resolved in phase 1, once
+per checkout, never here: by the time anything dispatches, every one of your own commands for the
+repo has already been running under it. This phase and phase 6 only apply it — to the adapter's
+`detect` and the registry preflight next, and to every group dispatched for the repo — and omit
+the field from the dispatches of a repo that resolved none.
 
 **Probe that repo's registry, once, before its first dispatch.** The field run this contract comes
 from began with a dead private-registry token: all 33 agents would have failed at install, one at a
 time, each burning a slot before reporting a confusing failure. Resolve the package manager the
-same way `classify-lines.sh` and the fix agent do — `<adapter_path> detect` gives `pm` and
-`pm_exec` — and run one read-only probe from inside `repo_root`, under `env_prefix` when this repo
-has one (bare when not). The `cd` is load-bearing and `env_prefix` cannot replace it: the prefix
-injects environment without changing directory, so a probe without the `cd` runs in your
-working directory, resolves the wrong `.npmrc`/`.yarnrc.yml`, and lets a dead private-registry
-token probe green against the public registry — the exact failure this preflight exists to catch;
+same way `classify-lines.sh` and the fix agent do — `cd <repo_root> && <env_prefix>
+<adapter_path> detect` gives `pm` and `pm_exec`, and it takes the same `cd` and the same prefix as
+the probe below because it reads the lockfile from the current directory and resolves `pm_exec`
+from the `PATH` the prefix arranges; a non-zero exit there excludes every one of that repo's
+groups exactly as a failed probe does below, with the script's `{"error": ...}` line — and run one
+read-only probe from inside `repo_root`, under `env_prefix` when this repo has one (bare when
+not). The `cd` is
+load-bearing and `env_prefix` cannot replace it: the prefix injects environment without changing
+directory, so a probe without the `cd` runs in your working directory, resolves the wrong
+`.npmrc`/`.yarnrc.yml`, and lets a dead private-registry token probe green against the public
+registry — the exact failure this preflight exists to catch;
 yarn berry additionally errors outside a project, which would exclude every berry repo. Probe a
 **scoped** dependency from the repo's own manifest when one exists — scoped packages are where
 private registries live — falling back to the top-ranked queued group's `package` for this repo
@@ -446,8 +361,8 @@ when the manifest declares no scoped dependency:
 - npm: `cd <repo_root> && <env_prefix> <pm_exec> view <package> version`
 - yarn (berry): `cd <repo_root> && <env_prefix> <pm_exec> npm info <package> --fields version`
 
-This is modeled on how phase 1 and phase 5 resolve `default_branch` up front and stop or exclude
-on a null rather than letting every downstream dispatch discover the same failure independently.
+This is modeled on how phase 1 resolves `default_branch` up front and excludes a checkout on a null
+rather than letting every downstream dispatch discover the same failure independently.
 A non-zero exit gets **one retry** before it means anything — registries flake, and a transient
 blip must not cost a repo its whole batch. A second failure is the signal: report one actionable
 message naming the repo and distinguishing the cause by what the output says — an auth failure
@@ -455,7 +370,7 @@ message naming the repo and distinguishing the cause by what the output says —
 running your login flow for that registry; a 404 means the probe package is not in the registry
 the probe reached, which is a routing or scope-mapping question, not an auth one; anything else
 (timeout, DNS, connection reset) is network trouble. Exclude every one of that repo's groups from
-the queue below, and report them in phase 7 alongside the run's other skipped work, noting that
+phase 6's queue, and report them in phase 7 alongside the run's other skipped work, noting that
 the failure may be transient and that re-running the skill re-probes. There is no proceed-anyway
 machinery here: a user who wants to dispatch past a failed probe says so in conversation, the
 same footing as the audit command's open-PR preflight. **One probe per repo, not per group** — the probe package, scoped dependency or
@@ -464,6 +379,8 @@ registry reachability as a whole; a second dead package in the same repo is the 
 green probe does not shield an actual `install` inside a fix agent from failing on that group's
 package specifically, but a probe failing here is worth stopping 30+ downstream failures for one
 report.
+
+## Phase 6: Dispatch the fix workflow
 
 ### The dispatch workflow
 
@@ -481,10 +398,10 @@ return at once with every entry still `null` — which phase 7 would faithfully 
 batch of crashed agents when nothing was ever dispatched. Fail loudly, fix the `args`, relaunch.
 
 Each payload is the group JSON verbatim under `group`, plus `adapter_path`, the group's own `nwo`
-(its `repo` field), `default_branch` and `repo_root` for that group's repo (from phase 1 at repo
-scope, or phase 5's resolved triples at org/user scope), `scripts_dir`
-(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and that repo's `env_prefix` when it resolved one (phase 1
-at repo scope, phase 5 at org and user scope; OPTIONAL — **omit the key rather than send null**).
+(its `repo` field), `default_branch` and `repo_root` for that group's repo (phase 1's facts for
+that checkout), `scripts_dir`
+(`${CLAUDE_PLUGIN_ROOT}/scripts/common`), and that repo's `env_prefix` when it resolved one (phase 1,
+once per checkout; OPTIONAL — **omit the key rather than send null**).
 
 The script is thin on purpose: it dispatches and it validates, and nothing else. The reap below and
 the phase 7 summary stay outside it.
@@ -648,7 +565,7 @@ Present one table for the run:
 `F4/F5` is `risk.f4` and `risk.f5` from the agent's result, which is the whole of the coverage and
 CI signal an agent reports; the scorer's fuller `coverage` and `ci` objects stay in the PR body.
 
-Omit the `Repo` column at repo scope, as in phases 3 and 4.
+Omit the `Repo` column when one checkout is in scope, as in phases 3 and 4.
 
 **A `no-op` result is neither a success nor a failure, and gets its own line, never the failure
 list.** The group's fix was already on the default branch when the agent got there: it made no
@@ -702,8 +619,8 @@ that repo hits the same wall until it is resolved
 
 A `phase: "push"` failure whose `detail` names a branch-namespace collision (a `directory file
 conflict` push rejection) gets its own Notes label (`branch-namespace collision (preflight
-miss)`): the namespace probe in phase 1 or phase 5 said `slash`, but this group's exact `fix/*`
-push still landed on a blocking sibling ref — the inverse collision those phases document as
+miss)`): phase 1's namespace probe said `slash`, but this group's exact `fix/*`
+push still landed on a blocking sibling ref — the inverse collision phase 1 documents as
 unprobed. Re-running the skill hits the same wall for this group until the namespace is resolved
 on the remote or the whole batch is re-run with the flat style forced
 ([#123](https://github.com/SurveyMonkey/skills/issues/123)).
@@ -713,34 +630,36 @@ the only possible fix crosses a major** — two different senses of the same nam
 here first because both mean the same thing to the user: a fix that did not happen.
 
 - Post-fix, every non-empty `requires_major_bump[]` an agent's result carries, per package line
-  (and per repo at org/user scope). This is validate's own reconciliation: the group was dispatched
-  and its own line fixed, but the install moved another copy of the package across the fix
-  boundary, and validate proved that copy cannot be reached from where it landed.
+  (and per repo when more than one checkout is in scope). This is validate's own
+  reconciliation: the group was dispatched and its own line fixed, but the install moved another
+  copy of the package across the fix boundary, and validate proved that copy cannot be reached
+  from where it landed.
 
   > Still vulnerable after this batch: `undici` 5.29.0 in `octo/app` (alerts patched only in the
   > 6.x line). No override bounded to 5.x can fix this; it needs a major bump of the parent that
   > pins it, or dropping that parent.
 
 - Pre-dispatch, every group classify-lines.sh moved to `skipped` under `requires major version
-  bump`, with its `resolved_majors` context — whether phase 2 found it at repo scope (still
-  reported here, not just phase 3's skip note, so it does not vanish once the batch runs) or phase
-  5 withdrew it after approval at org or user scope. Neither reached a fix agent: no override at
-  the resolved line could ever land the patched version, so there is nothing for validate to
-  reconcile.
+  bump`, with its `resolved_majors` context. Phase 2 found it before the question was ever asked,
+  and it is still reported here, not just in phase 3's skip note, so it does not vanish once the
+  batch runs. It never reached a fix agent: no override at the resolved line could ever land the
+  patched version, so there is nothing for validate to reconcile.
 
 Reporting a batch as done without either kind is the failure mode issue #19 is about, and it is
 worse coming from the summary than from an agent.
 
-**Then re-report every skipped repo from phase 2's `skipped_repos`, by name, if any remain
-unaddressed, and every repo phase 6's registry preflight excluded.** These are repos with alerts
-the batch never touched at all, and belong in the same summary as the batch that did run — never a
-detail left only in the earlier discovery report. A registry-preflight exclusion names the probe
-package, the diagnosed cause (auth, not-found, or network), that the failure may be transient, and
-that re-running the skill re-probes. A repo the branch-namespace probe excluded (phase 1 at repo
-scope, phase 5 step 4 otherwise: `ls-remote` failed twice, so `origin` is unreachable) is reported
-the same way. And **name every repo whose batch ran under the flat branch scheme**, with the
-reason: a remote branch named `fix` occupies the `fix/*` ref namespace, so that repo's PRs came
-from `fix-dependabot-...` branches — the user reading branch names in the PRs should not have to
+**Then re-report every checkout phase 1 or phase 2 excluded, by name, and every repo phase 5's
+registry preflight excluded.** These are repos with alerts the batch never touched at all, and
+belong in the same summary as the batch that did run — never a detail left only in the earlier
+discovery report. A registry-preflight exclusion names the probe package, the diagnosed cause
+(auth, not-found, or network), that the failure may be transient, and that re-running the skill
+re-probes. A checkout the branch-namespace probe excluded (phase 1: `ls-remote` failed twice;
+report the probe's stderr, not a guessed cause) is reported the same way, as is one with no usable
+`origin`, no resolvable default branch, a failed `discover-alerts.sh`, `select-adapter.sh` or
+`classify-lines.sh` run, or a failed adapter `detect` in phase 5. And **name every repo whose
+batch ran under the flat branch scheme**, with the reason: a remote branch named `fix` occupies
+the `fix/*` ref namespace, so that repo's PRs came from `fix-dependabot-...` branches — the user
+reading branch names in the PRs should not have to
 guess why they differ from a neighbor repo's.
 
 **Then report every group classify-lines.sh skipped under `shared parent across major lines`,
@@ -750,8 +669,8 @@ group was never dispatched. The verdict is per group, so a line of the same pack
 parents are disjoint may still have run normally
 ([#132](https://github.com/SurveyMonkey/skills/issues/132)). The remedy is human work: bumping
 the shared parent past the old line, or dropping the dependent that pins it. Like the
-requires-major-bump skips, report these whether phase 2 found them at repo scope or phase 5
-withdrew them after approval.
+requires-major-bump skips, these are phase 2 findings that belong in this summary too, not only in
+phase 3's skip note.
 
 **Then say what phase 6's reap removed and what it left, from `post-agent.sh`'s own reports —
 never rebuilt by hand.** Key what stayed on the user's disk on each report's `left_behind`, never on
@@ -794,34 +713,6 @@ them as text reports one leaked worktree as two. **Match on suffix, or resolve b
 comparing**, and when they agree report a single artifact — the resolved path is the one to show
 the user, since it is what a `git worktree remove` will act on. Two paths that genuinely differ
 after that are two artifacts and both get named.
-
-**Then, when phase 5's clone destination was the temporary one, decide whether it can be
-removed.** The condition is the one that gates the reap, for the same reason: **a group whose
-agent ended without a verified open PR has nothing on the remote**, so its worktree and its branch
-are the only copies of that work, and both sit inside this directory. Removing it would destroy
-exactly what phase 6 deliberately preserved.
-
-- **Every group in that destination ended with a verified open PR**, or nothing was cloned into it
-  at all: remove it, and name the directory and the repositories that were in it, in one line.
-  Those clones hold nothing the run still needs, because every pull request lives on the remote,
-  and anything the reap left behind inside goes with the directory, so say that rather than
-  pointing the user at a worktree path that no longer exists.
-- **Any group in it ended any other way** — a failure, a crash, a `no-op`, a `null` entry from the
-  workflow, or a `pr_url` whose PR is not open: **keep the whole directory**, and
-  report that it was kept, where it is, and which groups are the reason. It is temporary in the
-  sense that nothing else will reuse it, never in the sense that this skill deletes unpushed work.
-
-The removal is one command, after the last agent has returned, against the path phase 5 recorded
-from `mktemp`, verbatim:
-
-```bash
-rm -rf <the recorded gh-security-clones path>
-```
-
-**Never widen that path and never substitute another**: not a parent of it, not a glob, not a
-directory the user named. A checkout that already existed is reused, never created, so it is never
-inside the removable directory. A run whose clones went to a directory the user named removes
-nothing and says nothing here.
 
 Then aggregate `observations[]` across **all** results, deduplicate identical entries, and split
 them by `type`, because the two are not the same news.
@@ -908,7 +799,7 @@ open PRs on the target, but cannot open an issue here. So:
   `env_prefix` seam phase 1 resolves, read for a different directory: a rule stating a wrapper
   command for `SurveyMonkey/skills` is exactly the statement phase 1 already looks for, and using it
   here is not inventing anything. A bare `cd` into that directory is never the mechanism — the
-  failure class phase 1 documents (:74-78) is precisely that per-directory identity tools load
+  failure class phase 1 documents (:96-100) is precisely that per-directory identity tools load
   through interactive shell hooks a non-interactive tool shell never runs, so a bare `cd` followed by
   a bare `gh issue` command silently resolves whatever account was already ambient, not the
   directory's intended one. Switching identities is never invented silently; it is only ever an
@@ -923,7 +814,8 @@ and never queued: the approved batch drained completely. Offer them now as a **n
 question**, not as a resumption of work already approved: back to phase 3 with the remaining
 groups.
 
-Otherwise report done, including any repos still in `skipped_repos` and what would unblock each.
+Otherwise report done, including every checkout phase 1 or phase 2 excluded, every repo phase 5's
+registry preflight excluded, and what would unblock each.
 
 **When Filing a skill-defect report applied this run, the closing report carries its outcome too**,
 exactly as that section promises: the filed or proposed issue's number or URL when one exists, or,
@@ -945,8 +837,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/pr-status.sh <pr-url>...
 ```
 
 Pass every `success` PR URL; `no-op` and `failure` results carry a null `pr_url` and there is
-nothing to read. The script operates on PR URLs directly and needs no `repo_root`, so a batch's
-URLs can span repos and are handled identically at every scope.
+nothing to read. The script operates on PR URLs directly and needs no `repo_root`, but it reads
+each PR under whatever identity the shell resolves, and two checkouts can carry different
+`env_prefix`es. So **group the URLs by repo and make one call per repo, under that repo's
+`env_prefix`** (bare when it resolved none); with one checkout in scope that is one call.
 
 Report each PR with its URL, its merge-risk band, and its check state — and **state what that
 check state is worth**, because most of these PRs are minutes old:

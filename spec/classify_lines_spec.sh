@@ -869,30 +869,33 @@ STUB_EOF
 
     phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
-    It 'pipes phase 2 discovery through classify-lines.sh at repo scope'
+    # One venue since issue #188: phase 2 runs the pipeline before the ranked
+    # table, and the post-approval phase 5 venue is gone. The per-checkout
+    # loop itself is pinned by spec/resolve_alerts_scope_spec.sh.
+    It 'pipes phase 2 discovery through classify-lines.sh at one venue'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root>'
       The status should be success
-      The output should equal '2'
+      The output should equal '1'
     End
 
-    # Issue #158: both classify invocations carry the base ref, or the
+    # Issue #158: the classify invocation carries the base ref, or the
     # orchestration quietly falls back to judging the user's checkout.
-    It 'pins classification to origin/<default_branch> at both venues'
+    It 'pins classification to origin/<default_branch>'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>'
       The status should be success
-      The output should equal '2'
+      The output should equal '1'
     End
 
-    # A classify failure is a stop, at both venues: the dangerous recovery is
-    # an orchestrator quietly re-running without the flag, which judges the
+    # A classify failure is a stop for that checkout: the dangerous recovery
+    # is an orchestrator quietly re-running without the flag, which judges the
     # checkout and reintroduces issue #158 exactly.
     It 'names a classify failure a stop, never a cue to drop --base-ref'
       When call phrase_in "$SKILL" 'never re-run without .--base-ref.'
       The status should be success
-      The output should equal '2'
+      The output should equal '1'
     End
 
-    It 'withdraws a post-approval requires_major_bump group in phase 5'
+    It 'withdraws a requires_major_bump group in phase 2, before the question is asked'
       When call phrase_in "$SKILL" 'withdrawn from the phase 6 queue'
       The status should be success
       The output should equal '1'

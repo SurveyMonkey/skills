@@ -93,7 +93,7 @@ inverted `present` for npm alias keys. Every one passed a full suite at the time
 **Assert the verdict, not just the parse.** These defects are dangerous because a plausible-looking
 parse becomes a `removable` recommendation or a silent skip. A spec that stops at a script's JSON
 passes while the hazard survives, so assert through the consuming rule — `validate`, a
-`skipped_repos` reason, the `present: false` → `removable` path — and the test fails for the reason
+`skipped` reason, the `present: false` → `removable` path — and the test fails for the reason
 the bug mattered.
 
 **A shape found in the wild is the specimen.** When a real sample exists, trim the fixture from it;
