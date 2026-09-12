@@ -406,11 +406,30 @@ once per checkout; OPTIONAL — **omit the key rather than send null**).
 The script is thin on purpose: it dispatches and it validates, and nothing else. The reap below and
 the phase 7 summary stay outside it.
 
-Launch it as:
+**The Workflow tool only accepts a `scriptPath` it can already read** — a path it returned itself,
+or one under the working directory or a directory you have added. This skill always runs with the
+working directory set to a user checkout or to a directory containing them (phase 1's scope); either
+way it is outside the plugin tree, so
+`${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` is refused there even though the file exists and
+you can read it directly. Stage a verified copy instead of hand-authoring a substitute:
+
+1. Copy the file byte-for-byte from `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` to a path
+   **under the working directory itself** — not the session scratchpad, which is a session-scoped
+   path outside the working directory and trips the same refusal. Create a directory for this (for
+   example `.gh-security-dispatch/` at the root of the working directory) and stage the copy
+   there — a mechanical copy, never retyped or paraphrased.
+2. Checksum both the source and the copy and confirm they match before launching anything. A
+   mismatch means the copy failed; redo the copy, never patch the copy by hand to make it match.
+3. Launch `Workflow` with `scriptPath` pointing at the checksum-verified copy, not the plugin path.
+4. Keep the staged copy in place for the life of the run, including any resume — a resume launches
+   the same `scriptPath` again, so removing it before the batch is fully done breaks resume. Remove
+   the staging directory once phase 7's summary is delivered (or once the user declines to resume
+   an interrupted run). If the working directory is itself a git checkout, this directory is
+   untracked; delete it rather than leaving it to dirty `git status`.
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs",
+  scriptPath: "<checksum-verified copy of ${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs, staged under the working directory>",
   args: { cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>] }
 })
 ```
@@ -418,7 +437,9 @@ Workflow({
 The script is a real file, not something to write out here: it is version-controlled, unit-tested
 by `spec/js/`, and its result schema is executed against a validator rather than read
 ([ADR 010](../../../../docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). **Never
-inline a copy of it, and never hand-edit a variant for one run.** It does exactly two things —
+inline a copy of it, and never hand-edit a variant for one run.** A checksum-verified byte-for-byte
+copy staged only so the tool can read it is neither of those — it is the same tested file, proven
+identical before launch, never edited. It does exactly two things —
 fan one `fix-dependency` agent out per group under the cap, and validate each result against the
 Result contract in `agents/fix-dependency.md`. Everything else on this page is yours.
 
@@ -429,8 +450,9 @@ What it guarantees, so nothing here re-derives it:
   machine-wide.
 - **Malformed `args` is refused loudly**, before a single agent is dispatched: a `dispatches` that
   is absent, not an array, or empty, and a `cap` that is not a number of at least one.
-- **Each agent runs as `fix-dependency` on `sonnet`** (ADR 004's pin, passed explicitly because a
-  workflow agent call without it inherits the session model) with the Result schema attached.
+- **Each agent runs as `gh-security:fix-dependency` on `sonnet`** (ADR 004's pin, passed explicitly
+  because a workflow agent call without it inherits the session model) with the Result schema
+  attached.
 - **Entries come back in dispatch order**, one per group, each carrying its own `dispatch` payload
   beside its `result`.
 - **A result that does not name its own dispatch is dropped, not trusted** (`mispaired: true`,
@@ -448,7 +470,7 @@ it, or it returns fewer entries than `dispatches`:
   transcript directory; `<transcriptDir>/journal.jsonl` records each agent's actual return value.
   Read it to learn which groups completed and what they returned, rather than assuming.
 - **Resume rather than re-dispatch.** Relaunch with `{scriptPath, resumeFromRunId: <runId>}`, the
-  same script and the same `args` in the same order: the unchanged prefix of `agent()` calls
+  same staged copy's path and the same `args` in the same order: the unchanged prefix of `agent()` calls
   returns its cached results instantly and only the unfinished work runs live. Re-launching without
   `resumeFromRunId` re-runs every group, which is how a second branch and a second PR appear for
   work that already succeeded. Resuming the batch the user approved is not a new dispatch

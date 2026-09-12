@@ -643,10 +643,15 @@ describe('the workflow body, run with stubbed collaborators', () => {
     for (const c of calls) expect(allowed.has(c.prompt)).toBe(true)
   })
 
-  it('routes every agent to fix-dependency, on sonnet, with the schema', async () => {
+  // #187: plugin agents are registered namespaced (`<plugin>:<agent>`), so the
+  // bare name 'fix-dependency' is not a resolvable agent type — every agent()
+  // call throws immediately and the whole batch aborts before any subagent
+  // gets a session. The qualified type reaching agent() is the fix; this is
+  // the one assertion pinning it, so a regression here fails right here.
+  it('routes every agent to the namespaced fix-dependency agent type, on sonnet, with the schema', async () => {
     const { calls } = await runWorkflow({ main, args: { cap: 2, dispatches: batch(3) }, agent: echo })
     for (const c of calls) {
-      expect(c.opts.agentType).toBe('fix-dependency')
+      expect(c.opts.agentType).toBe('gh-security:fix-dependency')
       expect(c.opts.model).toBe('sonnet')
       expect(c.opts.schema).toStrictEqual(RESULT_SCHEMA)
       expect(c.opts.phase).toBe('Fix groups')

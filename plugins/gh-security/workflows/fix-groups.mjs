@@ -365,7 +365,9 @@ const worker = async () => {
       // Indexed write, never a push: workers finish out of order, and phase 7
       // is promised the entries in dispatch order.
       results[i] = await agent(dispatchPrompt(d), {
-        agentType: 'fix-dependency',
+        // Plugin agents are registered namespaced (<plugin>:<agent>); the bare
+        // name is not a resolvable agent type (#187).
+        agentType: 'gh-security:fix-dependency',
         // ADR 004's pin, stated here because a workflow agent() without
         // `model` inherits the session model and composition with the target
         // definition's frontmatter is unspecified.
