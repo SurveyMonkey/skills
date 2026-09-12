@@ -60,9 +60,18 @@ Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
 gate — `node` and `npm`, but still targets bash 3.2 because the hooks run it on stock macOS.
 
-- **Fixtures are hand-authored and use only public package names.** Never trim a lockfile out of a
-  private repo into this one, which is public: internal package names, registry URLs, and the
-  shape of an internal dependency graph all leak that way.
+**How this suite tests is the [`testing` skill](.claude/skills/testing/SKILL.md).** Seams, asserting
+the verdict rather than the parse, where an expected value may come from, red-first and the fixture
+that lands with every fix, what may be mocked, when a prose pin is legitimate, and the review
+checklist all live there and are not repeated here. Invoke it with the Skill tool (`testing`) or
+`/testing`; `.claude/rules/path-spec.md` loads it whenever a file under `spec/` is read.
+
+Two rules about what this public repository may name stay here, because they cover documentation
+and code comments as much as they cover fixtures:
+
+- **Fixtures use only public package names.** Never trim a lockfile out of a private repo into
+  this one, which is public: internal package names, registry URLs, and the shape of an internal
+  dependency graph all leak that way.
 - **Nothing names a repository, organization, account or workspace outside the public
   `@SurveyMonkey` org.** This covers fixtures, code comments, spec data and documentation alike,
   and it covers organization topology (umbrella and nested owner directories) as surely as it
@@ -71,38 +80,6 @@ gate — `node` and `npm`, but still targets bash 3.2 because the hooks run it o
   field-test fix PR") and give structural examples fictitious names (`@example-org/example-repo`,
   `octo/app`). `spec/reference_scrub_spec.sh` gates the internal slugs; the rest is on review. A
   doc's `owner:` frontmatter is exempt — it names an author, not a codebase or organization.
-- **Specs never hit the network or run an install.** Anything reaching for `gh` is mocked with
-  shellspec's `Mock`.
-- **Assert JSON with the `adapter_jq` / `common_jq` helpers**, not string matching against
-  pretty-printed output. Both preserve the script's exit status, which matters because `validate`
-  deliberately emits its report *and* fails.
-- **Use `Parameters` blocks for table-driven cases** (version ordering, ecosystem routing, band
-  thresholds) rather than repeating near-identical examples.
-
-### Every regression lands a fixture, in the same commit as its fix
-
-**A fix without a fixture is not a fix.** Any defect found by running the code — against a real
-repository, a crafted input, or a review reproduction — must land a fixture carrying that exact
-shape alongside the change that fixes it. This is not optional cleanup; it is the deliverable.
-
-Without it the suite stays green while each round trades one defect for another. That has happened
-repeatedly: the notice hook's text-only match missed `--json` output, its replacement regex could
-not match a brace in an advisory title, and its replacement's fix for yarn `patch:` locators
-inverted `present` for npm alias keys. Every one passed a full suite at the time.
-
-**Assert the verdict, not just the parse.** These defects are dangerous because a plausible-looking
-parse becomes a `removable` recommendation or a silent skip. A spec that stops at a script's JSON
-passes while the hazard survives, so assert through the consuming rule — `validate`, a
-`skipped` reason, the `present: false` → `removable` path — and the test fails for the reason
-the bug mattered.
-
-**A shape found in the wild is the specimen.** When a real sample exists, trim the fixture from it;
-never hand-author an approximation. Invented pnpm and yarn audit fixtures encoded formats those
-tools never emit, which is exactly why the suite could not see the bug.
-
-**A parser gaining a format branch needs a real specimen of that branch.** Aliases, patch
-protocols, workspace and portal targets, binding parameters and nesting each need their own entry,
-not a comment claiming they are excluded.
 
 Lint with [ShellCheck](https://www.shellcheck.net) (`brew install shellcheck`):
 
