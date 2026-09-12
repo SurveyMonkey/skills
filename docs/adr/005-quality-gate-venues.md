@@ -80,7 +80,7 @@ never a changed-file selection, per the `paths:`-filter prohibition above.)**
 **Amended by [ADR 012](012-typescript-on-node-22-18.md)
 ([#213](https://github.com/SurveyMonkey/skills/issues/213)): vitest is the primary suite venue, and
 shellspec covers the bash that remains.** RFC 002 moves the deterministic layer to TypeScript, so
-~~the shellspec suite~~ is no longer where most behavior is covered; after
+the shellspec suite is no longer where most behavior is covered; after
 [#240](https://github.com/SurveyMonkey/skills/issues/240) the shellspec suite is `notice_scan`,
 `detect_capacity`, `githooks`, `check_sh`, `reference_scrub` and `bash32_parse`. Nothing this ADR
 decides about venues changes with the substitution: one entry point, empty discovery as a hard

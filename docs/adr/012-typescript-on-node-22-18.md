@@ -59,8 +59,8 @@ The floor comes from a spike, recorded here as it was run
 
 | Node | Result |
 |---|---|
-| 22.16.0 | Fails at launch, with a named error |
-| 22.17.x | Fails at launch, with a named error |
+| 22.16 | Fails at launch, with a named error |
+| 22.17 | Fails at launch, with a named error |
 | 22.18.0 | Runs; **zero bytes on stderr** |
 | 22.22.2 | Runs; **zero bytes on stderr** |
 | 24.15.0 | Runs; **zero bytes on stderr** |

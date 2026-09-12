@@ -52,9 +52,9 @@ would have to be wrong for one of them.
 TypeScript interface. Verbs are functions behind one adapter interface; the four exit codes below
 become the same four outcomes carried in a typed result envelope, and the stdout/stderr split
 survives at the CLI entry point, where a command is invoked from a prompt. A process seam exists
-only at an ecosystem boundary: the package manager, `git`, `gh`. Every obligation this ADR states
-carries over unchanged onto the interface.** The tree being operated on is still the root the verbs
-run against. For the verbs that
+only at an ecosystem boundary: the package manager, `git`, `gh`, and `detect-capacity.sh`. Every
+obligation this ADR states carries over unchanged onto the interface.** The tree being operated on
+is still the root the verbs run against. For the verbs that
 write (`apply_constraint`, `install`, `shim`) that root must be a **linked git worktree**, never
 the user's own checkout: each of them refuses to run there, through the shared guard in
 `common/require-linked-worktree.sh`. JSON on stdout, human-readable detail on stderr.

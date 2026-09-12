@@ -1,6 +1,6 @@
 ---
 type: ADR
-description: 'Superseded in part by ADR 012. Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) with coverage thresholds at 100 on all four buckets to test them, while shipped plugin scripts stay bash + jq + gh.'
+description: 'Superseded in part by ADR 012. Workflow scripts ship as files under plugins/*/workflows/ rather than markdown fences, and the repo gains a dev-and-CI JavaScript toolchain (vitest, ajv) with coverage thresholds at 100 on all four buckets to test them, while shipped plugin scripts stayed bash + jq + gh until ADR 012.'
 status: deprecated
 created: 2026-09-01
 owner: brianespinosa
