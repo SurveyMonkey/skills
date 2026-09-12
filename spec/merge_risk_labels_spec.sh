@@ -74,6 +74,14 @@ Describe 'the closed set of merge-risk labels (#109)'
     End
   End
 
+  Describe 'the dependencies label hex, pinned in README.md too'
+    It "documents \`dependencies\` as \`#0366d6\`"
+      When call rule_in "$README" "\`dependencies\` (\`#0366d6\`"
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
   Describe 'no fourth band is inventable: exactly three merge-risk label names'
     sorted_band_case_arms() {
       grep -oE '^ *(low|medium|high|[a-z]+)\)( +color=| ;;)' -- "$1" \
