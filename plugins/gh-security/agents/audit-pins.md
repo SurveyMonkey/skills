@@ -981,10 +981,14 @@ sec_out=$(gh label create security --repo <nwo> --color D93F0B --description "Se
   *"already exists"*) : ;;
   *) false ;;
 esac
+dep_out=$(gh label create dependencies --repo <nwo> --color 0366d6 --description "Pull requests that update a dependency file" 2>&1) || case "$dep_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
 ```
 
 A duplicate-label message is success — the label is there, which is what this step wanted. Any
-other message is a phase `pr` failure, quoting `$sec_out`.
+other message is a phase `pr` failure, quoting `$sec_out` or `$dep_out`.
 
 Label names are case-insensitive for uniqueness and case-preserving, so passing lowercase
 `security` is safe whether the repository holds `security` or an older capitalized `Security`; the
@@ -1028,7 +1032,7 @@ Both label-creation steps run **before** `gh pr create`, so its failure means so
 wrong:
 
 ```bash
-gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security [--label merge-risk:<band>] \
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security --label dependencies [--label merge-risk:<band>] \
   --title "..." --body "..."
 ```
 

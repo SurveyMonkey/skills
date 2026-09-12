@@ -10,10 +10,10 @@
 # `fix-dependency.md` itself carries no label vocabulary any more — it calls
 # `render-pr.sh labels` and `render-pr.sh create`, and the label behavior
 # those calls produce (colors, descriptions, race tolerance, the `--label
-# security --label merge-risk:<band>` argv) is exercised end-to-end in
-# spec/render_pr_spec.sh, with a mocked `gh`. This file only pins the
-# rendering script's own source against drift, the same way it always pinned
-# the agent prose.
+# security --label dependencies --label merge-risk:<band>` argv) is exercised
+# end-to-end in spec/render_pr_spec.sh, with a mocked `gh`. This file only
+# pins the rendering script's own source against drift, the same way it
+# always pinned the agent prose.
 #
 # This lives in its own file rather than spec/audit_pins_rules_spec.sh or
 # spec/common_scripts_spec.sh because the thing being pinned spans an agent,
@@ -46,6 +46,7 @@ Describe 'the closed set of merge-risk labels (#109)'
 
   Describe 'audit-pins.md: label names and colors, pinned in the agent definition'
     Parameters
+      "$AUDIT_AGENT"  dependencies         0366d6
       "$AUDIT_AGENT"  merge-risk:low       2da44e
       "$AUDIT_AGENT"  merge-risk:medium    d4a72c
       "$AUDIT_AGENT"  merge-risk:high      cf222e
@@ -117,6 +118,14 @@ merge-risk:medium"
 
     It 'calls render-pr.sh create with --band'
       When call rule_in "$FIX_AGENT" 'render-pr\.sh create --repo <nwo> --head <branch_name> --band <band>'
+      The status should be success
+      The output should equal '1'
+    End
+  End
+
+  Describe 'render-pr.sh create: the full label set, security + dependencies + the band'
+    It 'builds --label security --label dependencies --label "merge-risk:..." in its gh pr create argv'
+      When call rule_in "$RENDER_PR" '\-\-label security \-\-label dependencies \-\-label "merge-risk:'
       The status should be success
       The output should equal '1'
     End

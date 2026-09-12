@@ -182,7 +182,7 @@ Describe 'the rules that gate the removal PR'
   End
 
   It 'creates the PR on the plugin-owned head'
-    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --label security'
+    When call rule_in "$AGENT" '--head chore/dependabot-remove-pins --label security --label dependencies'
     The status should be success
     The output should equal '1'
   End
@@ -360,7 +360,7 @@ Describe 'the rules that gate the removal PR'
     End
 
     It 'still builds the gh pr create call, so the absence above is about the flag'
-      When call phrase_in "$RENDER_PR" 'gh pr create --repo "[$]repo" --head "[$]head" .*--label security --label "merge-risk:[$]band_lower")'
+      When call phrase_in "$RENDER_PR" 'gh pr create --repo "[$]repo" --head "[$]head" .*--label security --label dependencies --label "merge-risk:[$]band_lower")'
       The status should be success
       The output should equal '1'
     End
