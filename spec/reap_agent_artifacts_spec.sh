@@ -540,12 +540,14 @@ Describe 'the orchestrator-side reap (issue #131)'
   # SKILL.md keeps only the orchestrator-level policy that still has to be
   # decided here — when to call it, and that its failure is never fatal.
   Describe 'the step in phase 6'
+    # pin: mechanical, retired by reap-batch.sh
     It 'prescribes one post-agent.sh call carrying the --result and --repo-root arguments'
       When call rule_in "$SKILL" 'post-agent.sh --result <path to the saved result>'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'passes package, major-line, and branch from the group'"'"'s own dispatch payload'
       When call rule_in "$SKILL" '--package <group\.package> --major-line <group\.major_line> --branch <group\.branch_name>'
       The status should be success
@@ -556,12 +558,14 @@ Describe 'the orchestrator-side reap (issue #131)'
     # script is also named in prose (the frontmatter grant, the env_prefix
     # seam, and phase 7's report paragraph) — legitimate references to a
     # script that does the work, not a second call site nobody decided on.
+    # pin: mechanical, retired by reap-batch.sh
     It 'invokes the script from exactly one command block'
       When call rule_in "$SKILL" 'scripts/common/post-agent\.sh --result'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'keeps the allowed-tools list accurate'
       When call rule_in "$SKILL" 'allowed-tools:.*post-agent.sh'
       The status should be success
@@ -572,6 +576,7 @@ Describe 'the orchestrator-side reap (issue #131)'
     # reap-agent-artifacts.sh) is gone with the collapse: it is exactly the
     # prose re-derivation scripts/CLAUDE.md calls a bug once a driver script
     # exists for it.
+    # pin: mechanical, retired by reap-batch.sh
     It 'no longer names reap-agent-artifacts.sh as a call site of its own'
       no_reap_script_mentions() { grep -c 'reap-agent-artifacts.sh' "$1" || true; }
       When call no_reap_script_mentions "$SKILL"
@@ -579,6 +584,7 @@ Describe 'the orchestrator-side reap (issue #131)'
       The output should equal '0'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'no longer prescribes a bare pr-status.sh call inside the reap step'
       # The window is located by its own opening sentence. A marker that stops
       # matching would silently scan nothing and pass, so an empty window is
@@ -615,6 +621,7 @@ Describe 'the orchestrator-side reap (issue #131)'
     # rolling pool's refill motion (the model no longer schedules anything)
     # and onto the workflow's returned entries, so the ordering rule is now
     # stated against the summary rather than against a slot.
+    # pin: mechanical, retired by reap-batch.sh
     It 'verifies the pull request before reaping anything'
       When call phrase_in "$SKILL" 'after the pull request is verified and before that result is folded into phase 7'
       The status should be success
@@ -625,12 +632,14 @@ Describe 'the orchestrator-side reap (issue #131)'
     # thing #175 deliberately left outside the workflow script: a batched or
     # per-repo reap would lose the per-group `left_behind` accounting phase 7
     # reads.
+    # pin: mechanical, retired by reap-batch.sh
     It 'makes exactly one post-agent.sh call per returned entry'
       When call phrase_in "$SKILL" 'one .post-agent.sh. call per returned entry, never one per repo and never one for the batch'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'reaps only on an OPEN pull request'
       When call phrase_in "$SKILL" 'only when that PR reads .OPEN'
       The status should be success
@@ -640,12 +649,14 @@ Describe 'the orchestrator-side reap (issue #131)'
     # The other half of the design: a failed or crashed agent keeps its
     # leftovers, so nothing is ever cleaned without a PR proving the tip is on
     # origin.
+    # pin: mechanical, retired by reap-batch.sh
     It 'never reaps an agent that ended without a verified open PR'
       When call phrase_in "$SKILL" 'An agent that ended any other way is never reaped'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by reap-batch.sh
     It 'carries on to the next entry even when the reap could not finish'
       When call phrase_in "$SKILL" 'A reap that could not finish must never stall the run'
       The status should be success
@@ -656,6 +667,7 @@ Describe 'the orchestrator-side reap (issue #131)'
     # (common/post-agent.sh, "Why env_prefix stops at the PR read"); SKILL.md
     # states only that it is threaded to the PR read and not the reap, never
     # re-deriving why.
+    # pin: mechanical, retired by reap-batch.sh
     It 'says env_prefix reaches the PR read inside the call and never the reap'
       When call phrase_in "$SKILL" 'and never to the reap that follows it'
       The status should be success
@@ -666,6 +678,7 @@ Describe 'the orchestrator-side reap (issue #131)'
     # into neither phase 7 bucket, since this group's PR *was* verified. The
     # script now reports this itself; SKILL.md only has to say the run keeps
     # going.
+    # pin: mechanical, retired by reap-batch.sh
     It 'never lets a reap that printed nothing stall the run either'
       When call phrase_in "$SKILL" 'and neither does one that printed nothing at all'
       The status should be success
@@ -674,12 +687,14 @@ Describe 'the orchestrator-side reap (issue #131)'
   End
 
   Describe 'the report in phase 7'
+    # pin: mechanical, retired by summarize-run.sh
     It 'reports the reaped count and everything left in place, from the script'"'"'s own reports'
       When call phrase_in "$SKILL" 'say what phase 6.s reap removed and what it left, from .post-agent.sh..s own reports'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by summarize-run.sh
     It 'says a leftover is recoverable only if the summary names it'
       When call phrase_in "$SKILL" 'but only if this summary says it is there'
       The status should be success
@@ -688,6 +703,7 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     # Every report already carries the derived path and branch; phase 7 is
     # told not to rebuild either from a template of its own.
+    # pin: mechanical, retired by summarize-run.sh
     It 'says nothing here recomputes a path or branch from a template'
       When call phrase_in "$SKILL" 'nothing here recomputes a path or a branch name from a template'
       The status should be success

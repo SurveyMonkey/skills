@@ -872,6 +872,7 @@ STUB_EOF
     # One venue since issue #188: phase 2 runs the pipeline before the ranked
     # table, and the post-approval phase 5 venue is gone. The per-checkout
     # loop itself is pinned by spec/resolve_alerts_scope_spec.sh.
+    # pin: mechanical, retired by prepare-checkout.sh
     It 'pipes phase 2 discovery through classify-lines.sh at one venue'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root>'
       The status should be success
@@ -880,6 +881,7 @@ STUB_EOF
 
     # Issue #158: the classify invocation carries the base ref, or the
     # orchestration quietly falls back to judging the user's checkout.
+    # pin: mechanical, retired by prepare-checkout.sh
     It 'pins classification to origin/<default_branch>'
       When call phrase_in "$SKILL" 'classify-lines.sh --repo-root <repo_root> --base-ref origin/<default_branch>'
       The status should be success
@@ -889,25 +891,31 @@ STUB_EOF
     # A classify failure is a stop for that checkout: the dangerous recovery
     # is an orchestrator quietly re-running without the flag, which judges the
     # checkout and reintroduces issue #158 exactly.
+    # pin: mechanical, retired by prepare-checkout.sh
     It 'names a classify failure a stop, never a cue to drop --base-ref'
       When call phrase_in "$SKILL" 'never re-run without .--base-ref.'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by prepare-checkout.sh
     It 'withdraws a requires_major_bump group in phase 2, before the question is asked'
       When call phrase_in "$SKILL" 'withdrawn from the phase 6 queue'
       The status should be success
       The output should equal '1'
     End
 
+    # pin: mechanical, retired by prepare-checkout.sh
     It 'never offers a requires-major-bump group as a rankable row in phase 3'
       When call phrase_in "$SKILL" 'never as a rankable row'
       The status should be success
       The output should equal '1'
     End
 
-    It 'reports both requires_major_bump senses together, first, in phase 7'
+    # Title narrowed to drop the unproven "first" claim: the assertion checks
+    # only that the sentence exists once, not where it sits in phase 7.
+    # pin: mechanical, retired by summarize-run.sh
+    It 'reports both requires_major_bump senses together in phase 7'
       When call phrase_in "$SKILL" 'two different senses of the same name'
       The status should be success
       The output should equal '1'
