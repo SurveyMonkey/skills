@@ -37,6 +37,11 @@ key_matches() {
     BEGIN { n = split(key, toks, " ") }
     { argv[NR] = $0 }
     END {
+      # An empty key (no tokens) must never match: awk finds nothing to fail
+      # on and would otherwise fall through to the unconditional exit 0
+      # below, turning a key-less registry row into a match-everything
+      # catch-all.
+      if (n == 0) exit 1
       ai = 1
       for (ti = 1; ti <= n; ti++) {
         found = 0
@@ -64,7 +69,14 @@ match_extra=
 
 if [ -s "$GH_MOCK_DIR/registry" ]; then
   while IFS="$(printf '\t')" read -r type xit key payload extra; do
-    [ -n "$type" ] || continue
+    # A registration guard in spec_helper.sh already refuses a key or text
+    # that would corrupt this format, but the dispatcher checks its own input
+    # rather than trusting that: a row whose type is neither is skipped
+    # rather than treated as a candidate match.
+    case $type in
+      reply|fail) ;;
+      *) continue ;;
+    esac
     if key_matches "$key"; then
       match_type=$type
       match_exit=$xit

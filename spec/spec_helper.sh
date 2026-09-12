@@ -97,6 +97,15 @@ common_jq() {
 # is one line delegating to it.
 export GH_MOCK_DISPATCH="$SHELLSPEC_PROJECT_ROOT/spec/support/gh-mock-dispatch.sh"
 
+# A literal tab and newline for the registration guards below. `$(printf
+# '\n')` cannot be used for this: command substitution strips ALL trailing
+# newlines, so a single "\n" collapses to an empty string and the guard's
+# pattern degrades to `**`, matching everything. An embedded literal in a
+# single-quoted assignment is not stripped.
+_GH_MOCK_TAB='	'
+_GH_MOCK_NL='
+'
+
 # Fresh scratch dir plus an empty registry and request log. Call once per
 # example, before any mock_gh_reply / mock_gh_fail registration — typically
 # from the spec file's own `Before` hook, alongside whatever fixture setup
@@ -136,6 +145,18 @@ mock_gh_cleanup() {
 # The last registration whose key matches a given call wins, so a `Before`
 # hook can register a default and one example can override it.
 mock_gh_reply() {
+  # A tab or newline in the key would silently split this single
+  # tab-separated registry record: the continuation line carries no tabs, so
+  # its whole content is misread as `type` with an empty `key`, and an empty
+  # key matches every call (key_matches has no tokens to fail on) — a
+  # corrupted registration would win the dispatcher's "last match wins" rule
+  # for every subsequent gh call. Reject it loudly instead.
+  case $1 in
+    *"$_GH_MOCK_TAB"*|*"$_GH_MOCK_NL"*)
+      printf 'mock_gh_reply: key must not contain a tab or newline: %s\n' "$1" >&2
+      return 1
+      ;;
+  esac
   # The exit field is unused for a reply, but it still needs a placeholder
   # ("-"): two adjacent tabs are indistinguishable from one under `read`'s
   # IFS-whitespace field splitting, which silently swallows the empty field
@@ -148,6 +169,16 @@ mock_gh_reply() {
 # `gh: Not Found (HTTP 404)` from `gh api`, `HTTP 422: Validation Failed: ...`
 # with no `gh:` prefix from a `gh` subcommand), `exit` defaults to 1.
 mock_gh_fail() {
+  # Same hazard as mock_gh_reply's key guard, and it also covers `text`: a
+  # multi-line gh error is exactly what mocking.md tells authors to
+  # reproduce ("copy the spelling the endpoint actually emits"), and a
+  # newline in it would corrupt this record the same way.
+  case $1$2 in
+    *"$_GH_MOCK_TAB"*|*"$_GH_MOCK_NL"*)
+      printf 'mock_gh_fail: key and text must not contain a tab or newline\n' >&2
+      return 1
+      ;;
+  esac
   printf 'fail\t%s\t%s\t%s\t\n' "${3:-1}" "$1" "$2" >> "$GH_MOCK_DIR/registry"
 }
 

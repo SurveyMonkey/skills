@@ -41,6 +41,32 @@ Describe 'discover-alerts.sh'
 
   discover() { common_jq discover-alerts.sh "$1" "$REPO"; }
 
+  # A newline embedded in a registered key or failure text would otherwise
+  # split this file's `Mock gh` registry into a key-less continuation record,
+  # which key_matches (spec/support/gh-mock-dispatch.sh) then reads as an
+  # empty-key match-everything catch-all — silently stealing every other
+  # endpoint's reply. Registration refuses it instead of letting that happen.
+  Describe 'the shared gh mock refuses a key or text that would corrupt its registry'
+    It 'rejects a mock_gh_reply key containing a newline'
+      When call mock_gh_reply "$(printf 'pr list\nbogus')" "$GH_MOCK_DIR/no-pr"
+      The status should not be success
+      The stderr should include 'must not contain a tab or newline'
+    End
+
+    It 'rejects a mock_gh_fail failure text containing a newline'
+      When call mock_gh_fail 'pr list' "$(printf 'gh: line one\nline two')"
+      The status should not be success
+      The stderr should include 'must not contain a tab or newline'
+    End
+
+    It 'leaves every already-registered endpoint answering as before the rejected call'
+      mock_gh_fail 'pr list' "$(printf 'gh: line one\nline two')" 2>/dev/null || true
+      When call discover '{a: (.actionable | length)}'
+      The status should be success
+      The output should equal '{"a":3}'
+    End
+  End
+
   # The leading label is not decoration: a Parameters row whose first field
   # starts with `[` reads as a command name ending in `]` (SC2288).
   Describe 'one group per package major line'

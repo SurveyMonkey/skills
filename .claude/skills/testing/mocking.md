@@ -89,10 +89,14 @@ script the mock block simply invokes.
   is read at call time, not copied, so an example that later overwrites the same path (many
   `discover-alerts.sh` examples rewrite their alerts fixture in place) is answered with the new
   content. The optional third argument is a file of stderr chatter gh should still emit alongside
-  an otherwise-successful reply (the release-upgrade notice `pr-status.sh` must tolerate).
+  an otherwise-successful reply (the release-upgrade notice `pr-status.sh` must tolerate). The key
+  may not contain a tab or newline; registration refuses it loudly rather than risk corrupting the
+  registry's tab-separated record.
 - `mock_gh_fail <verb path> <stderr text> [exit]` is a **per-endpoint** fail switch, so an example
   says which endpoint fails and how, with the real `gh: ... (HTTP nnn)` wording the scripts
-  classify.
+  classify. Same restriction as above, on both the key and the text: a real multi-line `gh` error
+  is exactly what this argument is for, but it cannot yet be reproduced here — reject it rather
+  than truncate or silently corrupt the registry.
 - `mock_gh_requests` prints the request log, one line per call, for assertions on what was sent
   (`ecosystem=pip`, `--search head:fix/...`) via command substitution:
   `The value "$(mock_gh_requests)" should include ...`.
