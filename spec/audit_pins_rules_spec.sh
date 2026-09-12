@@ -619,12 +619,14 @@ Describe 'the env_prefix dispatch contract (#106)'
   # The dispatch-payload half: the orchestrator carries env_prefix into the
   # fix-agent Task call, optionally, alongside the fields phase 6 already
   # sends.
+  # pin: mechanical, retired by build-dispatches.sh
   It 'carries env_prefix into the fix-dependency Task payload'
     When call rule_in "$SKILL" "that repo's .env_prefix. when it resolved one"
     The status should be success
     The output should equal '1'
   End
 
+  # pin: mechanical, retired by preflight-repo.sh
   It 'runs a registry preflight probe once per repo before phase 6 dispatch'
     When call rule_in "$SKILL" "Probe that repo's registry, once, before its first dispatch"
     The status should be success
@@ -635,6 +637,7 @@ Describe 'the env_prefix dispatch contract (#106)'
   # does not chdir, so a probe without the cd resolves the wrong
   # .npmrc/.yarnrc.yml and a dead private token probes green against the
   # public registry. One occurrence per package-manager snippet.
+  # pin: mechanical, retired by preflight-repo.sh
   It 'composes the probe as cd repo_root, then env_prefix, in every snippet'
     When call rule_in "$SKILL" 'cd <repo_root> && <env_prefix> <pm_exec>'
     The status should be success
