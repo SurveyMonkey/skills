@@ -130,6 +130,16 @@ jobs:
       # exists to produce an unreduced report, not a differently formatted
       # one, and every formatter names the failing examples.
       CHECK_SPEC_FORMAT: progress
+      # The macOS leg is the critical path of every PR run (340-430s against
+      # 110-170s on ubuntu, ADR 005 amendment, issue #208): it exists only to
+      # be the one runner that can execute spec/bash32_parse_spec.sh, so on a
+      # pull request that is the only file it runs, while ubuntu still runs
+      # the full suite. CI runs full suites rather than a changed-file
+      # selection (never `paths:` filters, above), so this narrows by gate,
+      # not by diff, and it is deliberately gate-scoped rather than
+      # push-scoped: main keeps running the full suite on macOS on every
+      # push, so a full macOS record still exists there.
+      CHECK_SPEC_ONLY: ${{ (matrix.os == 'macos-latest' && github.event_name == 'pull_request') && 'spec/bash32_parse_spec.sh' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
