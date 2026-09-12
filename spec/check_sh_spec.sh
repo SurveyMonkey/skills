@@ -443,11 +443,15 @@ STUB
       # arguments, appended after the flags, exactly like a human typing
       # `shellspec spec/one_spec.sh spec/two_spec.sh` would.
       #
-      # SHELLSPEC_JOBS is unset explicitly, same trap as the SHELLSPEC_JOBS
-      # pin two examples above (issue #61): the pre-push hook and CI both
-      # export it, and an example whose argv assertion is order-sensitive
-      # would otherwise depend on the caller's environment.
-      unset SHELLSPEC_JOBS
+      # SHELLSPEC_JOBS, CHECK_SPEC_SHELL, and CHECK_SPEC_FORMAT are unset
+      # explicitly, same trap as the SHELLSPEC_JOBS pin two examples above
+      # (issue #61): the CI spec job sets all three at the job level, so an
+      # example whose argv assertion is order- and content-sensitive would
+      # otherwise depend on the caller's environment. This example proved
+      # it: it passed locally and failed in CI's ubuntu leg, where
+      # CHECK_SPEC_SHELL=bash and CHECK_SPEC_FORMAT=progress leaked into the
+      # asserted argv.
+      unset SHELLSPEC_JOBS CHECK_SPEC_SHELL CHECK_SPEC_FORMAT
       cat > bin/shellspec <<'STUB'
 #!/bin/sh
 echo "argv: $*"
@@ -468,7 +472,7 @@ STUB
       # opposite of its own name and fails only there. SHELLSPEC_JOBS is
       # unset for the same reason as the example above.
       unset CHECK_SPEC_ONLY
-      unset SHELLSPEC_JOBS
+      unset SHELLSPEC_JOBS CHECK_SPEC_SHELL CHECK_SPEC_FORMAT
       cat > bin/shellspec <<'STUB'
 #!/bin/sh
 echo "argv: [$*]"
