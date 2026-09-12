@@ -91,12 +91,26 @@ pr-status.sh --env-prefix'
     file_vars=$(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*="[^"]*\.md"$' "$f" \
       | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/' | sort -u)
     varpat=$(printf '%s\n' "$file_vars" | paste -sd'|' -)
+    # A one-line ad hoc helper that greps a literal doc-file path directly,
+    # never assigning it to a path variable first (spec/node_apply_constraint_spec.sh's
+    # `definition()`, which greps fix-dependency.md inline). Named the same
+    # way file_vars is: the declaring line, not the call site, so a helper
+    # declared once and called from several `It` blocks is found from either.
+    inline_fns=$(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{.*\.md"' "$f" \
+      | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/' | sort -u)
+    fnpat=$(printf '%s\n' "$inline_fns" | paste -sd'|' -)
     pat='phrase_in|count_in|rule_in'
     if [ -n "$varpat" ]; then
       # Two literal backslashes: awk -v unescapes one level, so the regex
       # it evaluates ends up with the single \$( that matches a quoted
       # "$VAR" reference.
       pat="$pat|\\\\\$($varpat)"
+    fi
+    if [ -n "$fnpat" ]; then
+      # No \< \> word boundaries: BSD awk (the macOS default) does not
+      # support them. A bare substring match is safe here because the name
+      # comes from an actual declared helper in this same file, not a guess.
+      pat="$pat|($fnpat)"
     fi
     awk -v pat="$pat" '
       /^[ \t]*It / { in_it = 1; has = 0 }

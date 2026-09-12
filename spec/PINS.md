@@ -45,7 +45,7 @@ grep -rn 'pin: mechanical, retired by <script>' spec/
 
 ## Totals
 
-365 pins across 15 files: 281 `judgment`, 84 `mechanical`.
+368 pins across 16 files: 284 `judgment`, 84 `mechanical`.
 
 Mechanical pins by successor script:
 
@@ -502,3 +502,11 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 170 | anchors its paths glob the way every other rule in this repo does | judgment | - |
 | 182 | names the skill it points at | judgment | - |
 | 197 | links from the root CLAUDE.md to the New script section | judgment | - |
+
+### `spec/node_apply_constraint_spec.sh` — 3 pins (3 judgment, 0 mechanical)
+
+| Line | `It` title | Class | Successor script |
+|---|---|---|---|
+| 1277 | has a definition that treats source unsupported as a known limit, not a warning | judgment | - |
+| 1283 | has a definition that keeps the warning for a lockfile-backed source | judgment | - |
+| 1314 | has a definition that rejects such a value rather than opening a PR on it | judgment | - |
