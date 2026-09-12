@@ -633,7 +633,9 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 
 ## Testing
 
-Shellspec suites live in `spec/` at the repo root; conventions are in the root `CLAUDE.md`
+Shellspec suites live in `spec/` at the repo root. The strategy those suites are written to is the
+[`testing` skill](../../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck
+rules and the rules about what this public repository may name are in the root `CLAUDE.md`
 (Testing section). The suite runs in CI and in the committed pre-push hook, via
 `scripts/check.sh` at the repo root (ADR 005). Fixture tests do not replace verifying
 against real repositories with live alerts; check both the success path and the "parser found

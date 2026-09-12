@@ -64,7 +64,7 @@ gate — `node` and `npm`, but still targets bash 3.2 because the hooks run it o
 the verdict rather than the parse, where an expected value may come from, red-first and the fixture
 that lands with every fix, what may be mocked, when a prose pin is legitimate, and the review
 checklist all live there and are not repeated here. Invoke it with the Skill tool (`testing`) or
-`/testing`; `.claude/rules/path-spec.md` loads it whenever a file under `spec/` is read.
+`/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/` is read.
 
 Two rules about what this public repository may name stay here, because they cover documentation
 and code comments as much as they cover fixtures:

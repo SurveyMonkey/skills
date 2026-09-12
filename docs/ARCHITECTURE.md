@@ -94,7 +94,8 @@ The multi-agent orchestration itself, phases and all, is specified in
 ## Testing
 
 Shellspec suites live in `spec/` at the repo root. The strategy those suites are written to is the
-[`testing` skill](../.claude/skills/testing/SKILL.md), auto-loaded for files under `spec/` by
-`.claude/rules/path-spec.md`; it is stated there in full and not restated here. The gate commands,
+[`testing` skill](../.claude/skills/testing/SKILL.md), which `.claude/rules/path-spec.md` points a
+reader at when they open a file under `spec/`; it is stated there in full and not restated here.
+The gate commands,
 the ShellCheck rules and the rules about what this public repository may name are in the root
 [CLAUDE.md](../CLAUDE.md) Testing section.
