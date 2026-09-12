@@ -18,9 +18,12 @@
 #                                      -> scope null
 #
 # **A null `scope` is an answer, not an error** (exit stays 0): the path is in
-# no repository, so there is nothing to infer, and the caller asks the user
-# what to operate on — an org, a user, or a named repo. Guessing org versus
-# user from directory names is exactly what this script no longer does.
+# no repository, so there is nothing to infer. What the caller does with that
+# is its own contract: the audit command asks which repository to audit, and
+# resolve-alerts is meant to take its scope from `discover-repos.sh` instead,
+# which lists the checkouts directly inside the path (issue #188). Guessing
+# org versus user from directory names is exactly what this script no longer
+# does.
 #
 # `owner`, `repo` and `nwo` are also null inside a repository with no `origin`
 # remote, or one whose URL yields no `<owner>/<name>` pair. The scope is still

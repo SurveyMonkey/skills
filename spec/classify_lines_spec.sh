@@ -172,7 +172,7 @@ STUB_EOF
       '{actionable: [{package: $pkg, major_line: $line, ecosystem: "npm",
                       adapter_path: $a, branch_name: "sec/\($pkg)-\($line)"}],
         skipped: [{package: "old", reason: "no fix available"}],
-        skipped_repos: [{repo: "octo/readonly", reason: "no push access"}]}'
+        extra: [{note: "carried by the caller"}]}'
   }
 
   classify() {
@@ -250,7 +250,7 @@ STUB_EOF
             {package: "lodash", major_line: "4", ecosystem: "npm", adapter_path: $a},
             {package: "express", major_line: "4", ecosystem: "npm", adapter_path: $a}],
           skipped: [{package: "old", reason: "no fix available"}],
-          skipped_repos: [{repo: "octo/readonly", reason: "no push access"}]}' \
+          extra: [{note: "carried by the caller"}]}' \
         | "$COMMON/classify-lines.sh" --repo-root "$REPO_ROOT" | jq -c "$1"
     }
 
@@ -261,12 +261,13 @@ STUB_EOF
     End
 
     # A caller reads one list: the entries discovery and select-adapter
-    # already filed must survive this stage untouched, skipped_repos with
-    # them.
-    It 'passes pre-existing skipped and skipped_repos through untouched'
-      When call multi '{skipped_first: .skipped[0], skipped_repos}'
+    # already filed must survive this stage untouched. This stage rebuilds the
+    # output object, so a top-level key it does not know about has to survive
+    # with them rather than being silently dropped.
+    It 'passes pre-existing skipped and an unknown top-level key through untouched'
+      When call multi '{skipped_first: .skipped[0], extra}'
       The status should be success
-      The output should equal '{"skipped_first":{"package":"old","reason":"no fix available"},"skipped_repos":[{"repo":"octo/readonly","reason":"no push access"}]}'
+      The output should equal '{"skipped_first":{"package":"old","reason":"no fix available"},"extra":[{"note":"carried by the caller"}]}'
     End
 
     It 'requires --repo-root'
@@ -544,13 +545,13 @@ STUB_EOF
     End
   End
 
-  # Issue #123 at cross-repo scope: a remote branch literally named `fix`
-  # rejects every `fix/*` push with a `(directory file conflict)`, and the
-  # orchestrator learns it per repo only in phase 5, after discovery has
-  # already named every branch. This script is the one stage that runs once
-  # per repo with that repo's groups on stdin, so `--branch-style flat` here
-  # is where the flip lands: the rewritten `branch_name` is what the dispatch
-  # payload carries, and the fix agents consume it verbatim.
+  # Issue #123, per checkout: a remote branch literally named `fix` rejects
+  # every `fix/*` push with a `(directory file conflict)`, and the branch style
+  # is a fact about that one remote, learned only by probing it. This script is
+  # the one stage that runs once per checkout with that checkout's groups on
+  # stdin, so `--branch-style flat` here is where the flip lands: the rewritten
+  # `branch_name` is what the dispatch payload carries, and the fix agents
+  # consume it verbatim.
   Describe 'the flat branch rewrite (issue #123)'
     plugin_envelope() {
       jq -nc --arg a "$STUB" \

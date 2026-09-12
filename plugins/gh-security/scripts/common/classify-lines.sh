@@ -134,11 +134,13 @@
 # scheme (`fix/dependabot-...`) to the flat one (`fix-dependabot-...`), and
 # `slash` (the default) rewrites nothing. The scheme is a per-repo fact — a
 # remote branch literally named `fix` blocks every `fix/*` push (issue #123;
-# discover-alerts.sh's header carries the mechanism) — and this script is the
-# one stage of the cross-repo flow that runs once per repo with that repo's
-# groups on stdin (resolve-alerts SKILL.md phase 5), which is why the rewrite
-# sits here. A branch_name not carrying the slash prefix (another tool's
-# name, or one already flat) passes through unchanged.
+# discover-alerts.sh's header carries the mechanism). The orchestrator hands
+# that style to discovery, so groups normally arrive already in the right
+# scheme; the flag lives here as well for a caller that learns the namespace
+# verdict only after discovery has run and still has to convert the names it
+# holds. Under the default the rewrite is a no-op. A branch_name not carrying
+# the slash prefix (another tool's name, or one already flat) passes through
+# unchanged.
 
 set -euo pipefail
 
@@ -312,11 +314,10 @@ GROUP_ITEMS=$(printf '%s' "$input" \
 }
 
 # One repo per invocation. Discovery sets `repo` on every group unconditionally
-# (`group_repo_alerts`, discover-alerts.sh), at repo scope as much as org/user
-# scope, but the check treats an absent value the same as a present one for
-# defense in depth: either way, more than one distinct value means the caller
-# handed this script groups from more than one checkout, and `--repo-root`
-# only names one of them.
+# (`group_repo_alerts`, discover-alerts.sh), but the check treats an absent
+# value the same as a present one for defense in depth: either way, more than
+# one distinct value means the caller handed this script groups from more than
+# one checkout, and `--repo-root` only names one of them.
 REPOS=$(printf '%s' "$input" \
   | jq -c '[(.actionable // [])[].repo // empty] | unique' 2>"$ERR_FILE") || {
   err_json "Failed to read repo scope from actionable groups: $(cat "$ERR_FILE")"
@@ -606,8 +607,9 @@ annotated=$(printf '%s' "$input" | jq --argjson cls "$CLASS" \
       ]),
       classify_errors: $classify_errors
     }
-  # Pass through any other top-level keys (e.g. `skipped_repos` at org/user
-  # scope) unchanged, exactly as select-adapter.sh does.
+  # Any other top-level key passes through unchanged, exactly as
+  # select-adapter.sh does: this stage rebuilds the output object, so a key it
+  # does not know about would vanish here.
   | . as $out
   | ($input | del(.actionable, .skipped, .classify_errors)) + $out
   # The flat rewrite covers skipped groups too: a report naming a slash

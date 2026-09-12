@@ -133,8 +133,9 @@ Describe 'detect-scope.sh'
 
   # The whole point of issue #134: an `@owner/repo` shaped path that is not a
   # repository gets no scope at all, rather than the org or repo scope the
-  # directory names suggest. Exit stays 0 — this is an answer, and the
-  # orchestrator asks the user what to operate on.
+  # directory names suggest. Exit stays 0 — this is an answer, which the audit
+  # command turns into a question, and which resolve-alerts is meant to take
+  # from discover-repos.sh instead (issue #188).
   Describe 'outside any repository'
     It 'returns a null scope rather than reading the directory names'
       make_bare_directory
@@ -342,19 +343,18 @@ Describe 'select-adapter.sh'
       The stderr should include '"error":"Failed to annotate discovery JSON'
     End
 
-    # discover-alerts.sh --scope org|user emits a top-level `skipped_repos`
-    # array alongside actionable/skipped (issue #6). The batch-mode pipeline
-    # rebuilds the output object, so a key it does not know about must still
-    # survive the round trip rather than being silently dropped.
-    discovery_with_skipped_repos() {
-      printf '%s' '{"actionable":[{"package":"lodash","ecosystem":"npm"}],"skipped":[],"skipped_repos":[{"repo":"octo/readonly","reason":"no push access"}]}'
+    # The batch-mode pipeline rebuilds the output object from the keys it
+    # knows, so a top-level key it does not know about must survive the round
+    # trip rather than being silently dropped.
+    discovery_with_extra_key() {
+      printf '%s' '{"actionable":[{"package":"lodash","ecosystem":"npm"}],"skipped":[],"extra":[{"note":"carried by the caller"}]}'
     }
-    annotate_with_skipped_repos() { discovery_with_skipped_repos | "$COMMON/select-adapter.sh" --from-discovery | jq -c "$1"; }
+    annotate_with_extra_key() { discovery_with_extra_key | "$COMMON/select-adapter.sh" --from-discovery | jq -c "$1"; }
 
-    It 'passes skipped_repos through unchanged'
-      When call annotate_with_skipped_repos '.skipped_repos'
+    It 'passes an unknown top-level key through unchanged'
+      When call annotate_with_extra_key '.extra'
       The status should be success
-      The output should equal '[{"repo":"octo/readonly","reason":"no push access"}]'
+      The output should equal '[{"note":"carried by the caller"}]'
     End
   End
 End

@@ -115,8 +115,9 @@ if [ "$FROM_DISCOVERY" = true ]; then
                  | . + {reason: "ecosystem not supported yet"}
         ])
       }
-    # Pass through any other top-level keys discovery emitted (e.g.
-    # `skipped_repos` at org/user scope) unchanged, rather than dropping them.
+    # Any other top-level key discovery emitted passes through unchanged,
+    # rather than being dropped: this stage rebuilds the output object, so a
+    # key it does not know about would vanish here.
     | . as $out
     | ($input | del(.actionable, .skipped)) + $out
     ' 2>"$ERR_FILE") || {

@@ -31,6 +31,10 @@ Describe 'discover-alerts.sh'
     case "$1" in
       api)
         printf 'api\n' >> "$MOCK_DIR/log"
+        if [ -f "$MOCK_DIR/api-fail" ]; then
+          printf 'gh: Not Found (HTTP 404)\n' >&2
+          exit 1
+        fi
         cat "$MOCK_DIR/alerts.json"
         ;;
       pr)
@@ -148,12 +152,40 @@ Describe 'discover-alerts.sh'
     The output should equal '{"a":[[{"major":null,"vulnerable_ranges":["<= 5.28.0"]}]],"s":[[{"major":7,"vulnerable_ranges":["< 7.29.0"]}]]}'
   End
 
-  # Every group now carries its own `repo`, the field cross-repo scopes key on
-  # (issue #6). Repo scope pins it to the target passed on the command line.
-  It 'tags every group with the repo scope target'
+  # Every group carries its own `repo`, the field every downstream consumer
+  # keys on: it is the target passed on the command line, set unconditionally.
+  It 'tags every group with the target repo'
     When call discover '[(.actionable[], .skipped[]) | .repo] | unique'
     The status should be success
     The output should equal '["octo/app"]'
+  End
+
+  # One repository per invocation, and the output says exactly that: two keys,
+  # no `skipped_repos`. The repos in scope are the checkouts on disk
+  # (discover-repos.sh), so there is no cross-repo result for this script to
+  # summarize and no third key for a consumer to read as one (issue #188).
+  It 'emits exactly actionable and skipped'
+    When call discover 'keys'
+    The status should be success
+    The output should equal '["actionable","skipped"]'
+  End
+
+  Describe 'argument validation'
+    It 'requires a target repo'
+      When run script "$COMMON/discover-alerts.sh"
+      The status should equal 1
+      The stdout should equal ''
+      The stderr should include 'Usage'
+    End
+
+    # `--scope` is gone, not merely ignored: a caller still passing it gets the
+    # generic unknown-argument refusal rather than a silently narrowed run.
+    It 'refuses the withdrawn --scope flag'
+      When run script "$COMMON/discover-alerts.sh" --scope repo octo/app
+      The status should equal 1
+      The stdout should equal ''
+      The stderr should include 'Unknown argument: --scope'
+    End
   End
 
   It 'suffixes the line even when a package has only one'
@@ -376,6 +408,28 @@ Describe 'discover-alerts.sh'
     When run script "$COMMON/discover-alerts.sh" "$REPO"
     The status should not equal 0
     The stderr should include 'Not Found'
+  End
+
+  # The repo path is now the only path, so its own fetch failures are what
+  # stand between a caller and an empty-looking scope. Neither of these may
+  # reduce to "this repository has no alerts": the fetch that never happened
+  # and the body that never parsed both name the repository they failed on.
+  Describe 'the fetch itself failing'
+    It 'reports a failed fetch rather than an empty result'
+      : > "$MOCK_DIR/api-fail"
+      When run script "$COMMON/discover-alerts.sh" "$REPO"
+      The status should equal 1
+      The stdout should equal ''
+      The stderr should include 'Failed to fetch alerts for octo/app'
+    End
+
+    It 'reports a body that is not JSON at all'
+      printf 'not json' > "$MOCK_DIR/alerts.json"
+      When run script "$COMMON/discover-alerts.sh" "$REPO"
+      The status should equal 1
+      The stdout should equal ''
+      The stderr should include 'Invalid JSON response for octo/app'
+    End
   End
 
   # The two shapes are typed and validated independently — discovery's
