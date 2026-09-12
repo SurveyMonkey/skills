@@ -60,20 +60,43 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '0'
     End
 
-    # The `$` is written as `.` so the pattern does not spell `${`, which
-    # SC2016 reads as an expansion someone forgot to double-quote. Same fix
-    # the repo already uses for a sed character class (root CLAUDE.md), and
-    # `.` matches the literal `$` here: no directive needed.
-    It 'launches the workflow by scriptPath, from the plugin root'
-      When call rule_in "$SKILL" 'scriptPath: ".{CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs"'
+    # #187: the Workflow tool refuses a scriptPath it cannot already read, and
+    # every documented invocation runs with the working directory outside the
+    # plugin tree, so the bare plugin path is refused there. The skill now
+    # stages a checksum-verified copy under the working directory and
+    # launches that instead. The `$` is written as `.` so the pattern does
+    # not spell `${`, which SC2016 reads as an expansion someone forgot to
+    # double-quote (same fix the repo already uses for a sed character class,
+    # root CLAUDE.md): no directive needed.
+    It 'copies the workflow byte-for-byte from the plugin root before launch'
+      When call rule_in "$SKILL" 'Copy the file byte-for-byte from ..{CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs.'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'checksums the staged copy against the source before launching'
+      When call phrase_in "$SKILL" 'Checksum both the source and the copy and confirm they match before launching'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'launches the workflow by scriptPath, from the staged checksum-verified copy'
+      When call phrase_in "$SKILL" 'scriptPath. pointing at the checksum-verified copy, not the plugin path'
       The status should be success
       The output should equal '1'
     End
 
     # A hand-inlined variant would not be the tested file, which is the one
-    # thing ADR 010 buys.
+    # thing ADR 010 buys. The staged copy is explicitly carved out as neither
+    # an inline copy nor a hand-edited variant (#187).
     It 'forbids inlining a copy or hand-editing a variant'
       When call phrase_in "$SKILL" 'Never inline a copy of it, and never hand-edit a variant for one run'
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'explains that the staged, checksum-verified copy is not the forbidden kind'
+      When call phrase_in "$SKILL" 'A checksum-verified byte-for-byte copy staged only so the tool can read it is neither of those'
       The status should be success
       The output should equal '1'
     End

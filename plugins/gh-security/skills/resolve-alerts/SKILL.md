@@ -406,11 +406,23 @@ once per checkout; OPTIONAL — **omit the key rather than send null**).
 The script is thin on purpose: it dispatches and it validates, and nothing else. The reap below and
 the phase 7 summary stay outside it.
 
-Launch it as:
+**The Workflow tool only accepts a `scriptPath` it can already read** — a path it returned itself,
+or one under the working directory or a directory you have added. This skill always runs with the
+working directory set to one of the user's own checkouts (phase 1's scope), which is outside the
+plugin tree, so
+`${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` is refused there even though the file exists and
+you can read it directly. Stage a verified copy instead of hand-authoring a substitute:
+
+1. Copy the file byte-for-byte from `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` to a path
+   under the working directory (the session scratchpad is the natural place) — a mechanical copy,
+   never retyped or paraphrased.
+2. Checksum both the source and the copy and confirm they match before launching anything. A
+   mismatch means the copy failed; redo the copy, never patch the copy by hand to make it match.
+3. Launch `Workflow` with `scriptPath` pointing at the checksum-verified copy, not the plugin path.
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs",
+  scriptPath: "<checksum-verified copy of ${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs, staged under the working directory>",
   args: { cap: <detect-capacity.sh's cap>, dispatches: [<one payload per approved group>] }
 })
 ```
@@ -418,7 +430,9 @@ Workflow({
 The script is a real file, not something to write out here: it is version-controlled, unit-tested
 by `spec/js/`, and its result schema is executed against a validator rather than read
 ([ADR 010](../../../../docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). **Never
-inline a copy of it, and never hand-edit a variant for one run.** It does exactly two things —
+inline a copy of it, and never hand-edit a variant for one run.** A checksum-verified byte-for-byte
+copy staged only so the tool can read it is neither of those — it is the same tested file, proven
+identical before launch, never edited. It does exactly two things —
 fan one `fix-dependency` agent out per group under the cap, and validate each result against the
 Result contract in `agents/fix-dependency.md`. Everything else on this page is yours.
 
@@ -448,7 +462,7 @@ it, or it returns fewer entries than `dispatches`:
   transcript directory; `<transcriptDir>/journal.jsonl` records each agent's actual return value.
   Read it to learn which groups completed and what they returned, rather than assuming.
 - **Resume rather than re-dispatch.** Relaunch with `{scriptPath, resumeFromRunId: <runId>}`, the
-  same script and the same `args` in the same order: the unchanged prefix of `agent()` calls
+  same staged copy's path and the same `args` in the same order: the unchanged prefix of `agent()` calls
   returns its cached results instantly and only the unfinished work runs live. Re-launching without
   `resumeFromRunId` re-runs every group, which is how a second branch and a second PR appear for
   work that already succeeded. Resuming the batch the user approved is not a new dispatch
