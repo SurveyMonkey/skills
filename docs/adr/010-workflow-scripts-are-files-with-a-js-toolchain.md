@@ -71,8 +71,14 @@ gains a JavaScript toolchain for development and CI only.**
   `git ls-files` and an empty-discovery hard failure, like every other gate. It is wired into
   `all`, into the pre-push hook, and into `.github/workflows/gates.yml` as a `js` job that is
   added to the aggregate `gates` job's `needs:` list, whose arity floor moves from 4 to 5.
-- The schema is tested by executing it with **ajv**, not by reading it. The unsatisfiable-`allOf`
-  bug above is a test case.
+- The schema is tested by executing it with **ajv**, not by reading it. ~~The unsatisfiable-`allOf`
+  bug above is a test case.~~ **(amended in [#200](https://github.com/SurveyMonkey/skills/issues/200):
+  the tool-schema layer `agent()`'s `schema:` option is passed through rejects `oneOf`/`allOf`/
+  `anyOf` at a schema's root, so the cross-field rules that bug lived in — including this one —
+  moved out of `RESULT_SCHEMA` into `crossFieldViolations`, a plain JS function asserted directly
+  in `spec/js/fix-groups.test.mjs`, against ajv not at all. ajv still executes everything that
+  remains in the schema: the field set, the four enumerations, per-field nullability, and the
+  element shape of `observations[]`/`requires_major_bump[]`.)**
 - **Coverage thresholds are 100 on all four buckets** — `lines`, `functions`, `branches`,
   `statements` — via `@vitest/coverage-v8`, pinned exactly like every other tool here. The gate
   runs coverage; it is not a local convenience.
