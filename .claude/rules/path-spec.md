@@ -1,6 +1,6 @@
 ---
 paths:
-  - "spec/**"
+  - "**/spec/**"
 ---
 
 # Specs
