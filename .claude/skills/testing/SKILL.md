@@ -50,31 +50,37 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
 
 ## New script
 
-**Contract first.** An issue or plan proposing a new script carries the script's usage line and
-its JSON output shape, including error cases, before any code is written. That block is the seam
-the specs test at, and the reviewer of the plan is agreeing to the seam, not only to the idea.
+**Contract first.** Agree the usage line and JSON output shape, error cases included, as "Seams"
+above says, before any code is written. That block is the seam the specs test at, and the reviewer
+of the plan is agreeing to the seam, not only to the idea.
 
 **Red first.** The first spec example for a new script is committed failing against the missing
 script (or, where a commit must be green, is the first thing written on the branch and shown
-failing in the PR description). One example, one slice of behavior, then the smallest script that
-passes it, then the next example. Not the whole spec followed by the whole script.
+failing in the PR description), the same one slice at a time that "Red first" below asks for.
 
-A worked example: the contract for `discover-repos.sh` from issue #188's approved plan:
+A worked example: the `discover-repos.sh` contract, distilled from issue #188's approved plan and
+matching what shipped:
 
 ```
 discover-repos.sh [<path>]
 ```
 
-Exits 0 and emits a JSON object with `repos: []` when there are no repositories. When the input
-path is inside a git checkout, emits `repos: [<root path>]` for that one checkout. Otherwise, for
-each immediate non-dot subdirectory that is a checkout root (symlink-resolved), emits its path.
-Error cases: not a directory or unreadable directory exit 1 with `error: <reason>`.
+Exits 0 and emits `{target: <resolved path>, repos: []}` when there are no repositories. When the
+input path is inside a git checkout, emits `{target: <resolved path>, repos: [<root path>]}` for
+that one checkout. Otherwise, for each immediate non-dot subdirectory that is a checkout root
+(symlink-resolved), its path is added to `repos`. Every error, of which the script's own header
+names several beyond the two most obvious (not a directory, an unreadable directory), exits 1 with
+`{error: <reason>}` on stderr and nothing on stdout.
 
 When committing the first spec example against this contract, it fails because the script does
 not exist yet. The smallest script that passes it comes next. Then the next case: the directory
 with multiple immediate checkouts, the symlink to a checkout's subdirectory that the guard must
-suppress, the error-condition shapes. One example per batch run and one per mutation: see "Red
-first" and the review checklist below for how to verify a fixture loads its entire weight.
+suppress, then each error shape in turn. See the review checklist's mutant question below for how
+to confirm each new example pulls its own weight.
+
+**PR body.** A PR landing a new script states, in its description: "Contract agreed in <issue or
+plan comment>; first failing example: <spec:line>." Naming both makes the agreement and the first
+red example checkable from the PR alone.
 
 ## Assert the verdict, not the parse
 
