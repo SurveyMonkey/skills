@@ -5,10 +5,14 @@ thing a spec cannot run for real because it is the network and someone else's st
 
 Everything else is used for real:
 
-- **Not a sibling script.** `discover-alerts.sh` calling `classify-lines.sh`, the driver calling
-  `fix-group.sh`, a skill's pipeline: run the real one. A mocked collaborator tests the caller
-  against a shape nothing emits, which is how two scripts that each pass their own suite disagree
-  in the field.
+- **Not a sibling script.** `post-agent.sh` resolves `pr-status.sh` and `reap-agent-artifacts.sh`
+  as siblings of its own path, and `fix-group.sh` reaches `score-merge-risk.sh` the same way: run
+  the real one. `spec/post_agent_spec.sh` does exactly that, copying both collaborators verbatim
+  next to a scratch copy of the script under test. A mocked collaborator tests the caller against a
+  shape nothing emits, which is how two scripts that each pass their own suite disagree in the
+  field. Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh`
+  and `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their
+  own seam and never against a mock of the other.
 - **Not an adapter.** `node.sh` is reached through `adapter_jq`, as its callers reach it.
 - **Not git.** Fixtures are real `git init` repositories in scratch directories
   (`spec/discover_repos_spec.sh`), including the shapes that are supposed to fail: a bare
@@ -21,7 +25,7 @@ Everything else is used for real:
 
 The one other thing mocked in the suite is the machine itself: `uname`, `sysctl` and `nproc` in
 `spec/detect_capacity_spec.sh`, because the concurrency cap is a function of the host's cores and
-RAM, which is exactly as unfakeable and as external as the network. Both those mocks read their
+RAM, which is exactly as unfakeable and as external as the network. All three mocks read their
 answers from environment variables so one mock serves every `Parameters` row. Anything beyond `gh`
 and that trio needs a comment saying which boundary it is.
 
@@ -29,11 +33,16 @@ and that trio needs a comment saying which boundary it is.
 
 **Today**, each spec that needs `gh` builds its own shellspec `Mock gh` block: a `case` on the
 leading arguments, a log appended to a file under `$MOCK_DIR`, and fail switches read from stub
-files. Five files carry one (`spec/discover_alerts_spec.sh`, `spec/render_pr_spec.sh`,
-`spec/pr_status_spec.sh`, `spec/check_advisories_spec.sh`, `spec/post_agent_spec.sh`), they have
-already drifted from each other, and a generic dispatcher is the shape this skill warns about:
-mocking requires conditional logic inside the mock, and a reader cannot tell from an example which
-endpoints it exercises.
+files. Four files carry one (`spec/discover_alerts_spec.sh`, `spec/pr_status_spec.sh`,
+`spec/check_advisories_spec.sh`, and `spec/render_pr_spec.sh`, which carries five separate blocks
+of its own), they have already drifted from each other, and a generic dispatcher is the shape this
+skill warns about: mocking requires conditional logic inside the mock, and a reader cannot tell
+from an example which endpoints it exercises.
+
+`spec/post_agent_spec.sh` is the deliberate fifth shape rather than a counterexample: `pr-status.sh`
+runs there as a genuine subprocess of `post-agent.sh`, one level deeper than shellspec's own
+interception reaches, so its `gh` is a real executable placed on `PATH` instead of a `Mock` block.
+The boundary is the same one; only the mechanism differs.
 
 Two rules those blocks already get right and any replacement must keep:
 
@@ -44,8 +53,11 @@ Two rules those blocks already get right and any replacement must keep:
   because an empty alert list reads as "nothing to fix".
 - **The mock reproduces the real tool's shape, not a tidy one.** Real `gh` writes its
   release-upgrade notice to stderr and still exits 0; the mock does too, per PR, from a stub file.
-  A failure stub carries the real `gh: ... (HTTP nnn)` wording, because classification is what the
-  script under test does with it.
+  A failure stub carries the wording the real `gh` writes for that endpoint, and that is not one
+  spelling: `gh api` reports `gh: Not Found (HTTP 404)` (`spec/discover_alerts_spec.sh`), while a
+  `gh` subcommand reports `HTTP 422: Validation Failed: name already exists` with no `gh:` prefix
+  (`spec/render_pr_spec.sh`). Copy the spelling the endpoint actually emits, because classification
+  is what the script under test does with it.
 
 **The intended shape** is one shared, SDK-style helper in `spec/spec_helper.sh` (issue #196), which
 `mocking.md` will document as the way once it lands:
