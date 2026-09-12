@@ -495,13 +495,26 @@ it, or it returns fewer entries than `dispatches`:
 **`schema` replaces the old "an unparseable result block is a failure report" rule.** The agent is
 forced through structured output and retried on a mismatch, so nothing here re-parses a fence. Be
 precise about what that buys: the schema validates **the field set, the four enumerations, the
-nullability of each field, the element shape of `observations[]` and `requires_major_bump[]`, and
-the Result contract's cross-field rules** — exactly one of `no_op`/`failure` non-null with both
-null on success, each agreeing with `status`, and `bare_override` agreeing with `action`. It does
-not and cannot check that a `pr_url` names a real pull request, that `risk` is the scorer's own
-output rather than a number the agent invented, or that a `no_op`'s evidence supports its reason.
-Those stay what they always were: `post-agent.sh` verifies the pull request, and the rest is the
-agent's contract to keep. **A group whose entry comes back `null` — the schema could not be satisfied
+nullability of each field taken alone, and the element shape of `observations[]` and
+`requires_major_bump[]`**. It does not and cannot check that a `pr_url` names a real pull request,
+that `risk` is the scorer's own output rather than a number the agent invented, or that a `no_op`'s
+evidence supports its reason. Those stay what they always were: `post-agent.sh` verifies the pull
+request, and the rest is the agent's contract to keep.
+
+**The Result contract's cross-field rules are not schema-enforced.** They once were, as a
+top-level `oneOf`/`allOf` — exactly one of `no_op`/`failure` non-null with both null on success,
+each agreeing with `status`, and `bare_override` agreeing with `action` — but the tool-schema layer
+`schema` is passed through rejects `oneOf`/`allOf`/`anyOf` at a schema's root, so every dispatch
+threw before any agent ran ([#200](https://github.com/SurveyMonkey/skills/issues/200)). The
+workflow script now checks those rules itself, in plain JS, after each result comes back, and
+**warns rather than fails** a violation: `post-agent.sh` and phase 7 already read `no_op`,
+`failure`, `action` and `bare_override` straight off the result, so failing the whole group over an
+inconsistency they would surface anyway would cost a completed fix — including one that already
+opened a pull request — for a defect in the agent's own bookkeeping. A warning naming the group and
+the violation lands in the workflow's log; treat it as a signal to check that group's PR by hand,
+not as a reason to distrust the entry.
+
+**A group whose entry comes back `null` — the schema's structural checks could not be satisfied
 after retries, or the agent died — is a failure report for that group, and is still reported.** Its
 `dispatch` entry is right there beside it, carrying `package`, `major_line`, `branch_name` and
 `repo_root`, which is everything the reap and phase 7 need; run the reap below for it exactly as for

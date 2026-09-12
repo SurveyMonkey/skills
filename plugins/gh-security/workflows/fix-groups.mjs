@@ -166,85 +166,80 @@ const RESULT_SCHEMA = {
       },
     },
   },
-  // Exactly one of no_op/failure is non-null, both are null on success, and
-  // each agrees with `status`. Without this, {"status":"failure",
-  // "failure":null} validates field-for-field, clears post-agent.sh's gate
-  // (which reads only branch/package/major_line), and reaches phase 7's
-  // "failures get their phase and detail" with no data.
-  oneOf: [
-    {
-      properties: {
-        status: { const: 'success' },
-        pr_url: { type: 'string' },
-        action: { type: 'string' },
-        resolved_version: { type: 'string' },
-        risk: { type: 'object' },
-        no_op: { type: 'null' },
-        failure: { type: 'null' },
-      },
-    },
-    {
-      properties: {
-        status: { const: 'no-op' },
-        pr_url: { type: 'null' },
-        action: { type: 'null' },
-        // The doc requires this non-null on a no-op — it is what is
-        // installed — and null on a failure. Constrained in both directions
-        // rather than left free in either.
-        resolved_version: { type: 'string' },
-        risk: { type: 'null' },
-        // A no-op made no commit and wrote no override, so it cannot have
-        // added or tightened one.
-        bare_override: { const: 'none' },
-        no_op: { type: 'object' },
-        failure: { type: 'null' },
-      },
-    },
-    {
-      properties: {
-        status: { const: 'failure' },
-        pr_url: { type: 'null' },
-        action: { type: 'null' },
-        resolved_version: { type: 'null' },
-        risk: { type: 'null' },
-        no_op: { type: 'null' },
-        failure: { type: 'object' },
-      },
-    },
-  ],
-  // bare_override must agree with action, in both directions — but ONLY on
-  // success. `action` is null on every failure, while `bare_override` still
-  // reports what was written, and `apply_constraint` writes the override
-  // BEFORE `install`: a validate_failed_after_ladder, an install_failure, a
-  // hook-rejected push and a failed pr all reach `status: "failure"` with
-  // `bare_override: "added"`. Ungated, no value of `action` satisfies both
-  // this rule and the failure branch above, the agent is retried into a
-  // `null` entry, and the likelier repair it finds is to report
-  // `bare_override: "none"` — silently hiding a global pin on exactly the
-  // escalation a reviewer needs it on, and destroying the
-  // `unscoped_override_added` observation the pin audit depends on.
-  // `agents/fix-dependency.md` used to state the agreement rule
-  // unconditionally while nulling `action` on failure a few lines later —
-  // prose that only contradicts itself once machine-checked. That doc now
-  // scopes the rule to success too, so the schema and the instruction the
-  // model actually reads agree; fixing only this side would have left the
-  // model told to do the impossible.
-  allOf: [
-    {
-      if: {
-        properties: { status: { const: 'success' }, bare_override: { enum: ['added', 'tightened'] } },
-        required: ['status', 'bare_override'],
-      },
-      then: { properties: { action: { const: 'bare-override' } } },
-    },
-    {
-      if: {
-        properties: { status: { const: 'success' }, action: { const: 'bare-override' } },
-        required: ['status', 'action'],
-      },
-      then: { properties: { bare_override: { enum: ['added', 'tightened'] } } },
-    },
-  ],
+  // Cross-field rules used to live here as `oneOf`/`allOf`. The tool-schema
+  // layer agent()'s `schema:` option is passed through rejects any of those
+  // keywords at the schema ROOT — "input_schema does not support oneOf,
+  // allOf, or anyOf at the top level" — so every dispatch threw before an
+  // agent ever ran (#200). Those checks now live in `crossFieldViolations`
+  // below, run on each result after `agent()` returns, warned rather than
+  // enforced (see the wiring region for why).
+}
+
+// Exactly one of no_op/failure is non-null, both are null on success, and
+// each agrees with `status`. Without this, {"status":"failure",
+// "failure":null} is field-for-field structurally valid, clears
+// post-agent.sh's gate (which reads only branch/package/major_line), and
+// reaches phase 7's "failures get their phase and detail" with no data.
+//
+// bare_override must agree with action, in both directions — but ONLY on
+// success. `action` is null on every failure, while `bare_override` still
+// reports what was written, and `apply_constraint` writes the override
+// BEFORE `install`: a validate_failed_after_ladder, an install_failure, a
+// hook-rejected push and a failed pr all reach `status: "failure"` with
+// `bare_override: "added"`. Ungated, no value of `action` satisfies both
+// this rule and the failure branch above, and the tempting "fix" is to
+// report `bare_override: "none"` — silently hiding a global pin on exactly
+// the escalation a reviewer needs it on, and destroying the
+// `unscoped_override_added` observation the pin audit depends on.
+// `agents/fix-dependency.md` scopes the agreement rule to success, so the
+// validator and the instruction the model actually reads agree.
+//
+// Returns an array of violation strings; empty means the result is
+// consistent. Never throws: `post-agent.sh` and phase 7 read `no_op`,
+// `failure`, `action` and `bare_override` directly off the result already,
+// so a violation here is logged rather than failing the whole batch — the
+// same information those two readers would otherwise silently disagree
+// about is instead surfaced once, at the point the result arrives.
+function crossFieldViolations(r) {
+  const violations = []
+  const bothNull = r.no_op === null && r.failure === null
+  const onlyNoOp = r.no_op !== null && r.failure === null
+  const onlyFailure = r.no_op === null && r.failure !== null
+
+  if (r.status === 'success') {
+    if (!bothNull) violations.push('status "success" requires no_op and failure to both be null')
+    if (typeof r.pr_url !== 'string') violations.push('status "success" requires a non-null pr_url')
+    if (typeof r.action !== 'string') violations.push('status "success" requires a non-null action')
+    if (typeof r.resolved_version !== 'string') {
+      violations.push('status "success" requires a non-null resolved_version')
+    }
+    if (r.risk === null || typeof r.risk !== 'object') violations.push('status "success" requires a non-null risk')
+    if (['added', 'tightened'].includes(r.bare_override) && r.action !== 'bare-override') {
+      violations.push('bare_override "' + r.bare_override + '" requires action "bare-override"')
+    }
+    if (r.action === 'bare-override' && !['added', 'tightened'].includes(r.bare_override)) {
+      violations.push('action "bare-override" requires bare_override "added" or "tightened"')
+    }
+  } else if (r.status === 'no-op') {
+    if (!onlyNoOp) violations.push('status "no-op" requires no_op to be non-null and failure to be null')
+    if (r.pr_url !== null) violations.push('status "no-op" requires pr_url to be null')
+    if (r.action !== null) violations.push('status "no-op" requires action to be null')
+    if (typeof r.resolved_version !== 'string') {
+      violations.push('status "no-op" requires a non-null resolved_version')
+    }
+    if (r.risk !== null) violations.push('status "no-op" requires risk to be null')
+    // A no-op made no commit and wrote no override, so it cannot have added
+    // or tightened one.
+    if (r.bare_override !== 'none') violations.push('status "no-op" requires bare_override to be "none"')
+  } else if (r.status === 'failure') {
+    if (!onlyFailure) violations.push('status "failure" requires failure to be non-null and no_op to be null')
+    if (r.pr_url !== null) violations.push('status "failure" requires pr_url to be null')
+    if (r.action !== null) violations.push('status "failure" requires action to be null')
+    if (r.resolved_version !== null) violations.push('status "failure" requires resolved_version to be null')
+    if (r.risk !== null) violations.push('status "failure" requires risk to be null')
+  }
+
+  return violations
 }
 
 // Refuse a malformed `args` loudly. Every failure here is silent otherwise: a
@@ -379,6 +374,18 @@ const worker = async () => {
     } catch (e) {
       aborted.push({ group: d.group, error: (e && e.message) || String(e) })
       throw e
+    }
+    // The schema can no longer express these rules (#200), so check them here
+    // and warn: `post-agent.sh` and phase 7 read `no_op`/`failure`/`action`/
+    // `bare_override` off this same result directly, so failing the batch
+    // over an inconsistency they will surface anyway would lose a completed
+    // fix — including one that already opened a pull request — for a defect
+    // in the agent's own bookkeeping.
+    if (results[i]) {
+      const violations = crossFieldViolations(results[i])
+      if (violations.length) {
+        log('Cross-field inconsistency in the result for ' + agentLabel(d) + ': ' + violations.join('; '))
+      }
     }
   }
 }

@@ -40,6 +40,7 @@ import { readFile } from 'node:fs/promises'
 import {
   RESULT_SCHEMA,
   agentLabel,
+  crossFieldViolations,
   dispatchPrompt,
   main,
   pairEntry,
@@ -49,6 +50,21 @@ import {
 
 const validate = new Ajv({ allErrors: true, strict: false }).compile(RESULT_SCHEMA)
 const accepts = (r) => validate(r)
+
+// #200: the tool-schema layer agent()'s `schema:` option is passed through
+// rejects any of these three keywords at the schema ROOT with
+// "API Error: 400 tools.N.custom.input_schema: input_schema does not support
+// oneOf, allOf, or anyOf at the top level" — before any agent runs, before any
+// tool use, before any repository is touched. Nested occurrences (inside a
+// `properties` entry, for instance) are not the bug this pins; only the root
+// is rejected by that layer, so only the root is asserted here.
+describe('RESULT_SCHEMA at the tool-schema boundary', () => {
+  it('declares no oneOf, allOf, or anyOf at its root', () => {
+    for (const keyword of ['oneOf', 'allOf', 'anyOf']) {
+      expect(keyword in RESULT_SCHEMA).toBe(false)
+    }
+  })
+})
 
 describe('validateArgs', () => {
   it('accepts a well-formed args object', () => {
@@ -296,6 +312,12 @@ describe('pairEntry', () => {
 })
 
 describe('RESULT_SCHEMA, executed', () => {
+  // These examples cover what still lives in the schema after #200: field
+  // set, enumerations, nullability of each field taken alone, and the
+  // element shape of observations[]/requires_major_bump[]. The cross-field
+  // rules the schema used to express as oneOf/allOf — exactly one of
+  // no_op/failure agreeing with status, bare_override agreeing with action —
+  // moved to crossFieldViolations, exercised below.
   it('accepts a conforming success', () => {
     expect(accepts(successResult())).toBe(true)
   })
@@ -308,59 +330,6 @@ describe('RESULT_SCHEMA, executed', () => {
     expect(accepts(failureResult())).toBe(true)
   })
 
-  // THE regression test. apply_constraint writes the override before install,
-  // so a validate/install/push/pr failure truthfully reports
-  // bare_override "added" while action is null. An ungated agreement rule
-  // made that unsatisfiable: the agent would be retried into a null entry,
-  // losing the phase and detail, or would "fix" it by reporting
-  // bare_override "none" and hiding a global pin.
-  for (const phase of ['validate', 'install', 'push', 'pr']) {
-    it(`accepts a ${phase} failure that truthfully reports bare_override added`, () => {
-      const r = failureResult({
-        bare_override: 'added',
-        failure: { phase, detail: 'failed after the override was written' },
-        observations: [{ type: 'unscoped_override_added', key: 'sharp', range: '>=0.35.0 <1' }],
-      })
-      expect(accepts(r), JSON.stringify(validate.errors)).toBe(true)
-    })
-  }
-
-  it('accepts a failure reporting bare_override tightened', () => {
-    expect(accepts(failureResult({ bare_override: 'tightened' }))).toBe(true)
-  })
-
-  it('rejects a failure whose failure object is null', () => {
-    expect(accepts(failureResult({ failure: null }))).toBe(false)
-  })
-
-  it('rejects a no-op whose no_op object is null', () => {
-    expect(accepts(noOpResult({ no_op: null }))).toBe(false)
-  })
-
-  it('rejects a success carrying both no_op and failure', () => {
-    const r = successResult({
-      no_op: { reason: 'r', evidence: {} },
-      failure: { phase: 'install', detail: 'd' },
-    })
-    expect(accepts(r)).toBe(false)
-  })
-
-  it('rejects a failure carrying both no_op and failure', () => {
-    const r = failureResult({ no_op: { reason: 'r', evidence: {} } })
-    expect(accepts(r)).toBe(false)
-  })
-
-  it('rejects a success whose pr_url is null', () => {
-    expect(accepts(successResult({ pr_url: null }))).toBe(false)
-  })
-
-  it('rejects a failure carrying a pr_url', () => {
-    expect(accepts(failureResult({ pr_url: 'https://x/pull/1' }))).toBe(false)
-  })
-
-  // The agent contract nulls resolved_version on failure and requires it on a
-  // no-op. Both directions, because leaving either unconstrained lets a
-  // result claim something the doc forbids.
   // `fix-group.sh cleanup` runs after the PR is created and exits 3 when it
   // leaves a worktree behind, so a cleanup error can follow completed work.
   // Forcing it into the `failure` branch would make the agent choose between
@@ -474,23 +443,6 @@ describe('RESULT_SCHEMA, executed', () => {
     })
   })
 
-  it('rejects a failure carrying a resolved_version', () => {
-    expect(accepts(failureResult({ resolved_version: '6.28.0' }))).toBe(false)
-  })
-
-  it('rejects a no-op with no resolved_version', () => {
-    expect(accepts(noOpResult({ resolved_version: null }))).toBe(false)
-  })
-
-  it('rejects a success with no resolved_version', () => {
-    expect(accepts(successResult({ resolved_version: null }))).toBe(false)
-  })
-
-  // A no-op made no commit and wrote no override, so it cannot have added one.
-  it('rejects a no-op claiming it added a bare override', () => {
-    expect(accepts(noOpResult({ bare_override: 'added' }))).toBe(false)
-  })
-
   it('accepts each band the scorer actually emits', () => {
     for (const band of ['Low', 'Medium', 'High']) {
       const r = successResult({ risk: { band, score: 3, f4: 0, f5: 0 } })
@@ -501,21 +453,6 @@ describe('RESULT_SCHEMA, executed', () => {
   it('rejects a risk band outside the scorer vocabulary', () => {
     expect(accepts(successResult({ risk: { band: 'Critical', score: 3, f4: 0, f5: 0 } }))).toBe(false)
     expect(accepts(successResult({ risk: { band: 'low', score: 3, f4: 0, f5: 0 } }))).toBe(false)
-  })
-
-  // Still enforced on success, which is where action is non-null and the
-  // agreement is meaningful.
-  it('rejects a success with bare_override added but a scoped action', () => {
-    expect(accepts(successResult({ bare_override: 'added' }))).toBe(false)
-  })
-
-  it('rejects a success with a bare-override action but bare_override none', () => {
-    expect(accepts(successResult({ action: 'bare-override' }))).toBe(false)
-  })
-
-  it('accepts a success where bare_override and action agree', () => {
-    const r = successResult({ action: 'bare-override', bare_override: 'added' })
-    expect(accepts(r), JSON.stringify(validate.errors)).toBe(true)
   })
 
   for (const [field, bad] of [
@@ -576,6 +513,156 @@ describe('RESULT_SCHEMA, executed', () => {
 
   it('rejects a requires_major_bump entry missing its ranges', () => {
     expect(accepts(successResult({ requires_major_bump: [{ version: '5.29.0' }] }))).toBe(false)
+  })
+})
+
+// #200: these cross-field rules used to be the schema's oneOf/allOf, rejected
+// by the tool-schema layer at the root. They now live in crossFieldViolations,
+// a plain function run on each result after agent() returns — checked here
+// directly, against ajv not at all.
+describe('crossFieldViolations', () => {
+  it('finds nothing wrong with a conforming success', () => {
+    expect(crossFieldViolations(successResult())).toEqual([])
+  })
+
+  it('finds nothing wrong with a conforming no-op', () => {
+    expect(crossFieldViolations(noOpResult())).toEqual([])
+  })
+
+  it('finds nothing wrong with a conforming failure', () => {
+    expect(crossFieldViolations(failureResult())).toEqual([])
+  })
+
+  // THE regression test. apply_constraint writes the override before
+  // install, so a validate/install/push/pr failure truthfully reports
+  // bare_override "added" while action is null. An ungated agreement rule
+  // made that unsatisfiable under the old schema: the agent would be
+  // retried into a null entry, losing the phase and detail, or would "fix"
+  // it by reporting bare_override "none" and hiding a global pin. The
+  // agreement rule is scoped to success, so this must report no violations.
+  for (const phase of ['validate', 'install', 'push', 'pr']) {
+    it(`finds nothing wrong with a ${phase} failure that truthfully reports bare_override added`, () => {
+      const r = failureResult({
+        bare_override: 'added',
+        failure: { phase, detail: 'failed after the override was written' },
+        observations: [{ type: 'unscoped_override_added', key: 'sharp', range: '>=0.35.0 <1' }],
+      })
+      expect(crossFieldViolations(r)).toEqual([])
+    })
+  }
+
+  it('finds nothing wrong with a failure reporting bare_override tightened', () => {
+    expect(crossFieldViolations(failureResult({ bare_override: 'tightened' }))).toEqual([])
+  })
+
+  it('flags a failure whose failure object is null', () => {
+    expect(crossFieldViolations(failureResult({ failure: null }))).not.toEqual([])
+  })
+
+  it('flags a no-op whose no_op object is null', () => {
+    expect(crossFieldViolations(noOpResult({ no_op: null }))).not.toEqual([])
+  })
+
+  it('flags a success carrying both no_op and failure', () => {
+    const r = successResult({
+      no_op: { reason: 'r', evidence: {} },
+      failure: { phase: 'install', detail: 'd' },
+    })
+    expect(crossFieldViolations(r)).not.toEqual([])
+  })
+
+  it('flags a failure carrying both no_op and failure', () => {
+    const r = failureResult({ no_op: { reason: 'r', evidence: {} } })
+    expect(crossFieldViolations(r)).not.toEqual([])
+  })
+
+  it('flags a success whose pr_url is null', () => {
+    expect(crossFieldViolations(successResult({ pr_url: null }))).not.toEqual([])
+  })
+
+  it('flags a failure carrying a pr_url', () => {
+    expect(crossFieldViolations(failureResult({ pr_url: 'https://x/pull/1' }))).not.toEqual([])
+  })
+
+  // The agent contract nulls resolved_version on failure and requires it on a
+  // no-op. Both directions, because leaving either unconstrained lets a
+  // result claim something the doc forbids.
+  it('flags a failure carrying a resolved_version', () => {
+    expect(crossFieldViolations(failureResult({ resolved_version: '6.28.0' }))).not.toEqual([])
+  })
+
+  it('flags a no-op with no resolved_version', () => {
+    expect(crossFieldViolations(noOpResult({ resolved_version: null }))).not.toEqual([])
+  })
+
+  it('flags a success with no resolved_version', () => {
+    expect(crossFieldViolations(successResult({ resolved_version: null }))).not.toEqual([])
+  })
+
+  // A no-op made no commit and wrote no override, so it cannot have added one.
+  it('flags a no-op claiming it added a bare override', () => {
+    expect(crossFieldViolations(noOpResult({ bare_override: 'added' }))).not.toEqual([])
+  })
+
+  // Enforced on success, which is where action is non-null and the
+  // agreement is meaningful.
+  it('flags a success with bare_override added but a scoped action', () => {
+    expect(crossFieldViolations(successResult({ bare_override: 'added' }))).not.toEqual([])
+  })
+
+  it('flags a success with a bare-override action but bare_override none', () => {
+    expect(crossFieldViolations(successResult({ action: 'bare-override' }))).not.toEqual([])
+  })
+
+  it('finds nothing wrong with a success where bare_override and action agree', () => {
+    const r = successResult({ action: 'bare-override', bare_override: 'added' })
+    expect(crossFieldViolations(r)).toEqual([])
+  })
+
+  // Not enforced on failure: action is null on every failure while
+  // bare_override still reports what was truthfully written.
+  it('does not require bare_override/action agreement on a failure', () => {
+    const r = failureResult({ bare_override: 'added', action: null })
+    expect(crossFieldViolations(r)).toEqual([])
+  })
+
+  // Each per-status field check independently, so a check that drops one
+  // field cannot hide behind another example that only ever varies the
+  // fields covered above.
+  it('flags a success reporting a null action', () => {
+    expect(crossFieldViolations(successResult({ action: null }))).not.toEqual([])
+  })
+
+  it('flags a success reporting a null risk', () => {
+    expect(crossFieldViolations(successResult({ risk: null }))).not.toEqual([])
+  })
+
+  it('flags a no-op reporting a non-null pr_url', () => {
+    expect(crossFieldViolations(noOpResult({ pr_url: 'https://github.com/octo/app/pull/1' }))).not.toEqual([])
+  })
+
+  it('flags a no-op reporting a non-null action', () => {
+    expect(crossFieldViolations(noOpResult({ action: 'direct-update' }))).not.toEqual([])
+  })
+
+  it('flags a no-op reporting a non-null risk', () => {
+    expect(crossFieldViolations(noOpResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } }))).not.toEqual([])
+  })
+
+  it('flags a failure reporting a non-null action', () => {
+    expect(crossFieldViolations(failureResult({ action: 'direct-update' }))).not.toEqual([])
+  })
+
+  it('flags a failure reporting a non-null risk', () => {
+    expect(crossFieldViolations(failureResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } }))).not.toEqual([])
+  })
+
+  // A status outside the three named branches matches none of them, so the
+  // function reports no violations rather than throwing on an unrecognized
+  // shape; the schema's own enum is what refuses that status in the first
+  // place.
+  it('finds nothing wrong with a result whose status matches none of the three branches', () => {
+    expect(crossFieldViolations(successResult({ status: 'succeeded' }))).toEqual([])
   })
 })
 
@@ -706,6 +793,29 @@ describe('the workflow body, run with stubbed collaborators', () => {
     expect(JSON.stringify(entries)).not.toContain('/pull/99')
   })
 
+  // #200: the schema can no longer reject this shape (it moved out of the
+  // schema entirely), so the workflow must warn rather than lose the group.
+  // `post-agent.sh` and phase 7 still read `pr_url`/`action`/`bare_override`
+  // straight off the result, so the entry is kept exactly as the agent
+  // reported it — only logged, never dropped or nulled.
+  it('warns on a cross-field inconsistency instead of dropping or nulling the result', async () => {
+    const dispatches = batch(2)
+    const inconsistent = (prompt, opts, i) =>
+      (i === 0 ? { ...echo(prompt, opts, i), pr_url: null } : echo(prompt, opts, i))
+    const { entries, logs } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: inconsistent })
+    expect(entries).toHaveLength(2)
+    expect(entries[0].mispaired).toBe(false)
+    expect(entries[0].result).not.toBeNull()
+    expect(entries[0].result.pr_url).toBeNull()
+    expect(logs.join('\n')).toMatch(/Cross-field inconsistency in the result for octo\/app pkg-0 6/)
+    expect(logs.join('\n')).toMatch(/requires a non-null pr_url/)
+  })
+
+  it('logs nothing about cross-field inconsistency for a conforming result', async () => {
+    const { logs } = await runWorkflow({ main, args: { cap: 1, dispatches: batch(1) }, agent: echo })
+    expect(logs.join('\n')).not.toMatch(/Cross-field inconsistency/)
+  })
+
   it('announces the batch size and the width it runs at', async () => {
     const { logs } = await runWorkflow({ main, args: { cap: 3, dispatches: batch(9) }, agent: echo })
     expect(logs).toContain('Dispatching 9 group(s), 3 at a time')
@@ -823,7 +933,7 @@ describe('the projection is the shipped file', () => {
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('//'))
     expect(added).toEqual([
-      'export { RESULT_SCHEMA, validateArgs, workerCount, dispatchPrompt, agentLabel, pairEntry }',
+      'export { RESULT_SCHEMA, validateArgs, workerCount, dispatchPrompt, agentLabel, pairEntry, crossFieldViolations }',
       'export async function main(agent, parallel, phase, log, args) {',
       '}',
     ])
