@@ -1,0 +1,10 @@
+# Deliberately empty. spec/.shellcheckrc disables SC2317 and SC2329 for the
+# shellspec DSL only, where ShellCheck cannot see how `Describe`/`It`/`Mock`
+# blocks and `When call` actually execute. gh-mock-dispatch.sh under this
+# directory is a real, standalone shell script, not shellspec syntax, so
+# both checks belong active against it — the same reasoning spec/.shellcheckrc
+# already applies to the plugin scripts. ShellCheck resolves the nearest
+# .shellcheckrc to the file being checked without merging into ancestors, so
+# this empty file is what restores the defaults here (verified: an empty
+# spec/support/.shellcheckrc makes SC2317/SC2329 fire again on a script that
+# would otherwise inherit the parent's disable).

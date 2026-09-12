@@ -56,48 +56,88 @@ Two constraints hold for a substituted collaborator:
 
 ## How `gh` is mocked
 
-**Today**, each spec that needs `gh` builds its own shellspec `Mock gh` block: a `case` on the
-leading arguments, a log appended to a file under `$MOCK_DIR`, and fail switches read from stub
-files. Four files carry one (`spec/discover_alerts_spec.sh`, `spec/pr_status_spec.sh`,
-`spec/check_advisories_spec.sh`, and `spec/render_pr_spec.sh`, which carries five separate blocks
-of its own), they have already drifted from each other, and a generic dispatcher is the shape this
-skill warns about: mocking requires conditional logic inside the mock, and a reader cannot tell
-from an example which endpoints it exercises.
+One shared, SDK-style helper mocks `gh`, registered in `spec/spec_helper.sh` and driven from a
+standalone dispatcher script, `spec/support/gh-mock-dispatch.sh` (issue #196). Four files use it:
+`spec/discover_alerts_spec.sh`, `spec/pr_status_spec.sh`, `spec/check_advisories_spec.sh`, and
+`spec/render_pr_spec.sh`. Each one's `Mock gh` block is a single line:
 
-`spec/post_agent_spec.sh` is the deliberate fifth shape rather than a counterexample: `pr-status.sh`
-runs there as a genuine subprocess of `post-agent.sh`, one level deeper than shellspec's own
-interception reaches, so its `gh` is a real executable placed on `PATH` instead of a `Mock` block.
-The boundary is the same one; only the mechanism differs.
+```sh
+Mock gh
+  "$GH_MOCK_DISPATCH" "$@"
+End
+```
 
-Two rules those blocks already get right and any replacement must keep:
+The dispatcher lives in its own file rather than a `spec_helper.sh` function because a
+command-based `Mock` block runs as a real, separate subprocess whenever the script under test
+invokes `gh` itself (`When run script`, or a script that shells out to `gh` on its own) — that
+subprocess cannot call a shell function defined outside the block, and shellspec's own docs say
+the one exception (an exported bash function via `export -f`) is not portable to the `sh` this
+suite targets. An external command has no such restriction, so the matching and reply logic is a
+script the mock block simply invokes.
 
-- **An unhandled endpoint fails loudly.** `spec/pr_status_spec.sh` logs the call *before* refusing
-  it, deliberately: `exit 1` alone makes a rejected call invisible, so a suppressed mutating call
-  (`gh pr merge --auto || true`) would leave a clean log and a green suite, which is how the first
-  version of that assertion passed under mutation (issue #87). A silent empty body is worse still,
-  because an empty alert list reads as "nothing to fix".
-- **The mock reproduces the real tool's shape, not a tidy one.** Real `gh` writes its
-  release-upgrade notice to stderr and still exits 0; the mock does too, per PR, from a stub file.
-  A failure stub carries the wording the real `gh` writes for that endpoint, and that is not one
+`spec_helper.sh` exposes the registration API:
+
+- `mock_gh_reset` starts a fresh scratch directory (`$GH_MOCK_DIR`) with an empty registry and
+  request log. Call it once per example, typically from the spec file's own `Before` hook.
+- `mock_gh_cleanup` removes that scratch directory. Pair it with `mock_gh_reset` via `After`, the
+  same way `use_fixture` is paired with `After 'cleanup_fixture'` elsewhere in `spec_helper.sh` —
+  without it, every example that resets the mock leaks a `mktemp` directory for the life of the
+  shellspec process.
+- `mock_gh_reply <verb path> <file> [stderr file]` registers the stdout for **one endpoint**,
+  keyed by the leading `gh` arguments (`api repos/octo/app/dependabot/alerts`, `pr list`,
+  `label create merge-risk:low`). One reply per endpoint, no conditional logic in the test. `file`
+  is read at call time, not copied, so an example that later overwrites the same path (many
+  `discover-alerts.sh` examples rewrite their alerts fixture in place) is answered with the new
+  content. The optional third argument is a file of stderr chatter gh should still emit alongside
+  an otherwise-successful reply (the release-upgrade notice `pr-status.sh` must tolerate). The key
+  may not contain a tab or newline; registration refuses it loudly rather than risk corrupting the
+  registry's tab-separated record.
+- `mock_gh_fail <verb path> <stderr text> [exit]` is a **per-endpoint** fail switch, so an example
+  says which endpoint fails and how, with the real `gh: ... (HTTP nnn)` wording the scripts
+  classify. Same restriction as above, on both the key and the text: a real multi-line `gh` error
+  is exactly what this argument is for, but it cannot yet be reproduced here — reject it rather
+  than truncate or silently corrupt the registry.
+- `mock_gh_requests` prints the request log, one line per call, for assertions on what was sent
+  (`ecosystem=pip`, `--search head:fix/...`) via command substitution:
+  `The value "$(mock_gh_requests)" should include ...`.
+
+The dispatcher itself keeps the two rules the per-file blocks already got right:
+
+- **An unhandled endpoint fails loudly.** Every call is logged *before* it is matched, so a
+  rejected or unregistered call still shows up in `mock_gh_requests` — `exit 1` alone would make a
+  suppressed mutating call (`gh pr merge --auto || true`) invisible, which is how the first version
+  of that assertion passed under mutation (issue #87). An endpoint with no registered reply exits 1
+  with `unhandled: <args>` on stderr, so a call an example did not declare fails outright rather
+  than reading as "no alerts".
+- **The mock reproduces the real tool's shape, not a tidy one.** A failure registered with
+  `mock_gh_fail` carries the wording the real `gh` writes for that endpoint, and that is not one
   spelling: `gh api` reports `gh: Not Found (HTTP 404)` (`spec/discover_alerts_spec.sh`), while a
   `gh` subcommand reports `HTTP 422: Validation Failed: name already exists` with no `gh:` prefix
   (`spec/render_pr_spec.sh`). Copy the spelling the endpoint actually emits, because classification
   is what the script under test does with it.
 
-**The intended shape** is one shared, SDK-style helper in `spec/spec_helper.sh` (issue #196), which
-this file will document as the way once it lands:
-
-- `mock_gh_reply <verb path> <file>` registers the stdout for **one endpoint**, keyed by the
-  leading `gh` arguments (`api repos/octo/app/dependabot/alerts`, `pr list`,
-  `label create merge-risk:low`). One reply per endpoint, no conditional logic in the test.
-- `mock_gh_fail <verb path> <stderr text> [exit]` is a **per-endpoint** fail switch, so an example
-  says which endpoint fails and how.
-- `mock_gh_unhandled` keeps the rule above: an endpoint with no registered reply exits non-zero
-  with `unhandled: <args>` on stderr.
-- `mock_gh_requests` is the request log.
+Registration is keyed by the leading `gh` arguments: each space-separated token in the key must
+match an argument of the call whole, or match a leading part of it immediately followed by `?`, in
+order though not necessarily contiguous. That lets `pr list --search head:<branch>` match past
+`--repo`, and lets a key with no query string match an `api` call whose path carries one, without
+also matching an unrelated branch that merely shares a name prefix (`fix/dependabot-lodash` must
+not match `fix/dependabot-lodash-4x`). The **last** registration whose key matches a given call
+wins, so a `Before` hook can register a broad default (`pr list` answering "no open PR" for every
+branch, `label create` answering "created" for any label) and one example can register a narrower,
+later key to override it for the one case it cares about.
 
 The point of the SDK shape is that registration *is* the declaration: an example lists the
 endpoints it exercises, and reaching one it did not declare is a failure rather than a default.
+
+**One bespoke block remains**, in `spec/render_pr_spec.sh` ("round 2, finding 5"): a real failure
+whose *stdout* happens to contain the phrase `create_label` checks for, with the actual error on
+stderr. `mock_gh_reply` only ever answers success, and `mock_gh_fail` only ever writes to stderr,
+so a failing call that also writes to stdout is the one shape the shared helper cannot express.
+
+`spec/post_agent_spec.sh` stays its own shape rather than migrating: `pr-status.sh` runs there as a
+genuine subprocess of `post-agent.sh`, one level deeper than shellspec's own interception reaches,
+so its `gh` is a real executable placed on `PATH` instead of a `Mock` block at all. The boundary is
+the same one; only the mechanism differs, and there is no `Mock gh` block there to migrate.
 
 ## What a log assertion may claim
 

@@ -10,14 +10,11 @@
 
 Describe 'check-advisories.sh'
   setup_mock() {
-    MOCK_DIR="$SHELLSPEC_WORKDIR/advisories-mock"
-    rm -rf "$MOCK_DIR"
-    mkdir -p "$MOCK_DIR"
-    : > "$MOCK_DIR/log"
+    mock_gh_reset
     # Three advisories for lodash, spanning two different vulnerable ranges,
     # plus one withdrawn and one that reaches the query only because it also
     # affects a different package.
-    cat > "$MOCK_DIR/advisories.json" <<'JSON'
+    cat > "$GH_MOCK_DIR/advisories.json" <<'JSON'
 [[
   {
     "ghsa_id": "GHSA-aaaa-1111-bbbb", "cve_id": "CVE-2019-10744",
@@ -69,23 +66,14 @@ Describe 'check-advisories.sh'
   }
 ]]
 JSON
-    export MOCK_DIR
+    mock_gh_reply 'api advisories' "$GH_MOCK_DIR/advisories.json"
   }
 
   Before 'setup_mock'
+  After 'mock_gh_cleanup'
 
   Mock gh
-    printf '%s\n' "$*" >> "$MOCK_DIR/log"
-    case "$1" in
-      api)
-        if [ -f "$MOCK_DIR/api-fail" ]; then
-          printf 'gh: HTTP 503\n' >&2
-          exit 1
-        fi
-        cat "$MOCK_DIR/advisories.json"
-        ;;
-      *) exit 1 ;;
-    esac
+    "$GH_MOCK_DISPATCH" "$@"
   End
 
   advisories() {
@@ -119,7 +107,7 @@ JSON
     When call advisories '.ecosystem' --ecosystem pip lodash
     The status should be success
     The output should equal '"pip"'
-    The contents of file "$MOCK_DIR/log" should include 'ecosystem=pip'
+    The value "$(mock_gh_requests)" should include 'ecosystem=pip'
   End
 
   Describe 'verdict for a candidate version'
@@ -145,8 +133,8 @@ JSON
   Describe 'ranges the adapter cannot evaluate'
     unreadable_range() {
       jq '[[.[0][0] | .vulnerabilities[0].vulnerable_version_range = "see vendor advisory"]]' \
-        "$MOCK_DIR/advisories.json" > "$MOCK_DIR/tmp.json"
-      mv "$MOCK_DIR/tmp.json" "$MOCK_DIR/advisories.json"
+        "$GH_MOCK_DIR/advisories.json" > "$GH_MOCK_DIR/tmp.json"
+      mv "$GH_MOCK_DIR/tmp.json" "$GH_MOCK_DIR/advisories.json"
     }
 
     It 'reports unknown rather than safe'
@@ -195,8 +183,8 @@ JSON
   # before it groups. A second page dropped silently would shrink the union and
   # make a pin holding back exactly that advisory look removable.
   It 'unions across pages'
-    jq '[[.[0][0]], [.[0][1], .[0][2]]]' "$MOCK_DIR/advisories.json" > "$MOCK_DIR/paged.json"
-    mv "$MOCK_DIR/paged.json" "$MOCK_DIR/advisories.json"
+    jq '[[.[0][0]], [.[0][1], .[0][2]]]' "$GH_MOCK_DIR/advisories.json" > "$GH_MOCK_DIR/paged.json"
+    mv "$GH_MOCK_DIR/paged.json" "$GH_MOCK_DIR/advisories.json"
     When call advisories '{n: .advisory_count, ranges: .vulnerable_ranges}' lodash
     The status should be success
     The output should equal '{"n":3,"ranges":["< 4.17.12","< 4.17.21",">= 3.0.0, < 4.17.19"]}'
@@ -206,7 +194,7 @@ JSON
   # "safe": a pin may exist for a non-security reason, and a misspelled name
   # produces exactly this.
   It 'distinguishes no advisories from safe'
-    printf '[[]]' > "$MOCK_DIR/advisories.json"
+    printf '[[]]' > "$GH_MOCK_DIR/advisories.json"
     When call advisories '{verdict, advisory_count}' --adapter "$ADAPTER" --version 1.0.0 lodash
     The status should be success
     The output should equal '{"verdict":"no-advisories","advisory_count":0}'
@@ -244,14 +232,14 @@ JSON
   End
 
   It 'reports an API failure rather than an empty advisory list'
-    : > "$MOCK_DIR/api-fail"
+    mock_gh_fail 'api advisories' 'gh: HTTP 503'
     When run script "$COMMON/check-advisories.sh" lodash
     The status should equal 1
     The stderr should include 'Failed to fetch advisories'
   End
 
   It 'reports a response that is not an array'
-    printf '{"message":"Not Found"}' > "$MOCK_DIR/advisories.json"
+    printf '{"message":"Not Found"}' > "$GH_MOCK_DIR/advisories.json"
     When run script "$COMMON/check-advisories.sh" lodash
     The status should equal 1
     The stderr should include 'Not Found'
