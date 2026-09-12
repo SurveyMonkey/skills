@@ -48,6 +48,34 @@ and its JSON output shape, error cases included, before any code is written; tha
 specs then test at, and the reviewer of the plan is agreeing to the seam, not only to the idea
 (issue #198).
 
+## New script
+
+**Contract first.** An issue or plan proposing a new script carries the script's usage line and
+its JSON output shape, including error cases, before any code is written. That block is the seam
+the specs test at, and the reviewer of the plan is agreeing to the seam, not only to the idea.
+
+**Red first.** The first spec example for a new script is committed failing against the missing
+script (or, where a commit must be green, is the first thing written on the branch and shown
+failing in the PR description). One example, one slice of behavior, then the smallest script that
+passes it, then the next example. Not the whole spec followed by the whole script.
+
+A worked example: the contract for `discover-repos.sh` from issue #188's approved plan:
+
+```
+discover-repos.sh [<path>]
+```
+
+Exits 0 and emits a JSON object with `repos: []` when there are no repositories. When the input
+path is inside a git checkout, emits `repos: [<root path>]` for that one checkout. Otherwise, for
+each immediate non-dot subdirectory that is a checkout root (symlink-resolved), emits its path.
+Error cases: not a directory or unreadable directory exit 1 with `error: <reason>`.
+
+When committing the first spec example against this contract, it fails because the script does
+not exist yet. The smallest script that passes it comes next. Then the next case: the directory
+with multiple immediate checkouts, the symlink to a checkout's subdirectory that the guard must
+suppress, the error-condition shapes. One example per batch run and one per mutation: see "Red
+first" and the review checklist below for how to verify a fixture loads its entire weight.
+
 ## Assert the verdict, not the parse
 
 A spec that stops at "the JSON parsed" passes while the hazard survives. Assert through the rule

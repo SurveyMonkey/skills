@@ -148,6 +148,8 @@ and stop. The human decides when to enter plan mode.
 target repos were actually inspected: Yarn Berry rather than Classic, npm lockfile v3, and a
 pre-existing bare override that blocked the intended fix.
 
+**For a new script, follow the contract-first and red-first rules in the [testing skill's "New script" section](.claude/skills/testing/SKILL.md#new-script).**
+
 ## The issue tracker is the record
 
 A plan that lives only in a session is invisible to everyone else and gone when it ends.
