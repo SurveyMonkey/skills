@@ -213,7 +213,7 @@ flowchart TD
     D5["Phase 5: declared_ranges --line, then score-merge-risk.sh<br/>(F1-F7 as the scorer defines them today;<br/>F6 from --override-scope; no repo scripts run)"] --> D6
     D6["Phase 6: commit and push from the worktree"] --> D6Q{"repo hooks"}
     D6Q -->|"pre-commit or pre-push fails"| FPUSH["failure: phase push,<br/>quoting the hook (never --no-verify)"]
-    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>--label merge-risk:&lt;band&gt; (ready for review; the agent<br/>never merges it or arms auto-merge)"]
+    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>--label dependencies --label merge-risk:&lt;band&gt; (ready for review;<br/>the agent never merges it or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
     D6PRQ -->|no| FPR["failure: phase pr"]
     D6PRQ -->|yes| SUCC(["success: pr_url, action, risk band,<br/>requires_major_bump[], observations[]"])
