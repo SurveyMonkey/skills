@@ -93,10 +93,8 @@ The multi-agent orchestration itself, phases and all, is specified in
 
 ## Testing
 
-Shellspec suites live in `spec/` at the repo root, with fixtures that use only public package
-names, no network access, and `gh` mocked. The strategy those suites are written to (seams,
-asserting the verdict rather than the parse, where an expected value may come from, red-first and
-the fixture that lands with every fix, what may be mocked, and when a prose pin is legitimate) is
-the [`testing` skill](../.claude/skills/testing/SKILL.md), auto-loaded for `spec/**` by
-`.claude/rules/path-spec.md`. The gate commands and the ShellCheck rules are in the root
+Shellspec suites live in `spec/` at the repo root. The strategy those suites are written to is the
+[`testing` skill](../.claude/skills/testing/SKILL.md), auto-loaded for files under `spec/` by
+`.claude/rules/path-spec.md`; it is stated there in full and not restated here. The gate commands,
+the ShellCheck rules and the rules about what this public repository may name are in the root
 [CLAUDE.md](../CLAUDE.md) Testing section.
