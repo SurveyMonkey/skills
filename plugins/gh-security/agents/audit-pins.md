@@ -999,7 +999,7 @@ labels are additive and no source overrides another.
 **Add `merge-risk:<band>` only when `pr.risk.band` is non-null.** A null band means an empty
 delta — nothing scored, because every removed package either left the tree entirely or resolved to
 the same version either way — and gets no risk label at all, never a fake one; the PR carries only
-`security` in that case. When `pr.risk.band` is set, lowercase it verbatim for the label name
+`security` and `dependencies` in that case. When `pr.risk.band` is set, lowercase it verbatim for the label name
 (`merge-risk:low`, `merge-risk:medium`, or `merge-risk:high` — never a bare `risk:<band>`, which
 would read as alert severity rather than merge risk), with the same closed-set colors
 `fix-dependency.md` uses (`#2da44e` low, `#d4a72c` medium, `#cf222e` high). Create it the same way
@@ -1028,7 +1028,7 @@ race to create the same band label, and the loser's "already exists" failure mea
 there, which is what it wanted; only a failure for some other reason is a failure result
 (phase `pr`), quoting `$mr_out`.
 
-Both label-creation steps run **before** `gh pr create`, so its failure means something else went
+All label-creation steps run **before** `gh pr create`, so its failure means something else went
 wrong:
 
 ```bash
