@@ -444,8 +444,8 @@ STUB
       # `shellspec spec/one_spec.sh spec/two_spec.sh` would.
       #
       # SHELLSPEC_JOBS, CHECK_SPEC_SHELL, and CHECK_SPEC_FORMAT are unset
-      # explicitly, same trap as the SHELLSPEC_JOBS pin two examples above
-      # (issue #61): the CI spec job sets all three at the job level, so an
+      # explicitly, same trap as the SHELLSPEC_JOBS pin above (issue #61):
+      # the CI spec job sets all three at the job level, so an
       # example whose argv assertion is order- and content-sensitive would
       # otherwise depend on the caller's environment. This example proved
       # it: it passed locally and failed in CI's ubuntu leg, where
