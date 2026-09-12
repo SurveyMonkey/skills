@@ -66,6 +66,8 @@ that lands with every fix, what may be mocked, when a prose pin is legitimate, a
 checklist all live there and are not repeated here. Invoke it with the Skill tool (`testing`) or
 `/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/` is read.
 
+**For a new script, follow the contract-first and red-first rules in the [testing skill's "New script" section](.claude/skills/testing/SKILL.md#new-script).**
+
 Two rules about what this public repository may name stay here, because they cover documentation
 and code comments as much as they cover fixtures:
 

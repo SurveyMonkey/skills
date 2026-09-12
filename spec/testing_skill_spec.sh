@@ -179,4 +179,25 @@ description'
       The output should not equal '0'
     End
   End
+
+  Describe 'the New script pointer from the root CLAUDE.md'
+    # Neither existing gate above catches this class of rot: "cited paths"
+    # only scans for `spec/*.sh`/`.mjs`, and "relative links" only reads
+    # $SKILL_DIR/*.md, not the root CLAUDE.md that links into it. A renamed
+    # or deleted "## New script" heading would leave CLAUDE.md's link
+    # resolving to nothing and this file's guidance silently orphaned.
+    ROOT_CLAUDE="$SHELLSPEC_PROJECT_ROOT/CLAUDE.md"
+
+    It 'links from the root CLAUDE.md to the New script section'
+      When call grep -c '\.claude/skills/testing/SKILL\.md#new-script)' "$ROOT_CLAUDE"
+      The status should be success
+      The output should equal '1'
+    End
+
+    It 'still has the heading that link names'
+      When call grep -c '^## New script$' "$SKILL_DIR/SKILL.md"
+      The status should be success
+      The output should equal '1'
+    End
+  End
 End
