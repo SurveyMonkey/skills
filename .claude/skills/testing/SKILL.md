@@ -68,9 +68,10 @@ discover-repos.sh [<path>]
 Exits 0 and emits `{target: <resolved path>, repos: []}` when there are no repositories. When the
 input path is inside a git checkout, emits `{target: <resolved path>, repos: [<root path>]}` for
 that one checkout. Otherwise, for each immediate non-dot subdirectory that is a checkout root
-(symlink-resolved), its path is added to `repos`. Every error, of which the script's own header
-names several beyond the two most obvious (not a directory, an unreadable directory), exits 1 with
-`{error: <reason>}` on stderr and nothing on stdout.
+(symlink-resolved), its path is added to `repos`, sorted by that resolved path under a pinned
+collation with duplicates collapsed (two links to one checkout are one entry). Every error, of
+which the script's own header names several beyond the two most obvious (not a directory, an
+unreadable directory), exits 1 with `{error: <reason>}` on stderr and nothing on stdout.
 
 When committing the first spec example against this contract, it fails because the script does
 not exist yet. The smallest script that passes it comes next. Then the next case: the directory
