@@ -42,10 +42,11 @@ Describe 'discover-alerts.sh'
   discover() { common_jq discover-alerts.sh "$1" "$REPO"; }
 
   # A newline embedded in a registered key or failure text would otherwise
-  # split this file's `Mock gh` registry into a key-less continuation record,
-  # which key_matches (spec/support/gh-mock-dispatch.sh) then reads as an
-  # empty-key match-everything catch-all — silently stealing every other
-  # endpoint's reply. Registration refuses it instead of letting that happen.
+  # split this file's `Mock gh` registry mid-record: the physical newline
+  # ends the row before the dispatcher's `read` (spec/support/gh-mock-dispatch.sh)
+  # sees the rest of the fields, leaving a truncated row that can still match
+  # real gh calls but answers them from a missing payload, plus a garbage
+  # continuation row. Registration refuses it instead of letting that happen.
   Describe 'the shared gh mock refuses a key or text that would corrupt its registry'
     It 'rejects a mock_gh_reply key containing a newline'
       When call mock_gh_reply "$(printf 'pr list\nbogus')" "$GH_MOCK_DIR/no-pr"

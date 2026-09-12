@@ -145,12 +145,13 @@ mock_gh_cleanup() {
 # The last registration whose key matches a given call wins, so a `Before`
 # hook can register a default and one example can override it.
 mock_gh_reply() {
-  # A tab or newline in the key would silently split this single
-  # tab-separated registry record: the continuation line carries no tabs, so
-  # its whole content is misread as `type` with an empty `key`, and an empty
-  # key matches every call (key_matches has no tokens to fail on) — a
-  # corrupted registration would win the dispatcher's "last match wins" rule
-  # for every subsequent gh call. Reject it loudly instead.
+  # A tab or newline in the key would corrupt this single tab-separated
+  # registry record: a physical newline splits the line before the
+  # dispatcher's `read` ever sees the rest of the fields, so the record
+  # becomes a truncated row (a shorter, valid-looking key with its payload
+  # silently dropped) plus a garbage continuation row. The truncated row can
+  # still match real gh calls, but would answer them from a missing payload
+  # path instead of the one actually registered. Reject it loudly instead.
   case $1 in
     *"$_GH_MOCK_TAB"*|*"$_GH_MOCK_NL"*)
       printf 'mock_gh_reply: key must not contain a tab or newline: %s\n' "$1" >&2
