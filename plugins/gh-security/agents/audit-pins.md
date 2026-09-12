@@ -981,10 +981,14 @@ sec_out=$(gh label create security --repo <nwo> --color D93F0B --description "Se
   *"already exists"*) : ;;
   *) false ;;
 esac
+dep_out=$(gh label create dependencies --repo <nwo> --color 0366d6 --description "Pull requests that update a dependency file" 2>&1) || case "$dep_out" in
+  *"already exists"*) : ;;
+  *) false ;;
+esac
 ```
 
 A duplicate-label message is success — the label is there, which is what this step wanted. Any
-other message is a phase `pr` failure, quoting `$sec_out`.
+other message is a phase `pr` failure, quoting `$sec_out` or `$dep_out`.
 
 Label names are case-insensitive for uniqueness and case-preserving, so passing lowercase
 `security` is safe whether the repository holds `security` or an older capitalized `Security`; the
@@ -995,11 +999,12 @@ labels are additive and no source overrides another.
 **Add `merge-risk:<band>` only when `pr.risk.band` is non-null.** A null band means an empty
 delta — nothing scored, because every removed package either left the tree entirely or resolved to
 the same version either way — and gets no risk label at all, never a fake one; the PR carries only
-`security` in that case. When `pr.risk.band` is set, lowercase it verbatim for the label name
-(`merge-risk:low`, `merge-risk:medium`, or `merge-risk:high` — never a bare `risk:<band>`, which
-would read as alert severity rather than merge risk), with the same closed-set colors
-`fix-dependency.md` uses (`#2da44e` low, `#d4a72c` medium, `#cf222e` high). Create it the same way
-as `security`, before `gh pr create`, running only the one line for this PR's band:
+`security` and `dependencies` in that case. When `pr.risk.band` is set, lowercase it verbatim for
+the label name (`merge-risk:low`, `merge-risk:medium`, or `merge-risk:high` — never a bare
+`risk:<band>`, which would read as alert severity rather than merge risk), with the same
+closed-set colors `fix-dependency.md` uses (`#2da44e` low, `#d4a72c` medium, `#cf222e` high).
+Create it the same way as `security`, before `gh pr create`, running only the one line for this
+PR's band:
 
 ```bash
 mr_out=$(gh label create merge-risk:low --repo <nwo> --color 2da44e --description "Low merge risk" 2>&1) || case "$mr_out" in
@@ -1024,11 +1029,11 @@ race to create the same band label, and the loser's "already exists" failure mea
 there, which is what it wanted; only a failure for some other reason is a failure result
 (phase `pr`), quoting `$mr_out`.
 
-Both label-creation steps run **before** `gh pr create`, so its failure means something else went
+All label-creation steps run **before** `gh pr create`, so its failure means something else went
 wrong:
 
 ```bash
-gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security [--label merge-risk:<band>] \
+gh pr create --repo <nwo> --head chore/dependabot-remove-pins --label security --label dependencies [--label merge-risk:<band>] \
   --title "..." --body "..."
 ```
 

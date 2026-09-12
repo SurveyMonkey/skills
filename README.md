@@ -71,7 +71,9 @@ a time.
   `merge-risk:medium` (yellow, `#d4a72c`), `merge-risk:high` (red, `#cf222e`) — so a repo's PR list
   distinguishes low-risk fixes from ones that deserve a closer read without opening each one. It
   names *merge* risk, not alert severity, which is why the prefix is `merge-risk:` and never a
-  bare `risk:`; the labels are created automatically the first time a repo needs one.
+  bare `risk:`; the labels are created automatically the first time a repo needs one. Every PR
+  also carries `dependencies` (`#0366d6`, matching GitHub's own Dependabot label), so it shows up
+  in any repo workflow that filters or auto-merges on that label.
 - **Lockfile validation that refuses to bluff.** A fix claims completion only when the lockfile
   proves the vulnerable ranges are gone, and a parser finding nothing is an error, never a pass.
 - **PRs open ready for review, and nothing touches them after that.** One approval, before

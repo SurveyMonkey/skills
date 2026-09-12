@@ -698,6 +698,8 @@ cmd_labels() {
   local out
   out=$(create_label "$repo" security D93F0B "Security fix") \
     || die "gh label create security failed: $out"
+  out=$(create_label "$repo" dependencies 0366d6 "Pull requests that update a dependency file") \
+    || die "gh label create dependencies failed: $out"
   out=$(create_label "$repo" "merge-risk:$band_lower" "$color" "$desc") \
     || die "gh label create merge-risk:$band_lower failed: $out"
 
@@ -717,7 +719,7 @@ cmd_labels() {
   done
 
   jq -n --arg band "$band_lower" --argjson extra "$created_extra" \
-    '{status: "ok", labels: (["security", ("merge-risk:" + $band)] + $extra)}'
+    '{status: "ok", labels: (["security", "dependencies", ("merge-risk:" + $band)] + $extra)}'
 }
 
 # ---------------------------------------------------------------------------
@@ -752,7 +754,7 @@ cmd_create() {
   set_env_prefix "$env_prefix"
 
   local args=(gh pr create --repo "$repo" --head "$head" \
-              --label security --label "merge-risk:$band_lower")
+              --label security --label dependencies --label "merge-risk:$band_lower")
   local l
   for l in "${extra_labels[@]:-}"; do
     [ -n "$l" ] || continue

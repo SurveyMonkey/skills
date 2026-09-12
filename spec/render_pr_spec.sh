@@ -636,6 +636,12 @@ Refs: https://github.com/octo/app/security/dependabot/55"
             exit 1
           fi
           printf 'created label security\n' ;;
+        'label create dependencies')
+          if [ -f "$MOCK_DIR/dependencies-fails" ]; then
+            printf 'HTTP 403: Resource not accessible (dependencies)\n' >&2
+            exit 1
+          fi
+          printf 'created label dependencies\n' ;;
         'label create merge-risk:low'|'label create merge-risk:medium'|'label create merge-risk:high')
           printf 'HTTP 422: Validation Failed: name already exists\n' >&2
           exit 1 ;;
@@ -643,11 +649,12 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       esac
     End
 
-    It 'creates security and the one merge-risk label matching the band, with the right colors and descriptions'
+    It 'creates security, dependencies, and the one merge-risk label matching the band, with the right colors and descriptions'
       When call common_jq render-pr.sh '.' labels --repo "$REPO" --band low
       The status should be success
-      The output should equal '{"status":"ok","labels":["security","merge-risk:low"]}'
+      The output should equal '{"status":"ok","labels":["security","dependencies","merge-risk:low"]}'
       The contents of file "$MOCK_DIR/log" should include 'label create security --repo octo/app --color D93F0B --description Security fix'
+      The contents of file "$MOCK_DIR/log" should include 'label create dependencies --repo octo/app --color 0366d6 --description Pull requests that update a dependency file'
       The contents of file "$MOCK_DIR/log" should include 'label create merge-risk:low --repo octo/app --color 2da44e --description Low merge risk'
     End
 
@@ -659,7 +666,7 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       End
 
       It "uses $2 for merge-risk:$1"
-        When call common_jq render-pr.sh '.labels[1]' labels --repo "$REPO" --band "$1"
+        When call common_jq render-pr.sh '.labels[2]' labels --repo "$REPO" --band "$1"
         The status should be success
         The output should equal "\"merge-risk:$1\""
         The contents of file "$MOCK_DIR/log" should include "label create merge-risk:$1 --repo octo/app --color $2 --description $3"
@@ -678,6 +685,14 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The status should equal 1
       The output should include 'Resource not accessible'
       The stderr should include 'Resource not accessible'
+    End
+
+    It 'fails on a real gh label create error for dependencies, quoting it'
+      touch "$MOCK_DIR/dependencies-fails"
+      When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
+      The status should equal 1
+      The output should include 'Resource not accessible (dependencies)'
+      The stderr should include 'Resource not accessible (dependencies)'
     End
 
     It 'rejects an unknown band'
@@ -707,7 +722,7 @@ SH
     # does not already exist, so `labels` — not just `create` — has to
     # ensure them, with a neutral color since it does not know what the
     # label means.
-    It 'creates every extra --label given, alongside security and the band label'
+    It 'creates every extra --label given, alongside security, dependencies, and the band label'
       Mock gh
         printf '%s\n' "$*" >> "$MOCK_DIR/log"
         case "$1 $2" in
@@ -718,7 +733,8 @@ SH
       When call common_jq render-pr.sh '.' labels --repo "$REPO" --band low \
         --label needs-review --label breaking-change
       The status should be success
-      The output should equal '{"status":"ok","labels":["security","merge-risk:low","needs-review","breaking-change"]}'
+      The output should equal '{"status":"ok","labels":["security","dependencies","merge-risk:low","needs-review","breaking-change"]}'
+      The contents of file "$MOCK_DIR/log" should include 'label create dependencies --repo octo/app --color 0366d6 --description'
       The contents of file "$MOCK_DIR/log" should include 'label create needs-review --repo octo/app --color ededed --description'
       The contents of file "$MOCK_DIR/log" should include 'label create breaking-change --repo octo/app --color ededed --description'
     End
@@ -743,23 +759,23 @@ SH
       esac
     End
 
-    It 'passes the security and band labels, title, and body-file, with no draft flag'
+    It 'passes the security, dependencies, and band labels, title, and body-file, with no draft flag'
       When call common_jq render-pr.sh '.' create --repo "$REPO" --head fix/dependabot-lodash-4x \
         --title 'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x' \
         --body-file "$FX/expected-body-scoped.md" --band low
       The status should be success
       The output should equal '{"status":"ok","pr_url":"https://github.com/octo/app/pull/99"}'
-      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label merge-risk:low --title fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x --body-file $FX/expected-body-scoped.md"
+      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:low --title fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x --body-file $FX/expected-body-scoped.md"
       The contents of file "$MOCK_DIR/log" should not include '--draft'
     End
 
-    It 'appends every extra --label given, after security and the band label'
+    It 'appends every extra --label given, after security, dependencies, and the band label'
       When call common_jq render-pr.sh '.' create --repo "$REPO" --head fix/dependabot-lodash-4x \
         --title t --body-file "$FX/expected-body-scoped.md" --band high \
         --label needs-review --label breaking-change
       The status should be success
       The output should equal '{"status":"ok","pr_url":"https://github.com/octo/app/pull/99"}'
-      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label merge-risk:high --label needs-review --label breaking-change --title t --body-file $FX/expected-body-scoped.md"
+      The contents of file "$MOCK_DIR/log" should equal "pr create --repo octo/app --head fix/dependabot-lodash-4x --label security --label dependencies --label merge-risk:high --label needs-review --label breaking-change --title t --body-file $FX/expected-body-scoped.md"
     End
 
     It 'fails clearly when gh pr create fails'
