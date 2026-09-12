@@ -414,11 +414,18 @@ plugin tree, so
 you can read it directly. Stage a verified copy instead of hand-authoring a substitute:
 
 1. Copy the file byte-for-byte from `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` to a path
-   under the working directory (the session scratchpad is the natural place) — a mechanical copy,
-   never retyped or paraphrased.
+   **under the working directory itself** — not the session scratchpad, which is a session-scoped
+   path outside the working directory and trips the same refusal. Create a directory for this (for
+   example `.gh-security-dispatch/` at the root of the working directory) and stage the copy
+   there — a mechanical copy, never retyped or paraphrased.
 2. Checksum both the source and the copy and confirm they match before launching anything. A
    mismatch means the copy failed; redo the copy, never patch the copy by hand to make it match.
 3. Launch `Workflow` with `scriptPath` pointing at the checksum-verified copy, not the plugin path.
+4. Keep the staged copy in place for the life of the run, including any resume — a resume launches
+   the same `scriptPath` again, so removing it before the batch is fully done breaks resume. Remove
+   the staging directory once phase 7's summary is delivered (or once the user declines to resume
+   an interrupted run). If the working directory is itself a git checkout, this directory is
+   untracked; delete it rather than leaving it to dirty `git status`.
 
 ```
 Workflow({

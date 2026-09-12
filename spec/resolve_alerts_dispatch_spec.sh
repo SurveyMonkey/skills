@@ -86,6 +86,24 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
+    # The session scratchpad is a session-scoped path outside the working
+    # directory, so staging there trips the exact same refusal this section
+    # exists to work around. Named explicitly so the parenthetical mistake
+    # can't come back.
+    It 'rules out the session scratchpad as a staging location'
+      When call phrase_in "$SKILL" 'not the session scratchpad, which is a session-scoped'
+      The status should be success
+      The output should equal '1'
+    End
+
+    # A resume relaunches the same scriptPath; deleting the staged copy before
+    # the run (including any resume) finishes breaks resume silently.
+    It 'requires the staged copy to survive until the run, and any resume, is done'
+      When call phrase_in "$SKILL" 'Keep the staged copy in place for the life of the run, including any resume'
+      The status should be success
+      The output should equal '1'
+    End
+
     # A hand-inlined variant would not be the tested file, which is the one
     # thing ADR 010 buys. The staged copy is explicitly carved out as neither
     # an inline copy nor a hand-edited variant (#187).
