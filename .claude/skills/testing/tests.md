@@ -7,12 +7,14 @@ this suite shipped, and each is paired with what fixed it.
 
 ### The expected value comes from a published spec
 
-`spec/node_semver_spec.sh`, the `ordering` block.
+`spec/node_semver_spec.sh`, the `ordering` block inside `Describe 'node.sh compare_versions'`.
+Three of its fourteen rows:
 
 ```sh
 Describe 'ordering'
   Parameters
     # left            right             expected result
+    ...
     "1.0.0-beta.2"    "1.0.0-beta.11"   -1   # identifiers compare numerically
     "1.0.0-beta.11"   "1.0.0-rc.1"      -1
     "1.0.0-rc.1"      "1.0.0-beta.11"    1   # rc outranks beta
@@ -135,10 +137,10 @@ left the emitted list byte-identical and the suite green.
 
 The fix is the fixture, not the assertion: point the link at `elsewhere/sub`, a checkout no other
 shape in the workspace contributes, so removing the guard adds a visible entry. The same failure
-mode in prose: an alias with no version was reported as `{kind:"range", range:"esbuild-wasm"}`,
-and the specimen chosen to illustrate the phase-6 exception classified as `kind: alias`, which
-phase 2 files as `not-a-version-pin` and never tests, so the documented specimen could not reach the
-code path it was about (`spec/node_list_pins_spec.sh`, issue #48).
+mode in prose: the specimen chosen to illustrate the phase-6 exception classified as `kind: alias`,
+which phase 2 files as `not-a-version-pin` and never tests, so the documented specimen could not
+reach the code path it was about, and no fixture carried the reachable one
+(`spec/node_list_pins_spec.sh`, issue #48).
 
 **The test for a fixture is the mutant.** Name the defect it exists for, remove the guard or revert
 the fix, and watch the example fail. If it does not, the fixture is decoration.
