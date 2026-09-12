@@ -133,8 +133,8 @@ const RESULT_SCHEMA = {
     // thing `exit 3` exists to prevent — or reporting `failure`, which hides
     // a real open PR from phase 7 AND suppresses `post-agent.sh`'s reap,
     // since that only reaps a verified-open PR from a `success`. The leak
-    // would then be missed by the second line of defence too. So the `oneOf`
-    // branches below deliberately say nothing about `cleanup`.
+    // would then be missed by the second line of defence too. So
+    // `crossFieldViolations` below deliberately says nothing about `cleanup`.
     //
     // `worktree.path` and `work_dir.path` are the paths the driver RESOLVED
     // and acted on, which can differ textually from the ones the orchestrator
