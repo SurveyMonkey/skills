@@ -55,9 +55,14 @@ Any answer here has to leave that rule intact.
 gains a JavaScript toolchain for development and CI only.**
 
 - `plugins/gh-security/workflows/fix-groups.mjs` is the dispatch workflow.
-  `skills/resolve-alerts/SKILL.md` phase 6 references it by path
+  ~~`skills/resolve-alerts/SKILL.md` phase 6 references it by path
   (`${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs`) and launches it with
-  `Workflow({scriptPath, args})`. The fence is gone; what remains in the skill is the args
+  `Workflow({scriptPath, args})`.~~ **(amended in [#187](https://github.com/SurveyMonkey/skills/issues/187): the Workflow
+  tool refuses a `scriptPath` outside the working directory or an added directory, and every
+  documented invocation runs with the working directory set to one of the user's own checkouts,
+  outside the plugin tree — so phase 6 stages a checksum-verified byte-for-byte copy of the file
+  under the working directory and launches `Workflow({scriptPath, args})` against that copy
+  instead.)** The fence is gone; what remains in the skill is the args
   contract and the rules that are genuinely the model's to keep.
 - `package.json` at the repository root is `private: true` and carries **`vitest` and `ajv` at
   exact versions**, matching how every other tool in this repo is pinned and version-asserted
