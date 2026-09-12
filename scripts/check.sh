@@ -316,7 +316,7 @@ cmd_js() {
   [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
   [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
   command -v pnpm >/dev/null 2>&1 \
-    || die 'pnpm is not installed; the js gate needs node (ADR 010)'
+    || die 'pnpm is not installed; the js gate needs pnpm (ADR 010)'
   [ -d node_modules ] || die 'node_modules is absent; run pnpm install before the js gate'
   # A stale summary from an earlier run must never satisfy the assertions
   # below, so the report is removed before the suite regenerates it.

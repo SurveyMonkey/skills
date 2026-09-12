@@ -141,7 +141,7 @@ Describe 'scripts/check.sh'
       git add -A
       # A minimal pnpm stub on PATH: this example is about node_modules
       # being absent, not about whether pnpm itself is installed, and the
-      # real binary is not guaranteed to be on PATH here — the CI spec job
+      # real binary is not guaranteed to be on PATH here: the CI spec job
       # never installs it, only the js job does.
       printf '#!/bin/sh\nexit 0\n' > bin/pnpm
       chmod +x bin/pnpm
