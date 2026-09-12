@@ -668,6 +668,20 @@ Refs: https://github.com/octo/app/security/dependabot/55"
       The output should equal '"ok"'
     End
 
+    # setup_mock answers every merge-risk:* label create with "already
+    # exists", so every other test in this Describe drives label creation
+    # through that recovery path only. This overrides the band label's
+    # default with a plain success, the same way stub_open_pr overrides a
+    # default elsewhere, so the first-try-succeeds path stays exercised too.
+    It 'creates the band label outright when it does not already exist'
+      printf 'created label merge-risk:low\n' > "$GH_MOCK_DIR/created-band"
+      mock_gh_reply 'label create merge-risk:low' "$GH_MOCK_DIR/created-band"
+      When call common_jq render-pr.sh '.status' labels --repo "$REPO" --band low
+      The status should be success
+      The output should equal '"ok"'
+      The value "$(mock_gh_requests)" should include 'label create merge-risk:low --repo octo/app --color 2da44e --description Low merge risk'
+    End
+
     It 'fails on a real gh label create error, quoting it'
       mock_gh_fail 'label create security' 'HTTP 403: Resource not accessible'
       When run script "$COMMON/render-pr.sh" labels --repo "$REPO" --band low
