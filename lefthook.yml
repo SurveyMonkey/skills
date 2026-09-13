@@ -5,10 +5,10 @@
 # hand with `pnpm exec lefthook install`.
 #
 # pre-commit runs only the gates that are cheap: ShellCheck over staged shell
-# files, `claude plugin validate --strict` when a manifest is staged, and
-# `tsc -p` when TypeScript or its configuration is staged. None of them runs
-# a suite. #250 and #219 each add their own step here (Biome, vitest related)
-# as their own toolchains land.
+# files, `claude plugin validate --strict` when a manifest is staged, Biome
+# over the staged JSON, .mjs and .ts, and `tsc -p` when TypeScript or its
+# configuration is staged. None of them runs a suite. #219 adds its own step
+# here as its toolchain lands.
 #
 # pre-push runs nothing. CI is the enforcement boundary (ADR 005): the
 # shellspec and vitest suites need tooling a fresh clone may not have
@@ -48,6 +48,23 @@ pre-commit:
           ./scripts/check.sh types
         else
           printf '\n!! pre-commit: node_modules is absent, so the types gate did not run here.\n' >&2
+          printf '!! CI enforces it on the pull request. Install locally with:\n!!   pnpm install\n\n' >&2
+        fi
+    # Biome over the staged files only (#250). `--staged` is Biome's own
+    # selection rather than a file list from lefthook: it reads the index the
+    # way the CI run reads the tree, and it applies biome.json's exclusions
+    # itself, so a staged specimen under spec/fixtures/ is skipped here
+    # exactly as it is there. --no-errors-on-unmatched is what makes that
+    # skip a pass rather than "no files were processed", which Biome treats
+    # as an error. `check`, never `check --write`: a hook that edits the tree
+    # commits something nobody reviewed.
+    biome:
+      glob: '*.{json,mjs,ts}'
+      run: |
+        if [ -d node_modules ]; then
+          pnpm exec biome check --staged --error-on-warnings --no-errors-on-unmatched
+        else
+          printf '\n!! pre-commit: node_modules is absent, so the biome gate did not run here.\n' >&2
           printf '!! CI enforces it on the pull request. Install locally with:\n!!   pnpm install\n\n' >&2
         fi
     plugin-validate:

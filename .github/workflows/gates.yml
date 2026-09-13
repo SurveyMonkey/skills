@@ -267,6 +267,35 @@ jobs:
       - name: Type-check the TypeScript sources and examples
         run: ./scripts/check.sh types
 
+  biome:
+    # Biome's lint and format check over the tracked JSON, .mjs and .ts
+    # (#250), the whole tree at once. ubuntu alone, like the js and types
+    # jobs: one tool, one configuration, no platform surface. ShellCheck in
+    # the `lint` job still covers the bash; the two tools do not overlap.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # No `version:` input: pnpm resolves it from package.json's
+        # `packageManager` field, the one place that pin lives.
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Assert the pinned node version
+        run: |
+          installed=$(node --version)
+          if [ "$installed" != "v$NODE_VERSION" ]; then
+            echo "expected node v$NODE_VERSION, got: $installed"
+            exit 1
+          fi
+      - name: Install pinned dev dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint and format-check with Biome
+        run: ./scripts/check.sh biome
+
   version:
     # A plugin's version lives in its own plugin.json and nowhere else, so a
     # change shipped without bumping it reaches nobody while every other gate
@@ -372,10 +401,11 @@ jobs:
     # `needs:` from shrinking coverage silently: zero (or four) results
     # iterating past the loop is the same found-nothing-is-a-pass shape
     # every other gate refuses. Bump it with every gate added to `needs:`;
-    # it was 4 before the js gate (ADR 010) and 5 before the types gate
-    # (ADR 012, #214). Adding or dropping a gate?
+    # it was 4 before the js gate (ADR 010), 5 before the types gate
+    # (ADR 012, #214) and 6 before the biome gate (#250). Adding or dropping
+    # a gate?
     # Follow the checklist: docs/adr/005-quality-gate-venues.md#gate-change-checklist.
-    needs: [lint, validate, spec, js, types, version]
+    needs: [lint, validate, spec, js, types, biome, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -397,8 +427,8 @@ jobs:
                 ;;
             esac
           done
-          if [ "$n" -ne 6 ]; then
-            echo "expected 6 gate results, got $n"
+          if [ "$n" -ne 7 ]; then
+            echo "expected 7 gate results, got $n"
             exit 1
           fi
           if [ "$saw_cancelled" -eq 1 ]; then
