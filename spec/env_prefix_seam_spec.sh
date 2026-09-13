@@ -21,7 +21,7 @@
 Describe 'env_prefix as an opaque seam (issue #135)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
-  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/CLAUDE.md"
+  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/CLAUDE.md"
   FIXER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   AUDITOR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
 

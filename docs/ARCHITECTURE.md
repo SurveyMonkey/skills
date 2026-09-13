@@ -49,7 +49,7 @@ target bash 3.2 (the macOS
 default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
 pass**. Conventions and their reasoning live in
-[plugins/gh-security/CLAUDE.md](../plugins/gh-security/CLAUDE.md).
+[plugins/gh-security/docs/CLAUDE.md](../plugins/gh-security/docs/CLAUDE.md).
 
 ## The decisions, and where they are recorded
 

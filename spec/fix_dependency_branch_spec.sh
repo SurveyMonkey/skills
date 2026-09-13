@@ -19,7 +19,7 @@
 Describe 'the fix branch lifecycle in fix-dependency (#84, #171)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/fix-group.sh"
-  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/CLAUDE.md"
+  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/CLAUDE.md"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
 
   # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts lines and

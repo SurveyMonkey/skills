@@ -26,7 +26,7 @@ silent-success failures: `jq -r` on a missing key yields the string `null`, whos
 fails on stderr inside an `if` that `set -e` never sees; a `die` inside `$( )` ends only the
 subshell; a jq that errors feeds a heredoc-driven loop nothing, so the loop body never runs and
 `all` over the resulting empty array is `true`. Each of those shapes has shipped a wrong answer as
-a confident one, and `plugins/gh-security/CLAUDE.md` is now largely a list of them with
+a confident one, and `plugins/gh-security/docs/CLAUDE.md` is now largely a list of them with
 the discipline each one forced. A third cost is paid by everyone working in the tree and is harder
 to put a number on: there is no language server for bash, so no rename, no go-to-definition, and
 no type across the JSON contracts that every script both promises and consumes.
@@ -34,7 +34,7 @@ no type across the JSON contracts that every script both promises and consumes.
 ## Motivation
 
 This is not a design from scratch, and treating it as one would be the failure mode. The domain
-rules in `plugins/gh-security/CLAUDE.md` and the 90 fixture directories under
+rules in `plugins/gh-security/docs/CLAUDE.md` and the 90 fixture directories under
 `spec/fixtures/` are the requirements; every one of them was written to a defect found in the
 field or in review. What this RFC proposes is a change of substrate under those requirements, not
 a change to them.
@@ -55,7 +55,7 @@ the Bash tool imposes on every call, which is already why `fix-group.sh` is step
 one run.
 
 **The defect classes are substrate-specific.** Every rule quoted in the Summary exists because
-bash and jq make the wrong thing the quiet thing. `plugins/gh-security/CLAUDE.md` records
+bash and jq make the wrong thing the quiet thing. `plugins/gh-security/docs/CLAUDE.md` records
 the rules that answer them: a field the contract promises is present and typed or it is a hard
 error, never a default; there is no unchecked state reader to reach for; a reply is asserted to be
 a JSON object before any field of it is read. A typed boundary answers the same class by
@@ -99,7 +99,7 @@ ported immediately after.
 - **The #193 commands are not ported.** They do not exist yet. They are built in TypeScript inside
   Phase 3, against the contracts agreed in their own issues.
 - **No change to the domain rules.** Where the port disagrees with
-  `plugins/gh-security/CLAUDE.md`, the document wins and the port is wrong, except for the
+  `plugins/gh-security/docs/CLAUDE.md`, the document wins and the port is wrong, except for the
   bash-and-jq mechanism sections, which #216 rewrites because they describe a substrate that is
   going away.
 - **No published npm package, no build step, and no bundler.** The plugin ships `.ts` files that
@@ -231,7 +231,7 @@ genuinely need one.
   bounded: #240 narrows the shellspec job and #241 deletes the parity runner.
 - **A type system is not a domain check.** Nothing about TypeScript catches an adapter that reads
   a Yarn `resolution:` entry's `dependencies` block and forgets its peers. The domain rules in
-  `plugins/gh-security/CLAUDE.md` remain the requirements document, and the fixture that
+  `plugins/gh-security/docs/CLAUDE.md` remain the requirements document, and the fixture that
   covers each one remains the enforcement.
 - **The in-process adapter loses one property the process boundary gave for free**: an adapter
   crash used to be an exit code the caller handled, and in process it is an exception that can
@@ -255,7 +255,7 @@ issues carry. Each phase leaves the plugin working.
 | P0-1 | [#212](https://github.com/SurveyMonkey/skills/issues/212) | This RFC |
 | P0-2 | [#213](https://github.com/SurveyMonkey/skills/issues/213) | ADR 012, superseding ADR 010; amendments to ADR 001 and ADR 005 |
 | P0-3 | [#214](https://github.com/SurveyMonkey/skills/issues/214) | `tsconfig.json`, pinned `typescript` and `@types/node`, the `types` gate, the Node floor preamble |
-| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/CLAUDE.md` and rewritten; the `testing` skill's bash-specific parts amended |
+| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/CLAUDE.md` and rewritten; the `testing` skill's bash-specific parts amended |
 | P0-5 | [#215](https://github.com/SurveyMonkey/skills/issues/215) | TypeScript language server on for every session on this checkout |
 
 **Phase 1: foundations.**
@@ -376,7 +376,7 @@ To be spawned as this RFC executes:
 
 - [Milestone 6: TypeScript port, v1.0](https://github.com/SurveyMonkey/skills/milestone/6) and
   [milestone 5: CI cost](https://github.com/SurveyMonkey/skills/milestone/5)
-- Requirements: `plugins/gh-security/CLAUDE.md`, `spec/fixtures/`, `spec/PINS.md`
+- Requirements: `plugins/gh-security/docs/CLAUDE.md`, `spec/fixtures/`, `spec/PINS.md`
 - [RFC 001: Orchestrated multi-agent security alert resolution](001-alert-orchestration.md)
 - [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
 - [ADR 005: Quality gate venues and automation](../adr/005-quality-gate-venues.md)

@@ -5,7 +5,7 @@ Deterministic work lives here so agent prompts do not re-derive procedures each 
 typed JSON contract; interpreting failures and writing prose stays with the agent.
 
 **This document describes the target state**, the Shape in
-[RFC 002](../../docs/rfc/002-typescript-port.md): one CLI entry point over typed commands that
+[RFC 002](../../../docs/rfc/002-typescript-port.md): one CLI entry point over typed commands that
 node executes directly. Which of them have been ported and which are still bash is the rollout
 table in that RFC, and that table is the source for what exists today rather than anything here.
 A script name used below (`common/fix-group.sh`, `ecosystems/node.sh`) names the home of a
@@ -14,13 +14,13 @@ procedure, not a claim about the substrate it is written in this week.
 ## Hard constraints
 
 **Node 22.18 or newer, TypeScript executed directly**
-([ADR 012](../../docs/adr/012-typescript-on-node-22-18.md)). No build step, no bundler, no
+([ADR 012](../../../docs/adr/012-typescript-on-node-22-18.md)). No build step, no bundler, no
 generated tree: the file a reviewer reads on the default branch is the file that runs. The
-runtime strips the types, so the source stays inside the erasable subset — no `enum`, no
-parameter properties, no namespaces — enforced by `tsc --erasableSyntaxOnly` on a pull request
-rather than by a failure at a user's launch, and every import names the `.ts` extension
-explicitly. The floor itself is enforced where it is crossed: the entry point exits with a named
-error naming the required version when the running node is older.
+runtime strips the types, so the source stays inside the erasable subset (no `enum`, no parameter
+properties, no namespaces), enforced by `tsc --erasableSyntaxOnly` on a pull request rather than
+by a failure at a user's launch, and every import names the `.ts` extension explicitly. The floor
+itself is enforced where it is crossed: the entry point exits with a named error naming the
+required version when the running node is older.
 
 **Nothing shipped imports anything outside the plugin.** vitest, ajv, `typescript` and
 `@types/node` are dev and CI dependencies and stay that way. A dependency on a shipped path
@@ -63,7 +63,7 @@ decision comment). That export is also the test seam; see Testing below.
 
 ## Adapter contract
 
-See [ADR 001](../../docs/adr/001-ecosystem-adapter-contract.md). As amended by ADR 012 the
+See [ADR 001](../../../docs/adr/001-ecosystem-adapter-contract.md). As amended by ADR 012 the
 contract is an in-process interface rather than a process: verbs are functions behind one adapter
 interface, and the four exit codes are the same four outcomes carried in a typed result envelope.
 The stdout and stderr split survives at the CLI entry point, where a command is invoked from a
@@ -81,7 +81,7 @@ declared type, and a caller reading a field nothing promised does not compile. T
 stays runtime, because a lockfile, a `gh` reply and a state file are untrusted input whatever a
 signature says, so each is validated once where it enters rather than guarded again at every call
 site. The distinction that has to survive there is absent versus null: null is often a legitimate
-answer — a range with no floor has no `majors_ahead` — and absence never is, which is the same
+answer, since a range with no floor has no `majors_ahead`, and absence never is, which is the same
 rule that makes `range_facts` emit every key. An adapter missing `major_distance` once made the
 whole multi-major escalation vanish while the run still reported success. Two further routes
 reach that same silent zero and are checked the same way: a present-but-untyped value, and a verb
@@ -176,10 +176,10 @@ own header; restating them here is how the two drift.
 
 What that header does not say, and what belongs here:
 
-- **The removal is an in-driver edit, not an agent Edit call**, and it takes the whole
-  override block when the entry was the last one in it. `pnpm-workspace.yaml` (issue #159) is not JSON
-  and cannot be edited as one at all and the adapter's own workspace writer deliberately refuses to delete
-  a pre-existing entry, so the driver carries a line-level deleter over exactly the flat
+- **The removal is an in-driver edit, not an agent Edit call**, and it takes the whole override
+  block when the entry was the last one in it. `pnpm-workspace.yaml` (issue #159) is not JSON and
+  cannot be edited as one at all, and the adapter's own workspace writer deliberately refuses to
+  delete a pre-existing entry, so the driver carries a line-level deleter over exactly the flat
   `key: value` block that writer round-trips, and refuses any line inside the block it cannot read
   as an entry. A wrong parse there writes a file pnpm reads on every install.
 - **A pin is identified by its `path`, never by its key alone.** npm nests several entries under
@@ -663,7 +663,7 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 and `spec/fixtures/` (issue #216's decision comment). `.claude/rules/path-spec.md` applies to
 them unchanged: it points at the `testing` skill for every file under `spec/`. Shellspec covers
 the bash that remains. The strategy both suites are written to is the
-[`testing` skill](../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
+[`testing` skill](../../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
 and the rules about what this public repository may name are in the root `CLAUDE.md` (Testing
 section).
 
@@ -676,7 +676,7 @@ client is mocked per method; `git`, the filesystem and the fixture corpus are re
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
 statements), **with 95 as the floor the gate never goes below**, and exclusion by name with a
 stated reason as the only relief
-([ADR 012](../../docs/adr/012-typescript-on-node-22-18.md),
+([ADR 012](../../../docs/adr/012-typescript-on-node-22-18.md),
 [#211](https://github.com/SurveyMonkey/skills/issues/211)). The number is never lowered to
 accommodate one file: a lowered threshold hides every other file's regression behind the file
 that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it already has.
@@ -693,7 +693,7 @@ bash or jq mechanism the port removes, and
 [#241](https://github.com/SurveyMonkey/skills/issues/241) deletes it.** It governs the shipped
 scripts that have not been ported yet, plus `detect-capacity.sh` and `notice-scan.sh`, which stay
 bash for good (RFC 002, Non-Goals). Which is which is the rollout table in
-[RFC 002](../../docs/rfc/002-typescript-port.md). When this section goes, the two scripts that
+[RFC 002](../../../docs/rfc/002-typescript-port.md). When this section goes, the two scripts that
 outlive it keep these targets, stated in `scripts/CLAUDE.md` beside them.
 
 **Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from

@@ -54,7 +54,7 @@ dispatch is broken and stopping is the answer.
 These match `fix-dependency`'s, for the same reasons. Read them as binding, not as background.
 
 - **Phases 2, 4, 5 and 7 are `<scripts_dir>/audit-pins-driver.sh`, and you never re-derive them.**
-  The driver is the single home of that procedure (`plugins/gh-security/CLAUDE.md`, "The pin-audit driver owns
+  The driver is the single home of that procedure (`plugins/gh-security/docs/CLAUDE.md`, "The pin-audit driver owns
   phases 2, 4, 5 and 7"): every branch it takes was an enumerated branch of this document first,
   and each one exists because a field run got it wrong. Its contract is one shape, whichever
   subcommand you called: **exit 0** with a `status` this document names, **exit 2**
@@ -86,7 +86,7 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   else. Never write `.git/info/exclude` (your dispatcher already did, once, before dispatching any
   agent for this repo) and never run `git worktree prune`, `git gc`, or any other repository-wide
   command: another agent may share this `repo_root`, and those commands reach its state regardless
-  of what dispatched it. See `plugins/gh-security/CLAUDE.md`, "Repo-global git state belongs to the
+  of what dispatched it. See `plugins/gh-security/docs/CLAUDE.md`, "Repo-global git state belongs to the
   orchestrator".
 - **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
   package-manager, and adapter-script invocation** — and it composes with the locator each
@@ -102,7 +102,7 @@ These match `fix-dependency`'s, for the same reasons. Read them as binding, not 
   about what it contains. This is the one rule for carrying a repo's environment — there is
   no separate fallback rule to reconcile it with. **When `env_prefix` is absent, run every one of
   those commands bare, with no wrapping of your own.** An absent `env_prefix` means your
-  dispatcher was given none, which is the ordinary ambient-login case (see `plugins/gh-security/CLAUDE.md`,
+  dispatcher was given none, which is the ordinary ambient-login case (see `plugins/gh-security/docs/CLAUDE.md`,
   "`env_prefix` is an opaque, optional seam" for why the field matters and what a missing one
   looks like). The snippets below omit `env_prefix` for readability; compose it into
   every one whenever your dispatch carried it.
