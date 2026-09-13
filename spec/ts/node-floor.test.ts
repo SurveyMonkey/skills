@@ -27,30 +27,23 @@ describe('assertNodeFloor', () => {
   // spelling is here because a version read from anywhere else does not carry
   // the prefix, and one spelling passing while the other throws would be a
   // launch-time failure on a supported runtime.
-  it.each([
-    ['v22.18.0'],
-    ['22.18.0'],
-    ['v22.22.2'],
-    ['v24.15.0'],
-    ['v24.18.0'],
-    ['v26.0.0'],
-  ])('accepts %s, at or above the floor', (version) => {
-    expect(() => {
-      assertNodeFloor(version)
-    }).not.toThrow()
-  })
+  it.each([['v22.18.0'], ['22.18.0'], ['v22.22.2'], ['v24.15.0'], ['v24.18.0'], ['v26.0.0']])(
+    'accepts %s, at or above the floor',
+    (version) => {
+      expect(() => {
+        assertNodeFloor(version)
+      }).not.toThrow()
+    },
+  )
 
-  it.each([
-    ['v22.17.1'],
-    ['v22.17.0'],
-    ['v22.16.0'],
-    ['v20.19.0'],
-    ['v18.20.8'],
-  ])('refuses %s, below the floor', (version) => {
-    expect(() => {
-      assertNodeFloor(version)
-    }).toThrow(NodeFloorError)
-  })
+  it.each([['v22.17.1'], ['v22.17.0'], ['v22.16.0'], ['v20.19.0'], ['v18.20.8']])(
+    'refuses %s, below the floor',
+    (version) => {
+      expect(() => {
+        assertNodeFloor(version)
+      }).toThrow(NodeFloorError)
+    },
+  )
 
   it('names both the required and the running version', () => {
     let thrown: unknown

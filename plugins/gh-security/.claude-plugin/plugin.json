@@ -8,12 +8,5 @@
   },
   "homepage": "https://github.com/SurveyMonkey/skills/tree/main/plugins/gh-security",
   "license": "MIT",
-  "keywords": [
-    "github",
-    "security",
-    "dependabot",
-    "cve",
-    "overrides",
-    "pin-audit"
-  ]
+  "keywords": ["github", "security", "dependabot", "cve", "overrides", "pin-audit"]
 }

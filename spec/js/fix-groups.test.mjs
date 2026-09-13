@@ -11,42 +11,41 @@
 // suite exists to have caught was a well-formed schema that no truthful
 // failure result could satisfy, and every textual pin passed against it.
 
-import { describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises'
 import Ajv from 'ajv'
-
+import { describe, expect, it } from 'vitest'
 import {
-  cleanupReport,
-  dispatch,
-  failureResult,
-  stripCommentsAndStrings,
-  noOpResult,
-  runWorkflow,
-  successResult,
-  workflowSource,
-} from './harness.mjs'
-import {
+  assertMarkersOnce,
   PROJECTION_URL,
   PURE_BEGIN,
   PURE_END,
-  WIRING_BEGIN,
-  assertMarkersOnce,
   project,
   region,
+  WIRING_BEGIN,
 } from './generate.mjs'
-import { readFile } from 'node:fs/promises'
 // The projection generate.mjs writes before the suite is collected. This is
 // the module the coverage gate measures; the byte-identity examples at the
 // bottom are what make measuring it equivalent to measuring the shipped file.
 import {
-  RESULT_SCHEMA,
   agentLabel,
   crossFieldViolations,
   dispatchPrompt,
   main,
   pairEntry,
+  RESULT_SCHEMA,
   validateArgs,
   workerCount,
 } from './generated/workflow.mjs'
+import {
+  cleanupReport,
+  dispatch,
+  failureResult,
+  noOpResult,
+  runWorkflow,
+  stripCommentsAndStrings,
+  successResult,
+  workflowSource,
+} from './harness.mjs'
 
 const validate = new Ajv({ allErrors: true, strict: false }).compile(RESULT_SCHEMA)
 const accepts = (r) => validate(r)
@@ -101,8 +100,9 @@ describe('validateArgs', () => {
     ['cap negative', -1],
   ]) {
     it(`refuses ${name}`, () => {
-      expect(() => validateArgs({ cap, dispatches: [dispatch()] }))
-        .toThrow(/args\.cap must be a number >= 1/)
+      expect(() => validateArgs({ cap, dispatches: [dispatch()] })).toThrow(
+        /args\.cap must be a number >= 1/,
+      )
     })
   }
 
@@ -135,27 +135,32 @@ describe('validateArgs', () => {
     }
 
     it('refuses a null dispatch entry', () => {
-      expect(() => validateArgs({ ...ok, dispatches: [null] })).toThrow(/dispatches\[0\]\.group is missing/)
+      expect(() => validateArgs({ ...ok, dispatches: [null] })).toThrow(
+        /dispatches\[0\]\.group is missing/,
+      )
     })
 
     for (const field of ['package', 'repo', 'branch_name']) {
       it(`refuses a group with no ${field}`, () => {
         const d = dispatch()
         delete d.group[field]
-        expect(() => validateArgs({ ...ok, dispatches: [d] }))
-          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+        expect(() => validateArgs({ ...ok, dispatches: [d] })).toThrow(
+          new RegExp(`group\\.${field} must be a non-empty string`),
+        )
       })
 
       it(`refuses a group whose ${field} is empty`, () => {
         const d = dispatch({ group: { [field]: '' } })
-        expect(() => validateArgs({ ...ok, dispatches: [d] }))
-          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+        expect(() => validateArgs({ ...ok, dispatches: [d] })).toThrow(
+          new RegExp(`group\\.${field} must be a non-empty string`),
+        )
       })
 
       it(`refuses a group whose ${field} is not a string`, () => {
         const d = dispatch({ group: { [field]: 7 } })
-        expect(() => validateArgs({ ...ok, dispatches: [d] }))
-          .toThrow(new RegExp(`group\\.${field} must be a non-empty string`))
+        expect(() => validateArgs({ ...ok, dispatches: [d] })).toThrow(
+          new RegExp(`group\\.${field} must be a non-empty string`),
+        )
       })
     }
 
@@ -176,8 +181,9 @@ describe('validateArgs', () => {
       it(`refuses a major_line that is ${name}`, () => {
         const d = dispatch({ group: { major_line: line } })
         if (line === undefined) delete d.group.major_line
-        expect(() => validateArgs({ ...ok, dispatches: [d] }))
-          .toThrow(/group\.major_line must be a non-empty string or a number/)
+        expect(() => validateArgs({ ...ok, dispatches: [d] })).toThrow(
+          /group\.major_line must be a non-empty string or a number/,
+        )
       })
     }
 
@@ -185,8 +191,9 @@ describe('validateArgs', () => {
     it('names the offending index, not just the field', () => {
       const bad = dispatch()
       delete bad.group.branch_name
-      expect(() => validateArgs({ ...ok, dispatches: [dispatch(), dispatch(), bad] }))
-        .toThrow(/dispatches\[2\]\.group\.branch_name/)
+      expect(() => validateArgs({ ...ok, dispatches: [dispatch(), dispatch(), bad] })).toThrow(
+        /dispatches\[2\]\.group\.branch_name/,
+      )
     })
 
     // The whole point: this must fail loudly rather than produce a batch of
@@ -195,11 +202,16 @@ describe('validateArgs', () => {
       const seen = []
       const bad = dispatch()
       delete bad.group.branch_name
-      await expect(runWorkflow({
-        main,
-        args: { cap: 1, dispatches: [bad] },
-        agent: (p2, o, i) => { seen.push(i); return successResult() },
-      })).rejects.toThrow(/branch_name/)
+      await expect(
+        runWorkflow({
+          main,
+          args: { cap: 1, dispatches: [bad] },
+          agent: (_p2, _o, i) => {
+            seen.push(i)
+            return successResult()
+          },
+        }),
+      ).rejects.toThrow(/branch_name/)
       expect(seen).toHaveLength(0)
     })
   })
@@ -230,7 +242,14 @@ describe('the dispatch payload', () => {
     const d = dispatch()
     const payload = JSON.parse(dispatchPrompt(d).split('Dispatch payload:\n')[1])
     expect(payload).toEqual(d)
-    for (const k of ['group', 'adapter_path', 'nwo', 'default_branch', 'repo_root', 'scripts_dir']) {
+    for (const k of [
+      'group',
+      'adapter_path',
+      'nwo',
+      'default_branch',
+      'repo_root',
+      'scripts_dir',
+    ]) {
       expect(payload).toHaveProperty(k)
     }
   })
@@ -410,7 +429,9 @@ describe('RESULT_SCHEMA, executed', () => {
     it('accepts the resolved path form the driver emits', () => {
       const report = cleanupReport()
       expect(report.worktree.path.startsWith('/private/')).toBe(true)
-      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(true)
+      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(
+        true,
+      )
     })
 
     // The remaining keys layer 1 names. Typed but not required: the driver
@@ -419,9 +440,18 @@ describe('RESULT_SCHEMA, executed', () => {
     it('accepts the full eight-key report the driver emits', () => {
       const report = cleanupReport()
       expect(Object.keys(report).sort()).toEqual([
-        'branch', 'branch_deleted', 'branch_tip', 'detail', 'errors', 'reason', 'work_dir', 'worktree',
+        'branch',
+        'branch_deleted',
+        'branch_tip',
+        'detail',
+        'errors',
+        'reason',
+        'work_dir',
+        'worktree',
       ])
-      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(true)
+      expect(accepts(successResult({ cleanup: report })), JSON.stringify(validate.errors)).toBe(
+        true,
+      )
     })
 
     for (const [field, bad] of [
@@ -435,7 +465,9 @@ describe('RESULT_SCHEMA, executed', () => {
     }
 
     it('rejects a cleanup report whose errors are not strings', () => {
-      expect(accepts(successResult({ cleanup: cleanupReport({ errors: [{ msg: 'x' }] }) }))).toBe(false)
+      expect(accepts(successResult({ cleanup: cleanupReport({ errors: [{ msg: 'x' }] }) }))).toBe(
+        false,
+      )
     })
 
     it('rejects a cleanup field that is neither an object nor null', () => {
@@ -451,7 +483,9 @@ describe('RESULT_SCHEMA, executed', () => {
   })
 
   it('rejects a risk band outside the scorer vocabulary', () => {
-    expect(accepts(successResult({ risk: { band: 'Critical', score: 3, f4: 0, f5: 0 } }))).toBe(false)
+    expect(accepts(successResult({ risk: { band: 'Critical', score: 3, f4: 0, f5: 0 } }))).toBe(
+      false,
+    )
     expect(accepts(successResult({ risk: { band: 'low', score: 3, f4: 0, f5: 0 } }))).toBe(false)
   })
 
@@ -470,7 +504,17 @@ describe('RESULT_SCHEMA, executed', () => {
   })
 
   it('accepts every documented failure phase', () => {
-    for (const phase of ['input', 'worktree', 'baseline', 'classify', 'apply', 'install', 'validate', 'push', 'pr']) {
+    for (const phase of [
+      'input',
+      'worktree',
+      'baseline',
+      'classify',
+      'apply',
+      'install',
+      'validate',
+      'push',
+      'pr',
+    ]) {
       expect(accepts(failureResult({ failure: { phase, detail: 'd' } })), phase).toBe(true)
     }
   })
@@ -479,7 +523,16 @@ describe('RESULT_SCHEMA, executed', () => {
     expect(accepts(failureResult({ action: null }))).toBe(true)
   })
 
-  for (const field of ['status', 'package', 'branch', 'observations', 'requires_major_bump', 'bare_override', 'no_op', 'failure']) {
+  for (const field of [
+    'status',
+    'package',
+    'branch',
+    'observations',
+    'requires_major_bump',
+    'bare_override',
+    'no_op',
+    'failure',
+  ]) {
     it(`rejects a result missing ${field}`, () => {
       const r = successResult()
       delete r[field]
@@ -493,7 +546,12 @@ describe('RESULT_SCHEMA, executed', () => {
 
   // The adapter emits four observation types; narrowing to an enum would
   // reject three of them.
-  for (const type of ['unscoped_override', 'unscoped_override_added', 'manifest_pnpm_overrides_ignored', 'pnpm_major_unknown']) {
+  for (const type of [
+    'unscoped_override',
+    'unscoped_override_added',
+    'manifest_pnpm_overrides_ignored',
+    'pnpm_major_unknown',
+  ]) {
     it(`accepts the ${type} observation the adapter really emits`, () => {
       expect(accepts(successResult({ observations: [{ type }] }))).toBe(true)
     })
@@ -666,7 +724,9 @@ describe('crossFieldViolations', () => {
   })
 
   it('flags a no-op reporting a non-null pr_url', () => {
-    expect(crossFieldViolations(noOpResult({ pr_url: 'https://github.com/octo/app/pull/1' }))).not.toEqual([])
+    expect(
+      crossFieldViolations(noOpResult({ pr_url: 'https://github.com/octo/app/pull/1' })),
+    ).not.toEqual([])
   })
 
   it('flags a no-op reporting a non-null action', () => {
@@ -674,7 +734,9 @@ describe('crossFieldViolations', () => {
   })
 
   it('flags a no-op reporting a non-null risk', () => {
-    expect(crossFieldViolations(noOpResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } }))).not.toEqual([])
+    expect(
+      crossFieldViolations(noOpResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } })),
+    ).not.toEqual([])
   })
 
   it('flags a failure reporting a non-null action', () => {
@@ -682,7 +744,9 @@ describe('crossFieldViolations', () => {
   })
 
   it('flags a failure reporting a non-null risk', () => {
-    expect(crossFieldViolations(failureResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } }))).not.toEqual([])
+    expect(
+      crossFieldViolations(failureResult({ risk: { band: 'Low', score: 1, f4: 0, f5: 0 } })),
+    ).not.toEqual([])
   })
 
   // A status outside the three named branches matches none of them, so the
@@ -697,7 +761,8 @@ describe('crossFieldViolations', () => {
 describe('the workflow body, run with stubbed collaborators', () => {
   const batch = (n) =>
     Array.from({ length: n }, (_, i) =>
-      dispatch({ group: { package: `pkg-${i}`, branch_name: `fix/dependabot-pkg-${i}-6x` } }))
+      dispatch({ group: { package: `pkg-${i}`, branch_name: `fix/dependabot-pkg-${i}-6x` } }),
+    )
 
   // A stub agent that reports the identity of the group it was actually given,
   // which is what a real fix agent does — and what pairEntry checks. Derived
@@ -718,7 +783,11 @@ describe('the workflow body, run with stubbed collaborators', () => {
 
   it('dispatches exactly one agent per group and returns one entry per group', async () => {
     const dispatches = batch(7)
-    const { entries, calls } = await runWorkflow({ main, args: { cap: 3, dispatches }, agent: echo })
+    const { entries, calls } = await runWorkflow({
+      main,
+      args: { cap: 3, dispatches },
+      agent: echo,
+    })
     expect(calls).toHaveLength(7)
     expect(entries).toHaveLength(7)
     expect(entries.every((e) => e.mispaired === false)).toBe(true)
@@ -748,7 +817,9 @@ describe('the workflow body, run with stubbed collaborators', () => {
     const sent = calls
       .map((c) => JSON.parse(c.prompt.split('Dispatch payload:\n')[1]))
       .sort((a, b) => a.group.package.localeCompare(b.group.package))
-    expect(sent).toEqual([...dispatches].sort((a, b) => a.group.package.localeCompare(b.group.package)))
+    expect(sent).toEqual(
+      [...dispatches].sort((a, b) => a.group.package.localeCompare(b.group.package)),
+    )
   })
 
   it('never sends a prompt that is not one of the built payloads', async () => {
@@ -764,7 +835,11 @@ describe('the workflow body, run with stubbed collaborators', () => {
   // gets a session. The qualified type reaching agent() is the fix; this is
   // the one assertion pinning it, so a regression here fails right here.
   it('routes every agent to the namespaced fix-dependency agent type, on sonnet, with the schema', async () => {
-    const { calls } = await runWorkflow({ main, args: { cap: 2, dispatches: batch(3) }, agent: echo })
+    const { calls } = await runWorkflow({
+      main,
+      args: { cap: 2, dispatches: batch(3) },
+      agent: echo,
+    })
     for (const c of calls) {
       expect(c.opts.agentType).toBe('gh-security:fix-dependency')
       expect(c.opts.model).toBe('sonnet')
@@ -795,7 +870,9 @@ describe('the workflow body, run with stubbed collaborators', () => {
       return echo(prompt, opts, i)
     }
     const { entries } = await runWorkflow({ main, args: { cap: 6, dispatches }, agent: reversed })
-    expect(entries.map((e) => e.dispatch.group.package)).toEqual(dispatches.map((d) => d.group.package))
+    expect(entries.map((e) => e.dispatch.group.package)).toEqual(
+      dispatches.map((d) => d.group.package),
+    )
     expect(entries.map((e) => e.result.package)).toEqual(dispatches.map((d) => d.group.package))
   })
 
@@ -813,7 +890,9 @@ describe('the workflow body, run with stubbed collaborators', () => {
   it('flags and empties a mispaired result end to end', async () => {
     const dispatches = batch(3)
     const swap = (prompt, opts, i) =>
-      (i === 2 ? successResult({ package: 'someone-else', pr_url: 'https://github.com/octo/app/pull/99' }) : echo(prompt, opts, i))
+      i === 2
+        ? successResult({ package: 'someone-else', pr_url: 'https://github.com/octo/app/pull/99' })
+        : echo(prompt, opts, i)
     const { entries } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: swap })
     const bad = entries.find((e) => e.mispaired)
     expect(bad).toBeDefined()
@@ -829,8 +908,12 @@ describe('the workflow body, run with stubbed collaborators', () => {
   it('warns on a cross-field inconsistency instead of dropping or nulling the result', async () => {
     const dispatches = batch(2)
     const inconsistent = (prompt, opts, i) =>
-      (i === 0 ? { ...echo(prompt, opts, i), pr_url: null } : echo(prompt, opts, i))
-    const { entries, logs } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: inconsistent })
+      i === 0 ? { ...echo(prompt, opts, i), pr_url: null } : echo(prompt, opts, i)
+    const { entries, logs } = await runWorkflow({
+      main,
+      args: { cap: 1, dispatches },
+      agent: inconsistent,
+    })
     expect(entries).toHaveLength(2)
     expect(entries[0].mispaired).toBe(false)
     expect(entries[0].result).not.toBeNull()
@@ -840,7 +923,11 @@ describe('the workflow body, run with stubbed collaborators', () => {
   })
 
   it('logs nothing about cross-field inconsistency for a conforming result', async () => {
-    const { logs } = await runWorkflow({ main, args: { cap: 1, dispatches: batch(1) }, agent: echo })
+    const { logs } = await runWorkflow({
+      main,
+      args: { cap: 1, dispatches: batch(1) },
+      agent: echo,
+    })
     expect(logs.join('\n')).not.toMatch(/Cross-field inconsistency/)
   })
 
@@ -851,7 +938,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
   it('logs nothing about cross-field inconsistency for a mispaired result, even an inconsistent one', async () => {
     const dispatches = batch(2)
     const swap = (prompt, opts, i) =>
-      (i === 1 ? successResult({ package: 'someone-else', action: null }) : echo(prompt, opts, i))
+      i === 1 ? successResult({ package: 'someone-else', action: null }) : echo(prompt, opts, i)
     const { entries, logs } = await runWorkflow({ main, args: { cap: 1, dispatches }, agent: swap })
     expect(entries[1].mispaired).toBe(true)
     expect(entries[1].result).toBeNull()
@@ -859,12 +946,20 @@ describe('the workflow body, run with stubbed collaborators', () => {
   })
 
   it('announces the batch size and the width it runs at', async () => {
-    const { logs } = await runWorkflow({ main, args: { cap: 3, dispatches: batch(9) }, agent: echo })
+    const { logs } = await runWorkflow({
+      main,
+      args: { cap: 3, dispatches: batch(9) },
+      agent: echo,
+    })
     expect(logs).toContain('Dispatching 9 group(s), 3 at a time')
   })
 
   it('opens exactly one phase, matching the meta entry', async () => {
-    const { phases } = await runWorkflow({ main, args: { cap: 2, dispatches: batch(2) }, agent: echo })
+    const { phases } = await runWorkflow({
+      main,
+      args: { cap: 2, dispatches: batch(2) },
+      agent: echo,
+    })
     expect(phases).toEqual(['Fix groups'])
   })
 
@@ -877,26 +972,34 @@ describe('the workflow body, run with stubbed collaborators', () => {
       if (i === 0) throw new Error('token budget exhausted')
       return echo(prompt, opts, i)
     }
-    await expect(runWorkflow({ main, args: { cap: 2, dispatches }, agent: boom }))
-      .rejects.toThrow(/token budget exhausted/)
+    await expect(runWorkflow({ main, args: { cap: 2, dispatches }, agent: boom })).rejects.toThrow(
+      /token budget exhausted/,
+    )
   })
 
   it('says how many groups have no result, and points at the interruption contract', async () => {
     const dispatches = batch(3)
-    const boom = () => { throw new Error('token budget exhausted') }
-    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom }))
-      .rejects.toThrow(/3 of 3 group\(s\) have no result/)
-    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom }))
-      .rejects.toThrow(/resume from the runId/)
+    const boom = () => {
+      throw new Error('token budget exhausted')
+    }
+    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom })).rejects.toThrow(
+      /3 of 3 group\(s\) have no result/,
+    )
+    await expect(runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom })).rejects.toThrow(
+      /resume from the runId/,
+    )
   })
 
   // A thrown non-Error has no .message, and the abandonment report must still
   // name something rather than "undefined". Found by the branch threshold:
   // this path was the one line the suite did not reach.
   it('reports a thrown non-Error too', async () => {
-    const boom = () => { throw 'budget gone' }
-    await expect(runWorkflow({ main, args: { cap: 1, dispatches: batch(2) }, agent: boom }))
-      .rejects.toThrow(/budget gone/)
+    const boom = () => {
+      throw 'budget gone'
+    }
+    await expect(
+      runWorkflow({ main, args: { cap: 1, dispatches: batch(2) }, agent: boom }),
+    ).rejects.toThrow(/budget gone/)
   })
 
   it('logs the abandonment before it throws', async () => {
@@ -906,27 +1009,39 @@ describe('the workflow body, run with stubbed collaborators', () => {
       if (i === 1) throw new Error('token budget exhausted')
       return echo(prompt, opts, i)
     }
-    await runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom, logs })
-      .catch(() => {})
+    await runWorkflow({ main, args: { cap: 1, dispatches }, agent: boom, logs }).catch(() => {})
     expect(logs.join('\n')).toMatch(/worker\(s\) stopped early/)
   })
 
   it('never reports a partial batch as ordinary failures', async () => {
     // The hazard in one line: a resolved value here would be read by phase 7
     // as "these groups crashed", when in fact they were never dispatched.
-    const boom = () => { throw new Error('token budget exhausted') }
-    const outcome = await runWorkflow({ main, args: { cap: 1, dispatches: batch(2) }, agent: boom })
-      .then(() => 'resolved', () => 'rejected')
+    const boom = () => {
+      throw new Error('token budget exhausted')
+    }
+    const outcome = await runWorkflow({
+      main,
+      args: { cap: 1, dispatches: batch(2) },
+      agent: boom,
+    }).then(
+      () => 'resolved',
+      () => 'rejected',
+    )
     expect(outcome).toBe('rejected')
   })
 
   it('throws before dispatching anything when args are malformed', async () => {
     const seen = []
-    await expect(runWorkflow({
-      main,
-      args: { dispatches: [] },
-      agent: (p, o, i) => { seen.push(i); return echo(p, o, i) },
-    })).rejects.toThrow(/args\.dispatches/)
+    await expect(
+      runWorkflow({
+        main,
+        args: { dispatches: [] },
+        agent: (p, o, i) => {
+          seen.push(i)
+          return echo(p, o, i)
+        },
+      }),
+    ).rejects.toThrow(/args\.dispatches/)
     expect(seen).toHaveLength(0)
   })
 })
@@ -1001,7 +1116,9 @@ describe('the projection is the shipped file', () => {
 
   it('refuses a pure region that lost one of its declarations', async () => {
     const src = await workflowSource()
-    expect(() => project(src.replace(/pairEntry/g, 'renamed'))).toThrow(/no longer defines pairEntry/)
+    expect(() => project(src.replace(/pairEntry/g, 'renamed'))).toThrow(
+      /no longer defines pairEntry/,
+    )
   })
 
   // indexOf silently takes the first of a duplicate pair, so a second marker
@@ -1010,8 +1127,7 @@ describe('the projection is the shipped file', () => {
   it('refuses a duplicated marker rather than taking the first', async () => {
     const src = await workflowSource()
     for (const marker of [PURE_BEGIN, PURE_END, WIRING_BEGIN]) {
-      expect(() => project(`${src}\n${marker}\n`), marker)
-        .toThrow(/appears more than once/)
+      expect(() => project(`${src}\n${marker}\n`), marker).toThrow(/appears more than once/)
     }
   })
 
@@ -1036,9 +1152,15 @@ describe('the projection is the shipped file', () => {
     const harnessLoad = async () => {
       const src = await workflowSource()
       const body = src.replace(/^export const meta =/m, 'const meta =')
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-      return new AsyncFunction('agent', 'parallel', 'phase', 'log', 'args',
-        `${body}\n;return meta\n`)
+      const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor
+      return new AsyncFunction(
+        'agent',
+        'parallel',
+        'phase',
+        'log',
+        'args',
+        `${body}\n;return meta\n`,
+      )
     }
 
     it('parses as an async function body, meta and header included', async () => {
@@ -1053,7 +1175,7 @@ describe('the projection is the shipped file', () => {
       const end = src.indexOf('\n}\n', at)
       const literal = src.slice(at, end + 2).replace(/^export /, '')
       // eslint-disable-line no-new-func — same evaluation the harness does
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+      const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor
       return new AsyncFunction(`${literal}\n;return meta\n`)()
     }
 
@@ -1064,7 +1186,9 @@ describe('the projection is the shipped file', () => {
       // Every declared phase must have a phase() call that opens it, or the
       // progress display silently grows an empty group.
       const { phases } = await runWorkflow({
-        main, args: { cap: 1, dispatches: [dispatch()] }, agent: () => successResult(),
+        main,
+        args: { cap: 1, dispatches: [dispatch()] },
+        agent: () => successResult(),
       })
       expect(meta.phases.map((p) => p.title)).toEqual(phases)
       expect(meta.phases.every((p) => p.model === 'sonnet')).toBe(true)
@@ -1072,13 +1196,23 @@ describe('the projection is the shipped file', () => {
 
     it('is rejected as a whole when the header above the markers is malformed', async () => {
       const src = await workflowSource()
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-      const load = (text) => new AsyncFunction('agent', 'parallel', 'phase', 'log', 'args',
-        text.replace(/^export const meta =/m, 'const meta ='))
+      const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor
+      const load = (text) =>
+        new AsyncFunction(
+          'agent',
+          'parallel',
+          'phase',
+          'log',
+          'args',
+          text.replace(/^export const meta =/m, 'const meta ='),
+        )
       // Both mutations live in the forty lines above the pure marker, which
       // the projection never sees. Before this example they shipped green.
-      expect(() => load(src.replace(
-        "name: 'gh-security-fix-dispatch',", "name: 'gh-security-fix-dispatch',,"))).toThrow()
+      expect(() =>
+        load(
+          src.replace("name: 'gh-security-fix-dispatch',", "name: 'gh-security-fix-dispatch',,"),
+        ),
+      ).toThrow()
       expect(() => load(src.replace('  phases: [', '  phases: [[['))).toThrow()
       expect(() => load(src)).not.toThrow()
     })
@@ -1113,6 +1247,9 @@ describe('the projection is the shipped file', () => {
     for (const [form, code] of [
       ['single-quoted', "const m = 'args.cap must be a number'"],
       ['double-quoted', 'const m = "args.cap must be a number"'],
+      // The string below is the stripper's input, not a template that lost its
+      // backticks: its `${i}` is the shape under test.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder is the fixture
       ['a template literal', 'const m = `args.dispatches[${i}] is bad`'],
     ]) {
       it(`strips ${form} strings`, () => {
@@ -1121,15 +1258,17 @@ describe('the projection is the shipped file', () => {
     }
 
     it('strips line comments', () => {
-      expect(stripCommentsAndStrings('  // args.cap is the width\nconst x = 1'))
-        .not.toMatch(/\bargs\b/)
+      expect(stripCommentsAndStrings('  // args.cap is the width\nconst x = 1')).not.toMatch(
+        /\bargs\b/,
+      )
     })
 
     // And does NOT hide a real use, which is the whole point.
     it('leaves an actual use of the global visible', () => {
       expect(stripCommentsAndStrings('const n = args.dispatches.length')).toMatch(/\bargs\b/)
-      expect(stripCommentsAndStrings("const n = args.dispatches.length // 'args'"))
-        .toMatch(/\bargs\b/)
+      expect(stripCommentsAndStrings("const n = args.dispatches.length // 'args'")).toMatch(
+        /\bargs\b/,
+      )
     })
   })
 
