@@ -457,6 +457,18 @@ STUB
       The status should be success
     End
 
+    # A newer minor on the floor's major, distinct from the exact-boundary
+    # case above and from the major-above-floor default the other examples
+    # use: it is the one leg of the major/minor/patch comparison ladder nothing
+    # else here exercises, so a mutant weakening that `-gt` would otherwise
+    # survive.
+    It 'accepts a newer minor on the floor major'
+      STUB_NODE_VERSION=v22.19.0
+      export STUB_NODE_VERSION
+      When run "$CHECK" types
+      The status should be success
+    End
+
     It 'refuses a node whose version it cannot read'
       # An unreadable version is not evidence that the floor is met; that is
       # the found-nothing-is-a-pass shape every gate here refuses.
