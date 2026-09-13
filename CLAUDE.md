@@ -42,6 +42,19 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
+Sessions on this checkout run the TypeScript language server: `.claude/settings.json` enables
+`typescript-lsp@claude-plugins-official`, which expects the server on the PATH, so install it once
+per machine alongside the shellspec and ShellCheck installs above and below:
+
+```bash
+npm install -g typescript-language-server typescript
+```
+
+The server resolves the compiler it is given, and the repository pins its own `typescript` in
+devDependencies, so `tsc` and the editor answer from the same version. There is no pyright: after
+the port this repository has no Python, and the milestone 7 adapter is TypeScript
+([#215](https://github.com/SurveyMonkey/skills/issues/215)).
+
 The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
 then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
