@@ -27,7 +27,7 @@ echo "$1" >> gates.log
 exit 0
 STUB
     chmod +x scripts/check.sh
-    for _t in shellcheck claude shellspec npm; do
+    for _t in shellcheck claude shellspec pnpm; do
       printf '#!/bin/sh\nexit 0\n' > "bin/$_t"
       chmod +x "bin/$_t"
     done

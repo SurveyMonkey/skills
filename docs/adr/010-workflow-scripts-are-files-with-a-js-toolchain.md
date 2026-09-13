@@ -158,7 +158,7 @@ sources of truth for one behavior is worse than either alone.
 ## Consequences
 
 - **A second toolchain in CI.** The gates workflow gains a `js` job and a node setup step, and the
-  aggregate check now waits on five jobs instead of four. Contributors need `npm ci` before the
+  aggregate check now waits on five jobs instead of four. Contributors need `pnpm install` before the
   `js` gate runs locally; it stands down with a warning in the pre-push hook when `node_modules`
   is absent, the same graceful degradation a missing `shellspec` already gets, because a hook that
   hard-fails a fresh clone trains people to `--no-verify` (ADR 005).

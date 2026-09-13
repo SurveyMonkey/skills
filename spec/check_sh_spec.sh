@@ -124,7 +124,7 @@ Describe 'scripts/check.sh'
 
     # Discovery passing does not mean the gate can run: an untracked
     # node_modules and a missing package.json each get their own refusal
-    # rather than a confusing failure from inside npm.
+    # rather than a confusing failure from inside pnpm.
     It 'fails js when the project manifest is absent'
       mkdir -p spec/js
       printf 'x\n' > spec/js/x.test.mjs
@@ -135,17 +135,25 @@ Describe 'scripts/check.sh'
     End
 
     It 'fails js when node_modules has not been installed'
-      mkdir -p spec/js
+      mkdir -p spec/js bin
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
       git add -A
+      # A minimal pnpm stub on PATH: this example is about node_modules
+      # being absent, not about whether pnpm itself is installed, and the
+      # real binary is not guaranteed to be on PATH here: the CI spec job
+      # never installs it, only the js job does.
+      printf '#!/bin/sh\nexit 0\n' > bin/pnpm
+      chmod +x bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
       When run "$CHECK" js
       The status should eq 2
-      The stderr should include 'run npm ci'
+      The stderr should include 'run pnpm install'
     End
   End
 
-  # The coverage assertions, with a stub npm so no suite runs: this tests how
+  # The coverage assertions, with a stub pnpm so no suite runs: this tests how
   # check.sh reads a coverage summary, the same way the executed-example floor
   # tests how it reads a shellspec summary.
   #
@@ -154,29 +162,29 @@ Describe 'scripts/check.sh'
   # "Unknown%" over 0/0 files, satisfies its own 100% thresholds, and exits 0.
   # A threshold cannot see an empty file set, so the gate has to.
   Describe 'the coverage floor'
-    stub_npm() {
+    stub_pnpm() {
       scratch_repo || return 1
       mkdir -p spec/js bin coverage node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
       git add -A
       # cmd_js clears any stale summary before running the suite, so the
-      # stub npm is what publishes the one each example wants — exactly where
+      # stub pnpm is what publishes the one each example wants — exactly where
       # the real vitest run would write it.
-      # `npm test` publishes whatever summary the example asked for, and fails
-      # if the example asked it to. Both halves matter: a stub that always
-      # exits 0 never exercises the failing-suite path at all.
-      cat > bin/npm <<'STUB'
+      # `pnpm test` publishes whatever summary the example asked for, and
+      # fails if the example asked it to. Both halves matter: a stub that
+      # always exits 0 never exercises the failing-suite path at all.
+      cat > bin/pnpm <<'STUB'
 #!/bin/sh
 [ -f want.json ] && { mkdir -p coverage; cat want.json > coverage/coverage-summary.json; }
 [ -f want-suite-failure ] && exit 1
 exit 0
 STUB
-      chmod +x bin/npm
+      chmod +x bin/pnpm
       PATH="$PWD/bin:$PATH"
       export PATH
     }
-    Before stub_npm
+    Before stub_pnpm
 
     summary() { cat > want.json; }
     full() {
@@ -264,7 +272,7 @@ JSON
       cat > coverage/coverage-summary.json <<JSON
 {"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
 JSON
-      # No want.json, so the stub npm publishes nothing this run.
+      # No want.json, so the stub pnpm publishes nothing this run.
       When run "$CHECK" js
       The status should eq 2
       The stderr should include 'produced no coverage summary'
