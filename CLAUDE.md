@@ -52,8 +52,9 @@ npm install -g typescript-language-server typescript
 
 The server resolves the compiler it is given, and the repository pins its own `typescript` in
 devDependencies, so `tsc` and the editor answer from the same version. There is no pyright: this
-repository has no Python today; a Python adapter is tracked separately (milestone 7), and pyright
-can be added when that work starts.
+repository has no Python and will not gain any. The milestone 7 adapter targets Python ecosystems
+(pip, uv) but is written in TypeScript, per
+[RFC 002](docs/rfc/002-typescript-port.md#alternatives-considered).
 
 The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
