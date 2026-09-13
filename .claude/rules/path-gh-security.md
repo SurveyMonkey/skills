@@ -16,5 +16,5 @@ own, `claude plugin validate --strict` refuses that name ("CLAUDE.md at the plug
 loaded as project context") and `scripts/check.sh validate` gates on it; anywhere else inside the
 plugin the name would promise memory semantics the file does not have. This rule is what gives the
 document the same reach. It is agent context rather than a knowledge doc, so it carries no OKF
-frontmatter, which is what [`path-docs.md`](path-docs.md) exempts `CLAUDE.md` and its kind from
-wherever they sit.
+frontmatter: [`path-docs.md`](path-docs.md) exempts `CLAUDE.md` and its kind from that
+requirement wherever they sit.

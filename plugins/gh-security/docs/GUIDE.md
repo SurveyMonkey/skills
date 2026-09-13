@@ -212,10 +212,10 @@ What that header does not say, and what belongs here:
 - **The advisory cache is a payload like any other, and it outlives the process.**
   `$WORK/advisories/` is read by a later invocation than the one that wrote it, so it is written
   to a temporary path and renamed into place, as the state file is, and validated on read by the
-  same check the fresh query goes through — object-ness, all five promised fields, and `verdict` being one of
-  the four values `check-advisories.sh` emits. A torn entry read blind dies in the
-  parse with nothing to show for it: the checkpoint contract's own `needs_judgment`, manufactured out
-  of a half-written file.
+  same check the fresh query goes through: object-ness, all five promised fields, and `verdict`
+  being one of the four values `check-advisories.sh` emits. A torn entry read blind dies in the
+  parse with nothing to show for it, as the checkpoint contract's own `needs_judgment`,
+  manufactured out of a half-written file.
 - **There is no one generic "is this JSON?" check, and the reason is not that it never fired.** It
   did: a failed parse produces nothing at all, and nothing is not JSON. What it could not do is
   say anything useful, because "is this JSON?" passes for `null`, for `[]` and for every
@@ -226,32 +226,32 @@ What that header does not say, and what belongs here:
   the versions its caller lists, a cached advisory against the five fields it promises. A capture
   PRODUCED here fails the phase at the step that produced it, so the diagnosis names that step
   instead of whichever check the empty value happened to trip next.
-- **A container check is not a shape check, and the difference recommends deletions.**
-  Asserting that `findings` is an array asserted the box. A `tested` finding whose
-  `attributable_versions` came back a string, an object or `null` is not `[]`, so it skipped the
-  empty-delta arm, entered the advisory loop, and iterating it errored there: the loop was fed
-  nothing, its body never ran, `verdicts` stayed `[]`, and **"all of them" over an empty list is
-  `true`**. The pin earned `removable` with `advisory_verdict: "safe"` and no advisory query run
-  at all, which in `pr` mode is a deletion in a pull request. The findings shape that is validated
-  is therefore the shape the callers read, down to `collateral_changes` entries carrying a boolean `judged` — and
-  `judge` additionally refuses a non-empty collateral list in which nothing was judged, because an
-  empty verdict list collapses to `safe`, the strongest claim available about packages nobody
-  looked at.
+- **A container check is not a shape check, and the difference recommends deletions.** The check
+  in place asserted only that `findings` is an array: the box, not what the callers read out of
+  it. A `tested` finding whose `attributable_versions` came back a string, an object or `null` is
+  not `[]`, so it skipped the empty-delta arm, entered the advisory loop, and iterating it errored
+  there: the loop was fed nothing, its body never ran, `verdicts` stayed `[]`, and **"all of them"
+  over an empty list is `true`**. The pin earned `removable` with `advisory_verdict: "safe"` and
+  no advisory query run at all, which in `pr` mode is a deletion in a pull request. The findings
+  shape that is validated is therefore the shape the callers read, down to `collateral_changes`
+  entries carrying a boolean `judged`. And `judge` additionally refuses a non-empty collateral
+  list in which nothing was judged, because an empty verdict list collapses to `safe`, the
+  strongest claim available about packages nobody looked at.
 - **Each step refuses to run before the one it depends on**, and the guard on `together` is the
   one that earns its keep: before `judge` every finding still reads `tested`, so an unguarded
   `together` finds an empty candidate set and terminates exit 0 with `no removable pins found` — a
   claim about work that never happened, arriving at the agent as a successful audit. `judge`'s own
   guard is on a tested pin existing, not merely on `baseline_done`: `baseline` writes findings for
   the pins it refused, so a healthy repository has `findings: []` the moment it finishes and the
-  same false claim was reachable with no `test-pin` call at all. And `judge_done` is cleared by
-  every `record_finding`, because a `test-pin` run after a judgment leaves that pin `tested` and
-  `together` selects on status — the pin would be dropped from a candidate set the agent believes
-  is complete. **Every** write to `findings` goes through the one setter that clears the flag:
-  the write that did not was `baseline`'s bulk write, so a second `baseline` after a completed
-  judgment reset the findings to its own refused set while `judge_done` stayed true and
-  `together` reported `no removable pins found` over an audit it had just discarded. And `judge`
-  counts the pins the baseline did NOT refuse, never every testable pin: counting all of them
-  deadlocks a repository whose baseline refused every one, since `test-pin` refuses those by
+  same false claim was reachable with no `test-pin` call at all. And `judge_done` is cleared
+  whenever a finding is recorded, because a `test-pin` run after a judgment leaves that pin
+  `tested` and `together` selects on status — the pin would be dropped from a candidate set the
+  agent believes is complete. **Every** write to `findings` goes through the one setter that
+  clears the flag: the write that did not was `baseline`'s bulk write, so a second `baseline`
+  after a completed judgment reset the findings to its own refused set while `judge_done` stayed
+  true and `together` reported `no removable pins found` over an audit it had just discarded. And
+  `judge` counts the pins the baseline did NOT refuse, never every testable pin: counting all of
+  them deadlocks a repository whose baseline refused every one, since `test-pin` refuses those by
   design and there would be no route to any report at all.
 - **The tested package's advisory answer never absorbs the collateral verdict.** `advisory_verdict`,
   `advisory_count` and `matched_ranges` are `check-advisories.sh`'s reply about the pinned package
@@ -392,10 +392,10 @@ prescribed snippet locates itself: `git -C <path> ...`, or `cd <path> && <comman
 everything else.
 
 Scripts that are cwd-sensitive enforce it rather than trust it, through one shared guard:
-`common/require-linked-worktree.sh`, invoked by `refuse_primary_checkout` in
-`ecosystems/node.sh` for the verbs that write: `apply_constraint`
-(rewrites `package.json`, and under npm deletes the stale lockfile entries its override must
-move — npm keeps an existing `package-lock.json` entry over a newly added override, issue #124),
+`common/require-linked-worktree.sh`, called by `ecosystems/node.sh` before each of the verbs that
+write: `apply_constraint` (rewrites `package.json`, and under npm deletes the stale lockfile
+entries its override must move — npm keeps an existing `package-lock.json` entry over a newly
+added override, issue #124),
 `install` (rewrites the lockfile and `node_modules`) and `shim`
 (creates a directory and an executable, and absolutizes a vendored runner from the cwd). That is
 the whole set today; a verb that starts writing joins it, and the guard is its first statement. It
@@ -694,8 +694,9 @@ bash or jq mechanism the port removes, and
 [#241](https://github.com/SurveyMonkey/skills/issues/241) deletes it.** It governs the shipped
 scripts that have not been ported yet, plus `detect-capacity.sh` and `notice-scan.sh`, which stay
 bash for good (RFC 002, Non-Goals). Which is which is the rollout table in
-[RFC 002](../../../docs/rfc/002-typescript-port.md). When this section goes, the two scripts that
-outlive it keep these targets, stated in `scripts/CLAUDE.md` beside them.
+[RFC 002](../../../docs/rfc/002-typescript-port.md). These targets outlive this section:
+`scripts/CLAUDE.md` points here for them today, and is where they land beside the two scripts
+when this section goes.
 
 **Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
 Homebrew, so anything the two versions read differently goes green locally and red only in CI.

@@ -88,17 +88,17 @@ Four semantics carry over from the shared shellspec helper
   how the first version of that assertion passed under mutation (issue #87).
 - **The request log is asserted on shape, never on count or order.** See the next section.
 
-Until the last bash script is ported, the shellspec suite keeps its own command-based `gh` mock
-(`spec/support/gh-mock-dispatch.sh`, registered from `spec/spec_helper.sh`), carrying those same
-four semantics for the specs that still drive a script through its CLI. It retires with the
-scripts it serves ([#241](https://github.com/SurveyMonkey/skills/issues/241)); nothing new is
-written against it.
-
 What does not carry over is the dispatcher's key matching: keys matched token by token against
 argv, with a last-registration-wins override, because a command-based shellspec `Mock` block runs
 as a separate subprocess that cannot call a shell function and had to be handed argv to sort out.
 A method call needs none of that, and a defaulting layer with an override rule is exactly the
 conditional logic in test setup the SDK shape exists to remove.
+
+Until the last bash script is ported, the shellspec suite keeps its own command-based `gh` mock
+(`spec/support/gh-mock-dispatch.sh`, registered from `spec/spec_helper.sh`), carrying those same
+four semantics for the specs that still drive a script through its CLI. It retires with the
+scripts it serves ([#241](https://github.com/SurveyMonkey/skills/issues/241)); nothing new is
+written against it.
 
 ## What a log assertion may claim
 
