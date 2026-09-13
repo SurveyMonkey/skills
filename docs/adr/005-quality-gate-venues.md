@@ -77,6 +77,24 @@ suite and the `push` venue on the default branch runs the full suite on both leg
 records a full macOS run. The narrowing is by gate, not by diff: CI still runs full suites,
 never a changed-file selection, per the `paths:`-filter prohibition above.)**
 
+**Amended by [ADR 012](012-typescript-on-node-22-18.md)
+([#213](https://github.com/SurveyMonkey/skills/issues/213)): vitest is the primary suite venue, and
+shellspec covers the bash that remains.** RFC 002 moves the deterministic layer to TypeScript, so
+the shellspec suite is no longer where most behavior is covered; after
+[#240](https://github.com/SurveyMonkey/skills/issues/240) the shellspec suite is `notice_scan`,
+`detect_capacity`, `githooks`, `check_sh`, `reference_scrub` and `bash32_parse`. Nothing this ADR
+decides about venues changes with the substitution: one entry point, empty discovery as a hard
+failure, an executed-example floor (which vitest needs for the same reason shellspec does), and CI
+as the enforcement boundary. Fact 2 above keeps the macOS leg alive for the same reason it always
+had, narrowed to it.
+
+**One knock-on, stated so it is not read as more than it is.** The lefthook refusal at the end of
+this Decision rests on two grounds: that lefthook adds a dependency to a repo whose stated
+constraint is `bash`, `jq` and `gh`, and that `core.hooksPath` does the job with none. ADR 012
+removes the first, because a deterministic layer in TypeScript needs node anyway. It says nothing
+about the second, which stands on its own and is answered, on the different ground of hook speed,
+by [#249](https://github.com/SurveyMonkey/skills/issues/249). The refusal is not reversed here.
+
 **Tool versions are pinned in CI and asserted after install**, to the versions the hooks run
 locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,
 the Claude CLI by version with `DISABLE_AUTOUPDATER=1` (without which the pin is cosmetic). The

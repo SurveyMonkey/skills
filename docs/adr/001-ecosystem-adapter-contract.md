@@ -45,8 +45,16 @@ would have to be wrong for one of them.
 
 ## Decision
 
-**Invocation.** Adapters are executables at `scripts/ecosystems/<name>.sh`, invoked as
-`<adapter> <verb> [args]`, run from the root of the tree being operated on. For the verbs that
+**Invocation.** ~~Adapters are executables at `scripts/ecosystems/<name>.sh`, invoked as
+`<adapter> <verb> [args]`, run from the root of the tree being operated on.~~ **Amended by
+[ADR 012](012-typescript-on-node-22-18.md)
+([#213](https://github.com/SurveyMonkey/skills/issues/213)): the contract becomes an in-process
+TypeScript interface. Verbs are functions behind one adapter interface; the four exit codes below
+become the same four outcomes carried in a typed result envelope, and the stdout/stderr split
+survives at the CLI entry point, where a command is invoked from a prompt. A process seam exists
+only at an ecosystem boundary: the package manager, `git`, `gh`, and `detect-capacity.sh`. Every
+obligation this ADR states carries over unchanged onto the interface.** The tree being operated on
+is still the root the verbs run against. For the verbs that
 write (`apply_constraint`, `install`, `shim`) that root must be a **linked git worktree**, never
 the user's own checkout: each of them refuses to run there, through the shared guard in
 `common/require-linked-worktree.sh`. JSON on stdout, human-readable detail on stderr.
@@ -327,9 +335,15 @@ is the third state and exits 1: coercing it to `{}` produced a `count: 0` byte-i
 legitimately empty case, and the audit stops on `count: 0`, so a corrupted manifest audited clean
 — "found nothing" meaning "all clear" by another route.
 
-**Dependencies are `bash`, `jq`, and `gh`.** No `node`, no `npx`. Node has no built-in semver, so
-using it would mean `npx semver` and a cold-cache network fetch in the middle of a security fix.
-Scripts target bash 3.2, the macOS default.
+~~**Dependencies are `bash`, `jq`, and `gh`.** No `node`, no `npx`.~~ **Superseded by
+[ADR 012](012-typescript-on-node-22-18.md)
+([#213](https://github.com/SurveyMonkey/skills/issues/213)): the deterministic layer is TypeScript
+on Node 22.18 or newer. The fix flow cannot complete without npm, pnpm or yarn, all of which are
+node, so the runtime is present wherever this plugin can do its job.** Node has no built-in semver,
+so using it would mean `npx semver` and a cold-cache network fetch in the middle of a security fix.
+**That half stands:** nothing shipped fetches from a registry at run time, and the port adds no
+runtime dependency to a shipped path. ~~Scripts target bash 3.2, the macOS default.~~ **The bash
+that remains (`notice-scan.sh`, `detect-capacity.sh`) still does.**
 
 ## Consequences
 

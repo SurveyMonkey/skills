@@ -5,7 +5,7 @@ status: stable
 created: 2026-09-12
 owner: brianespinosa
 related_milestones: [5, 6]
-related_adrs: []
+related_adrs: [12]
 ---
 
 # RFC 002: The gh-security deterministic layer moves to TypeScript
@@ -74,9 +74,9 @@ ported immediately after.
 - Every deterministic script that runs as part of a fix or audit run is TypeScript, executed
   directly by Node, behind one CLI entry point at `plugins/gh-security/bin/gh-security.ts`.
 - The runtime floor is Node 22.18, the first release whose type stripping runs without a flag and
-  without a warning on stderr (spike table and reasoning in ADR 012, which
-  [#213](https://github.com/SurveyMonkey/skills/issues/213) spawns in Phase 0; it is not written
-  yet, so every reference to it here is forward-looking).
+  without a warning on stderr (spike table and reasoning in
+  [ADR 012](../adr/012-typescript-on-node-22-18.md), landed in Phase 0 by
+  [#213](https://github.com/SurveyMonkey/skills/issues/213)).
 - The adapter contract ([ADR 001](../adr/001-ecosystem-adapter-contract.md)) survives as a
   contract, but as an in-process interface rather than a process boundary.
 - The fixture corpus is carried over unchanged, and bash and TypeScript answer the same fixtures
@@ -366,9 +366,11 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
 
 To be spawned as this RFC executes:
 
-- ADR: the runtime decision, the erasable-syntax constraint and the coverage policy
+- ~~ADR: the runtime decision, the erasable-syntax constraint and the coverage policy
   ([#213](https://github.com/SurveyMonkey/skills/issues/213)), which also amends ADR 001's process
-  boundary and ADR 005's venue split.
+  boundary and ADR 005's venue split.~~ **Landed in Phase 0 as
+  [ADR 012](../adr/012-typescript-on-node-22-18.md)**, which supersedes ADR 010 on the bash-only
+  rule for shipped scripts and carries the ADR 001 and ADR 005 amendments.
 
 ## Related
 
