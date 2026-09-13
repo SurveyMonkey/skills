@@ -50,18 +50,17 @@ To request support, open an issue with:
 
 ## Quality gates
 
-Enable the committed git hooks once per clone:
+Local git hooks are [lefthook](https://lefthook.dev) (`lefthook.yml`), installed by `pnpm install`
+or by hand with `pnpm exec lefthook install`.
 
-```bash
-git config core.hooksPath .githooks
-```
-
-`pre-commit` runs ShellCheck and `claude plugin validate --strict` (~2s); `pre-push` runs the
-shellspec suite in parallel (roughly a minute, machine-dependent). Both warn and continue if a
-tool is missing; CI (`.github/workflows/gates.yml`) enforces all four gates regardless. Run any
-gate directly with `./scripts/check.sh <lint|validate|spec|version|fast|all|targets>`. The fourth,
-`version`, has no hook: it checks that every plugin whose files changed since the comparison base
-carries a changed `plugin.json` version, and only CI knows a base worth comparing against. See
+`pre-commit` runs ShellCheck over staged shell files and `claude plugin validate --strict` when a
+manifest is staged (~2s); `pre-push` runs nothing. Each pre-commit step warns and stands down if
+its tool is missing; CI
+(`.github/workflows/gates.yml`) enforces every gate regardless, hooks installed or not. Run any
+gate directly with `./scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>`. The
+`version` and `spec`/`js` suites have no hook: `version` needs a comparison base only CI can
+resolve, and the suites need tooling a fresh clone may not have (ADR 005, amended by
+[#249](https://github.com/SurveyMonkey/skills/issues/249)). See
 [ADR 005](../docs/adr/005-quality-gate-venues.md).
 
 ## Local Development

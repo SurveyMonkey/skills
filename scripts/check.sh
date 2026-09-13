@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# check.sh: the quality gates. One definition, three callers: the committed
-# git hooks in .githooks/, the workflow in .github/workflows/gates.yml, and
-# humans running it directly.
+# check.sh: the quality gates. One definition, three callers: lefthook.yml,
+# the workflow in .github/workflows/gates.yml, and humans running it
+# directly.
 #
 # Usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>
 #
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
-#   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
-#             pre-push hook and CI both set it, ADR 005). CHECK_SPEC_ONLY, if
-#             set, narrows the run to a whitespace-separated list of spec
-#             files instead of the whole suite (ADR 005 amendment, #208).
+#   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; CI
+#             sets it, ADR 005). CHECK_SPEC_ONLY, if set, narrows the run to
+#             a whitespace-separated list of spec files instead of the whole
+#             suite (ADR 005 amendment, #208).
 #   js        the vitest suite over the Workflow script, with coverage
-#             thresholds at 100 on all four buckets (ADR 010). Needs an
-#             installed node_modules; run pnpm install first.
+#             thresholds at 100 on all four buckets (ADR 010), then
+#             `lefthook validate` over lefthook.yml. Both need an installed
+#             node_modules; run pnpm install first. lefthook's check lives
+#             here rather than under `validate` because the CI job named
+#             `validate` has no node_modules and this one already installs
+#             it for vitest (ADR 005 amendment, #249).
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
@@ -82,10 +86,12 @@ cd "$repo_root"
 
 # Discovery, never a written-down list: git's index is the source of truth,
 # so a newly staged script is covered the moment it exists and this script
-# lints itself. The .githooks/ entries carry no .sh suffix, hence the second
-# pathspec.
+# lints itself. `.githooks/` used to need a second pathspec here (its entries
+# carried no .sh suffix); #249 deletes that directory in favor of
+# lefthook.yml, whose commands live inline in YAML rather than as separate
+# shell files, so the plain glob is enough again.
 shell_targets() {
-  git ls-files -- '*.sh' '.githooks/*'
+  git ls-files -- '*.sh'
 }
 
 cmd_targets() {
@@ -348,6 +354,12 @@ cmd_js() {
   # runner's are separate.
   pnpm --silent test
   js_assert_coverage
+  # lefthook.yml's own gate: a config lefthook itself rejects would be a
+  # local hook silently never running, the same shape every other refusal
+  # here exists to catch. This is the only CI venue with node_modules
+  # installed (ADR 005 amendment, #249).
+  [ -f lefthook.yml ] || die 'lefthook.yml is missing; nothing to validate'
+  pnpm exec lefthook validate
 }
 
 # The commit-ish the version gate compares against, before the merge-base is
