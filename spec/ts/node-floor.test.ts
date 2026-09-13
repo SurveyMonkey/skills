@@ -4,11 +4,12 @@
 // a fact about the machine running the suite. `bin/gh-security.ts` passes
 // `process.version` to it when that entry point lands (#224).
 //
-// Every expected value here is hand-written from ADR 012's spike table
-// (docs/adr/012-typescript-on-node-22-18.md): 22.16 and 22.17 fail at launch,
-// 22.18.0 is the first release that runs with zero bytes on stderr, and
-// 22.22.2, 24.15.0 and 24.18.0 run. None of it is recomputed the way the
-// module computes it.
+// Every expected value here is hand-written, either taken directly from ADR
+// 012's spike table (docs/adr/012-typescript-on-node-22-18.md) — 22.16 and
+// 22.17 fail at launch, 22.18.0 is the first release that runs with zero
+// bytes on stderr, and 22.22.2, 24.15.0 and 24.18.0 run — or a reasonable
+// hand-authored extrapolation from it (older majors, an unreadable string).
+// None of it is recomputed the way the module computes it.
 import { describe, expect, it } from 'vitest'
 
 import {

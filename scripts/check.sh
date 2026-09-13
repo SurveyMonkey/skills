@@ -123,7 +123,10 @@ js_targets() {
 # type-checked as if they were this repository's own source, and it is what
 # lets the gate refuse a discovery that came back empty: `tsc` errors on no
 # inputs, but an include path that silently stopped matching is the quieter
-# failure, and it would leave a green gate checking less than it claims.
+# failure, and it would leave a green gate checking less than it claims. A
+# single `*` below still matches a nested file (e.g. src/lib/node-floor.ts):
+# `git ls-files` pathspec globbing crosses directory separators, unlike a
+# shell glob, so this is not narrower than it looks.
 ts_targets() {
   git ls-files -- \
     'plugins/gh-security/bin/*.ts' \

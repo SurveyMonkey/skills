@@ -32,7 +32,10 @@ export class NodeFloorError extends Error {
 /**
  * A release triple, or `undefined` when the string is not one. The optional
  * `v` is what `process.version` carries; a prerelease or build suffix is
- * accepted and ignored, since it never moves the release below the floor.
+ * stripped and ignored, not because ignoring it is semver-safe in general
+ * (`22.18.0-rc.1` sorts below `22.18.0`), but because a real node release
+ * binary's `process.version` never carries one — the only caller this floor
+ * is ever compared against.
  */
 const parseVersion = (version: string): [number, number, number] | undefined => {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)

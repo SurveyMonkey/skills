@@ -38,7 +38,9 @@ pre-commit:
     # checker handed a file list answers a different question. The glob
     # decides when the step runs, not what it checks. It stays sub-second and
     # runs no suite, so the rule this file exists for (ADR 005 as amended by
-    # #249) holds.
+    # #249) holds. `*.ts` here matches a nested staged file too (e.g.
+    # plugins/gh-security/src/lib/node-floor.ts), the same way the
+    # shellcheck step's `*.sh` above does.
     types:
       glob: '{*.ts,tsconfig.json}'
       run: |
