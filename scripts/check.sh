@@ -9,7 +9,9 @@
 #   validate  claude plugin validate --strict over the marketplace manifest
 #             and every plugin under plugins/*/
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; the
-#             pre-push hook and CI both set it, ADR 005)
+#             pre-push hook and CI both set it, ADR 005). CHECK_SPEC_ONLY, if
+#             set, narrows the run to a whitespace-separated list of spec
+#             files instead of the whole suite (ADR 005 amendment, #208).
 #   js        the vitest suite over the Workflow script, with coverage
 #             thresholds at 100 on all four buckets (ADR 010). Needs an
 #             installed node_modules; run pnpm install first.
@@ -197,6 +199,24 @@ cmd_spec() {
     args[${#args[@]}]=--format
     args[${#args[@]}]=$CHECK_SPEC_FORMAT
   fi
+  # CHECK_SPEC_ONLY narrows the run to specific spec files, given as a
+  # whitespace-separated list. shellspec takes file arguments after its
+  # flags, so these are appended rather than routed through another flag.
+  # This exists for the macOS PR leg (ADR 005 amendment, issue #208): that
+  # runner is the only one that can execute the bash 3.2 parse gate, and on a
+  # pull request only that gate needs to run there, while the ubuntu leg
+  # still runs the full suite. Unset, every spec file runs, exactly as before
+  # this variable existed. `read -ra` does the splitting, so the value is
+  # never expanded unquoted (unlike the flag values above, this one is
+  # genuinely a list, not a single token).
+  local -a only=()
+  if [ -n "${CHECK_SPEC_ONLY:-}" ]; then
+    read -ra only <<< "$CHECK_SPEC_ONLY"
+  fi
+  local o
+  for o in ${only[@]+"${only[@]}"}; do
+    args[${#args[@]}]=$o
+  done
   # ${args[@]+...}: bash 3.2's set -u rejects expanding an empty array.
   shellspec ${args[@]+"${args[@]}"} 2>&1 | tee "$report"
   # shellspec exits 0 having run zero examples, and a skipped example is

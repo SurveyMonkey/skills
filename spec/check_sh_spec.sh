@@ -437,6 +437,54 @@ STUB
       The output should not include '--format'
     End
 
+    It 'passes CHECK_SPEC_ONLY through as trailing file arguments'
+      # The macOS PR leg narrows to the bash 3.2 gate alone (ADR 005
+      # amendment, issue #208), so this has to travel as real shellspec file
+      # arguments, appended after the flags, exactly like a human typing
+      # `shellspec spec/one_spec.sh spec/two_spec.sh` would.
+      #
+      # SHELLSPEC_JOBS, CHECK_SPEC_SHELL, and CHECK_SPEC_FORMAT are unset
+      # explicitly, same trap as the SHELLSPEC_JOBS pin above (issue #61):
+      # the CI spec job sets all three at the job level, so an
+      # example whose argv assertion is order- and content-sensitive would
+      # otherwise depend on the caller's environment. This example proved
+      # it: it passed locally and failed in CI's ubuntu leg, where
+      # CHECK_SPEC_SHELL=bash and CHECK_SPEC_FORMAT=progress leaked into the
+      # asserted argv.
+      unset SHELLSPEC_JOBS CHECK_SPEC_SHELL CHECK_SPEC_FORMAT
+      cat > bin/shellspec <<'STUB'
+#!/bin/sh
+echo "argv: $*"
+cat summary.txt
+exit 0
+STUB
+      printf '2 examples, 0 failures\n' > summary.txt
+      CHECK_SPEC_ONLY='spec/bash32_parse_spec.sh spec/other_spec.sh'
+      export CHECK_SPEC_ONLY
+      When run "$CHECK" spec
+      The status should be success
+      The output should include 'argv: spec/bash32_parse_spec.sh spec/other_spec.sh'
+    End
+
+    It 'omits file arguments entirely when CHECK_SPEC_ONLY is unset'
+      # Unset explicitly for the same reason CHECK_SPEC_FORMAT is above: CI
+      # sets it at the job level, and an example that inherits it asserts the
+      # opposite of its own name and fails only there. SHELLSPEC_JOBS is
+      # unset for the same reason as the example above.
+      unset CHECK_SPEC_ONLY
+      unset SHELLSPEC_JOBS CHECK_SPEC_SHELL CHECK_SPEC_FORMAT
+      cat > bin/shellspec <<'STUB'
+#!/bin/sh
+echo "argv: [$*]"
+cat summary.txt
+exit 0
+STUB
+      printf '5 examples, 0 failures\n' > summary.txt
+      When run "$CHECK" spec
+      The status should be success
+      The output should include 'argv: []'
+    End
+
     It 'reads the summary through ANSI color codes'
       # --color via .shellspec-local prefixes the summary line with escape
       # sequences; the floor must still find the count rather than refusing

@@ -68,7 +68,14 @@ record of real runs exists. The spec job is a **matrix of ubuntu and macOS**: ub
 suite under modern bash 5.x (`CHECK_SPEC_SHELL=bash`, because dash was never a supported target,
 per fact 3), macOS is the only runner that can execute the bash 3.2 parse gate, and its leg sets
 `REQUIRE_BASH32=1` so that gate failing to run fails the job rather than skipping green (facts 2
-and 3).
+and 3). ~~Both legs run the full suite.~~ **(amended in
+[#208](https://github.com/SurveyMonkey/skills/issues/208): the macOS leg was measured as the
+critical path of every PR run (340-430s against ubuntu's 110-170s) for a suite it exists only
+to run one file of, `spec/bash32_parse_spec.sh`; `CHECK_SPEC_ONLY` (`scripts/check.sh`) now
+narrows a `pull_request` run on macOS to that file alone, while ubuntu keeps running the full
+suite and the `push` venue on the default branch runs the full suite on both legs, so main still
+records a full macOS run. The narrowing is by gate, not by diff: CI still runs full suites,
+never a changed-file selection, per the `paths:`-filter prohibition above.)**
 
 **Tool versions are pinned in CI and asserted after install**, to the versions the hooks run
 locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,
