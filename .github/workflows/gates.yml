@@ -231,6 +231,42 @@ jobs:
         # 100 (ADR 010).
         run: ./scripts/check.sh js
 
+  types:
+    # `tsc -p tsconfig.json` over the TypeScript the plugin ships and the
+    # examples under spec/ts/ (ADR 012). ubuntu alone, for the same reason
+    # the js job runs there alone: this is one compiler evaluating one
+    # configuration, with no platform surface. The type check is not a build
+    # step and emits nothing; the file a reviewer reads on the default branch
+    # is the file node runs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # No `version:` input, same as the js job: pnpm resolves it from
+        # package.json's `packageManager` field, the one place that pin lives.
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Assert the pinned node version
+        # The pin, asserted rather than printed. check.sh types separately
+        # asserts the ADR 012 floor, which is the lower bound users must
+        # clear; this is the exact version CI claims to run.
+        run: |
+          installed=$(node --version)
+          if [ "$installed" != "v$NODE_VERSION" ]; then
+            echo "expected node v$NODE_VERSION, got: $installed"
+            exit 1
+          fi
+      - name: Install pinned dev dependencies
+        # `--frozen-lockfile`, never a bare `install`, for the reason the js
+        # job states: it is what makes the exact-version pins real.
+        run: pnpm install --frozen-lockfile
+      - name: Type-check the TypeScript sources and examples
+        run: ./scripts/check.sh types
+
   version:
     # A plugin's version lives in its own plugin.json and nowhere else, so a
     # change shipped without bumping it reaches nobody while every other gate
@@ -336,9 +372,10 @@ jobs:
     # `needs:` from shrinking coverage silently: zero (or four) results
     # iterating past the loop is the same found-nothing-is-a-pass shape
     # every other gate refuses. Bump it with every gate added to `needs:`;
-    # it was 4 before the js gate (ADR 010). Adding or dropping a gate?
+    # it was 4 before the js gate (ADR 010) and 5 before the types gate
+    # (ADR 012, #214). Adding or dropping a gate?
     # Follow the checklist: docs/adr/005-quality-gate-venues.md#gate-change-checklist.
-    needs: [lint, validate, spec, js, version]
+    needs: [lint, validate, spec, js, types, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -360,8 +397,8 @@ jobs:
                 ;;
             esac
           done
-          if [ "$n" -ne 5 ]; then
-            echo "expected 5 gate results, got $n"
+          if [ "$n" -ne 6 ]; then
+            echo "expected 6 gate results, got $n"
             exit 1
           fi
           if [ "$saw_cancelled" -eq 1 ]; then

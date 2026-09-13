@@ -50,19 +50,28 @@ and CI dependency only; the TypeScript the plugin ships imports nothing outside 
 the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`
 ([ADR 012](docs/adr/012-typescript-on-node-22-18.md)).
 
+The TypeScript under `plugins/gh-security/` and the examples under `spec/ts/` are type-checked by
+`tsc -p tsconfig.json`, which emits nothing: direct execution means the file a reviewer reads on
+the default branch is the file node runs, so the compiler is a checker and never a build step.
+The same gate asserts that the running node meets the ADR 012 floor of 22.18, because a floor that
+is documented rather than enforced is one a user discovers at launch.
+
 Every quality gate (shellspec suite, ShellCheck, `claude plugin validate --strict`, the vitest
-suite with its coverage floor, and the plugin version gate) runs through one entry point,
-`scripts/check.sh`
-(`lint` / `validate` / `spec` / `js` / `version` / `fast` / `all` / `targets`); target lists live
-there and nowhere else, and empty discovery is a hard failure in every gate — including the
-coverage report, where a threshold satisfied by an empty file set is exactly that bug. Local git
-hooks are [lefthook](https://lefthook.dev), installed by `pnpm install` (or by hand with
-`pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files and
-`claude plugin validate --strict` when a manifest is staged, and pre-push runs nothing: CI is
-the enforcement boundary (`.github/workflows/gates.yml`).
+suite with its coverage floor, the TypeScript type check, and the plugin version gate) runs
+through one entry point, `scripts/check.sh`
+(`lint` / `validate` / `spec` / `js` / `types` / `version` / `fast` / `all` / `targets`); target
+lists live there and nowhere else, and empty discovery is a hard failure in every gate — including
+the coverage report, where a threshold satisfied by an empty file set is exactly that bug. Local
+git hooks are [lefthook](https://lefthook.dev), installed by `pnpm install` (or by hand with
+`pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files,
+`claude plugin validate --strict` when a manifest is staged, and the `types` gate when TypeScript
+or `tsconfig.json` is staged (the one step that checks the whole project rather than the staged
+files), and pre-push runs nothing: CI is the enforcement boundary
+(`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
-gate — `node` and `pnpm`, but still targets bash 3.2 because the hooks run it on stock macOS.
+and `types` gates — `pnpm` and `node` at the ADR 012 floor, but still targets bash 3.2 because the
+hooks run it on stock macOS.
 
 **How this suite tests is the [`testing` skill](.claude/skills/testing/SKILL.md).** Seams, asserting
 the verdict rather than the parse, where an expected value may come from, red-first and the fixture

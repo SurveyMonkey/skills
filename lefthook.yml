@@ -4,11 +4,11 @@
 # since pnpm 10 blocks a dependency's lifecycle scripts otherwise) or by
 # hand with `pnpm exec lefthook install`.
 #
-# pre-commit runs only the gates that are staged-only and cheap: ShellCheck
-# over staged shell files, and `claude plugin validate --strict` when a
-# manifest is staged. Neither runs a suite. #250, #214 and #219 each add
-# their own step here (Biome, tsc, vitest related) as their own toolchains
-# land; this issue deliberately ships none of those.
+# pre-commit runs only the gates that are cheap: ShellCheck over staged shell
+# files, `claude plugin validate --strict` when a manifest is staged, and
+# `tsc -p` when TypeScript or its configuration is staged. None of them runs
+# a suite. #250 and #219 each add their own step here (Biome, vitest related)
+# as their own toolchains land.
 #
 # pre-push runs nothing. CI is the enforcement boundary (ADR 005): the
 # shellspec and vitest suites need tooling a fresh clone may not have
@@ -31,6 +31,22 @@ pre-commit:
         else
           printf '\n!! pre-commit: shellcheck is not installed, so the lint gate did not run here.\n' >&2
           printf '!! CI enforces it on the pull request. Install locally with:\n!!   brew install shellcheck\n\n' >&2
+        fi
+    # The one step that is NOT staged-only: `tsc -p tsconfig.json` checks the
+    # whole project (#214, ADR 012), because a type error caused by a staged
+    # file is usually in a file that was not staged, and a project-wide
+    # checker handed a file list answers a different question. The glob
+    # decides when the step runs, not what it checks. It stays sub-second and
+    # runs no suite, so the rule this file exists for (ADR 005 as amended by
+    # #249) holds.
+    types:
+      glob: '{*.ts,tsconfig.json}'
+      run: |
+        if [ -d node_modules ]; then
+          ./scripts/check.sh types
+        else
+          printf '\n!! pre-commit: node_modules is absent, so the types gate did not run here.\n' >&2
+          printf '!! CI enforces it on the pull request. Install locally with:\n!!   pnpm install\n\n' >&2
         fi
     plugin-validate:
       glob: '{.claude-plugin/**,plugins/*/.claude-plugin/**}'

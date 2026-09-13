@@ -3,7 +3,7 @@
 # the workflow in .github/workflows/gates.yml, and humans running it
 # directly.
 #
-# Usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>
+# Usage: scripts/check.sh <lint|validate|spec|js|types|version|fast|all|targets>
 #
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
@@ -19,19 +19,29 @@
 #             here rather than under `validate` because the CI job named
 #             `validate` has no node_modules and this one already installs
 #             it for vitest (ADR 005 amendment, #249).
+#   types     `tsc -p tsconfig.json` over the TypeScript the plugin ships and
+#             the examples under spec/ts/, plus an assertion that the running
+#             node meets the ADR 012 floor. noEmit: this is a checker, never a
+#             build step, because the file a reviewer reads on the default
+#             branch is the file node runs. Needs an installed node_modules;
+#             run pnpm install first.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
 #             pre-commit hook invokes lint and validate separately so each
-#             can warn about its own missing tool)
-#   all       lint + validate + spec + js + version
+#             can warn about its own missing tool). Deliberately not `types`:
+#             fast is the pair that needs no install, and the types gate
+#             refuses outright without node_modules. The pre-commit hook runs
+#             `types` as its own step, where the missing-tool warning belongs.
+#   all       lint + validate + spec + js + types + version
 #   targets   print the lint target list, for inspection
 #
 # This is dev tooling, not shipped plugin code: unlike the scripts under
 # plugins/gh-security/scripts/ it may assume git, jq, shellcheck, shellspec,
-# the claude CLI, and — since ADR 010 — node and pnpm. It still targets bash
-# 3.2, because the hooks run it on stock macOS. The node dependency is a dev
-# and CI one only: no shipped plugin script gained a runtime.
+# the claude CLI, and — since ADR 010 — node and pnpm, at the ADR 012 floor
+# for node. It still targets bash 3.2, because the hooks run it on stock
+# macOS. The node dependency is a dev and CI one only: no shipped plugin
+# script gained a runtime.
 #
 # The version gate answers exactly one question: if the tip of this branch
 # became the default branch, would users be handed changed plugin code at a
@@ -105,6 +115,20 @@ cmd_targets() {
 # project code. vitest.config.mjs states the same anchor to the runner.
 js_targets() {
   git ls-files -- 'spec/js/*.test.mjs'
+}
+
+# The types gate's targets, from the index like every other gate's and
+# anchored at exactly the three paths tsconfig.json includes. Anchoring is
+# what keeps the many hand-authored trees under spec/fixtures/ from being
+# type-checked as if they were this repository's own source, and it is what
+# lets the gate refuse a discovery that came back empty: `tsc` errors on no
+# inputs, but an include path that silently stopped matching is the quieter
+# failure, and it would leave a green gate checking less than it claims.
+ts_targets() {
+  git ls-files -- \
+    'plugins/gh-security/bin/*.ts' \
+    'plugins/gh-security/src/*.ts' \
+    'spec/ts/*.ts'
 }
 
 cmd_lint() {
@@ -362,6 +386,71 @@ cmd_js() {
   pnpm exec lefthook validate
 }
 
+# ADR 012's runtime floor, as the three numbers the comparison reads and the
+# string every message names. 22.18.0 is the first release that runs this
+# plugin's TypeScript with zero bytes on stderr; 22.17 fails at launch.
+NODE_FLOOR_MAJOR=22
+NODE_FLOOR_MINOR=18
+NODE_FLOOR_PATCH=0
+NODE_FLOOR="$NODE_FLOOR_MAJOR.$NODE_FLOOR_MINOR.$NODE_FLOOR_PATCH"
+
+# Asserted, not printed. The pinned tool versions in the workflow are all
+# checked after install for the same reason: printing a version is not
+# enforcing one, and a floor that is documented and hoped for is the failure
+# ADR 012 put a runtime preamble in the plugin to avoid. A version string this
+# cannot read refuses too — an unreadable version is not evidence that the
+# floor is met, which is this repository's signature bug arriving inside the
+# gate that exists to stop it.
+assert_node_floor() {
+  command -v node >/dev/null 2>&1 \
+    || die "node is not installed; the types gate needs node $NODE_FLOOR or newer (ADR 012)"
+  local raw version major rest minor patch part
+  raw=$(node --version) || die 'node --version failed; could not read a node version'
+  version=${raw#v}
+  # A prerelease or build suffix never moves the release below the floor, so
+  # it is dropped rather than refused.
+  version=${version%%[-+]*}
+  case "$version" in
+    *.*.*) ;;
+    *) die "could not read a node version from '$raw'" ;;
+  esac
+  major=${version%%.*}
+  rest=${version#*.}
+  minor=${rest%%.*}
+  patch=${rest#*.}
+  for part in "$major" "$minor" "$patch"; do
+    case "$part" in
+      '' | *[!0-9]*) die "could not read a node version from '$raw'" ;;
+    esac
+  done
+  if [ "$major" -gt "$NODE_FLOOR_MAJOR" ]; then return 0; fi
+  if [ "$major" -eq "$NODE_FLOOR_MAJOR" ]; then
+    if [ "$minor" -gt "$NODE_FLOOR_MINOR" ]; then return 0; fi
+    if [ "$minor" -eq "$NODE_FLOOR_MINOR" ] && [ "$patch" -ge "$NODE_FLOOR_PATCH" ]; then
+      return 0
+    fi
+  fi
+  die "the types gate needs node $NODE_FLOOR or newer (ADR 012), but node --version says $raw"
+}
+
+cmd_types() {
+  local targets n=0 f
+  targets=$(ts_targets)
+  while IFS= read -r f; do
+    if [ -n "$f" ]; then n=$((n + 1)); fi
+  done < <(printf '%s\n' "$targets")
+  [ "$n" -gt 0 ] \
+    || die 'no TypeScript files discovered under the tsconfig include paths; refusing to report a pass'
+  [ -f tsconfig.json ] || die 'tsconfig.json is missing; the types gate has nothing to check'
+  command -v pnpm >/dev/null 2>&1 \
+    || die 'pnpm is not installed; the types gate needs pnpm (ADR 012)'
+  [ -d node_modules ] || die 'node_modules is absent; run pnpm install before the types gate'
+  assert_node_floor
+  # noEmit lives in tsconfig.json rather than on this line: the same
+  # invocation has to mean the same thing when an editor or a hook runs it.
+  pnpm exec tsc -p tsconfig.json
+}
+
 # The commit-ish the version gate compares against, before the merge-base is
 # taken. Every caller goes through the merge base, so an explicit
 # CHECK_VERSION_BASE may be a branch, a tag, or a raw sha: the workflow passes
@@ -469,6 +558,7 @@ cmd_all() {
   cmd_validate
   cmd_spec
   cmd_js
+  cmd_types
   cmd_version
 }
 
@@ -478,8 +568,9 @@ case "${1:-}" in
   validate) cmd_validate ;;
   spec) cmd_spec ;;
   js) cmd_js ;;
+  types) cmd_types ;;
   version) cmd_version ;;
   fast) cmd_fast ;;
   all) cmd_all ;;
-  *) die 'usage: scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>' ;;
+  *) die 'usage: scripts/check.sh <lint|validate|spec|js|types|version|fast|all|targets>' ;;
 esac
