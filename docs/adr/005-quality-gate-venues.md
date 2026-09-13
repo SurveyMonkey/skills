@@ -163,6 +163,21 @@ switch for omitting it.
 lefthook, proposed on #10, is not used: it adds a dependency to a repo whose stated constraint is
 `bash`, `jq`, and `gh`, and `core.hooksPath` does the job with none.
 
+### Gate-change checklist
+
+The repository carries one ruleset, `protect-default`
+([export in `docs/rulesets/`](../rulesets/README.md)), managed by hand in the GitHub UI, whose
+only required status check is the aggregate `gates` job. Every change that adds or drops a gate
+touches the workflow; none of them should ever need to touch the ruleset. When changing which
+gates run:
+
+1. Add or drop the job in the `gates` job's `needs:` list.
+2. Move the arity floor (the `[ "$n" -ne N ]` check) by the same count.
+3. Keep the job id `gates` unchanged, so the ruleset's required status check context never needs
+   editing.
+4. Re-export the ruleset (`docs/rulesets/README.md` has the command) only if the ruleset itself
+   changed, which a gate addition or removal should never require, per point 3.
+
 ## Consequences
 
 - The gate definitions cannot drift between venues, because there is only one definition. The

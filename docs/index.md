@@ -10,3 +10,4 @@ okf_version: "0.2"
 | [adr/](adr/index.md) | Architecture Decision Records, one per decision. |
 | [rfc/](rfc/index.md) | Requests for Comments driving longer-running initiatives. |
 | [diagrams/](diagrams/index.md) | Control-flow and state diagrams for the plugins' multi-phase flows. |
+| [rulesets/](rulesets/README.md) | Point-in-time export of the protect-default branch ruleset and how it relates to the gates workflow. |

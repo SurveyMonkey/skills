@@ -335,7 +335,8 @@ jobs:
     # `needs:` from shrinking coverage silently: zero (or four) results
     # iterating past the loop is the same found-nothing-is-a-pass shape
     # every other gate refuses. Bump it with every gate added to `needs:`;
-    # it was 4 before the js gate (ADR 010).
+    # it was 4 before the js gate (ADR 010). Adding or dropping a gate?
+    # Follow the checklist: docs/adr/005-quality-gate-venues.md#gate-change-checklist.
     needs: [lint, validate, spec, js, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
