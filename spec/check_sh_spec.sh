@@ -114,6 +114,25 @@ Describe 'scripts/check.sh'
       The stderr should include 'no JS test files discovered'
     End
 
+    # The types gate (ADR 012, #214) discovers the same way, anchored at the
+    # three paths tsconfig.json includes, so `tsc` never sees an input the
+    # configuration does not claim and a shrinking input set is refused rather
+    # than reported as a clean type check.
+    It 'fails types when no TypeScript files are tracked under the include paths'
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include 'no TypeScript files discovered'
+    End
+
+    It 'ignores a .ts under spec/fixtures when deciding whether the types gate has targets'
+      mkdir -p spec/fixtures/some-repo
+      printf 'export const x = 1\n' > spec/fixtures/some-repo/thing.ts
+      git add -A
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include 'no TypeScript files discovered'
+    End
+
     # Discovery passing does not mean the gate can run: an untracked
     # node_modules and a missing package.json each get their own refusal
     # rather than a confusing failure from inside pnpm.
@@ -370,6 +389,94 @@ STUB
       When run "$CHECK" js
       The status should be success
       The output should include 'coverage measured'
+    End
+  End
+
+  # The types gate (#214, ADR 012). Stubbed node and pnpm: this covers what
+  # check.sh refuses before it runs the compiler, and how it reads a node
+  # version, not whether `tsc` passes. The floor assertion is the reason for
+  # the node stub — a gate that only printed the running version would be
+  # documenting the floor rather than enforcing it, and the machine running
+  # this suite is not the one the assertion is about.
+  Describe 'the types gate'
+    stub_types() {
+      scratch_repo || return 1
+      mkdir -p spec/ts bin node_modules
+      printf 'export const x = 1\n' > spec/ts/x.test.ts
+      printf '{}' > tsconfig.json
+      git add -A
+      cat > bin/node <<'STUB'
+#!/bin/sh
+echo "${STUB_NODE_VERSION:-v24.18.0}"
+STUB
+      # `pnpm exec tsc -p tsconfig.json` goes through this; it fails only
+      # when an example asks it to, so a clean run reaches the gate's own
+      # verdict rather than the compiler's.
+      cat > bin/pnpm <<'STUB'
+#!/bin/sh
+[ -f want-tsc-failure ] && exit 1
+exit 0
+STUB
+      chmod +x bin/node bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before stub_types
+
+    It 'fails when tsconfig.json is absent'
+      rm -f tsconfig.json
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include 'tsconfig.json is missing'
+    End
+
+    It 'fails when node_modules has not been installed'
+      rmdir node_modules
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include 'run pnpm install'
+    End
+
+    # ADR 012's spike table: 22.17 fails at launch, 22.18.0 is the first
+    # release that runs with zero bytes on stderr. The gate names both the
+    # floor and what it found, so the reader is not left to guess which half
+    # to change.
+    It 'refuses a node below the 22.18 floor'
+      STUB_NODE_VERSION=v22.17.1
+      export STUB_NODE_VERSION
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include '22.18.0'
+      The stderr should include '22.17.1'
+    End
+
+    It 'accepts the first release that clears the floor'
+      STUB_NODE_VERSION=v22.18.0
+      export STUB_NODE_VERSION
+      When run "$CHECK" types
+      The status should be success
+    End
+
+    It 'refuses a node whose version it cannot read'
+      # An unreadable version is not evidence that the floor is met; that is
+      # the found-nothing-is-a-pass shape every gate here refuses.
+      STUB_NODE_VERSION=banana
+      export STUB_NODE_VERSION
+      When run "$CHECK" types
+      The status should eq 2
+      The stderr should include 'could not read a node version'
+    End
+
+    It 'fails when the compiler reports errors'
+      : > want-tsc-failure
+      When run "$CHECK" types
+      The status should not eq 0
+      The status should not eq 2
+    End
+
+    It 'passes when the compiler is clean on a supported node'
+      When run "$CHECK" types
+      The status should be success
     End
   End
 
