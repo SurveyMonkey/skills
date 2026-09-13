@@ -319,13 +319,23 @@ jobs:
 
   gates:
     # The single required status check on the default branch, pinned there to
-    # the GitHub Actions app: green only when every gate is. !cancelled() so a failed dependency
-    # produces a red check here rather than a skipped one, while a
-    # superseded (cancelled) PR run does not publish a spurious red. The
-    # arity floor keeps a gate dropped from `needs:` from shrinking coverage
-    # silently: zero (or four) results iterating to success is the same
-    # found-nothing-is-a-pass shape every other gate refuses. Bump it with
-    # every gate added to `needs:`; it was 4 before the js gate (ADR 010).
+    # the GitHub Actions app: green only when every gate is. `!cancelled()`
+    # only guards this job's OWN cancellation, not its dependencies'; it
+    # does NOT, by itself, keep a superseded (cancelled) run from publishing
+    # a spurious red (issues #183, #209): when a newer push cancels an
+    # in-flight run, `lint`/`spec`/`validate`/`version`/`js` come back
+    # `cancelled`, this job still runs (nothing cancelled it specifically),
+    # and a loop that only checked for `success` failed on that. The step
+    # below fixes the actual behavior: a real `failure` (or a `skipped`
+    # needed job, which is not a success for a required check either) still
+    # fails the loop, but when every non-success result is `cancelled` and
+    # nothing failed outright, it exits 0 rather than publish a red check
+    # for a run nobody should act on: the replacement run's own result is
+    # the one that matters. The arity floor keeps a gate dropped from
+    # `needs:` from shrinking coverage silently: zero (or four) results
+    # iterating past the loop is the same found-nothing-is-a-pass shape
+    # every other gate refuses. Bump it with every gate added to `needs:`;
+    # it was 4 before the js gate (ADR 010).
     needs: [lint, validate, spec, js, version]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -336,14 +346,23 @@ jobs:
         run: |
           echo "gate results: $RESULTS"
           n=0
+          saw_cancelled=0
           for r in $RESULTS; do
             n=$((n + 1))
-            if [ "$r" != "success" ]; then
-              echo "a gate did not succeed"
-              exit 1
-            fi
+            case "$r" in
+              success) ;;
+              cancelled) saw_cancelled=1 ;;
+              *)
+                echo "a gate did not succeed (result: $r)"
+                exit 1
+                ;;
+            esac
           done
           if [ "$n" -ne 5 ]; then
             echo "expected 5 gate results, got $n"
             exit 1
+          fi
+          if [ "$saw_cancelled" -eq 1 ]; then
+            echo "every non-success dependency was cancelled: this run was superseded by a newer push to the same ref. Standing down with a green exit rather than publishing a red gates check nobody should act on; the newer run's own gates result is the one that matters."
+            exit 0
           fi
