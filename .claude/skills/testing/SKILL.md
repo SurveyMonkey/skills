@@ -9,11 +9,6 @@ This is the strategy the gates enforce. The gate commands themselves (`scripts/c
 shellspec, vitest, ShellCheck) and the rules about suppressing a linter finding live in the root
 [CLAUDE.md](../../../CLAUDE.md); nothing here repeats them.
 
-Structure adapted from the TDD skill at
-<https://github.com/mattpocock/skills/tree/main/skills/engineering/tdd>, with every example
-rewritten in this repository's idiom: typed commands with JSON contracts, vitest, an injected
-`gh` client, and the shellspec suite over the bash that remains.
-
 Paired worked examples from this suite: [tests.md](tests.md). Mocking: [mocking.md](mocking.md).
 
 ## Seams
