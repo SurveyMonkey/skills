@@ -335,9 +335,6 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
 
 ## Open Questions
 
-- **Where the TypeScript tests live**: `spec/` alongside the shellspec files, or `src/**/*.test.ts`
-  beside the code. Decided in #214 and recorded there; it changes the vitest include globs and
-  nothing else.
 - **Whether any `src` file legitimately cannot reach 100 coverage.** The policy (ADR 012) already
   answers what happens when one does: exclusion by name with a stated reason, never a lowered
   number, and never below the 95 floor. Which files, if any, is answered by the code as it lands.
@@ -363,6 +360,9 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
   beside its successor: two sources of truth for one behavior is worse than either alone, which is
   the rule ADR 010 already applied to the dispatch script's textual pins.
 - **The `testing` skill stays the policy**, amended rather than replaced (#216).
+- **The TypeScript tests live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`, with the
+  existing `path-spec` rule applying to them unchanged. Settled in #216's decision comment rather
+  than in #214, which this constrains: #214's vitest include globs follow from it.
 
 To be spawned as this RFC executes:
 

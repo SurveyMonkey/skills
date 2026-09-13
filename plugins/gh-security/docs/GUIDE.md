@@ -102,7 +102,7 @@ been written yet ([#171](https://github.com/SurveyMonkey/skills/issues/171)).
 10-minute ceiling cannot wrap a control install plus a fix install (field runs: ~4 minutes each,
 up to ~17 minutes total) and the remediation ladder needs a seam where judgment can escape to the
 agent. The subcommands, the exit-code contract and the option surface are stated once, in the
-script's own header (`common/fix-group.sh:1-50`); restating them here is how the two drift.
+script's own header (`common/fix-group.sh:1-76`); restating them here is how the two drift.
 
 What that header does not say, and what belongs here:
 
@@ -202,37 +202,38 @@ What that header does not say, and what belongs here:
   against the whole tree**: that cannot be read off the diff alone, so the driver counts the family
   in the union of both maps and refuses to sample when that count exceeds the number that moved.
 - **A `resolved_versions` payload that found nothing is a hard error, not an empty list.**
-  `adapter_field ... present` asserts the KEY, and `[ .versions[]?.version ]` turns an absent or
-  mistyped `versions` into `[]` because `?` swallows the type error by design. That `[]` becomes
-  both the baseline and the after-removal list, so the delta is empty — and an empty delta is this
-  flow's documented cue for `removable`. A parser that found nothing would recommend a deletion
-  with no advisory query run, which is the repo's headline rule inverted in the one driver whose
-  output deletes things. `fix-group.sh`'s `line_versions` hard-errors on the identical payload for
-  the identical reason.
+  Asserting that the `versions` key is present is not asserting that it holds versions: read
+  leniently, an absent or mistyped `versions` collapses to an empty list rather than raising. That
+  empty list becomes both the baseline and the after-removal list, so the delta is empty, and an
+  empty delta is this flow's documented cue for `removable`. A parser that found nothing would
+  recommend a deletion with no advisory query run, which is the repo's headline rule inverted in
+  the one driver whose output deletes things. `fix-group.sh` hard-errors on the identical payload
+  for the identical reason.
 - **The advisory cache is a payload like any other, and it outlives the process.**
   `$WORK/advisories/` is read by a later invocation than the one that wrote it, so it is written
-  temp-plus-`mv` (as `state_set` writes the state file) and validated on read by the same function
-  the fresh query goes through — object-ness, all five promised fields, and `verdict` being one of
+  to a temporary path and renamed into place, as the state file is, and validated on read by the
+  same check the fresh query goes through — object-ness, all five promised fields, and `verdict` being one of
   the four values `check-advisories.sh` emits. A torn entry read blind dies in the
   parse with nothing to show for it: the checkpoint contract's own `needs_judgment`, manufactured out
   of a half-written file.
-- **There is no `require_json` helper, and the reason is not that it never fired.** It did: a failed
-  parse produces nothing at all, and nothing is not JSON. What it could not do is say
-  anything useful — "is this JSON?" passes for `null`, for `[]` and for every wrong-shaped value,
-  so on a payload it reported the wrong problem and on an internal capture it reported the right
-  problem too late to name which step produced it. Both halves are now handled where they belong.
-  A payload ENTERING the script is validated against **the shape its caller reads**:
-  `state_json`'s predicate, `rv_versions`, `advisory_validate`. A capture PRODUCED here fails the
-  phase at the step that produced it, so the diagnosis names that step instead of whichever
-  check the empty value happened to trip next.
+- **There is no one generic "is this JSON?" check, and the reason is not that it never fired.** It
+  did: a failed parse produces nothing at all, and nothing is not JSON. What it could not do is
+  say anything useful, because "is this JSON?" passes for `null`, for `[]` and for every
+  wrong-shaped value, so on a payload it reported the wrong problem and on an internal capture it
+  reported the right problem too late to name which step produced it. Both halves are now handled
+  where they belong. A payload ENTERING the driver is validated against **the shape its caller
+  reads**: the state file against its reader's predicate, a `resolved_versions` payload against
+  the versions its caller lists, a cached advisory against the five fields it promises. A capture
+  PRODUCED here fails the phase at the step that produced it, so the diagnosis names that step
+  instead of whichever check the empty value happened to trip next.
 - **A container check is not a shape check, and the difference recommends deletions.**
-  `state_json '.findings' 'type == "array"'` asserted the box. A `tested` finding whose
+  Asserting that `findings` is an array asserted the box. A `tested` finding whose
   `attributable_versions` came back a string, an object or `null` is not `[]`, so it skipped the
-  empty-delta arm, entered the advisory loop, and iterating it errored there — the loop was
-  fed nothing, its body never ran, `verdicts` stayed `[]`, and **`all` over an empty array is
+  empty-delta arm, entered the advisory loop, and iterating it errored there: the loop was fed
+  nothing, its body never ran, `verdicts` stayed `[]`, and **"all of them" over an empty list is
   `true`**. The pin earned `removable` with `advisory_verdict: "safe"` and no advisory query run
-  at all, which in `pr` mode is a deletion in a pull request. `FINDINGS_SHAPE` is therefore the
-  shape the callers read, down to `collateral_changes` entries carrying a boolean `judged` — and
+  at all, which in `pr` mode is a deletion in a pull request. The findings shape that is validated
+  is therefore the shape the callers read, down to `collateral_changes` entries carrying a boolean `judged` — and
   `judge` additionally refuses a non-empty collateral list in which nothing was judged, because an
   empty verdict list collapses to `safe`, the strongest claim available about packages nobody
   looked at.
@@ -245,8 +246,8 @@ What that header does not say, and what belongs here:
   same false claim was reachable with no `test-pin` call at all. And `judge_done` is cleared by
   every `record_finding`, because a `test-pin` run after a judgment leaves that pin `tested` and
   `together` selects on status — the pin would be dropped from a candidate set the agent believes
-  is complete. **Every** write to `findings` goes through `set_findings`, which clears the flag:
-  the one that did not was `baseline`'s bulk write, so a second `baseline` after a completed
+  is complete. **Every** write to `findings` goes through the one setter that clears the flag:
+  the write that did not was `baseline`'s bulk write, so a second `baseline` after a completed
   judgment reset the findings to its own refused set while `judge_done` stayed true and
   `together` reported `no removable pins found` over an audit it had just discarded. And `judge`
   counts the pins the baseline did NOT refuse, never every testable pin: counting all of them
