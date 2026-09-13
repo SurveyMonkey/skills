@@ -5,10 +5,10 @@
 # hand with `pnpm exec lefthook install`.
 #
 # pre-commit runs only the gates that are cheap: ShellCheck over staged shell
-# files, `claude plugin validate --strict` when a manifest is staged, Biome
-# over the staged JSON, .mjs and .ts, and `tsc -p` when TypeScript or its
-# configuration is staged. None of them runs a suite. #219 adds its own step
-# here as its toolchain lands.
+# files, `tsc -p` when TypeScript or its configuration is staged, Biome over
+# the staged JSON, .mjs and .ts, and `claude plugin validate --strict` when a
+# manifest is staged. None of them runs a suite. #219 adds its own step here
+# as its toolchain lands.
 #
 # pre-push runs nothing. CI is the enforcement boundary (ADR 005): the
 # shellspec and vitest suites need tooling a fresh clone may not have
