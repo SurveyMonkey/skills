@@ -219,8 +219,8 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 514 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
 | 520 | still allows two lines of the same package to run together | judgment | - |
 | 533 | ties the reap to the result being in hand, not to a completion notification | mechanical | reap-batch.sh |
-| 540 | no longer claims in scripts/CLAUDE.md that the reap runs on each completion | mechanical | reap-batch.sh |
-| 547 | keeps the never-prune rule in scripts/CLAUDE.md on the entitlement, not the timing | judgment | - |
+| 540 | no longer claims in the plugin guide that the reap runs on each completion | mechanical | reap-batch.sh |
+| 547 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
 | 553 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
 | 559 | records the widened pull-request read window in ADR 003 | judgment | - |
 | 568 | no longer describes the fix agent as running from a rolling pool | judgment | - |
@@ -230,7 +230,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 599 | rests the decision on the harness already being node | judgment | - |
 | 605 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
 | 613 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
-| 619 | forbids a plugin script from calling into the workflow file | judgment | - |
+| 619 | forbids the shipped code from importing the workflow file | judgment | - |
 
 ### `spec/audit_pins_rules_spec.sh` — 56 pins (53 judgment, 3 mechanical)
 

@@ -2,7 +2,7 @@
 
 Claude Code plugin marketplace. Installation and plugin overview: [README.md](README.md);
 structure: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Script conventions: [plugins/gh-security/scripts/CLAUDE.md](plugins/gh-security/scripts/CLAUDE.md).
+Plugin conventions and domain rules: [plugins/gh-security/docs/GUIDE.md](plugins/gh-security/docs/GUIDE.md).
 
 ## Releasing a plugin
 
@@ -46,7 +46,9 @@ The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
 then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
 buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). That is a dev
-and CI dependency only; the shipped plugin *scripts* remain `bash` + `jq` + `gh`.
+and CI dependency only; the TypeScript the plugin ships imports nothing outside the plugin, and
+the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`
+([ADR 012](docs/adr/012-typescript-on-node-22-18.md)).
 
 Every quality gate (shellspec suite, ShellCheck, `claude plugin validate --strict`, the vitest
 suite with its coverage floor, and the plugin version gate) runs through one entry point,

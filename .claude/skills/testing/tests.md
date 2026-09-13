@@ -3,6 +3,13 @@
 Every example below is real and cited by path. The bad ones are not hypotheticals: each is a shape
 this suite shipped, and each is paired with what fixed it.
 
+**A PR that deletes a cited spec replaces the citation with its successor example, in the same
+PR.** The port retires these files as their replacements land
+([#223](https://github.com/SurveyMonkey/skills/issues/223),
+[#231](https://github.com/SurveyMonkey/skills/issues/231)), and a citation whose file is gone
+takes the lesson with it. `spec/testing_skill_spec.sh` catches the dangling path; only the PR that
+removed the file knows what replaced it.
+
 ## Good
 
 ### The expected value comes from a published spec

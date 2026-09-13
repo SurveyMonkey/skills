@@ -21,7 +21,7 @@
 Describe 'env_prefix as an opaque seam (issue #135)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
-  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
+  CONV="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/GUIDE.md"
   FIXER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   AUDITOR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
 
@@ -37,7 +37,7 @@ Describe 'env_prefix as an opaque seam (issue #135)'
 
   Describe 'the definition is a command prefix and nothing more'
     Parameters
-      "$CONV"    'scripts/CLAUDE.md'
+      "$CONV"    'the plugin guide'
       "$SKILL"   'SKILL.md phase 1'
       "$CMD"     'the audit-pins command'
     End
@@ -187,7 +187,7 @@ Describe 'env_prefix as an opaque seam (issue #135)'
 
   Describe 'the failure class survives the de-coupling'
     Parameters
-      "$CONV"  'scripts/CLAUDE.md'
+      "$CONV"  'the plugin guide'
       "$SKILL" 'SKILL.md phase 1'
       "$CMD"   'the audit-pins command'
     End

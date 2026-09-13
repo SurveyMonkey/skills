@@ -34,7 +34,7 @@
 Describe 'phase 6 dispatches one workflow (issue #175)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-  SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/CLAUDE.md"
+  SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/GUIDE.md"
   REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
   ADR010="$SHELLSPEC_PROJECT_ROOT/docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md"
@@ -537,14 +537,14 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
 
     # pin: mechanical, retired by reap-batch.sh
-    It 'no longer claims in scripts/CLAUDE.md that the reap runs on each completion'
+    It 'no longer claims in the plugin guide that the reap runs on each completion'
       no_completion_reap() { grep -c 'on each completion' "$1" || true; }
       When call no_completion_reap "$SCRIPTS_DOC"
       The status should be success
       The output should equal '0'
     End
 
-    It 'keeps the never-prune rule in scripts/CLAUDE.md on the entitlement, not the timing'
+    It 'keeps the never-prune rule in the plugin guide on the entitlement, not the timing'
       When call phrase_in "$SCRIPTS_DOC" 'the local-scope[ ]*rule is what makes it safe, not the timing'
       The status should be success
       The output should equal '1'
@@ -608,7 +608,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    # The scripts/CLAUDE.md rule is still absolute for what it governs; what
+    # The plugin guide's rule is still absolute for what it governs; what
     # it gained is a statement of what that is.
     It 'scopes the scripts dependency rule to what runs on a user machine'
       When call blob_in "$SCRIPTS_DOC" 'this rule governs what runs on a user.s machine'
@@ -616,8 +616,8 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    It 'forbids a plugin script from calling into the workflow file'
-      When call blob_in "$SCRIPTS_DOC" 'Nothing here may call it, import it, or acquire a runtime because it exists'
+    It 'forbids the shipped code from importing the workflow file'
+      When call blob_in "$SCRIPTS_DOC" 'Nothing under .bin/. or .src/. imports that file'
       The status should be success
       The output should equal '1'
     End
