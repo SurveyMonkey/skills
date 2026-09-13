@@ -20,7 +20,7 @@ to touch (see Hard rules).
 **Phases 1 to 5 and Cleanup are a script, not your procedure.** `common/fix-group.sh` runs the
 worktree setup, the classification, the control-install baseline, the apply-install-validate
 ladder, the merge-risk score and the cleanup, and it is the only place that sequence exists
-(`plugins/gh-security/docs/CLAUDE.md`, "The fix driver owns phases 1 to 5"). You call its steps, you apply judgment
+(`plugins/gh-security/docs/GUIDE.md`, "The fix driver owns phases 1 to 5"). You call its steps, you apply judgment
 exactly where it hands control back, and you write the pull request. **Re-deriving any of its
 procedure here is a bug**, not a fallback.
 
@@ -118,7 +118,7 @@ driver hands back, plus the PR prose. Do not reimplement what the scripts do.
   dispatching any agent for this repo) and never run `git worktree prune`, `git gc`, or any other
   repository-wide command: sibling agents — another line of your package, another package — may
   share this `repo_root` right now, and those commands reach their state. See
-  `plugins/gh-security/docs/CLAUDE.md`, "Repo-global git state belongs to the orchestrator".
+  `plugins/gh-security/docs/GUIDE.md`, "Repo-global git state belongs to the orchestrator".
 - **When `env_prefix` is present in your dispatch, it runs in front of every `gh`, `git`,
   package-manager, and adapter-script invocation** — and it composes with the locator each
   command already carries, going **after** the `cd`: the prefix injects environment without
@@ -136,7 +136,7 @@ driver hands back, plus the PR prose. Do not reimplement what the scripts do.
   **When `env_prefix` is absent, run every one of those commands bare,
   with no wrapping of your own**, and pass no `--env-prefix` to the
   driver. An absent `env_prefix` means your dispatcher was given none, which is the ordinary
-  ambient-login case (see `plugins/gh-security/docs/CLAUDE.md`, "`env_prefix` is an opaque, optional seam" for why
+  ambient-login case (see `plugins/gh-security/docs/GUIDE.md`, "`env_prefix` is an opaque, optional seam" for why
   the field matters and what a missing one looks like: `git fetch` reporting
   `repository not found`, `git commit` failing on a missing author identity, or a package-manager
   install 401ing against the wrong registry token). The snippets below omit `env_prefix` for
@@ -454,7 +454,7 @@ The driver states these; you interpret them.
 
 **`common/render-pr.sh` renders the commit message, the PR body, the labels, and the `gh pr
 create` call — the same relationship phases 1 to 5 have with `fix-group.sh`.** It is the single
-home of that rendering (`plugins/gh-security/docs/CLAUDE.md`): re-deriving the commit-message template, the PR body
+home of that rendering (`plugins/gh-security/docs/GUIDE.md`): re-deriving the commit-message template, the PR body
 sections, the label colors, or the race-tolerant label-creation logic here is a bug, not a
 fallback. You supply two things it cannot: the git operations themselves (commit, push, the PR),
 and the narrative two of its rendered sections require, described below.

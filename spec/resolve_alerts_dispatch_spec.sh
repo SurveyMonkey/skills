@@ -34,7 +34,7 @@
 Describe 'phase 6 dispatches one workflow (issue #175)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-  SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/CLAUDE.md"
+  SCRIPTS_DOC="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/docs/GUIDE.md"
   REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
   ADR010="$SHELLSPEC_PROJECT_ROOT/docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md"

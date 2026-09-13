@@ -11,5 +11,5 @@ Anything else still here is mid-port and is being replaced by a TypeScript comma
 `../bin/` and `../src/`; the rollout table in RFC 002 says what has moved.
 
 **The conventions, the domain rules and the testing policy are one document,
-[`plugins/gh-security/docs/CLAUDE.md`](../docs/CLAUDE.md)**, whose "Bash during the port" section
+[`plugins/gh-security/docs/GUIDE.md`](../docs/GUIDE.md)**, whose "Bash during the port" section
 carries the bash 3.2 and jq 1.7 targets these two scripts are written to.

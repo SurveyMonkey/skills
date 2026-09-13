@@ -106,7 +106,7 @@ it: a threshold satisfied by an empty file set is this repository's signature bu
 not repealed, it is made irrelevant to the question it was drawn for: `workflows/fix-groups.mjs`
 stays exactly as it is, evaluated by the harness, and nothing in the port imports it or is imported
 by it. `notice-scan.sh` and `detect-capacity.sh` stay bash (RFC 002, Non-Goals). The domain rules
-in `plugins/gh-security/docs/CLAUDE.md` remain the requirements document; only its bash-and-jq
+in `plugins/gh-security/docs/GUIDE.md` remain the requirements document; only its bash-and-jq
 mechanism sections are rewritten ([#216](https://github.com/SurveyMonkey/skills/issues/216)).
 
 ## Consequences
