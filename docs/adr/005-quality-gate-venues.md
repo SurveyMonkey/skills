@@ -53,13 +53,21 @@ are discovered (`git ls-files`, `plugins/*/` enumeration, `spec/*_spec.sh`), nev
 and **empty discovery is a hard failure in every gate**, including a floor on *executed*
 examples (total minus skips) read from the shellspec summary, because of fact 1.
 
-**Local hooks split by cost.** Committed `.githooks/`, activated once per clone with
+~~**Local hooks split by cost.** Committed `.githooks/`, activated once per clone with
 `git config core.hooksPath .githooks` (a relative path, so the hooks follow linked worktrees).
 `pre-commit` runs the two ~2s gates; the suite runs in `pre-push` (parallel, since a human is
 waiting). A 39s pre-commit hook trains people to `--no-verify`, and a hook routinely bypassed is
 worth less than no hook. A commit touching nothing the gates read skips them; a missing tool
 warns loudly, names the install command, states that CI enforces, and continues. Neither is a
-silent skip.
+silent skip.~~ **(amended in [#249](https://github.com/SurveyMonkey/skills/issues/249): local
+hooks are staged-only and never run a suite.** [lefthook](https://lefthook.dev) (`lefthook.yml`),
+installed by `pnpm install` or by hand with `pnpm exec lefthook install`, runs `pre-commit`
+scoped to staged files: ShellCheck over staged shell files, and `claude plugin validate --strict`
+when a manifest is staged. `pre-push` runs nothing. The shellspec suite that used to run in
+`.githooks/pre-push` is not ported; CI is the only venue for it now, and for the vitest suite,
+same as it already was for the version gate. A missing tool still warns loudly, names the install
+command, and states that CI enforces, exactly as `.githooks/pre-commit` did; neither branch is a
+silent skip.)
 
 **CI enforces every gate**, in `.github/workflows/gates.yml`, because hooks can be uninstalled,
 skipped, or absent on a fresh clone. Jobs `lint`, `validate`, and `spec` give per-gate failure
@@ -92,8 +100,14 @@ had, narrowed to it.
 this Decision rests on two grounds: that lefthook adds a dependency to a repo whose stated
 constraint is `bash`, `jq` and `gh`, and that `core.hooksPath` does the job with none. ADR 012
 removes the first, because a deterministic layer in TypeScript needs node anyway. It says nothing
-about the second, which stands on its own and is answered, on the different ground of hook speed,
-by [#249](https://github.com/SurveyMonkey/skills/issues/249). The refusal is not reversed here.
+about the second, which stands on its own and is answered, ~~on the different ground of hook
+speed, by [#249](https://github.com/SurveyMonkey/skills/issues/249). The refusal is not reversed
+here.~~ **on the different ground of hook speed, by
+[#249](https://github.com/SurveyMonkey/skills/issues/249): a hook that stays fast by running only
+staged-file gates is worth having, and `core.hooksPath` pointed at committed shell scripts cannot
+express "staged files only" the way lefthook's `glob` does without duplicating that logic by
+hand. The refusal is reversed on that ground alone; see the lefthook adoption at the end of this
+Decision.**
 
 **Tool versions are pinned in CI and asserted after install**, to the versions the hooks run
 locally: ShellCheck 0.11.0 from the release tarball, shellspec 0.28.1 installed from its tag ref,
@@ -178,8 +192,18 @@ are to merge the stack as a unit or to put the bump in the bottom layer. No bypa
 exists, and none should: a gate whose whole purpose is catching an omission cannot ship with a
 switch for omitting it.
 
-lefthook, proposed on #10, is not used: it adds a dependency to a repo whose stated constraint is
-`bash`, `jq`, and `gh`, and `core.hooksPath` does the job with none.
+~~lefthook, proposed on #10, is not used: it adds a dependency to a repo whose stated constraint is
+`bash`, `jq`, and `gh`, and `core.hooksPath` does the job with none.~~ **(amended in
+[#249](https://github.com/SurveyMonkey/skills/issues/249): lefthook is adopted.** ADR 012 removed
+the dependency objection, since a TypeScript deterministic layer needs node regardless. The
+`core.hooksPath` objection stood on its own until now: it is answered by hook speed, not by the
+dependency question. `core.hooksPath` can only point at committed scripts that see the whole
+working tree, so a hook that stays fast by scoping to staged files has to build that scoping by
+hand, in shell, per gate — which is exactly the `.githooks/pre-commit` scope-check comment block
+this ADR's "Local hooks split by cost" paragraph describes above. lefthook's `glob` filter on
+`{staged_files}` is that scoping, declared once per command instead of hand-rolled per hook, and
+it is the entire reason this issue exists: hooks stay staged-only and never run a suite, CI is the
+enforcement boundary exactly as before, and lefthook adds no new gate and no new suite venue.)
 
 ### Gate-change checklist
 

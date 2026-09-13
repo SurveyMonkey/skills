@@ -1,0 +1,50 @@
+# lefthook.yml: local git hooks, staged-only and fast (ADR 005, amended by
+# #249). Installed by `pnpm install` (lefthook's own postinstall runs
+# `lefthook install`, via `pnpm.onlyBuiltDependencies` in package.json,
+# since pnpm 10 blocks a dependency's lifecycle scripts otherwise) or by
+# hand with `pnpm exec lefthook install`.
+#
+# pre-commit runs only the gates that are staged-only and cheap: ShellCheck
+# over staged shell files, and `claude plugin validate --strict` when a
+# manifest is staged. Neither runs a suite. #250, #214 and #219 each add
+# their own step here (Biome, tsc, vitest related) as their own toolchains
+# land; this issue deliberately ships none of those.
+#
+# pre-push runs nothing. CI is the enforcement boundary (ADR 005): the
+# shellspec and vitest suites need tooling a fresh clone may not have
+# (shellspec, an installed node_modules), and a slow pre-push hook trains
+# people straight to --no-verify. This replaces .githooks/pre-push, which
+# ran both suites there; #249 removes that step rather than porting it.
+#
+# Bypass for one commit or push with --no-verify. CI enforces regardless.
+
+pre-commit:
+  commands:
+    # Glob matches check.sh's own shell_targets discovery (scripts/check.sh,
+    # `git ls-files -- '*.sh'`), so a file this step skips is never one the
+    # lint gate would have covered, and vice versa.
+    shellcheck:
+      glob: '*.sh'
+      run: |
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck {staged_files}
+        else
+          printf '\n!! pre-commit: shellcheck is not installed, so the lint gate did not run here.\n' >&2
+          printf '!! CI enforces it on the pull request. Install locally with:\n!!   brew install shellcheck\n\n' >&2
+        fi
+    plugin-validate:
+      glob: '{.claude-plugin/**,plugins/*/.claude-plugin/**}'
+      run: |
+        if command -v claude >/dev/null 2>&1; then
+          ./scripts/check.sh validate
+        else
+          printf '\n!! pre-commit: claude (the Claude Code CLI) is not installed, so the validate gate did not run here.\n' >&2
+          printf '!! CI enforces it on the pull request. Install locally with:\n!!   curl -fsSL https://claude.ai/install.sh | bash\n\n' >&2
+        fi
+
+pre-push:
+  # Deliberately empty. See the file header: no suite runs on push, CI
+  # enforces both, and a hook that pays for a suite trains people to
+  # --no-verify. This is the whole reason #249 exists over keeping
+  # .githooks/pre-push, which paid that cost locally.
+  commands: {}

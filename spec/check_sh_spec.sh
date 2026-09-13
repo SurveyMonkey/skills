@@ -167,6 +167,10 @@ Describe 'scripts/check.sh'
       mkdir -p spec/js bin coverage node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
+      # cmd_js checks for lefthook.yml itself (its own empty-discovery-style
+      # refusal, #249) before ever reaching the stub pnpm below, so every
+      # example here needs one on disk regardless of what it is testing.
+      printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
       git add -A
       # cmd_js clears any stale summary before running the suite, so the
       # stub pnpm is what publishes the one each example wants — exactly where
@@ -174,6 +178,10 @@ Describe 'scripts/check.sh'
       # `pnpm test` publishes whatever summary the example asked for, and
       # fails if the example asked it to. Both halves matter: a stub that
       # always exits 0 never exercises the failing-suite path at all.
+      # `pnpm exec lefthook validate` (cmd_js's own gate on lefthook.yml)
+      # goes through this same stub, and always exits 0 here: the
+      # examples in this Describe are about the coverage floor, not
+      # lefthook.yml itself.
       cat > bin/pnpm <<'STUB'
 #!/bin/sh
 [ -f want.json ] && { mkdir -p coverage; cat want.json > coverage/coverage-summary.json; }

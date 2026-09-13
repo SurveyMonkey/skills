@@ -1,9 +1,10 @@
 # The quality gates (root CLAUDE.md "Testing", ADR 005), run on every PR and
-# on main. The committed .githooks/ run the three local ones via the same
-# entry point, scripts/check.sh; CI is the enforcement boundary because hooks
-# can be uninstalled, skipped, or absent on a fresh clone, and it is the only
-# venue for the version gate, whose comparison base a hook cannot know
-# (ADR 005).
+# on main. lefthook (lefthook.yml) runs the staged-only local subset of the
+# fast gates via the same entry point, scripts/check.sh; CI is the
+# enforcement boundary because hooks can be uninstalled, skipped, or absent
+# on a fresh clone, and it is the only venue for the version gate (and, per
+# #249, for the shellspec and vitest suites), whose comparison base or
+# tooling a hook cannot know or need (ADR 005).
 #
 # No `paths:` filters, ever: the aggregate `gates` job IS a required status
 # check on the default branch (protect-default ruleset), and a PR filtered out
