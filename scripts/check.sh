@@ -86,10 +86,12 @@ cd "$repo_root"
 
 # Discovery, never a written-down list: git's index is the source of truth,
 # so a newly staged script is covered the moment it exists and this script
-# lints itself. The .githooks/ entries carry no .sh suffix, hence the second
-# pathspec.
+# lints itself. `.githooks/` used to need a second pathspec here (its entries
+# carried no .sh suffix); #249 deletes that directory in favor of
+# lefthook.yml, whose commands live inline in YAML rather than as separate
+# shell files, so the plain glob is enough again.
 shell_targets() {
-  git ls-files -- '*.sh' '.githooks/*'
+  git ls-files -- '*.sh'
 }
 
 cmd_targets() {

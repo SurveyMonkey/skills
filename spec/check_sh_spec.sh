@@ -50,14 +50,6 @@ Describe 'scripts/check.sh'
       The lines of output should eq 2
     End
 
-    It 'lists .githooks entries despite their missing .sh suffix'
-      mkdir -p .githooks
-      touch .githooks/pre-commit
-      git add .githooks/pre-commit
-      When run "$CHECK" targets
-      The output should equal '.githooks/pre-commit'
-    End
-
     It 'discovers from cwd even when the environment carries another GIT_DIR'
       # git exports GIT_DIR to hooks, and inheriting it aims every git call
       # at the hook's repository regardless of cwd; observed live when the
@@ -167,9 +159,11 @@ Describe 'scripts/check.sh'
       mkdir -p spec/js bin coverage node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
-      # cmd_js checks for lefthook.yml itself (its own empty-discovery-style
-      # refusal, #249) before ever reaching the stub pnpm below, so every
-      # example here needs one on disk regardless of what it is testing.
+      # cmd_js's own gate on lefthook.yml (#249) runs after the suite and its
+      # coverage assertion, but still inside this one function, so a missing
+      # lefthook.yml would fail every example below with an unrelated
+      # message. Each needs one on disk regardless of what it is testing;
+      # the lefthook-specific refusals get their own Describe below.
       printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
       git add -A
       # cmd_js clears any stale summary before running the suite, so the
@@ -317,6 +311,64 @@ JSON
       When run "$CHECK" js
       The status should eq 2
       The stderr should include 'pct is Unknown, not a number'
+      The output should include 'coverage measured'
+    End
+  End
+
+  # cmd_js's own gate on lefthook.yml (#249): a config lefthook itself would
+  # reject is a local hook silently never running, the same shape every
+  # empty-discovery refusal above exists to catch. This needs its own stub
+  # pnpm, distinct from "the coverage floor" above, because `pnpm exec
+  # lefthook validate` and `pnpm --silent test` are both invoked through it
+  # and only this Describe cares about the former's exit code.
+  Describe 'the lefthook check in the js gate'
+    lefthook_stub_pnpm() {
+      scratch_repo || return 1
+      mkdir -p spec/js bin coverage node_modules
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      git add -A
+      # `pnpm --silent test` always publishes a fully-covered summary, so
+      # every example here reaches the lefthook check; `pnpm exec lefthook
+      # validate` exits 1 only when want-lefthook-failure is present.
+      cat > bin/pnpm <<'STUB'
+#!/bin/sh
+if [ "$1" = exec ]; then
+  [ -f want-lefthook-failure ] && exit 1
+  exit 0
+fi
+mkdir -p coverage
+cat > coverage/coverage-summary.json <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+exit 0
+STUB
+      chmod +x bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before lefthook_stub_pnpm
+
+    It 'fails when lefthook.yml is missing'
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'lefthook.yml is missing'
+      The output should include 'coverage measured'
+    End
+
+    It 'fails when lefthook rejects the config, whatever the coverage report says'
+      printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
+      : > want-lefthook-failure
+      When run "$CHECK" js
+      The status should not eq 0
+      The status should not eq 2
+      The output should include 'coverage measured'
+    End
+
+    It 'passes when lefthook.yml is present and lefthook accepts it'
+      printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
+      When run "$CHECK" js
+      The status should be success
       The output should include 'coverage measured'
     End
   End

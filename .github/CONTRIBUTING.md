@@ -53,8 +53,9 @@ To request support, open an issue with:
 Local git hooks are [lefthook](https://lefthook.dev) (`lefthook.yml`), installed by `pnpm install`
 or by hand with `pnpm exec lefthook install`.
 
-`pre-commit` runs ShellCheck and `claude plugin validate --strict` over staged files only (~2s);
-`pre-push` runs nothing. Each pre-commit step warns and stands down if its tool is missing; CI
+`pre-commit` runs ShellCheck over staged shell files and `claude plugin validate --strict` when a
+manifest is staged (~2s); `pre-push` runs nothing. Each pre-commit step warns and stands down if
+its tool is missing; CI
 (`.github/workflows/gates.yml`) enforces every gate regardless, hooks installed or not. Run any
 gate directly with `./scripts/check.sh <lint|validate|spec|js|version|fast|all|targets>`. The
 `version` and `spec`/`js` suites have no hook: `version` needs a comparison base only CI can
