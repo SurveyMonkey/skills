@@ -338,10 +338,13 @@ js_coverage_exclude() {
   '
 }
 
-# Every tracked plugins/gh-security/src/**/*.ts file that vitest.config.mjs's
-# own coverage.exclude does not name (ADR 012, #211). Anchored the way
-# ts_targets is: a single `*` still matches a nested file because git
-# ls-files pathspec globbing crosses directory separators.
+# Every tracked TypeScript file the plugin ships, under bin/ and src/, that
+# vitest.config.mjs's own coverage.exclude does not name (ADR 012, #211).
+# Both paths, because the entry point under bin/ is code a user runs and is
+# measured with the rest (#224); the pair matches vitest.config.mjs's own
+# coverage.include. Anchored the way ts_targets is: a single `*` still
+# matches a nested file because git ls-files pathspec globbing crosses
+# directory separators.
 #
 # Discovery refuses on empty here rather than only being caught downstream:
 # js_assert_coverage's own "the report names no files" guard cannot see this
@@ -353,12 +356,12 @@ js_coverage_exclude() {
 # zero discovered spec/js/ test files.
 js_coverage_ts_subjects() {
   local tracked n=0 f
-  tracked=$(git ls-files -- 'plugins/gh-security/src/*.ts')
+  tracked=$(git ls-files -- 'plugins/gh-security/bin/*.ts' 'plugins/gh-security/src/*.ts')
   while IFS= read -r f; do
     if [ -n "$f" ]; then n=$((n + 1)); fi
   done < <(printf '%s\n' "$tracked")
   [ "$n" -gt 0 ] \
-    || die 'no TypeScript files discovered under plugins/gh-security/src/*.ts; refusing to report a pass'
+    || die 'no TypeScript files discovered under plugins/gh-security/{bin,src}/*.ts; refusing to report a pass'
   local excluded
   excluded=$(js_coverage_exclude) \
     || return 1
