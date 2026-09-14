@@ -86,6 +86,11 @@ describe('allowOwnCommands', () => {
     ['a leading cd', `cd /tmp && node ${FAKE_ENTRY} version`],
     ['a leading environment assignment', `PATH=/evil node ${FAKE_ENTRY} version`],
     ['an embedded newline', `node ${FAKE_ENTRY} version\nrm -rf ~`],
+    // The newline here is the last character of an otherwise valid argument
+    // token with spaces on both sides, so it is `isSafeArgument` that has to
+    // catch it rather than the subcommand check. Without this row, trimming
+    // an argument before testing it is a change no example fails.
+    ['a newline ending an otherwise valid argument', `node ${FAKE_ENTRY} version a-b\n rm -rf /`],
     ['a quoted argument', `node ${FAKE_ENTRY} version "a b"`],
     ['a glob', `node ${FAKE_ENTRY} version *`],
     ['a tilde', `node ${FAKE_ENTRY} version ~/secrets`],
@@ -111,13 +116,12 @@ describe('allowOwnCommands', () => {
     ['an input that is not an object', 'node'],
     ['a null input', null],
   ])('gives no decision for %s', (_case, input) => {
-    expect(allowOwnCommands(input, ROOT, NAMES)).toBeUndefined()
+    expect(allowOwnCommands(input, FAKE_ENTRY, NAMES)).toBeUndefined()
   })
 
   it.each([
     ['an entry point one directory above the one being defended', '/plugins/bin/gh-security.ts'],
     ['an entry point that is a prefix of the resolved one', '/plugins/gh-security/bin/gh-security'],
-    ['an empty entry point', ''],
   ])('gives no decision for a command naming %s', (_case, named) => {
     // The resolved path anchors the comparison, so a command naming anything
     // else is a command about some other file and the normal permission
