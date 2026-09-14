@@ -169,7 +169,7 @@ implementation, stay.
 ### Testing
 
 vitest becomes the primary venue and shellspec covers the bash that remains: `notice_scan`,
-`detect_capacity`, `githooks`, `check_sh`, `reference_scrub` and `bash32_parse` (#240). The
+`detect_capacity`, `check_sh`, `reference_scrub` and `bash32_parse` (#240). The
 `testing` skill stays the policy the port follows; #216 replaces only its bash-specific mechanisms
 (the `common_jq` and `adapter_jq` seams, the command-based `gh` mock, the worked example), and
 leaves the language-neutral rules (assert the verdict not the parse, independent expected values,

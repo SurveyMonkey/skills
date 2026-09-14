@@ -711,6 +711,24 @@ through. A spawned process covers the entry point's own behavior and nothing els
 client is mocked per method; `git`, the filesystem and the fixture corpus are real. The skill's
 `mocking.md` is the whole of that rule.
 
+**The harness is four modules under `spec/ts/support/`**
+([#219](https://github.com/SurveyMonkey/skills/issues/219)): `fixtures.ts` copies a committed
+specimen into a scratch directory per example, the vitest twin of `use_fixture`; `gh-mock.ts` is a
+`GhClient` whose every method throws until the example registers a reply or a failure for it;
+`git-repo.ts` builds a temp origin and a clone of it with real `git`; and `parity.ts` runs a bash
+command line and a TypeScript call on one input and reports the first path at which their JSON
+differs. They are test infrastructure, so they are not under `src/` and not in the coverage
+include: measuring them would let an unused helper move the number while no shipped code changed.
+
+**Parity is what licenses a deletion.** A bash script is deleted only after its replacement is
+parity-green on every fixture that covered it
+([RFC 002](../../../docs/rfc/002-typescript-port.md)), and its spec file goes in the same commit,
+because two implementations of one behavior outlive their usefulness the moment one of them is
+authoritative. `spec/ts/parity-semver.test.ts` is the first such run, over `node.sh`'s two semver
+verbs. The runner itself is deleted in
+[#241](https://github.com/SurveyMonkey/skills/issues/241), when there is nothing left to compare
+against.
+
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
 statements), **with 95 as the floor the gate never goes below**, and exclusion by name with a
 stated reason as the only relief
@@ -721,8 +739,10 @@ that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it alr
 
 The suites run in CI through `scripts/check.sh` at the repo root (ADR 005, as amended by ADR 012
 and [#249](https://github.com/SurveyMonkey/skills/issues/249)). Locally, lefthook's pre-commit
-hook runs only the cheap gates (ShellCheck and Biome over staged files, `types` when TypeScript is
-staged, `claude plugin validate --strict` when a manifest is staged); pre-push runs nothing. Fixture
+hook runs only the cheap gates (ShellCheck and Biome over staged files, `types` when TypeScript
+or `tsconfig.json` is staged, the vitest examples related to a staged `.ts` file with the parity
+examples excluded, and `claude plugin validate --strict` when a manifest is staged); pre-push runs
+nothing. Fixture
 tests do not replace verifying against real repositories with live alerts; check both the success
 path and the "parser found nothing" path.
 

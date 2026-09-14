@@ -90,7 +90,7 @@ never a changed-file selection, per the `paths:`-filter prohibition above.)**
 shellspec covers the bash that remains.** RFC 002 moves the deterministic layer to TypeScript, so
 the shellspec suite is no longer where most behavior is covered; after
 [#240](https://github.com/SurveyMonkey/skills/issues/240) the shellspec suite is `notice_scan`,
-`detect_capacity`, `githooks`, `check_sh`, `reference_scrub` and `bash32_parse`. Nothing this ADR
+`detect_capacity`, `check_sh`, `reference_scrub` and `bash32_parse`. Nothing this ADR
 decides about venues changes with the substitution: one entry point, empty discovery as a hard
 failure, an executed-example floor (which vitest needs for the same reason shellspec does), and CI
 as the enforcement boundary. Fact 2 above keeps the macOS leg alive for the same reason it always
