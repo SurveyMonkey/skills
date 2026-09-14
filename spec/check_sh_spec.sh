@@ -494,6 +494,25 @@ JSON
         The status should be success
         The output should include 'coverage measured'
       End
+
+      # js_coverage_exclude reads vitest.config.mjs with node rather than a
+      # second bash-side copy of its exclude array (ADR 012, #211), so a
+      # config that fails to import is this gate's own error path, not just
+      # a hazard traced by hand: it must fail loudly rather than silently
+      # falling back to "nothing excluded".
+      It 'fails when vitest.config.mjs fails to import'
+        cat > vitest.config.mjs <<'CONFIG'
+export default {
+CONFIG
+        git add -A
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+        When run "$CHECK" js
+        The status should eq 2
+        The stderr should include 'could not determine the coverage gate subjects'
+        The output should include 'coverage measured'
+      End
     End
   End
 
