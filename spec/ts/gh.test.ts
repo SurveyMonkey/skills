@@ -501,11 +501,11 @@ describe('createPullRequest', () => {
 describe('a client built with an env_prefix', () => {
   it('runs gh under it', () => {
     const { spawn, seen } = answering({ stdout: '[[]]' })
-    const client = createGhClient({ spawn, envPrefix: parseEnvPrefix('direnv exec /src/app') })
+    const client = createGhClient({ spawn, envPrefix: parseEnvPrefix('run-in exec /src/app') })
     client.listDependabotAlerts({ repo: 'octo/app' })
     client.createLabel({ repo: 'octo/app', name: 'security', color: 'D93F0B', description: 'x' })
     for (const request of seen) {
-      expect(request.command).toBe('direnv')
+      expect(request.command).toBe('run-in')
       expect(request.args.slice(0, 3)).toEqual(['exec', '/src/app', 'gh'])
     }
   })

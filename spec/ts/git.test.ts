@@ -103,11 +103,11 @@ describe('gitRun', () => {
     const { spawn, seen } = recordingSpawn()
     gitRun('/w/fix', ['status', '--porcelain'], {
       spawn,
-      envPrefix: parseEnvPrefix('direnv exec /src/app'),
+      envPrefix: parseEnvPrefix('run-in exec /src/app'),
     })
     expect(seen).toEqual([
       {
-        command: 'direnv',
+        command: 'run-in',
         args: ['exec', '/src/app', 'git', '-C', '/w/fix', 'status', '--porcelain'],
       },
     ])

@@ -7,10 +7,13 @@
 // "`env_prefix` is an opaque, optional seam"). It is a command prefix the
 // user's environment requires, resolved once from session context by the
 // dispatcher and threaded verbatim from there. Nothing here names an
-// environment manager, probes for one, or invents a prefix of its own:
-// `direnv exec <dir>` is one thing a session might supply, and a module that
-// knew that name would be making the assumption the guide forbids. Absent
-// means bare, which is the ordinary single-login case.
+// environment manager, probes for one, or invents a prefix of its own: a
+// per-directory launcher invoked as `<tool> exec <dir>` is one thing a
+// session might supply and an environment-injecting wrapper is another, and a
+// module that knew either name would be making the assumption the guide
+// forbids. `spec/env_prefix_seam_spec.sh` is the executable form of that
+// rule: it greps this whole plugin for such a name. Absent means bare, which
+// is the ordinary single-login case.
 //
 // It wraps a command, never a shell builtin, so it can never stand in for a
 // `cd`: the request keeps its own `cwd`, and the prefix is composed after it.

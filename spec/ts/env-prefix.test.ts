@@ -16,13 +16,13 @@ import {
 describe('withEnvPrefix', () => {
   it('prepends the prefix verbatim, leaving the command as an argument to it', () => {
     expect(
-      withEnvPrefix(parseEnvPrefix('direnv exec /src/app'), {
+      withEnvPrefix(parseEnvPrefix('run-in exec /src/app'), {
         command: 'gh',
         args: ['pr', 'list', '--repo', 'octo/app'],
         cwd: '/src/app',
       }),
     ).toEqual({
-      command: 'direnv',
+      command: 'run-in',
       args: ['exec', '/src/app', 'gh', 'pr', 'list', '--repo', 'octo/app'],
       cwd: '/src/app',
     })
@@ -54,7 +54,7 @@ describe('withEnvPrefix', () => {
   // injects environment and does not chdir, so a request that named a
   // directory still names it.
   it('leaves cwd, stdin and the added environment alone', () => {
-    const wrapped = withEnvPrefix(parseEnvPrefix('direnv exec /src/app'), {
+    const wrapped = withEnvPrefix(parseEnvPrefix('run-in exec /src/app'), {
       command: 'gh',
       args: ['pr', 'create'],
       cwd: '/src/app/.claude/worktrees/fix',
@@ -85,12 +85,12 @@ describe('parseEnvPrefix', () => {
   })
 
   it('splits on whitespace, the way the bash seam it replaces did', () => {
-    expect(parseEnvPrefix('  direnv   exec\t/src/app  ')).toEqual(['direnv', 'exec', '/src/app'])
+    expect(parseEnvPrefix('  run-in   exec\t/src/app  ')).toEqual(['run-in', 'exec', '/src/app'])
   })
 
   // `null` is only the empty answer when it is the whole prefix. A path that
   // happens to contain the word is a path.
   it('keeps a prefix whose arguments merely contain the word null', () => {
-    expect(parseEnvPrefix('direnv exec /src/null')).toEqual(['direnv', 'exec', '/src/null'])
+    expect(parseEnvPrefix('run-in exec /src/null')).toEqual(['run-in', 'exec', '/src/null'])
   })
 })

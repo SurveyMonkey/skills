@@ -183,7 +183,7 @@ describe('the optional readers', () => {
     ['an explicit null', { env_prefix: null }, null],
     ['the empty string', { env_prefix: '' }, null],
     ['a non-string', { env_prefix: 7 }, null],
-    ['a prefix', { env_prefix: 'direnv exec /src/app' }, 'direnv exec /src/app'],
+    ['a prefix', { env_prefix: 'run-in exec /src/app' }, 'run-in exec /src/app'],
   ])('readOptionalString reads %s as %j', (_shape, data, expected) => {
     expect(readOptionalString(loaded(data), 'env_prefix')).toBe(expected)
   })
