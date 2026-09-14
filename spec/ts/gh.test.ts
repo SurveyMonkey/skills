@@ -86,6 +86,10 @@ describe('listDependabotAlerts', () => {
   // what it saw instead of quoting an empty string.
   it.each([
     ['an object carrying no message', '{"documentation_url":"https://docs.github.com/rest"}'],
+    // A `message` that is not a string is quoted by nothing: reading it out
+    // regardless of type puts a number, or an object, where the report
+    // expects the API's own sentence.
+    ['an object whose message is not a string', '{"message":42}'],
     ['a bare string', '"OPEN"'],
     ['a number', '42'],
   ])('reports %s as not being the array of pages it expected', (_shape, stdout) => {
@@ -193,6 +197,21 @@ describe('findOpenPullRequest', () => {
     ).toBeNull()
   })
 
+  // The first hit, not the last. `discover-alerts.sh:425` passes
+  // `--jq '.[0].url // empty'`, and the search can legitimately return more
+  // than one open PR headed from the same branch name across forks; taking
+  // the wrong end names a PR this plugin did not open.
+  it('answers the first hit when the search returns more than one', () => {
+    const { spawn } = answering({
+      stdout:
+        '[{"url":"https://github.com/octo/app/pull/12"},{"url":"https://github.com/octo/app/pull/9"}]',
+    })
+    const client = createGhClient({ spawn })
+    expect(unwrap(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }))).toBe(
+      'https://github.com/octo/app/pull/12',
+    )
+  })
+
   it('is a failure, not a null, when the search itself failed', () => {
     const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
     const client = createGhClient({ spawn })
@@ -260,6 +279,19 @@ describe('viewPullRequest', () => {
     expect(answered.statusCheckRollup).toEqual([])
   })
 
+  // The same two, absent rather than null. They are the documented exception
+  // and nothing else is: `pr-status.sh` reads them this way today, so the
+  // reading is pinned here rather than left to be re-argued from the five
+  // fields below, every one of which hard-fails on absence.
+  it('reads an absent rollup and an absent merge state the same way as a null one', () => {
+    const { mergeStateStatus: _m, statusCheckRollup: _r, ...without } = view
+    const { spawn } = answering({ stdout: JSON.stringify(without) })
+    const client = createGhClient({ spawn })
+    const answered = unwrap(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }))
+    expect(answered.mergeStateStatus).toBeNull()
+    expect(answered.statusCheckRollup).toEqual([])
+  })
+
   // Present and of the promised type, or a hard error, never a default (ADR
   // 001). One row per field, because a missing `isDraft` read straight takes
   // a branch of its own: the PR reports as ready for review.
@@ -280,6 +312,21 @@ describe('viewPullRequest', () => {
         'gh pr view https://github.com/octo/app/pull/12 answered a pull request this client cannot read',
     })
   })
+
+  // The other five have no exception: an absent key is a hard error, so the
+  // mutant that extends the `??` above to another field dies here.
+  it.each([['number'], ['state'], ['isDraft'], ['headRefName'], ['baseRefName']] as const)(
+    'refuses a reply with no %s at all',
+    (field) => {
+      const body: Record<string, unknown> = { ...view }
+      delete body[field]
+      const { spawn } = answering({ stdout: JSON.stringify(body) })
+      const client = createGhClient({ spawn })
+      expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }).outcome).toBe(
+        'error',
+      )
+    },
+  )
 
   it.each([
     ['an array', '[]'],
@@ -457,6 +504,29 @@ describe('createPullRequest', () => {
       ),
     ).toEqual({ url: 'https://github.com/octo/app/pull/13' })
     expect(seen[0]?.args).not.toContain('--label')
+  })
+
+  // The LAST URL, not the first. `render-pr.sh:768` takes `tail -n1` for this
+  // reason: `gh` writes its own chatter before the PR it made, and that
+  // chatter carries URLs of its own, so reading the first one answers with a
+  // link to something that is not the pull request.
+  it('answers the last URL when the output carries more than one', () => {
+    const { spawn } = answering({
+      stdout:
+        'Warning: 2 uncommitted changes\nsee https://github.com/cli/cli/issues/1234 for details\n\nhttps://github.com/octo/app/pull/12\n',
+    })
+    const client = createGhClient({ spawn })
+    expect(
+      unwrap(
+        client.createPullRequest({
+          repo: 'octo/app',
+          head: 'fix/lodash-4',
+          title: 't',
+          bodyFile: '/w/fix/body.md',
+          labels: [],
+        }),
+      ),
+    ).toEqual({ url: 'https://github.com/octo/app/pull/12' })
   })
 
   // An exit 0 with no URL in the output is a success claim backed by nothing,

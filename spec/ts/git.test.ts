@@ -121,11 +121,16 @@ describe('git', () => {
     expect(seen).toEqual([])
   })
 
+  // Quoting git means git's own words, not only the frame around them: a
+  // `describeRun` that always rendered `no output` would still carry
+  // `failed (exit`, so the assertion reaches for what git wrote.
   it('is a failure quoting git when the command exits non-zero', () => {
     const root = repository()
     const envelope = git(root, ['rev-parse', '--verify', 'refs/heads/nope'])
     expect(envelope.outcome).toBe('error')
-    expect(envelope.outcome === 'error' && envelope.error).toContain('failed (exit')
+    const error = envelope.outcome === 'error' && envelope.error
+    expect(error).toContain('git -C')
+    expect(error).toContain('failed (exit 128): fatal: Needed a single revision')
   })
 })
 
