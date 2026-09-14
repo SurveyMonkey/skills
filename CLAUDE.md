@@ -90,8 +90,9 @@ git hooks are [lefthook](https://lefthook.dev), installed by `pnpm install` (or 
 `pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files, the `types`
 gate when TypeScript or `tsconfig.json` is staged (the one step that checks the whole project
 rather than the staged files), the vitest examples related to the staged TypeScript
-(`vitest related`, with coverage off: `related` runs a subset, and the thresholds run on the full
-suite in CI), Biome over the staged JSON, `.mjs` and `.ts`, and
+(`vitest related`, with coverage off and the parity examples excluded: `related` runs a subset,
+and the thresholds and the parity runs both belong to the full suite in CI), Biome over the
+staged JSON, `.mjs` and `.ts`, and
 `claude plugin validate --strict` when a manifest is staged, and pre-push runs nothing: CI is
 the enforcement boundary (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin

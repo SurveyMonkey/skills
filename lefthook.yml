@@ -9,10 +9,11 @@
 # the staged JSON, .mjs and .ts, `claude plugin validate --strict` when a
 # manifest is staged, and the vitest examples RELATED to the staged TypeScript
 # (#219). None of them runs a suite: `related` runs the examples that import
-# what was staged and nothing else, which is seconds rather than the whole
-# collection, and coverage is off because a threshold measured over a subset
-# of the files is a number that means nothing. Coverage runs on the full suite
-# in CI, where it is the gate (ADR 012, #211).
+# what was staged and nothing else, which is under a second, and coverage is
+# off because a threshold measured over a subset of the files is a number that
+# means nothing. Coverage runs on the full suite in CI, where it is the gate
+# (ADR 012, #211). The parity examples are excluded from the step for the same
+# reason the suite is: see the vitest step below.
 #
 # pre-push runs nothing. CI is the enforcement boundary (ADR 005): the
 # shellspec and vitest suites need tooling a fresh clone may not have
@@ -83,11 +84,28 @@ pre-commit:
     # `--coverage.enabled=false` for the reason in the header: thresholds over
     # a subset measure the subset, and the number that gates this repository
     # is the one the full suite produces in CI.
+    #
+    # `--exclude` keeps the parity examples out. A parity file spawns the bash
+    # side once per row (85 processes for spec/ts/parity-semver.test.ts), and
+    # `related` selects it from the shipped modules it imports, not only from
+    # the runner: staging plugins/gh-security/src/semver/versions.ts was
+    # measured here at 9.1s in this step against 0.5s for a source file with
+    # no parity example behind it. Those semver modules are what a port issue
+    # edits, and every later port issue adds another parity file on the same
+    # footing, so this would be a hook that pays for a suite on ordinary work,
+    # which is the thing ADR 005 (as amended by #249) refuses because it
+    # trains people to --no-verify. CI runs them in `check.sh js`. The glob
+    # covers the parity files by name, so a future one is excluded with
+    # nothing to remember; vitest merges the pattern with vitest.config.mjs's
+    # own `exclude` rather than replacing it, and a commit that stages only a
+    # parity file finds no related example and exits 0, the same as any other
+    # file no example imports.
     vitest:
       glob: '*.ts'
       run: |
         if [ -d node_modules ]; then
-          pnpm exec vitest related --run --coverage.enabled=false {staged_files}
+          pnpm exec vitest related --run --coverage.enabled=false \
+            --exclude 'spec/ts/parity-*.test.ts' {staged_files}
         else
           printf '\n!! pre-commit: node_modules is absent, so the vitest step did not run here.\n' >&2
           printf '!! CI enforces it on the pull request. Install locally with:\n!!   pnpm install\n\n' >&2

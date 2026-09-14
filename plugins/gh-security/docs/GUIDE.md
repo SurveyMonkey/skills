@@ -739,9 +739,10 @@ that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it alr
 
 The suites run in CI through `scripts/check.sh` at the repo root (ADR 005, as amended by ADR 012
 and [#249](https://github.com/SurveyMonkey/skills/issues/249)). Locally, lefthook's pre-commit
-hook runs only the cheap gates (ShellCheck and Biome over staged files, `types` and the vitest
-examples related to the staged TypeScript when a `.ts` file is staged, and
-`claude plugin validate --strict` when a manifest is staged); pre-push runs nothing. Fixture
+hook runs only the cheap gates (ShellCheck and Biome over staged files, `types` when TypeScript
+or `tsconfig.json` is staged, the vitest examples related to a staged `.ts` file with the parity
+examples excluded, and `claude plugin validate --strict` when a manifest is staged); pre-push runs
+nothing. Fixture
 tests do not replace verifying against real repositories with live alerts; check both the success
 path and the "parser found nothing" path.
 
