@@ -45,19 +45,7 @@ export default {
       // accommodate it, because a silently-narrowed `include` hides that
       // file's regression the same way an empty file set would (ADR 012,
       // #211).
-      exclude: [
-        // node-floor.ts's own comments explain why: `parseVersion`'s regex
-        // captures three mandatory `(\d+)` groups inside a `^...$` anchored
-        // match, so a successful match always populates all three, and
-        // `assertNodeFloor`'s loop only ever indexes 0, 1 and 2 into two
-        // fixed-length 3-tuples. The `?? 0` after each index exists only
-        // because `noUncheckedIndexedAccess` cannot see either guarantee;
-        // the fallback branch it introduces is provably unreachable at
-        // runtime, and closing it needs a source change (a non-null
-        // assertion in place of the fallback, or a `v8 ignore` comment),
-        // which is out of scope for #211.
-        'plugins/gh-security/src/lib/node-floor.ts',
-      ],
+      exclude: [],
       // `all` keeps a file with no test at all in the denominator at 0%
       // rather than dropping it from the report entirely.
       all: true,
