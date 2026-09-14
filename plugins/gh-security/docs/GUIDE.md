@@ -55,7 +55,7 @@ defaulted.
 | `src/lib/git.ts` | Path containment, worktree queries, refs |
 | `src/lib/gh.ts` | The typed `gh` client |
 | `src/lib/state.ts` | The fix driver's state file, typed |
-| `src/semver/` | Comparison and range facts |
+| `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | The ADR 001 verbs as an in-process interface; `node` handles `npm` alerts |
 | `src/commands/` | Discovery, preflight, scoring, rendering, the drivers |
