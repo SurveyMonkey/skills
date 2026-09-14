@@ -28,9 +28,10 @@ export default {
       // The projection of the shipped workflow, and the TypeScript the plugin
       // ships: the entry point under bin/ is measured with the source under
       // src/, because it is a file a user runs and a file the report never
-      // names is a file whose regression nothing catches (#224). The shipped workflow file itself cannot appear here: it
-      // is never imported (its contract requires a top-level `return`), so no
-      // instrumentation can attribute a line to it: a `//# sourceURL=`
+      // names is a file whose regression nothing catches (#224). The shipped
+      // workflow file itself cannot appear here: it is never imported (its
+      // contract requires a top-level `return`), so no instrumentation can
+      // attribute a line to it: a `//# sourceURL=`
       // pointing at the real path was tried and changes nothing.
       // spec/js/generate.mjs explains the projection and fix-groups.test.mjs
       // asserts it is byte-identical to the regions it copies, which is what
