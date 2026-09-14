@@ -215,7 +215,16 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       // Present and of the promised type, or a hard error, never a default
       // (ADR 001). A field read straight out of an absent key takes a branch
       // of its own downstream: a missing `isDraft` reads as "ready", and a
-      // missing `mergeStateStatus` reads as neither behind nor conflicted.
+      // missing `state` reads as neither open nor merged.
+      //
+      // Two fields are the documented exception, because GitHub itself
+      // answers them null: `mergeStateStatus` while mergeability is still
+      // being computed, and `statusCheckRollup` on a head commit that has no
+      // checks. `pr-status.sh` reads the same two that way today
+      // (`(.statusCheckRollup // []) as $roll`, and `.mergeStateStatus`
+      // straight), so `??` here is the port of that and not a default papering
+      // over an absent key. Every other field is checked below with no
+      // fallback at all.
       const number = fields.number
       const state = fields.state
       const isDraft = fields.isDraft
