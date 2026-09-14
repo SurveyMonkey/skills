@@ -30,20 +30,33 @@ export class NodeFloorError extends Error {
 }
 
 /**
- * A release triple, or `undefined` when the string is not one. The optional
- * `v` is what `process.version` carries; a prerelease or build suffix is
- * stripped and ignored, not because ignoring it is semver-safe in general
- * (`22.18.0-rc.1` sorts below `22.18.0`), but because a real node release
- * binary's `process.version` never carries one — the only caller this floor
- * is ever compared against.
+ * A release triple. The optional `v` is what `process.version` carries; a
+ * prerelease or build suffix is stripped and ignored, not because ignoring
+ * it is semver-safe in general (`22.18.0-rc.1` sorts below `22.18.0`), but
+ * because a real node release binary's `process.version` never carries one,
+ * the only caller this floor is ever compared against.
+ *
+ * Throws a {@link NodeFloorError} naming `version` when it is not that
+ * shape, rather than returning `undefined`: an unreadable version is not
+ * evidence that the floor is met, so there is nothing for a caller to
+ * re-check.
  */
-const parseVersion = (version: string): [number, number, number] | undefined => {
+const parseVersion = (version: string): [number, number, number] => {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)
-  if (match === null) return undefined
-  // The pattern has three capturing groups, so all three are present on a
-  // match; `noUncheckedIndexedAccess` cannot know that, hence the fallbacks,
-  // which a match can never reach.
-  return [Number(match[1] ?? 0), Number(match[2] ?? 0), Number(match[3] ?? 0)]
+  if (match === null) {
+    throw new NodeFloorError(
+      `gh-security could not read a node version from "${version}". ` +
+        `It requires node ${NODE_FLOOR} or newer.`,
+    )
+  }
+  // Three mandatory capturing groups inside an anchored match: a successful
+  // match always populates all three positions, so the tuple shape is
+  // asserted once here rather than defended at each read with a `?? 0`
+  // fallback `noUncheckedIndexedAccess` cannot see is unreachable. The
+  // assertion is erased at runtime, so unlike a fallback it adds no branch
+  // for coverage to find.
+  const [, major, minor, patch] = match as unknown as [string, string, string, string]
+  return [Number(major), Number(minor), Number(patch)]
 }
 
 /**
@@ -52,29 +65,35 @@ const parseVersion = (version: string): [number, number, number] | undefined => 
  * Throws a {@link NodeFloorError} naming both the required and the running
  * version, so a user below the floor is told what to change rather than left
  * with a failure deep inside a fix run. A version string that cannot be read
- * as a release is refused too: an unreadable version is not evidence that the
- * floor is met.
+ * as a release is refused too, by {@link parseVersion}: an unreadable
+ * version is not evidence that the floor is met.
  */
 export const assertNodeFloor = (version: string): void => {
-  const running = parseVersion(version)
-  if (running === undefined) {
-    throw new NodeFloorError(
-      `gh-security could not read a node version from "${version}". ` +
-        `It requires node ${NODE_FLOOR} or newer.`,
-    )
-  }
+  const actual = parseVersion(version)
   // The floor is compared as the triple it is declared as, never re-parsed
-  // out of the string: one source of truth, and no branch for a shape this
-  // file's own literal cannot take.
-  for (let i = 0; i < NODE_FLOOR_PARTS.length; i += 1) {
-    const required = NODE_FLOOR_PARTS[i] ?? 0
-    const actual = running[i] ?? 0
-    if (actual > required) return
-    if (actual < required) {
-      throw new NodeFloorError(
-        `gh-security requires node ${NODE_FLOOR} or newer, but this is node ${version}. ` +
-          'Upgrade node, or run the plugin under a newer release.',
-      )
-    }
-  }
+  // out of the string: one source of truth, and correct for any
+  // non-negative integer triple rather than only while every part stays
+  // under 1000 (a collapsed `major * 1_000_000 + minor * 1_000 + patch`
+  // comparison would carry a patch of 1000 into minor; node has never
+  // shipped one, but this floor check is the thing that runs first on every
+  // machine, so it must not encode that as an unstated assumption).
+  // Lexicographic, and still exactly one branch below: the first non-zero
+  // subtraction decides the order, falling through the `||` chain only
+  // while the more significant parts are equal.
+  if (compareTriples(actual, NODE_FLOOR_PARTS) >= 0) return
+  throw new NodeFloorError(
+    `gh-security requires node ${NODE_FLOOR} or newer, but this is node ${version}. ` +
+      'Upgrade node, or run the plugin under a newer release.',
+  )
 }
+
+/**
+ * Lexicographic comparison of two release triples: negative when `a` sorts
+ * before `b`, positive when after, zero when equal. Major dominates minor
+ * dominates patch, each compared as its own subtraction rather than folded
+ * into one magnitude, so there is no ceiling on any component.
+ */
+const compareTriples = (
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+): number => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]

@@ -59,10 +59,12 @@ repository has no Python and will not gain any. The milestone 7 adapter targets 
 The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
 then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
-buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). That is a dev
+buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The same gate
+covers every tracked `plugins/gh-security/src/**/*.ts` file, with a file that genuinely cannot
+reach 100 excluded by name in `vitest.config.mjs`, never by lowering the number
+([ADR 012](docs/adr/012-typescript-on-node-22-18.md), #211). That is a dev
 and CI dependency only; the TypeScript the plugin ships imports nothing outside the plugin, and
-the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`
-([ADR 012](docs/adr/012-typescript-on-node-22-18.md)).
+the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`.
 
 The TypeScript under `plugins/gh-security/` and the examples under `spec/ts/` are type-checked by
 `tsc -p tsconfig.json`, which emits nothing: direct execution means the file a reviewer reads on

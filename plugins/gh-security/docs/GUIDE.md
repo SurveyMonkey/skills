@@ -686,9 +686,12 @@ stated reason as the only relief
 accommodate one file: a lowered threshold hides every other file's regression behind the file
 that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it already has.
 
-The suites run in CI and in the committed pre-push hook, through `scripts/check.sh` at the repo
-root (ADR 005, as amended by ADR 012). Fixture tests do not replace verifying against real
-repositories with live alerts; check both the success path and the "parser found nothing" path.
+The suites run in CI through `scripts/check.sh` at the repo root (ADR 005, as amended by ADR 012
+and [#249](https://github.com/SurveyMonkey/skills/issues/249)). Locally, lefthook's pre-commit
+hook runs only the cheap gates (ShellCheck and Biome over staged files, `types` when TypeScript is
+staged, `claude plugin validate --strict` when a manifest is staged); pre-push runs nothing. Fixture
+tests do not replace verifying against real repositories with live alerts; check both the success
+path and the "parser found nothing" path.
 
 ## Bash during the port
 
