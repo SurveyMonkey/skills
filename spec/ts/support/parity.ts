@@ -11,6 +11,10 @@
 // the first differing path in a form a reviewer can act on, because "the two
 // disagree" is a verdict nobody can fix from.
 //
+// The rule it serves is in the plugin guide's Testing section, under
+// "Harness": a bash script is deleted only after its replacement is
+// parity-green on every fixture that covered it.
+//
 // This is test infrastructure. It is not under `src/`, it is not in the
 // coverage include, and it is deleted with the last bash script it has
 // anything left to compare against (#241).
