@@ -1,6 +1,6 @@
 {
   "name": "gh-security",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "description": "Resolve Dependabot alerts in parallel for the current repo, or for every repo checked out directly under the current directory, never cloning anything: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and pull requests that open ready for review carrying a computed merge-risk rating and a matching merge-risk label. A separate pin audit, run on its own via /gh-security:audit-pins and preflighted against the repo's own open security PRs, finds overrides no longer needed and opens its own removal PR.",
   "author": {
     "name": "Brian Espinosa",
