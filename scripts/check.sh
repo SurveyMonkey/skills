@@ -12,8 +12,11 @@
 #             sets it, ADR 005). CHECK_SPEC_ONLY, if set, narrows the run to
 #             a whitespace-separated list of spec files instead of the whole
 #             suite (ADR 005 amendment, #208).
-#   js        the vitest suite over the Workflow script, with coverage
-#             thresholds at 100 on all four buckets (ADR 010), then
+#   js        the vitest suite over the Workflow script and the TypeScript
+#             source the plugin ships, with coverage thresholds at 100 on all
+#             four buckets for the workflow projection (ADR 010) and for
+#             every tracked plugins/gh-security/src/**/*.ts file not named in
+#             vitest.config.mjs's own coverage.exclude (ADR 012, #211), then
 #             `lefthook validate` over lefthook.yml. Both need an installed
 #             node_modules; run pnpm install first. lefthook's check lives
 #             here rather than under `validate` because the CI job named
@@ -304,10 +307,73 @@ cmd_spec() {
   rm -f "$report"
 }
 
-# The file the coverage thresholds are about. Named here as well as in
-# vitest.config.mjs's `include`, because the whole hazard below is a report
-# that names nothing: a threshold satisfied by an empty file set.
-JS_COVERAGE_SUBJECT='spec/js/generated/workflow.mjs'
+# The workflow projection's coverage subject (ADR 010). Named here as well as
+# in vitest.config.mjs's `coverage.include`, because the whole hazard below is
+# a report that names nothing: a threshold satisfied by an empty file set.
+JS_COVERAGE_WORKFLOW_SUBJECT='spec/js/generated/workflow.mjs'
+
+# vitest.config.mjs's own `coverage.exclude`, read from that file rather than
+# copied into a second list here: it is the array the runner itself obeys
+# when deciding which src files even appear in the coverage summary, so a
+# bash-side copy could drift from it and this gate would then demand a file
+# vitest never measured (ADR 012, #211). A missing vitest.config.mjs means no
+# exclusions rather than a refusal: the only repo that lacks one is a scratch
+# test repo that never wrote one, and production always ships the real file.
+js_coverage_exclude() {
+  [ -f vitest.config.mjs ] || return 0
+  node -e '
+    const path = require("path");
+    const url = require("url");
+    const target = url.pathToFileURL(path.resolve("vitest.config.mjs")).href;
+    import(target)
+      .then((m) => {
+        const coverage = (m.default && m.default.test && m.default.test.coverage) || {};
+        const exclude = coverage.exclude || [];
+        for (const entry of exclude) process.stdout.write(entry + "\n");
+      })
+      .catch((err) => {
+        process.stderr.write(String((err && err.stack) || err) + "\n");
+        process.exit(1);
+      });
+  '
+}
+
+# Every tracked plugins/gh-security/src/**/*.ts file that vitest.config.mjs's
+# own coverage.exclude does not name (ADR 012, #211). Anchored the way
+# ts_targets is: a single `*` still matches a nested file because git
+# ls-files pathspec globbing crosses directory separators.
+js_coverage_ts_subjects() {
+  local excluded
+  excluded=$(js_coverage_exclude) \
+    || return 1
+  local -a exclude_arr=()
+  local e
+  while IFS= read -r e; do
+    [ -n "$e" ] || continue
+    exclude_arr[${#exclude_arr[@]}]=$e
+  done < <(printf '%s\n' "$excluded")
+  local f skip x
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    skip=0
+    for x in ${exclude_arr[@]+"${exclude_arr[@]}"}; do
+      if [ "$f" = "$x" ]; then
+        skip=1
+        break
+      fi
+    done
+    [ "$skip" -eq 1 ] || printf '%s\n' "$f"
+  done < <(git ls-files -- 'plugins/gh-security/src/*.ts')
+}
+
+# The coverage gate's full subject list: the workflow projection (ADR 010)
+# plus every non-excluded tracked TypeScript source file (ADR 012, #211).
+# Deterministic order: the workflow subject first, then git ls-files' own
+# sorted output.
+js_coverage_subjects() {
+  printf '%s\n' "$JS_COVERAGE_WORKFLOW_SUBJECT"
+  js_coverage_ts_subjects
+}
 
 # A 100% threshold over zero files passes. That is this repo's signature bug
 # class arriving inside the coverage gate, and it is a live risk here rather
@@ -329,6 +395,10 @@ JS_COVERAGE_SUBJECT='spec/js/generated/workflow.mjs'
 # `.../workflow.mjs.orig` at 0% across the board exited 0. Vitest module ids
 # can carry `?v=`/`?t=` query suffixes, so that is a shape a provider change
 # could really produce. `endswith` is now the only test, used for both.
+#
+# Takes exactly one subject; js_assert_coverage calls it once per entry in
+# js_coverage_subjects, so a shortfall or a missing file is reported against
+# the subject it belongs to rather than folded into one generic message.
 js_coverage_problems() {
   jq -r --arg subject "$1" '
     def buckets: ["lines", "branches", "functions", "statements"];
@@ -374,14 +444,27 @@ js_assert_coverage() {
            | "\($b) " + (if ($v | has($b)) and (($v[$b] | type) == "object") and ($v[$b] | has("pct"))
                           then "\($v[$b].pct)%" else "ABSENT" end) ] | join("  "))
   ' "$summary"
-  local problems
-  problems=$(js_coverage_problems "$JS_COVERAGE_SUBJECT" "$summary") \
-    || die "could not read bucket percentages from $summary"
-  if [ -n "$problems" ]; then
-    printf '%s\n' "$problems" | while IFS= read -r problem; do
+  local subjects
+  subjects=$(js_coverage_subjects) \
+    || die 'could not determine the coverage gate subjects'
+  local subject problems all_problems=''
+  while IFS= read -r subject; do
+    [ -n "$subject" ] || continue
+    problems=$(js_coverage_problems "$subject" "$summary") \
+      || die "could not read bucket percentages from $summary"
+    [ -z "$problems" ] && continue
+    if [ -n "$all_problems" ]; then
+      all_problems="$all_problems
+$problems"
+    else
+      all_problems=$problems
+    fi
+  done < <(printf '%s\n' "$subjects")
+  if [ -n "$all_problems" ]; then
+    printf '%s\n' "$all_problems" | while IFS= read -r problem; do
       [ -z "$problem" ] || printf 'check: %s\n' "$problem" >&2
     done
-    die "coverage of $JS_COVERAGE_SUBJECT is not 100 on all four buckets"
+    die 'coverage is not 100 on all four buckets for every subject'
   fi
 }
 
