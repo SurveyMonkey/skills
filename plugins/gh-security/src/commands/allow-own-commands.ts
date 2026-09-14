@@ -18,8 +18,10 @@
 // explicit character set that contains no shell metacharacter. Anything else
 // returns nothing.
 //
-// This file ships. It imports nothing outside the plugin, and stays inside
-// the erasable subset.
+// This file ships. It imports nothing outside the plugin, and nothing from
+// node beyond `url`.
+
+import { fileURLToPath } from 'node:url'
 
 import type { CommandContext, CommandResult } from '../cli/command.ts'
 import { ok } from '../lib/envelope.ts'
@@ -37,18 +39,42 @@ export type AllowDecision = {
 export const ENTRY_PATH = '/bin/gh-security.ts'
 
 /**
+ * This plugin's own entry point, resolved from where this module is
+ * installed rather than from anything a caller supplies.
+ *
+ * Ruling A on #224 anchors the comparison on `CLAUDE_PLUGIN_ROOT`, and the
+ * requirement it was written for is that the root never comes from the
+ * command being judged. The installed location satisfies that requirement
+ * and depends on nothing undocumented: the hooks reference documents
+ * `${CLAUDE_PLUGIN_ROOT}` only as a placeholder expanded inside a hook's
+ * `command` string, and never states that the variable reaches the hook
+ * process's environment. Reading it there would make this hook silently
+ * inert wherever it is absent, which is the failure that is hardest to
+ * notice: a hook that never decides looks exactly like a hook that is
+ * working.
+ *
+ * This module sits at `<plugin root>/src/commands/`, so the root is two
+ * directories up and the entry point is {@link ENTRY_PATH} below it.
+ */
+export const ENTRY = fileURLToPath(new URL(`../..${ENTRY_PATH}`, import.meta.url))
+
+/**
  * Any character an argument may not contain, as the complement of the set it
  * may. The set is stated as what is allowed rather than as a list of
  * metacharacters to reject, because a reject-list is only ever as complete
- * as the person who wrote it: letters, digits, and the eleven punctuation
+ * as the person who wrote it: letters, digits, and the nine punctuation
  * characters a version, a path, a package name, a flag or a `key=value` pair
- * needs. Every shell metacharacter is outside it, the space included, so a
- * token carrying one is rejected rather than re-split.
+ * needs (`. _ : / @ = + , -`). Every shell metacharacter is outside it, the
+ * space included, so a token carrying one is rejected rather than re-split.
  *
  * Written as a negated class tested for absence rather than as an anchored
- * positive match, because `$` in a JavaScript regular expression also
- * matches before a trailing newline: `/^[a-z]+$/.test('rm\n')` is true, and
- * a newline is the one metacharacter this hook can least afford to admit.
+ * positive match, because the two are the same rule read in opposite
+ * directions and only one of them states it: a negated class says outright
+ * that any character not listed is refused, while an anchored `/^...+$/` says
+ * it only by implication and has to be re-derived every time a reader asks
+ * whether some particular character gets through. The spec checks the answer
+ * one metacharacter at a time rather than taking either spelling's word for
+ * it.
  */
 export const UNSAFE_ARGUMENT = /[^A-Za-z0-9._:/@=+,-]/
 
@@ -72,25 +98,21 @@ const reason = (entry: string, command: string): string =>
   'subcommand and arguments carrying no shell metacharacters.'
 
 /**
- * The decision, as a pure function of the hook input, the plugin root and the
- * registered command names.
+ * The decision, as a pure function of the hook input, the entry point being
+ * defended and the registered command names.
  *
- * `pluginRoot` comes from the hook's environment (`CLAUDE_PLUGIN_ROOT`) and
- * never from the command being judged: a root read out of the command text
- * would let the command choose what it is compared against, which is no
+ * `entry` is an absolute path the caller resolved from its own installed
+ * location ({@link ENTRY}), never a root read out of the command being
+ * judged: a command that chose what it is compared against would be no
  * comparison at all.
  */
 export const allowOwnCommands = (
   input: unknown,
-  pluginRoot: string | undefined,
+  entry: string,
   commandNames: readonly string[],
 ): AllowDecision | undefined => {
-  if (pluginRoot === undefined || pluginRoot === '') return undefined
   const command = bashCommandOf(input)
   if (command === undefined) return undefined
-  // A trailing slash on the root is the one spelling difference that says
-  // nothing about the command, so it is normalised away before comparison.
-  const entry = `${pluginRoot.replace(/\/+$/, '')}${ENTRY_PATH}`
   const [runtime, named, subcommand, ...args] = command.trim().split(/ +/)
   if (runtime !== 'node') return undefined
   if (named !== entry) return undefined
@@ -122,7 +144,7 @@ const parseHookInput = (text: string): unknown => {
 export const allowOwnCommandsCommand = (context: CommandContext): CommandResult => {
   const decision = allowOwnCommands(
     parseHookInput(context.io.readStdin()),
-    context.env.CLAUDE_PLUGIN_ROOT,
+    ENTRY,
     context.commandNames,
   )
   return decision === undefined ? undefined : ok(decision)

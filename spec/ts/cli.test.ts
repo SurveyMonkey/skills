@@ -12,7 +12,6 @@
 // Every expected value below is hand-written from the contract on #224,
 // never read back out of the code under test.
 import { readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -21,15 +20,9 @@ import { run } from '../../plugins/gh-security/src/lib/process-runner.ts'
 
 const ENTRY_URL = new URL('../../plugins/gh-security/bin/gh-security.ts', import.meta.url)
 const ENTRY = fileURLToPath(ENTRY_URL)
-const PLUGIN_ROOT = dirname(dirname(ENTRY))
 
-const entry = (args: readonly string[], request: { input?: string; root?: string } = {}) =>
-  run({
-    command: process.execPath,
-    args: [ENTRY, ...args],
-    input: request.input,
-    ...(request.root === undefined ? {} : { env: { CLAUDE_PLUGIN_ROOT: request.root } }),
-  })
+const entry = (args: readonly string[], request: { input?: string } = {}) =>
+  run({ command: process.execPath, args: [ENTRY, ...args], input: request.input })
 
 const hookInput = (command: string): string =>
   JSON.stringify({
@@ -76,10 +69,7 @@ describe("a command's result", () => {
 
 describe('the allow hook, driven the way Claude Code drives it', () => {
   it('answers an invocation of this entry point with an allow decision', () => {
-    const result = entry(['allow-own-commands'], {
-      input: hookInput(`node ${ENTRY} version`),
-      root: PLUGIN_ROOT,
-    })
+    const result = entry(['allow-own-commands'], { input: hookInput(`node ${ENTRY} version`) })
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(JSON.parse(result.stdout)).toEqual({
       hookSpecificOutput: {
@@ -95,7 +85,6 @@ describe('the allow hook, driven the way Claude Code drives it', () => {
     // prompt stands, which is what the chained `rm` here must still get.
     const result = entry(['allow-own-commands'], {
       input: hookInput(`node ${ENTRY} version; rm -rf ~`),
-      root: PLUGIN_ROOT,
     })
     expect(result).toMatchObject({ status: 0, stdout: '', stderr: '' })
   })

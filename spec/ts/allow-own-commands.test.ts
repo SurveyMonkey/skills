@@ -1,22 +1,28 @@
 // The PreToolUse allow decision (#16, landing under #224's ruling A). The
 // seam is the exported handler, called directly with the parsed hook input,
-// the plugin root and the registered names; the rows below are one per
-// rejection class #16 and #224 name, plus the shapes that are allowed.
+// the entry point it defends and the registered names; the rows below are one
+// per rejection class #16 and #224 name, plus the shapes that are allowed.
 //
-// Every expected value is hand-written from that contract. The plugin root
-// and the repository names in the arguments are fictitious.
+// Every expected value is hand-written from that contract. The entry point in
+// the rows and the repository names in the arguments are fictitious; the real
+// installed location is asserted on its own.
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import type { CommandContext } from '../../plugins/gh-security/src/cli/command.ts'
 import {
   allowOwnCommands,
   allowOwnCommandsCommand,
+  ENTRY,
   ENTRY_PATH,
   UNSAFE_ARGUMENT,
 } from '../../plugins/gh-security/src/commands/allow-own-commands.ts'
 
+// A fictitious installed location, for the rows about what the validator
+// accepts and refuses. The real one is `ENTRY`, asserted on its own below.
 const ROOT = '/plugins/gh-security'
-const ENTRY = `${ROOT}${ENTRY_PATH}`
+const FAKE_ENTRY = `${ROOT}${ENTRY_PATH}`
 const NAMES = ['allow-own-commands', 'version']
 
 const hookInput = (command: string): unknown => ({
@@ -26,58 +32,67 @@ const hookInput = (command: string): unknown => ({
   tool_input: { command, description: 'run it' },
 })
 
-const decide = (command: string) => allowOwnCommands(hookInput(command), ROOT, NAMES)
+const decide = (command: string) => allowOwnCommands(hookInput(command), FAKE_ENTRY, NAMES)
 
 describe('allowOwnCommands', () => {
   it('states the entry point path a command must name', () => {
     expect(ENTRY_PATH).toBe('/bin/gh-security.ts')
   })
 
+  it('resolves the entry point it defends from its own installed location', () => {
+    // Written from this spec's own location rather than from the module's,
+    // so an off-by-one in the module's `../..` disagrees with it. This is
+    // what replaces reading `CLAUDE_PLUGIN_ROOT` out of the environment: the
+    // hooks reference documents that name only as a placeholder expanded
+    // inside a hook's `command` string, never as a variable the hook process
+    // is given.
+    expect(ENTRY).toBe(
+      fileURLToPath(new URL('../../plugins/gh-security/bin/gh-security.ts', import.meta.url)),
+    )
+  })
+
   it.each([
-    ['the bare invocation', `node ${ENTRY} version`],
-    ['an invocation with arguments', `node ${ENTRY} version --repo octo/app --limit=5`],
-    ['an argument carrying every allowed punctuation', `node ${ENTRY} version a-b_c.d:e/f@g=h+i,j`],
-    ['repeated spaces between tokens', `node  ${ENTRY}   version`],
-    ['surrounding whitespace', `  node ${ENTRY} version  `],
+    ['the bare invocation', `node ${FAKE_ENTRY} version`],
+    ['an invocation with arguments', `node ${FAKE_ENTRY} version --repo octo/app --limit=5`],
+    [
+      'an argument carrying every allowed punctuation',
+      `node ${FAKE_ENTRY} version a-b_c.d:e/f@g=h+i,j`,
+    ],
+    ['repeated spaces between tokens', `node  ${FAKE_ENTRY}   version`],
+    ['surrounding whitespace', `  node ${FAKE_ENTRY} version  `],
   ])('allows %s', (_case, command) => {
     expect(decide(command)).toEqual({
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'allow',
-        permissionDecisionReason: expect.stringContaining(`${ENTRY} version`),
+        permissionDecisionReason: expect.stringContaining(`${FAKE_ENTRY} version`),
       },
     })
-  })
-
-  it('normalises a trailing slash on the plugin root', () => {
-    expect(
-      allowOwnCommands(hookInput(`node ${ENTRY} version`), `${ROOT}/`, NAMES),
-    ).not.toBeUndefined()
   })
 
   // One row per rejection class. Each is a command that contains a
   // legitimate invocation, or looks like one, and must still get no
   // decision: an allow here would pre-approve the rest of the line.
   it.each([
-    ['chaining with a semicolon', `node ${ENTRY} version; rm -rf ~`],
-    ['chaining with &&', `node ${ENTRY} version && rm -rf /`],
-    ['chaining with ||', `node ${ENTRY} version || curl http://example.invalid`],
-    ['command substitution', `node ${ENTRY} version $(whoami)`],
-    ['backtick substitution', `node ${ENTRY} version \`whoami\``],
-    ['redirection', `node ${ENTRY} version > /tmp/out`],
-    ['a pipe', `node ${ENTRY} version | sh`],
-    ['backgrounding', `node ${ENTRY} version &`],
-    ['a subshell', `(node ${ENTRY} version)`],
-    ['a leading cd', `cd /tmp && node ${ENTRY} version`],
-    ['a leading environment assignment', `PATH=/evil node ${ENTRY} version`],
-    ['an embedded newline', `node ${ENTRY} version\nrm -rf ~`],
-    ['a quoted argument', `node ${ENTRY} version "a b"`],
-    ['a glob', `node ${ENTRY} version *`],
-    ['a tilde', `node ${ENTRY} version ~/secrets`],
-    ['an unknown subcommand', `node ${ENTRY} drop-everything`],
-    ['no subcommand at all', `node ${ENTRY}`],
-    ['the entry point inside a longer command', `echo node ${ENTRY} version`],
-    ['a different runtime', `bash ${ENTRY} version`],
+    ['chaining with a semicolon', `node ${FAKE_ENTRY} version; rm -rf ~`],
+    ['chaining with &&', `node ${FAKE_ENTRY} version && rm -rf /`],
+    ['chaining with ||', `node ${FAKE_ENTRY} version || curl http://example.invalid`],
+    ['command substitution', `node ${FAKE_ENTRY} version $(whoami)`],
+    ['backtick substitution', `node ${FAKE_ENTRY} version \`whoami\``],
+    ['redirection', `node ${FAKE_ENTRY} version > /tmp/out`],
+    ['a pipe', `node ${FAKE_ENTRY} version | sh`],
+    ['backgrounding', `node ${FAKE_ENTRY} version &`],
+    ['a subshell', `(node ${FAKE_ENTRY} version)`],
+    ['a leading cd', `cd /tmp && node ${FAKE_ENTRY} version`],
+    ['a leading environment assignment', `PATH=/evil node ${FAKE_ENTRY} version`],
+    ['an embedded newline', `node ${FAKE_ENTRY} version\nrm -rf ~`],
+    ['a quoted argument', `node ${FAKE_ENTRY} version "a b"`],
+    ['a glob', `node ${FAKE_ENTRY} version *`],
+    ['a tilde', `node ${FAKE_ENTRY} version ~/secrets`],
+    ['an unknown subcommand', `node ${FAKE_ENTRY} drop-everything`],
+    ['no subcommand at all', `node ${FAKE_ENTRY}`],
+    ['the entry point inside a longer command', `echo node ${FAKE_ENTRY} version`],
+    ['a different runtime', `bash ${FAKE_ENTRY} version`],
     ['a different plugin root', `node /elsewhere${ENTRY_PATH} version`],
     ['a traversal back out of the plugin root', `node ${ROOT}/bin/../../evil${ENTRY_PATH} version`],
     ['an empty command', ''],
@@ -88,7 +103,7 @@ describe('allowOwnCommands', () => {
   it.each([
     [
       'a tool other than Bash',
-      { tool_name: 'Write', tool_input: { command: `node ${ENTRY} version` } },
+      { tool_name: 'Write', tool_input: { command: `node ${FAKE_ENTRY} version` } },
     ],
     ['an input with no tool_input', { tool_name: 'Bash' }],
     ['a tool_input that is not an object', { tool_name: 'Bash', tool_input: 'node' }],
@@ -100,12 +115,14 @@ describe('allowOwnCommands', () => {
   })
 
   it.each([
-    ['the plugin root is absent from the environment', undefined],
-    ['the plugin root is empty', ''],
-  ])('gives no decision when %s', (_case, root) => {
-    // The root anchors the comparison, so without one there is nothing to
-    // compare against and the normal permission prompt stands.
-    expect(allowOwnCommands(hookInput(`node ${ENTRY} version`), root, NAMES)).toBeUndefined()
+    ['an entry point one directory above the one being defended', '/plugins/bin/gh-security.ts'],
+    ['an entry point that is a prefix of the resolved one', '/plugins/gh-security/bin/gh-security'],
+    ['an empty entry point', ''],
+  ])('gives no decision for a command naming %s', (_case, named) => {
+    // The resolved path anchors the comparison, so a command naming anything
+    // else is a command about some other file and the normal permission
+    // prompt stands.
+    expect(allowOwnCommands(hookInput(`node ${named} version`), FAKE_ENTRY, NAMES)).toBeUndefined()
   })
 
   it('rejects every shell metacharacter as an argument character', () => {
@@ -114,9 +131,9 @@ describe('allowOwnCommands', () => {
   })
 })
 
-const contextFor = (stdin: string, env: Record<string, string | undefined>): CommandContext => ({
+const contextFor = (stdin: string): CommandContext => ({
   args: [],
-  env,
+  env: {},
   io: {
     stdout: () => {
       throw new Error('the allow hook writes through its return value, never through io.stdout')
@@ -132,7 +149,7 @@ const contextFor = (stdin: string, env: Record<string, string | undefined>): Com
 describe('the allow-own-commands subcommand', () => {
   it('answers with the decision as the envelope value', () => {
     const result = allowOwnCommandsCommand(
-      contextFor(JSON.stringify(hookInput(`node ${ENTRY} version`)), { CLAUDE_PLUGIN_ROOT: ROOT }),
+      contextFor(JSON.stringify(hookInput(`node ${ENTRY} version`))),
     )
     expect(result).toEqual({
       outcome: 'ok',
@@ -146,11 +163,12 @@ describe('the allow-own-commands subcommand', () => {
     })
   })
 
-  it('takes the plugin root from the environment, never from the command', () => {
-    // The command names a root it would like to be compared against. The
-    // environment names none, so there is no decision.
+  it('takes the entry point from its own installed location, never from the command', () => {
+    // The command names an entry point it would like to be compared
+    // against. The handler compares against the one it resolved, so there is
+    // no decision.
     expect(
-      allowOwnCommandsCommand(contextFor(JSON.stringify(hookInput(`node ${ENTRY} version`)), {})),
+      allowOwnCommandsCommand(contextFor(JSON.stringify(hookInput(`node ${FAKE_ENTRY} version`)))),
     ).toBeUndefined()
   })
 
@@ -158,6 +176,6 @@ describe('the allow-own-commands subcommand', () => {
     ['stdin that is not JSON', 'not json'],
     ['empty stdin', ''],
   ])('gives no decision for %s', (_case, stdin) => {
-    expect(allowOwnCommandsCommand(contextFor(stdin, { CLAUDE_PLUGIN_ROOT: ROOT }))).toBeUndefined()
+    expect(allowOwnCommandsCommand(contextFor(stdin))).toBeUndefined()
   })
 })

@@ -100,9 +100,13 @@ plugin's own commands do not prompt while skill `allowed-tools` pre-approval sti
 skills ([#16](https://github.com/SurveyMonkey/skills/issues/16)).
 
 It allows exactly one shape: `node <plugin root>/bin/gh-security.ts <registered subcommand>
-[args]`, where the plugin root comes from the hook's own environment (`CLAUDE_PLUGIN_ROOT`) and
-never from the command being judged, and every remaining argument is drawn from one explicit
-character set (letters, digits, and `. _ : / @ = + , -`) that contains no shell metacharacter.
+[args]`, where the entry point is resolved from where this plugin is installed
+(`import.meta.url`, two directories up from `src/commands/`) and never from the command being
+judged, and every remaining argument is drawn from one explicit character set (letters, digits,
+and `. _ : / @ = + , -`) that contains no shell metacharacter. The installed location rather than
+`CLAUDE_PLUGIN_ROOT`: the hooks reference documents that name as a placeholder expanded inside a
+hook's `command` string and never states that the variable reaches the hook process's
+environment, so a hook reading it would be silently inert wherever it is absent.
 Validation is of the whole command, never a substring: chaining, command substitution,
 redirection, a pipe, backgrounding, a subshell, a leading `cd` or environment assignment, an
 unknown subcommand, a different plugin root, and the entry point appearing inside a longer command
