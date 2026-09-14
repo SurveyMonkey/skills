@@ -25,10 +25,13 @@ export default {
     globalSetup: ['spec/js/generate.mjs'],
     coverage: {
       provider: 'v8',
-      // The projection of the shipped workflow, and the TypeScript source the
-      // plugin ships. The shipped workflow file itself cannot appear here: it
-      // is never imported (its contract requires a top-level `return`), so no
-      // instrumentation can attribute a line to it: a `//# sourceURL=`
+      // The projection of the shipped workflow, and the TypeScript the plugin
+      // ships: the entry point under bin/ is measured with the source under
+      // src/, because it is a file a user runs and a file the report never
+      // names is a file whose regression nothing catches (#224). The shipped
+      // workflow file itself cannot appear here: it is never imported (its
+      // contract requires a top-level `return`), so no instrumentation can
+      // attribute a line to it: a `//# sourceURL=`
       // pointing at the real path was tried and changes nothing.
       // spec/js/generate.mjs explains the projection and fix-groups.test.mjs
       // asserts it is byte-identical to the regions it copies, which is what
@@ -38,7 +41,11 @@ export default {
       // The harness and the test files are deliberately outside the set: they
       // are test infrastructure, and measuring them would let an unused
       // helper move the number while no shipped code changed.
-      include: ['spec/js/generated/workflow.mjs', 'plugins/gh-security/src/**/*.ts'],
+      include: [
+        'spec/js/generated/workflow.mjs',
+        'plugins/gh-security/bin/**/*.ts',
+        'plugins/gh-security/src/**/*.ts',
+      ],
       // A file that genuinely cannot reach 100 (a process boundary or a
       // platform branch) is named here with a comment saying why, never
       // dropped from `include` instead: the number is never lowered to

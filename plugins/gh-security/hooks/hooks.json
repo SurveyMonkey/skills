@@ -1,6 +1,17 @@
 {
-  "description": "Nudge toward gh-security resolve-alerts when a Bash (or backgrounded BashOutput) command's output carries a GitHub vulnerability notice or package manager audit findings.",
+  "description": "Allow this plugin's own CLI invocations without a prompt (PreToolUse), and nudge toward gh-security resolve-alerts when a Bash (or backgrounded BashOutput) command's output carries a GitHub vulnerability notice or package manager audit findings (PostToolUse).",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/bin/gh-security.ts allow-own-commands"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|BashOutput",

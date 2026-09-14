@@ -227,7 +227,7 @@ Describe 'scripts/check.sh'
     # Describe, just one step further downstream: it needs a stub pnpm that
     # actually publishes a passing workflow-only summary, so the run reaches
     # subject discovery rather than dying earlier for an unrelated reason.
-    It 'fails js when no tracked TypeScript source files exist under plugins/gh-security/src'
+    It 'fails js when no tracked TypeScript files exist under plugins/gh-security bin or src'
       mkdir -p spec/js bin node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
@@ -246,7 +246,7 @@ STUB
       export PATH
       When run "$CHECK" js
       The status should eq 2
-      The stderr should include 'no TypeScript files discovered under plugins/gh-security/src'
+      The stderr should include 'no TypeScript files discovered under plugins/gh-security/{bin,src}'
       The output should include 'coverage measured'
     End
   End
