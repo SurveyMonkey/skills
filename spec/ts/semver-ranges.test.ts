@@ -146,17 +146,19 @@ describe('satisfies', () => {
     expect(satisfies(version, range)).toBe(expected)
   })
 
-  // The divergence from npm's semver that node.sh lines 3405-3426 document
+  // The divergence from npm's semver that node.sh lines 3417-3428 document
   // and keep deliberately: npm admits a prerelease into a range only when a
   // comparator in the same conjunction carries a prerelease on the identical
   // core, so `1.x` does not admit `2.0.0-alpha` for npm, while this evaluator
   // reports true because `2.0.0-alpha` sorts below `2.0.0` and so falls
   // inside `>=1.0.0 <2.0.0`. The second row is the same divergence as
-  // spec/node_apply_constraint_spec.sh reaches it, where a `10.3.0-beta.1`
-  // copy is admitted by a plain `^10.0.0` that node-semver would exclude.
+  // spec/node_apply_constraint_spec.sh reaches it: its `npm-cross-line`
+  // fixture declares `minimatch` at `^10.2.5` (spec/fixtures/npm-cross-line/
+  // package.json), and a `10.3.0-beta.1` copy is admitted by that plain
+  // caret range, which node-semver would exclude.
   it.each([
     ['2.0.0-alpha', '1.x', true],
-    ['10.3.0-beta.1', '^10.0.0', true],
+    ['10.3.0-beta.1', '^10.2.5', true],
   ])('admits the prerelease %s into %s, unlike npm', (version, range, expected) => {
     expect(satisfies(version, range)).toBe(expected)
   })

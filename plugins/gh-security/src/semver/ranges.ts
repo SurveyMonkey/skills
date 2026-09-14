@@ -138,7 +138,8 @@ export const satisfies = (version: string, range: string): boolean =>
   )
 
 /**
- * Every comparator token in a range, with the `||` groups flattened.
+ * Every comparator token in a range, with the `||` groups flattened, for the
+ * merge-risk scorer (issue #21).
  *
  * Flattened rather than evaluated separately because of what the callers ask:
  * the floor of a union is the lowest floor in it, and a range carrying a pin
@@ -149,10 +150,10 @@ export const rangeTokens = (range: string): string[] =>
   nonEmpty(tightenOperators(range).split(FLAT_TOKEN_SEPARATOR))
 
 /**
- * Whether a range pins, for the merge-risk scorer (issue #21). A tilde, an
- * exact version, an x-range bounded to one minor line, or an explicit upper
- * bound. A caret is not a pin: it admits the whole major line, which is the
- * ordinary declaration, and `1.x` says the same thing.
+ * Whether a range pins. A tilde, an exact version, an x-range bounded to one
+ * minor line, or an explicit upper bound. A caret is not a pin: it admits the
+ * whole major line, which is the ordinary declaration, and `1.x` says the
+ * same thing.
  */
 export const rangePinned = (range: string): boolean =>
   rangeTokens(range).some(
