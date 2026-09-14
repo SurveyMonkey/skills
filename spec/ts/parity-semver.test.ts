@@ -24,6 +24,12 @@
 // `tokenParseable`, `rangeParseable`, `rangeFloorMajor`, `parseVersion`,
 // `semverMax`, `coreAt`) are internal definitions of `SEMVER_JQ` with no verb
 // of their own, so the only parity reachable for them is through these two.
+//
+// One row of `satisfies` is out for a different reason: `range_facts` refuses
+// an empty range outright (`node.sh range_facts '' 1.0.0` exits 1 with
+// "range_facts requires a range and a version"), so the empty-range row of
+// that table names no argument pair the verb takes, and a parity row for it
+// would assert the argument guard rather than the semver.
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -43,7 +49,9 @@ const ADAPTER = join(
 )
 
 // `node.sh compare_versions` answers `{a, b, result, delta, major_distance}`
-// (node.sh line 33), so the TypeScript side carries the echoed arguments the
+// (`verb_compare_versions`, node.sh lines 3395-3401; the verb summary at line
+// 33 names the three computed fields and not the two echoed ones), so the
+// TypeScript side carries the echoed arguments the
 // verb adds around `versionFacts`. Dropping them here would make the runner
 // report a difference on every row, which is the mismatch report proving
 // nothing rather than the agreement proving something.
@@ -187,6 +195,12 @@ describe('range_facts', () => {
     ['~4.17.0', '4.17.21'],
     ['~4.16.0', '4.17.21'],
     ['^5.28.0 || ^6.19.0', '5.28.4'],
+    // The second alternative, satisfied on its own. The pair also appears in
+    // the `rangeFacts` block above, and it is carried here too because that
+    // block is about the floor and the pin shape: a bug that collapsed `||`
+    // into one impossible conjunction is what this row exists for, and it
+    // should not depend on a row kept for another reason.
+    ['^5.28.0 || ^6.19.0', '6.19.8'],
     ['>=4.17.0, <5', '4.17.21'],
     ['4.17.21', '4.17.21'],
     ['>= 7.0.0, < 7.29.0', '7.28.0'],
