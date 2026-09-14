@@ -387,6 +387,69 @@ JSON
       The stderr should include 'pct is Unknown, not a number'
       The output should include 'coverage measured'
     End
+
+    # ADR 012, #211: the coverage gate also requires every tracked
+    # plugins/gh-security/src/**/*.ts file, unless vitest.config.mjs's own
+    # coverage.exclude names it: the same array vitest itself reads, so a
+    # file excluded there is a file check.sh must not demand either.
+    Describe 'the coverage floor over TypeScript source'
+      ts_stub_pnpm() {
+        stub_pnpm || return 1
+        mkdir -p plugins/gh-security/src/lib
+        printf 'export const x = 1\n' > plugins/gh-security/src/lib/example.ts
+        git add -A
+      }
+      Before ts_stub_pnpm
+
+      It 'fails when the summary is missing a tracked src file'
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+        When run "$CHECK" js
+        The status should eq 2
+        The stderr should include 'names no entry ending in plugins/gh-security/src/lib/example.ts'
+        The output should include 'coverage measured'
+      End
+
+      It 'fails when a src file is below 100 on one bucket, naming file and bucket'
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 92 100 100)}
+JSON
+        When run "$CHECK" js
+        The status should eq 2
+        The stderr should include 'plugins/gh-security/src/lib/example.ts: branches is 92%'
+        The stderr should include 'is not 100 on all four buckets'
+        The output should include 'coverage measured'
+      End
+
+      It 'accepts a report where the workflow and the src file are both fully covered'
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 100 100 100)}
+JSON
+        When run "$CHECK" js
+        The status should be success
+        The output should include 'coverage measured'
+      End
+
+      It 'does not require a file named in vitest.config.mjs coverage.exclude'
+        cat > vitest.config.mjs <<'CONFIG'
+export default {
+  test: {
+    coverage: {
+      exclude: ['plugins/gh-security/src/lib/example.ts'],
+    },
+  },
+}
+CONFIG
+        git add -A
+        summary <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+JSON
+        When run "$CHECK" js
+        The status should be success
+        The output should include 'coverage measured'
+      End
+    End
   End
 
   # cmd_js's own gate on lefthook.yml (#249): a config lefthook itself would
