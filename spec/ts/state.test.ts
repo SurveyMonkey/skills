@@ -64,6 +64,20 @@ describe('loadState', () => {
     mkdirSync(join(work, 'state.json'))
     expect(loadState(work).outcome).toBe('error')
   })
+
+  // The OS error is quoted, not swallowed. "Run 'setup' first" is the right
+  // remedy for a file that was never written and the wrong one for a file
+  // that is there and unreadable, so the reason has to travel with the
+  // message: a reader told only to rerun setup never learns which it was.
+  it.each([
+    ['a file that is not there', undefined, 'ENOENT'],
+    ['a state path that is a directory', 'directory', 'EISDIR'],
+  ])('names the underlying error for %s', (_shape, shape, code) => {
+    const work = scratch()
+    if (shape === 'directory') mkdirSync(join(work, 'state.json'))
+    const envelope = loadState(work)
+    expect(envelope.outcome === 'error' && envelope.error).toContain(code)
+  })
 })
 
 describe('createState and writeKey', () => {

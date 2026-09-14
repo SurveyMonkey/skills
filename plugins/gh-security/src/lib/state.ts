@@ -69,8 +69,13 @@ export const loadState = (workDir: string): Envelope<StateFile> => {
   let text: string
   try {
     text = readFileSync(path, 'utf8')
-  } catch {
-    return failure(`no readable state file at ${path}; run 'setup' first`)
+  } catch (error) {
+    // The OS error is quoted, the way `writeObject` quotes its own: the bash
+    // this replaces tested `[ -f ]` for absence and reported an existing file
+    // it could not read separately, so folding the two into "run 'setup'
+    // first" would send a reader after a file that is already there and
+    // unreadable for some other reason.
+    return failure(`no readable state file at ${path}: ${String(error)}. Run 'setup' first.`)
   }
   let parsed: JsonValue
   try {
