@@ -153,7 +153,7 @@ shipped fetches from a registry at run time.
 
 [ADR 005](005-quality-gate-venues.md) splits the gates by cost and venue with shellspec as the
 suite. **vitest becomes the primary suite venue, and shellspec covers the bash that remains**:
-`notice_scan`, `detect_capacity`, `githooks`, `check_sh`, `reference_scrub` and `bash32_parse`
+`notice_scan`, `detect_capacity`, `check_sh`, `reference_scrub` and `bash32_parse`
 ([#240](https://github.com/SurveyMonkey/skills/issues/240)). Everything ADR 005 decides about
 venues is unchanged by that substitution: one entry point in `scripts/check.sh`, empty discovery
 as a hard failure in every gate, CI as the enforcement boundary, and the executed-example floor,
