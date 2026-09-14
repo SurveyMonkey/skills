@@ -81,8 +81,12 @@ export const parseVersion = (version: string): ParsedVersion => {
       return Number.isFinite(parsed) ? parsed : 0
     }),
     // The prerelease is everything after the first hyphen, rejoined, so an
-    // identifier containing a hyphen survives it.
-    pre: parts.length > 1 ? parts.slice(1).join('-').split('.') : [],
+    // identifier containing a hyphen survives it. `splitLiteral`, not `.split`
+    // directly: an empty prerelease segment (a version ending in a bare `-`)
+    // has to read as [] the same way the empty-string case above does, or
+    // "1.2.3-" stops comparing equal to "1.2.3" the way jq's `semver_cmp`
+    // does.
+    pre: parts.length > 1 ? splitLiteral(parts.slice(1).join('-'), '.') : [],
   }
 }
 

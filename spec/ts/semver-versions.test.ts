@@ -58,6 +58,7 @@ describe('compareVersions, spellings the ordering chain does not spell out', () 
     ['1.0.0-alpha.beta', '1.0.0-alpha.1', 1], // the mirror of the numeric-ident row
     ['1', '1.0.0', 0], // a missing minor and patch read as 0
     ['1.1', '1.0.0', 1],
+    ['1.2.3-', '1.2.3', 0], // an empty prerelease segment is a release
   ])('orders %s against %s as %i', (left, right, expected) => {
     expect(compareVersions(left, right)).toBe(expected)
   })
@@ -116,6 +117,10 @@ describe('parseVersion', () => {
     // The specimen spec/node_apply_constraint_spec.sh writes into a lockfile
     // for its "not plain semver" case.
     ['10.x-bogus', [10, 0], ['bogus']],
+    // A trailing hyphen with nothing after it is an empty prerelease segment,
+    // which jq's `split(".")` on "" reads as [] (a release), not [""]: the
+    // same empty-string rule the core field applies two lines above.
+    ['1.2.3-', [1, 2, 3], []],
   ])('reads %s', (version, core, pre) => {
     expect(parseVersion(version)).toEqual({ core, pre })
   })
