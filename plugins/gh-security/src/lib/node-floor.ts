@@ -71,16 +71,29 @@ const parseVersion = (version: string): [number, number, number] => {
 export const assertNodeFloor = (version: string): void => {
   const actual = parseVersion(version)
   // The floor is compared as the triple it is declared as, never re-parsed
-  // out of the string: one source of truth. Each triple collapses to a
-  // single comparable number, since major dominates minor dominates patch
-  // and 1000 comfortably exceeds any real minor or patch component, rather
-  // than being compared position by position, so this function has exactly
-  // one branch, not three.
-  const value = ([major, minor, patch]: readonly [number, number, number]): number =>
-    major * 1_000_000 + minor * 1_000 + patch
-  if (value(actual) >= value(NODE_FLOOR_PARTS)) return
+  // out of the string: one source of truth, and correct for any
+  // non-negative integer triple rather than only while every part stays
+  // under 1000 (a collapsed `major * 1_000_000 + minor * 1_000 + patch`
+  // comparison would carry a patch of 1000 into minor; node has never
+  // shipped one, but this floor check is the thing that runs first on every
+  // machine, so it must not encode that as an unstated assumption).
+  // Lexicographic, and still exactly one branch below: the first non-zero
+  // subtraction decides the order, falling through the `||` chain only
+  // while the more significant parts are equal.
+  if (compareTriples(actual, NODE_FLOOR_PARTS) >= 0) return
   throw new NodeFloorError(
     `gh-security requires node ${NODE_FLOOR} or newer, but this is node ${version}. ` +
       'Upgrade node, or run the plugin under a newer release.',
   )
 }
+
+/**
+ * Lexicographic comparison of two release triples: negative when `a` sorts
+ * before `b`, positive when after, zero when equal. Major dominates minor
+ * dominates patch, each compared as its own subtraction rather than folded
+ * into one magnitude, so there is no ceiling on any component.
+ */
+const compareTriples = (
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+): number => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
