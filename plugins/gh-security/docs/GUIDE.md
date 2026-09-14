@@ -48,7 +48,13 @@ defaulted.
 | Path | Scope |
 |---|---|
 | `bin/gh-security.ts` | The one entry point: the Node-floor preamble, the subcommand registry, JSON on stdout |
-| `src/lib/` | Envelopes, the process runner, git helpers, the typed `gh` client, the state file, the `env_prefix` seam |
+| `src/lib/envelope.ts` | The four ADR 001 outcomes as one typed result, and the exit codes |
+| `src/lib/node-floor.ts` | The runtime floor, as a pure function over a version string |
+| `src/lib/process-runner.ts` | The one place a process starts, with the spawn as a parameter |
+| `src/lib/env-prefix.ts` | The `env_prefix` seam |
+| `src/lib/git.ts` | Path containment, worktree queries, refs |
+| `src/lib/gh.ts` | The typed `gh` client |
+| `src/lib/state.ts` | The fix driver's state file, typed |
 | `src/semver/` | Comparison and range facts |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | The ADR 001 verbs as an in-process interface; `node` handles `npm` alerts |
@@ -64,6 +70,33 @@ this plugin into one pattern for one path
 `gh` client, and returning the envelope. The registry in `bin/gh-security.ts` stays thin enough
 that the entry point's own behavior is all a spawned process has left to cover (issue #216's
 decision comment). That export is also the test seam; see Testing below.
+
+### Shared library
+
+**Everything under `src/lib/` is written once and imported everywhere. Nothing later defines its
+own runner, client, or envelope** ([#217](https://github.com/SurveyMonkey/skills/issues/217)).
+
+**The envelope is the contract between every layer.** ADR 001's four exit codes are four outcomes
+carried in one typed value (`ok`, `error`, `not-implemented`, `unsupported`), and only the entry
+point turns one back into a stdout/stderr pair and a process exit code. The JSON is unchanged from
+what the scripts emit: a success payload is the value itself at the top level, every failure is
+`{"error": ...}`, and an unsupported toolchain additionally names itself in `unsupported`. An
+outcome is a value rather than a control-flow event, which is what answers the one property the
+process boundary gave for free: a crash the caller could see as an exit code (RFC 002).
+
+**The process runner is the only place a process starts, and its spawn is a parameter.** It
+defaults to a real child process and is substituted through that parameter by examples, which is
+how the `gh` client is exercised against real `gh` output shapes with no network. It is
+synchronous because every caller in this plugin is: a phase runs a command, reads its output, and
+decides the next one from it.
+
+**The `gh` client is SDK-style: one typed method per operation this plugin performs**, injected
+into handlers and mocked one method at a time. Adding a `gh` call means adding a method, which is
+what keeps the endpoints a handler touches legible from its substitution list. Octokit is not the
+client, because nothing shipped imports anything outside the plugin (ADR 012); `gh` stays the
+transport, since it already carries the user's authentication and takes the `env_prefix` wrapping.
+Every reply is validated where it enters, and `--paginate --slurp`'s page nesting is collapsed
+here rather than by each caller.
 
 ## Adapter contract
 
