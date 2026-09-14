@@ -217,6 +217,38 @@ Describe 'scripts/check.sh'
       The status should eq 2
       The stderr should include 'run pnpm install'
     End
+
+    # ADR 012, #211: the coverage gate's TypeScript-source subject list is
+    # merged with the workflow projection (ADR 010) before js_assert_coverage
+    # ever sees it, so the report-level "names no files" guard cannot catch a
+    # tree with zero tracked plugins/gh-security/src/**/*.ts files — the
+    # workflow subject alone keeps that merged list non-empty. This is
+    # discovery emptiness the same shape as every other refusal in this
+    # Describe, just one step further downstream: it needs a stub pnpm that
+    # actually publishes a passing workflow-only summary, so the run reaches
+    # subject discovery rather than dying earlier for an unrelated reason.
+    It 'fails js when no tracked TypeScript source files exist under plugins/gh-security/src'
+      mkdir -p spec/js bin node_modules
+      printf 'x\n' > spec/js/x.test.mjs
+      printf '{"private":true}' > package.json
+      printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
+      git add -A
+      cat > bin/pnpm <<'STUB'
+#!/bin/sh
+mkdir -p coverage
+cat > coverage/coverage-summary.json <<JSON
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+JSON
+exit 0
+STUB
+      chmod +x bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+      When run "$CHECK" js
+      The status should eq 2
+      The stderr should include 'no TypeScript files discovered under plugins/gh-security/src'
+      The output should include 'coverage measured'
+    End
   End
 
   # The coverage assertions, with a stub pnpm so no suite runs: this tests how
@@ -239,6 +271,15 @@ Describe 'scripts/check.sh'
       # message. Each needs one on disk regardless of what it is testing;
       # the lefthook-specific refusals get their own Describe below.
       printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
+      # A tracked TypeScript source file, so js_coverage_ts_subjects' own
+      # empty-discovery refusal never fires here: this Describe is about how
+      # check.sh reads a coverage summary, not about that refusal, which gets
+      # its own example in "empty discovery refuses instead of passing"
+      # above. Named base.ts, distinct from the "coverage floor over
+      # TypeScript source" Describe's example.ts below, since ts_stub_pnpm
+      # builds on this same fixture and tracks both.
+      mkdir -p plugins/gh-security/src/lib
+      printf 'export const x = 1\n' > plugins/gh-security/src/lib/base.ts
       git add -A
       # cmd_js clears any stale summary before running the suite, so the
       # stub pnpm is what publishes the one each example wants — exactly where
@@ -294,8 +335,9 @@ JSON
     End
 
     It 'accepts a report whose subject is fully covered'
+      # base.ts (stub_pnpm) is a subject too, so it needs its own entry.
       summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
 JSON
       When run "$CHECK" js
       The status should be success
@@ -423,8 +465,9 @@ JSON
       End
 
       It 'accepts a report where the workflow and the src file are both fully covered'
+        # base.ts (stub_pnpm) is a subject too, so it needs its own entry.
         summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
 JSON
         When run "$CHECK" js
         The status should be success
@@ -442,8 +485,10 @@ export default {
 }
 CONFIG
         git add -A
+        # example.ts is excluded, but base.ts (stub_pnpm) is not, so it still
+        # needs its own entry.
         summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
 JSON
         When run "$CHECK" js
         The status should be success
@@ -464,6 +509,12 @@ JSON
       mkdir -p spec/js bin coverage node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
+      # A tracked TypeScript source file, so js_coverage_ts_subjects' own
+      # empty-discovery refusal never fires here: this Describe is about the
+      # lefthook check, which runs after the coverage assertion, so it needs
+      # a subject list the stub's summary below actually satisfies.
+      mkdir -p plugins/gh-security/src/lib
+      printf 'export const x = 1\n' > plugins/gh-security/src/lib/base.ts
       git add -A
       # `pnpm --silent test` always publishes a fully-covered summary, so
       # every example here reaches the lefthook check; `pnpm exec lefthook
@@ -476,7 +527,7 @@ if [ "$1" = exec ]; then
 fi
 mkdir -p coverage
 cat > coverage/coverage-summary.json <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}},"/x/plugins/gh-security/src/lib/base.ts":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
 JSON
 exit 0
 STUB

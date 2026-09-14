@@ -342,7 +342,23 @@ js_coverage_exclude() {
 # own coverage.exclude does not name (ADR 012, #211). Anchored the way
 # ts_targets is: a single `*` still matches a nested file because git
 # ls-files pathspec globbing crosses directory separators.
+#
+# Discovery refuses on empty here rather than only being caught downstream:
+# js_assert_coverage's own "the report names no files" guard cannot see this
+# case, because the workflow projection (ADR 010) is always a second, fixed
+# subject that keeps the merged list non-empty even when this one is. A tree
+# with no tracked TypeScript source at all would otherwise measure zero of
+# it and report the coverage gate green (root CLAUDE.md: empty discovery is
+# a hard failure in every gate), the same shape cmd_js already refuses for
+# zero discovered spec/js/ test files.
 js_coverage_ts_subjects() {
+  local tracked n=0 f
+  tracked=$(git ls-files -- 'plugins/gh-security/src/*.ts')
+  while IFS= read -r f; do
+    if [ -n "$f" ]; then n=$((n + 1)); fi
+  done < <(printf '%s\n' "$tracked")
+  [ "$n" -gt 0 ] \
+    || die 'no TypeScript files discovered under plugins/gh-security/src/*.ts; refusing to report a pass'
   local excluded
   excluded=$(js_coverage_exclude) \
     || return 1
@@ -352,7 +368,7 @@ js_coverage_ts_subjects() {
     [ -n "$e" ] || continue
     exclude_arr[${#exclude_arr[@]}]=$e
   done < <(printf '%s\n' "$excluded")
-  local f skip x
+  local skip x
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     skip=0
@@ -363,7 +379,7 @@ js_coverage_ts_subjects() {
       fi
     done
     [ "$skip" -eq 1 ] || printf '%s\n' "$f"
-  done < <(git ls-files -- 'plugins/gh-security/src/*.ts')
+  done < <(printf '%s\n' "$tracked")
 }
 
 # The coverage gate's full subject list: the workflow projection (ADR 010)
