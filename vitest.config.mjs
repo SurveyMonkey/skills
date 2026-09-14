@@ -9,7 +9,12 @@
 // repo's. Keep the pattern anchored at spec/js/.
 export default {
   test: {
-    include: ['spec/js/**/*.test.mjs'],
+    // spec/js/ is the Workflow script's suite (ADR 010); spec/ts/ is the
+    // TypeScript suite (ADR 012, #216 decision 5). Both anchors are explicit
+    // for the same reason: spec/fixtures/ carries dozens of hand-authored
+    // package.json and node_modules trees, and a broad default pattern is how
+    // one of those ends up collected as this repository's own code.
+    include: ['spec/js/**/*.test.mjs', 'spec/ts/**/*.test.ts'],
     exclude: ['node_modules/**', 'spec/fixtures/**'],
     // A run that collects no files is not a pass. scripts/check.sh js also
     // refuses empty discovery before it gets here; this is the same floor

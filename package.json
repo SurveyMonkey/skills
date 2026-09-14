@@ -8,12 +8,16 @@
     "test": "vitest run --coverage"
   },
   "devDependencies": {
+    "@types/node": "22.20.2",
     "@vitest/coverage-v8": "4.1.11",
     "ajv": "8.20.0",
     "lefthook": "2.1.12",
+    "typescript": "7.0.2",
     "vitest": "4.1.11"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["lefthook"]
+    "onlyBuiltDependencies": [
+      "lefthook"
+    ]
   }
 }

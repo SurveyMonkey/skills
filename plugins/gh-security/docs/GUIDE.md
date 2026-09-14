@@ -20,7 +20,11 @@ runtime strips the types, so the source stays inside the erasable subset (no `en
 properties, no namespaces), enforced by `tsc --erasableSyntaxOnly` on a pull request rather than
 by a failure at a user's launch, and every import names the `.ts` extension explicitly. The floor
 itself is enforced where it is crossed: the entry point exits with a named error naming the
-required version when the running node is older.
+required version when the running node is older. The check itself is
+`src/lib/node-floor.ts` (`assertNodeFloor`, throwing `NodeFloorError`), a pure function over a
+version string that `bin/gh-security.ts` imports and calls on `process.version`
+([#224](https://github.com/SurveyMonkey/skills/issues/224)); `scripts/check.sh types` asserts the
+same floor for the machine running the gates.
 
 **Nothing shipped imports anything outside the plugin.** vitest, ajv, `typescript` and
 `@types/node` are dev and CI dependencies and stay that way. A dependency on a shipped path
