@@ -34,9 +34,5 @@
   // `scripts/check.sh types`, which refuses a run that finds no tracked
   // `.ts` file under them: `tsc` with no inputs is an error, but a shrinking
   // input set is the quieter failure this repository refuses everywhere.
-  "include": [
-    "plugins/gh-security/bin",
-    "plugins/gh-security/src",
-    "spec/ts"
-  ]
+  "include": ["plugins/gh-security/bin", "plugins/gh-security/src", "spec/ts"]
 }

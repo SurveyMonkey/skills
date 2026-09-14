@@ -3,7 +3,7 @@
 # the workflow in .github/workflows/gates.yml, and humans running it
 # directly.
 #
-# Usage: scripts/check.sh <lint|validate|spec|js|types|version|fast|all|targets>
+# Usage: scripts/check.sh <lint|validate|spec|js|types|biome|version|fast|all|targets>
 #
 #   lint      ShellCheck over every tracked shell file
 #   validate  claude plugin validate --strict over the marketplace manifest
@@ -25,15 +25,20 @@
 #             build step, because the file a reviewer reads on the default
 #             branch is the file node runs. Needs an installed node_modules;
 #             run pnpm install first.
+#   biome     Biome's lint and format check over tracked JSON, .mjs and .ts
+#             (#250), with warnings treated as failures. Needs an installed
+#             node_modules; run pnpm install first. ShellCheck still covers
+#             the bash: the two tools do not overlap.
 #   version   every plugin whose files changed since the merge base carries a
 #             plugin.json version that differs from the base's
 #   fast      lint + validate, the ~2s pair, for running by hand (the
 #             pre-commit hook invokes lint and validate separately so each
 #             can warn about its own missing tool). Deliberately not `types`:
 #             fast is the pair that needs no install, and the types gate
-#             refuses outright without node_modules. The pre-commit hook runs
-#             `types` as its own step, where the missing-tool warning belongs.
-#   all       lint + validate + spec + js + types + version
+#             refuses outright without node_modules, as does `biome`. The
+#             pre-commit hook runs each of those as its own step, where the
+#             missing-tool warning belongs.
+#   all       lint + validate + spec + js + types + biome + version
 #   targets   print the lint target list, for inspection
 #
 # This is dev tooling, not shipped plugin code: unlike the scripts under
@@ -132,6 +137,26 @@ ts_targets() {
     'plugins/gh-security/bin/*.ts' \
     'plugins/gh-security/src/*.ts' \
     'spec/ts/*.ts'
+}
+
+# The Biome gate's targets. Three suffixes, minus the three trees Biome is
+# deliberately not pointed at, and the exclusions are stated here as git
+# pathspecs as well as in biome.json: this count is what refuses an empty
+# discovery, so it has to mean the same set Biome is about to read.
+#
+#   spec/fixtures/                 lockfile specimens. The testing skill says
+#                                  a specimen is never hand-edited, and a
+#                                  formatter edit is one.
+#   docs/rulesets/                 a verbatim export; formatting it would make
+#                                  every re-export a diff.
+#   plugins/gh-security/workflows/ a Workflow script must `return` at top
+#                                  level (ADR 010), which no ES module parser
+#                                  accepts. Its gate is the vitest suite.
+biome_targets() {
+  git ls-files -- '*.json' '*.mjs' '*.ts' \
+    ':(exclude)spec/fixtures/**' \
+    ':(exclude)docs/rulesets/**' \
+    ':(exclude)plugins/gh-security/workflows/**'
 }
 
 cmd_lint() {
@@ -454,6 +479,26 @@ cmd_types() {
   pnpm exec tsc -p tsconfig.json
 }
 
+cmd_biome() {
+  local targets n=0 f
+  targets=$(biome_targets)
+  while IFS= read -r f; do
+    if [ -n "$f" ]; then n=$((n + 1)); fi
+  done < <(printf '%s\n' "$targets")
+  [ "$n" -gt 0 ] \
+    || die 'no Biome targets discovered among tracked JSON, .mjs and .ts; refusing to report a pass'
+  [ -f biome.json ] || die 'biome.json is missing; the biome gate has no configuration to run'
+  command -v pnpm >/dev/null 2>&1 \
+    || die 'pnpm is not installed; the biome gate needs pnpm'
+  [ -d node_modules ] || die 'node_modules is absent; run pnpm install before the biome gate'
+  # `biome ci`, the read-only verdict, never `check --write`: a gate that
+  # edits the tree to make itself pass reports on a tree nobody reviewed.
+  # --error-on-warnings because a recommended rule that only warns is a
+  # finding this gate would otherwise report and pass, and #250's acceptance
+  # criterion is that the CI job fails on the finding.
+  pnpm exec biome ci . --error-on-warnings
+}
+
 # The commit-ish the version gate compares against, before the merge-base is
 # taken. Every caller goes through the merge base, so an explicit
 # CHECK_VERSION_BASE may be a branch, a tag, or a raw sha: the workflow passes
@@ -562,6 +607,7 @@ cmd_all() {
   cmd_spec
   cmd_js
   cmd_types
+  cmd_biome
   cmd_version
 }
 
@@ -572,8 +618,9 @@ case "${1:-}" in
   spec) cmd_spec ;;
   js) cmd_js ;;
   types) cmd_types ;;
+  biome) cmd_biome ;;
   version) cmd_version ;;
   fast) cmd_fast ;;
   all) cmd_all ;;
-  *) die 'usage: scripts/check.sh <lint|validate|spec|js|types|version|fast|all|targets>' ;;
+  *) die 'usage: scripts/check.sh <lint|validate|spec|js|types|biome|version|fast|all|targets>' ;;
 esac

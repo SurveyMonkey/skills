@@ -56,18 +56,26 @@ the default branch is the file node runs, so the compiler is a checker and never
 The same gate asserts that the running node meets the ADR 012 floor of 22.18, because a floor that
 is documented rather than enforced is one a user discovers at launch.
 
+[Biome](https://biomejs.dev) lints and formats the JSON, `.mjs` and `.ts`; ShellCheck keeps the
+bash. It is pinned like every other tool and installed by `pnpm install`. Three trees are out of
+scope and stay that way: `spec/fixtures/` (a specimen is never hand-edited, and a formatter edit
+is one), `docs/rulesets/` (re-exported verbatim, so formatting it would make every re-export a
+diff), and `plugins/gh-security/workflows/` (a Workflow script must `return` at top level, which
+no ES module parser accepts; the vitest suite is its gate).
+
 Every quality gate (shellspec suite, ShellCheck, `claude plugin validate --strict`, the vitest
-suite with its coverage floor, the TypeScript type check, and the plugin version gate) runs
+suite with its coverage floor, the TypeScript type check, Biome, and the plugin version gate) runs
 through one entry point, `scripts/check.sh`
-(`lint` / `validate` / `spec` / `js` / `types` / `version` / `fast` / `all` / `targets`); target
+(`lint` / `validate` / `spec` / `js` / `types` / `biome` / `version` / `fast` / `all` /
+`targets`); target
 lists live there and nowhere else, and empty discovery is a hard failure in every gate — including
 the coverage report, where a threshold satisfied by an empty file set is exactly that bug. Local
 git hooks are [lefthook](https://lefthook.dev), installed by `pnpm install` (or by hand with
-`pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files,
-`claude plugin validate --strict` when a manifest is staged, and the `types` gate when TypeScript
-or `tsconfig.json` is staged (the one step that checks the whole project rather than the staged
-files), and pre-push runs nothing: CI is the enforcement boundary
-(`.github/workflows/gates.yml`).
+`pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files, the `types`
+gate when TypeScript or `tsconfig.json` is staged (the one step that checks the whole project
+rather than the staged files), Biome over the staged JSON, `.mjs` and `.ts`, and
+`claude plugin validate --strict` when a manifest is staged, and pre-push runs nothing: CI is
+the enforcement boundary (`.github/workflows/gates.yml`).
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
 and `types` gates — `pnpm` and `node` at the ADR 012 floor, but still targets bash 3.2 because the

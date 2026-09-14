@@ -133,6 +133,61 @@ Describe 'scripts/check.sh'
       The stderr should include 'no TypeScript files discovered'
     End
 
+    # The Biome gate (#250) discovers tracked JSON, .mjs and .ts, minus the
+    # three trees Biome is deliberately not pointed at, and refuses an empty
+    # result for the same reason every other gate does.
+    It 'fails biome when no JSON, .mjs or .ts files are tracked'
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'no Biome targets discovered'
+    End
+
+    It 'ignores a fixture manifest when deciding whether the biome gate has targets'
+      # spec/fixtures/ is excluded from Biome: a specimen is never
+      # hand-edited, and a formatter edit is one. A tree of them is therefore
+      # not evidence that the gate has something to check.
+      mkdir -p spec/fixtures/some-repo
+      printf '{"name":"fixture"}' > spec/fixtures/some-repo/package.json
+      git add -A
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'no Biome targets discovered'
+    End
+
+    It 'ignores a rulesets export when deciding whether the biome gate has targets'
+      # docs/rulesets/ is excluded from Biome: it is re-exported verbatim, so
+      # formatting it would make every re-export a diff.
+      mkdir -p docs/rulesets
+      printf '{"name":"export"}' > docs/rulesets/protect-default.json
+      git add -A
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'no Biome targets discovered'
+    End
+
+    It 'ignores a Workflow script when deciding whether the biome gate has targets'
+      # plugins/gh-security/workflows/ is excluded from Biome: a Workflow
+      # script's required top-level `return` is a parse error for any ES
+      # module parser (ADR 010), so Biome could never pass over it.
+      mkdir -p plugins/gh-security/workflows
+      printf 'return {}\n' > plugins/gh-security/workflows/dispatch.mjs
+      git add -A
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'no Biome targets discovered'
+    End
+
+    It 'discovers a tracked .ts file as a Biome target'
+      # The gate's claimed scope is JSON, .mjs and .ts; a .ts-only tree must
+      # clear discovery, not just a JSON-only one.
+      mkdir -p bin
+      printf 'export const x = 1\n' > bin/thing.ts
+      git add -A
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'biome.json is missing'
+    End
+
     # Discovery passing does not mean the gate can run: an untracked
     # node_modules and a missing package.json each get their own refusal
     # rather than a confusing failure from inside pnpm.
@@ -488,6 +543,54 @@ STUB
 
     It 'passes when the compiler is clean on a supported node'
       When run "$CHECK" types
+      The status should be success
+    End
+  End
+
+  # The Biome gate (#250). Stubbed pnpm, like the types gate above: this
+  # covers what check.sh refuses before it runs Biome, not whether Biome
+  # agrees with the tree.
+  Describe 'the biome gate'
+    stub_biome() {
+      scratch_repo || return 1
+      mkdir -p bin node_modules
+      printf '{}' > biome.json
+      printf '{"private":true}' > package.json
+      git add -A
+      cat > bin/pnpm <<'STUB'
+#!/bin/sh
+[ -f want-biome-failure ] && exit 1
+exit 0
+STUB
+      chmod +x bin/pnpm
+      PATH="$PWD/bin:$PATH"
+      export PATH
+    }
+    Before stub_biome
+
+    It 'fails when biome.json is absent'
+      rm -f biome.json
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'biome.json is missing'
+    End
+
+    It 'fails when node_modules has not been installed'
+      rmdir node_modules
+      When run "$CHECK" biome
+      The status should eq 2
+      The stderr should include 'run pnpm install'
+    End
+
+    It 'fails when Biome reports findings'
+      : > want-biome-failure
+      When run "$CHECK" biome
+      The status should not eq 0
+      The status should not eq 2
+    End
+
+    It 'passes when Biome is clean'
+      When run "$CHECK" biome
       The status should be success
     End
   End

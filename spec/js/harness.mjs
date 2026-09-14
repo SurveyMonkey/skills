@@ -35,7 +35,13 @@ export async function runWorkflow({ args, agent, main, logs = [] }) {
     return agent(prompt, opts, calls.length - 1)
   }
   const parallelStub = (thunks) =>
-    Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
+    Promise.all(
+      thunks.map((t) =>
+        Promise.resolve()
+          .then(t)
+          .catch(() => null),
+      ),
+    )
 
   const entries = await main(
     agentStub,
@@ -135,7 +141,10 @@ export function cleanupReport(over = {}) {
     // the orchestrator dispatched as /w/... comes back as /private/w/...,
     // which is why nothing may correlate these by string equality.
     worktree: { path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x', action: 'left' },
-    work_dir: { path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x/.work', action: 'removed' },
+    work_dir: {
+      path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x/.work',
+      action: 'removed',
+    },
     branch: 'fix/dependabot-undici-6x',
     branch_deleted: false,
     branch_tip: null,

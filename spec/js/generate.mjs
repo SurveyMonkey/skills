@@ -89,9 +89,15 @@ export function assertMarkersOnce(src) {
       throw new Error(`marker appears more than once in the workflow: ${marker}`)
     }
   }
-  if (!(src.indexOf(PURE_BEGIN) < src.indexOf(PURE_END)
-    && src.indexOf(PURE_END) < src.indexOf(WIRING_BEGIN))) {
-    throw new Error('the workflow markers are out of order; expected pure begin, pure end, wiring begin')
+  if (
+    !(
+      src.indexOf(PURE_BEGIN) < src.indexOf(PURE_END) &&
+      src.indexOf(PURE_END) < src.indexOf(WIRING_BEGIN)
+    )
+  ) {
+    throw new Error(
+      'the workflow markers are out of order; expected pure begin, pure end, wiring begin',
+    )
   }
 }
 
