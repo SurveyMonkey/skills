@@ -21,8 +21,9 @@ plugins/<plugin>/
 
 - A command is an exported handler: parsed arguments, the environment and an injected io in, an
   envelope out. `lib/envelope.ts` has the four ADR 001 outcomes, which are the exit statuses:
-  `ok` 0, `error` 1, `not-implemented` 2, `unsupported` 3. A handler may also answer with
-  silence: exit 0, nothing written.
+  `ok` 0, `error` 1, `not-implemented` 2, `unsupported` 3. A success is JSON on stdout; a
+  failure is `{"error": ...}` on stdout, with the same message in prose on stderr. A handler may
+  also answer with silence: exit 0, nothing written.
 - The entry point is `scripts/<plugin>.ts`, never `bin/`. It holds no decisions, and has exactly
   one static import, `../src/lib/node-floor.ts`. Everything else loads by `await import` after
   the floor check.

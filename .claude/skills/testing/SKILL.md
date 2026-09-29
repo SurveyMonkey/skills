@@ -70,6 +70,8 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
   `harness/paths.ts`, never from `../` counted from the test's own location. The one relative
   import is the entry point test's own `import()` of `scripts/<plugin>.ts`, which `#<p>/*` does
   not map, so that coverage measures the file.
+- Tests of `harness/` go in `tests/harness/`. Checks of this repository's own layout go in
+  `tests/repo/`.
 - Fixtures stay in `spec/fixtures/`. The shellspec suite and the vitest suite share them.
 - `spec/js/` stays the Workflow script's suite (ADR 010). The script must `return` at top level,
   which no ES module parser accepts.
@@ -193,7 +195,8 @@ retired.
 ## Coverage
 
 **100 on all four buckets** (lines, branches, functions, statements) for the TypeScript source,
-over the named source set in `vitest.config.ts`, **and no file is excluded by name** (ADR 012 as
+**with 95 as the floor the gate never goes below**, over the named source set in
+`vitest.config.ts`, **and no file is excluded by name** (ADR 012 as
 amended in #273). The gate does not move to fit the code. Do not lower a threshold, and do not add
 a name to `coverage.exclude`, even for a file you judge a process boundary or a platform branch.
 The remedy for a branch no test can reach is to restructure the code until the branch no longer

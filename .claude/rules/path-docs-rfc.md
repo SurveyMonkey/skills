@@ -24,6 +24,7 @@ builds. The shared frontmatter rules are in `path-docs.md`.
   ---
   ```
 
+  `type`, `description`, `status`, `created` and `owner` are required.
 - Sections, in order: Summary, Motivation, Goals / Non-Goals, Proposed Approach, Alternatives
   Considered, Trade-offs & Risks, Rollout / Migration Plan, Open Questions, Decisions &
   Follow-ups, Related. Omit one only when it genuinely does not apply.

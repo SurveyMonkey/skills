@@ -8,8 +8,8 @@
   review.
 - Anything deterministic runs in a script, not an agent. Split work so the script emits
   structured output and the agent decides from it.
-- A command function is one job: parsed arguments and injected clients in, exit code and output
-  out (`.claude/rules/type-ts.md`). Shared logic is a pure function in `lib/`.
+- A command function is one job: parsed arguments, the environment and an injected io in, an
+  envelope out (`.claude/rules/type-ts.md`). Shared logic is a pure function in `lib/`.
 - An orchestrator composes skills, agents and scripts. It holds the order of steps and the
   decisions between them, and no other logic. It uses the tools of its own plugin, or tools that
   its plugin declares as dependencies ([dependencies.md](dependencies.md)). It never

@@ -5,8 +5,8 @@
 `description` is what `index.md` surfaces so an agent can decide whether to open the file. Write
 it as a statement of the doc's subject, not a restatement of its title.
 
-The type vocabulary (`.claude/rules/path-docs.md`) is deliberately small. A doc that fits none of
-these is usually a `Reference`. This includes diagram-directory READMEs, which do not get a type of their own. If you extend the vocabulary,
+The type vocabulary (`.claude/rules/path-docs.md`) is deliberately small. Diagram-directory
+READMEs are a `Reference` too; they do not get a type of their own. If you extend the vocabulary,
 that is a profile revision, not a local decision.
 
 ## Status model
@@ -51,7 +51,8 @@ request is the archive for the proposal itself, so link it from the record.
 
 ## Shared keys
 
-Defined once here; each per-type rule states which of them it requires.
+Defined once here; each per-type rule, and its detail file here (`adr.md`, `rfc.md`), states
+which of them it requires.
 
 | Key | Value |
 |-----|-------|

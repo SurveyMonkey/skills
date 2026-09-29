@@ -8,15 +8,16 @@ with the others. Each one costs tokens and time on every use, so keep both low.
 - A hook does what must always happen the same way. A skill holds judgment or knowledge. A
   subagent is only for context isolation or parallel work.
 - An orchestrator holds the order of steps and the decisions between them, and no other logic.
-- Derive what a plugin needs on each run. State on disk is a last resort.
+- Derive what a plugin needs on each run. State on disk is a last resort, and lives under
+  `${CLAUDE_PLUGIN_DATA}`. A literal path in a plugin is a defect.
 
 ## Challenge a divergence
 
 When a proposal, plan or change goes against a rule here, or in the `plugin-design` skill, say so
 before work starts:
 
-1. Name the rule, and cite the official source that supports it (the skill's `composition.md`,
-   "Sources").
+1. Name the rule, and cite the official source that supports it
+   ([Sources](../skills/plugin-design/composition.md#sources)).
 2. Propose the smaller alternative. Look for one or two parts that you can remove, or move into
    a script or a shared function, to make the design much simpler.
 3. Let the user decide. When the user keeps the divergence, record the ruling on the issue.

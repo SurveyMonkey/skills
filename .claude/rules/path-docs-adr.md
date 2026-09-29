@@ -23,6 +23,7 @@ RFC. The shared frontmatter rules are in `path-docs.md`.
   ---
   ```
 
+  `type`, `description`, `status`, `created` and `owner` are required.
 - Sections: Context, Decision, Consequences. Status is frontmatter, never a body heading.
 - Context states the problem so that more than one answer could satisfy it, before the Decision
   names one.
