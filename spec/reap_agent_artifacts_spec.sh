@@ -533,7 +533,7 @@ Describe 'the orchestrator-side reap (issue #131)'
 
   # Issue #171/#173: the phase 6 reap procedure is collapsed into one
   # `post-agent.sh` call, the way `fix-group.sh` already collapsed phases 1-5
-  # (scripts/CLAUDE.md, "The fix driver owns phases 1 to 5"). The path
+  # (docs/gh-security/GUIDE.md, "The fix driver owns phases 1 to 5"). The path
   # template, the `<package_path>` sanitization rule, and the two-step
   # pr-status.sh/reap-agent-artifacts.sh breakdown are the script's to own
   # now (`common/post-agent.sh`'s own header, and `spec/post_agent_spec.sh`);
@@ -574,7 +574,7 @@ Describe 'the orchestrator-side reap (issue #131)'
 
     # The two-step breakdown (parse the result, call pr-status.sh, then
     # reap-agent-artifacts.sh) is gone with the collapse: it is exactly the
-    # prose re-derivation scripts/CLAUDE.md calls a bug once a driver script
+    # prose re-derivation docs/gh-security/GUIDE.md calls a bug once a driver script
     # exists for it.
     # pin: mechanical, retired by reap-batch.sh
     It 'no longer names reap-agent-artifacts.sh as a call site of its own'

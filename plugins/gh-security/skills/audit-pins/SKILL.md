@@ -1,4 +1,6 @@
 ---
+name: audit-pins
+disable-model-invocation: true
 description: >
   Audit this repo's dependency pins — the overrides and resolutions added to
   hold transitive dependencies at safe versions — and report which are no

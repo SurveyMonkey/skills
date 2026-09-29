@@ -20,16 +20,19 @@ Skills within a plugin are invoked as `/namespace:skill-name`. One namespace per
 concern per namespace.
 
 ```
+lib/                # shared TypeScript; a plugin reaches it through its src/lib symlink
 plugins/
   gh-security/
     .claude-plugin/
       plugin.json   # the plugin's identity and version; the whole release is bumping it
-    skills/         # orchestrators that run in the main session
+    skills/         # entry points: orchestrators that run in the main session
     agents/         # subagents dispatched in parallel; each declares its model in frontmatter
-    commands/       # explicit entry points
     workflows/      # Workflow tool scripts (JavaScript), run by the harness, not the user's
                     # shell; tested by vitest with coverage at 100 (ADR 010)
+    src/            # TypeScript commands behind the CLI (.claude/rules/type-ts.md)
+      lib -> ../../../lib
     scripts/
+      gh-security.ts  # the one CLI entry point
       common/       # ecosystem-agnostic: checkout discovery, scope, alert discovery,
                     # adapter routing, risk scoring, capacity detection, PR state,
                     # advisory lookup
@@ -40,8 +43,9 @@ plugins/
 
 ## Scripts do, agents decide
 
-Deterministic work belongs in `scripts/` with a JSON contract; skills, agents, and commands carry
-only the judgment. Scripts depend on `bash`, `jq`, and `gh` alone — a rule about what runs on the
+Deterministic work belongs in `scripts/` with a JSON contract; skills and agents carry
+only the judgment. Tests, docs and flow diagrams live outside the plugin directory, which ships
+only its run-time files (`.claude/rules/path-plugins.md`). Scripts depend on `bash`, `jq`, and `gh` alone — a rule about what runs on the
 user's machine, which is every script under `scripts/`; the one JavaScript file under
 `workflows/` is evaluated by the Claude Code harness, which is already node, and no script here
 may call into it ([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Scripts
@@ -49,7 +53,7 @@ target bash 3.2 (the macOS
 default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
 pass**. Conventions and their reasoning live in
-[plugins/gh-security/docs/GUIDE.md](../plugins/gh-security/docs/GUIDE.md).
+[docs/gh-security/GUIDE.md](gh-security/GUIDE.md).
 
 ## The decisions, and where they are recorded
 

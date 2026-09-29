@@ -171,7 +171,7 @@ highest_version() {
       # string `null`, which reads as "not higher": a failed comparison would
       # silently pick the wrong highest_fixed_version (issue #39). Absent and
       # untyped are both errors here, per the adapter contract in
-      # scripts/CLAUDE.md.
+      # docs/gh-security/GUIDE.md.
       cmp_json=$("$adapter" compare_versions "$candidate" "$best" 2>"$ERR_FILE") || {
         printf '{"error":"compare_versions failed for %s (%s vs %s): %s"}\n' \
           "$eco" "$candidate" "$best" "$(cat "$ERR_FILE")" >&2
@@ -243,7 +243,7 @@ group_repo_alerts() {
 
       # Leading component of the patched version, or "none" when no patched
       # version is published. Extraction, not comparison: ordering versions
-      # stays behind the adapter (see scripts/CLAUDE.md).
+      # stays behind the adapter (see docs/gh-security/GUIDE.md).
       #
       # The identifier is advisory-supplied text, not a validated version.
       # Prose ("See vendor advisory") and stray whitespace do occur, and

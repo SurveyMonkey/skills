@@ -30,9 +30,8 @@ request, open for review, that carries a computed merge-risk rating.
 
 | Entry point | Kind | What it does |
 |---|---|---|
-| `resolve-alerts` | Skill | Triggers from natural language ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches one fix subagent per group through a capacity-bounded workflow and reports the pull requests they open. |
-| `/gh-security:resolve-alerts` | Command | Explicit entry point for the same skill. |
-| `/gh-security:audit-pins` | Command | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. Preflights for the repo's own open `security`-labeled PRs first, and stops if any exist: run it after those fix PRs have merged or been closed. |
+| `resolve-alerts` (`/gh-security:resolve-alerts`) | Skill | Triggers from natural language, or run it by name ("fix this repo's security alerts", "clean up npm audit findings"). Discovers, ranks, and batches alerts, then dispatches one fix subagent per group through a capacity-bounded workflow and reports the pull requests they open. |
+| `/gh-security:audit-pins` | Skill, run by name only | Reports which of a repo's dependency pins (overrides and resolutions) are no longer needed, testing each removal in an isolated worktree against every published advisory for the package, then opens a PR removing the confirmed set. Report-only is offered as the alternative. Preflights for the repo's own open `security`-labeled PRs first, and stops if any exist: run it after those fix PRs have merged or been closed. |
 
 Two subagents do the work, each dispatched by its own entry point: `fix-dependency` runs in
 parallel from a capacity-bounded workflow, and `audit-pins` is dispatched alone, one repository at

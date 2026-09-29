@@ -335,7 +335,7 @@ STUB_EOF
     End
   End
 
-  # "Zero resolved versions is an error, never a pass" (scripts/CLAUDE.md).
+  # "Zero resolved versions is an error, never a pass" (docs/gh-security/GUIDE.md).
   # present: true backed by versions: [] is the parser-failure shape that
   # rule warns about, not a legitimate empty answer, and it must never reach
   # the compare loop through a single-empty-string herestring iteration and

@@ -11,7 +11,7 @@
 
 Describe 'the defect-report guidance in resolve-alerts (#148)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
-  AUDIT_CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+  AUDIT_CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
 
   # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts lines
   # and suits a prescribed command or a sentence that fits on one, `phrase_in`

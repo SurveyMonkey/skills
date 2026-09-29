@@ -4,7 +4,8 @@ This repository is maintained by SurveyMonkey engineers. Contributions are curre
 
 ## Adding a New Skill to an Existing Plugin
 
-1. Create a new skill file under the appropriate `plugins/<namespace>/commands/` directory.
+1. Create the skill at `plugins/<namespace>/skills/<skill>/SKILL.md`, with its flow diagram at
+   `docs/flows/<namespace>/<skill>/_skill-flow.md` (`.claude/rules/file-skill-md.md`).
 2. Follow the patterns established by existing skills in that plugin.
 3. Open a PR with a clear description of what the skill does and how to test it.
 

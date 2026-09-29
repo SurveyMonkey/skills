@@ -1,3 +1,11 @@
+---
+type: Reference
+description: The gh-security plugin's conventions, domain rules, adapter contract, layout and testing policy; the requirements document for the TypeScript port.
+owner: brianespinosa
+created: 2026-07-26
+stale_after: 2027-03-28
+---
+
 # gh-security
 
 Deterministic work lives here so agent prompts do not re-derive procedures each session.
@@ -5,7 +13,7 @@ Deterministic work lives here so agent prompts do not re-derive procedures each 
 typed JSON contract; interpreting failures and writing prose stays with the agent.
 
 **This document describes the target state**, the Shape in
-[RFC 002](../../../docs/rfc/002-typescript-port.md): one CLI entry point over typed commands that
+[RFC 002](../rfc/002-typescript-port.md): one CLI entry point over typed commands that
 node executes directly. Which of them have been ported and which are still bash is the rollout
 table in that RFC, and that table is the source for what exists today rather than anything here.
 A script name used below (`common/fix-group.sh`, `ecosystems/node.sh`) names the home of a
@@ -14,15 +22,15 @@ procedure, not a claim about the substrate it is written in this week.
 ## Hard constraints
 
 **Node 22.18 or newer, TypeScript executed directly**
-([ADR 012](../../../docs/adr/012-typescript-on-node-22-18.md)). No build step, no bundler, no
+([ADR 012](../adr/012-typescript-on-node-22-18.md)). No build step, no bundler, no
 generated tree: the file a reviewer reads on the default branch is the file that runs. The
 runtime strips the types, so the source stays inside the erasable subset (no `enum`, no parameter
 properties, no namespaces), enforced by `tsc --erasableSyntaxOnly` on a pull request rather than
 by a failure at a user's launch, and every import names the `.ts` extension explicitly. The floor
 itself is enforced where it is crossed: the entry point exits with a named error naming the
 required version when the running node is older. The check itself is
-`src/lib/node-floor.ts` (`assertNodeFloor`, throwing `NodeFloorError`), a pure function over a
-version string that `bin/gh-security.ts` imports and calls on `process.version`
+`lib/node-floor.ts` (`assertNodeFloor`, throwing `NodeFloorError`), a pure function over a
+version string that `scripts/gh-security.ts` imports and calls on `process.version`
 ([#224](https://github.com/SurveyMonkey/skills/issues/224)); `scripts/check.sh types` asserts the
 same floor for the machine running the gates.
 
@@ -31,11 +39,12 @@ same floor for the machine running the gates.
 reintroduces the cold-cache registry fetch in the middle of a security fix that ADR 001 refused
 `npx semver` for, and that refusal stands.
 
-**Scope: this rule governs what runs on a user's machine**, which is everything under `bin/` and
-`src/`, plus the two bash scripts that still ship under `scripts/`. It is not a repository-wide
+**Scope: this rule governs what runs on a user's machine**, which is `scripts/gh-security.ts`,
+everything under `src/` (and the root `lib/` it reaches through `src/lib`), plus the two bash
+scripts that still ship under `scripts/`. It is not a repository-wide
 ban on dependencies. `plugins/gh-security/workflows/` ships one JavaScript file that the Claude
 Code harness loads and evaluates, never a user's shell (ADR 010's boundary, which ADR 012 leaves
-standing). Nothing under `bin/` or `src/` imports that file, and it imports nothing from them.
+standing). Nothing under `scripts/` or `src/` imports that file, and it imports nothing from them.
 
 **`gh`, `git`, the package manager and `detect-capacity.sh` are the only process seams.** Every
 other boundary is a function call: a verb never spawns another verb, and no call site pays a
@@ -45,21 +54,25 @@ defaulted.
 
 ## Layout
 
+Paths are relative to `plugins/gh-security/`, except `lib/`, which is the repository root's. The
+plugin reaches it through the committed symlink `src/lib -> ../../../lib`
+(`.claude/rules/type-ts.md`).
+
 | Path | Scope |
 |---|---|
-| `bin/gh-security.ts` | The one entry point: the Node-floor preamble, then the CLI |
+| `scripts/gh-security.ts` | The one entry point: the Node-floor preamble, then the CLI |
 | `src/cli/` | `registry.ts`, the subcommand map; `run.ts`, parse, dispatch, render, exit; `command.ts`, what a command is and the real io |
-| `src/lib/envelope.ts` | The four ADR 001 outcomes as one typed result, and the exit codes |
-| `src/lib/node-floor.ts` | The runtime floor, as a pure function over a version string |
-| `src/lib/process-runner.ts` | The one place a process starts, with the spawn as a parameter |
-| `src/lib/env-prefix.ts` | The `env_prefix` seam |
-| `src/lib/git.ts` | Path containment, worktree queries, refs |
-| `src/lib/gh.ts` | The typed `gh` client |
-| `src/lib/state.ts` | The fix driver's state file, typed |
+| `lib/envelope.ts` | The four ADR 001 outcomes as one typed result, and the exit codes |
+| `lib/node-floor.ts` | The runtime floor, as a pure function over a version string |
+| `lib/process-runner.ts` | The one place a process starts, with the spawn as a parameter |
+| `lib/env-prefix.ts` | The `env_prefix` seam |
+| `lib/git.ts` | Path containment, worktree queries, refs |
+| `lib/gh.ts` | The typed `gh` client |
+| `src/state.ts` | The fix driver's state file, typed |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | The ADR 001 verbs as an in-process interface; `node` handles `npm` alerts |
-| `src/commands/` | The PreToolUse allow hook, discovery, preflight, scoring, rendering, the drivers |
+| `src/subcommands/` | The PreToolUse allow hook, discovery, preflight, scoring, rendering, the drivers |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
 
@@ -68,16 +81,17 @@ this plugin into one pattern for one path
 ([#16](https://github.com/SurveyMonkey/skills/issues/16)).
 
 **A command is an exported, typed handler** taking its parsed arguments plus an injected io and
-`gh` client, and returning the envelope. The registry in `bin/gh-security.ts` stays thin enough
+`gh` client, and returning the envelope. The registry in `src/cli/registry.ts` stays thin enough
 that the entry point's own behavior is all a spawned process has left to cover (issue #216's
 decision comment). That export is also the test seam; see Testing below.
 
 ### The CLI
 
 **A command is an exported handler, and the entry point adds nothing.** `src/cli/registry.ts`
-maps a subcommand name to that handler plus the one line `--help` prints for it, so adding a
-command is an entry in that map and a file under `src/commands/`, never a change to
-`bin/gh-security.ts`. The entry point itself is four statements: the Node-floor check, which is
+maps a subcommand name to a `load` function that dynamically imports that handler, plus the one
+line `--help` prints for it, so a command nobody asked for is never loaded. Adding a
+command is an entry in that map and a file under `src/subcommands/`, never a change to
+`scripts/gh-security.ts`. The entry point itself is four statements: the Node-floor check, which is
 its only static import and its first statement, then the CLI, which `src/cli/run.ts` parses,
 dispatches, renders and exits with.
 
@@ -85,7 +99,7 @@ dispatches, renders and exits with.
 stdout, and exit 0. Nothing else is intercepted: a `--help` after a command name belongs to that
 command.
 
-**Exit codes are ADR 001's four, carried by the envelope** (`EXIT_CODES` in `src/lib/envelope.ts`,
+**Exit codes are ADR 001's four, carried by the envelope** (`EXIT_CODES` in `lib/envelope.ts`,
 read through `exitCodeFor`): 0 success, 1 error, 2 verb not implemented, 3 unsupported toolchain.
 A success payload is JSON on stdout; a failure is `{"error": ...}` on stdout with the same message
 in prose on stderr. An unknown command is the one deliberate exception to that split: it is not a
@@ -94,14 +108,14 @@ reading stdout as this CLI's contract must never read "there is no such command"
 A command may also answer with silence, which is exit 0 and nothing written at all.
 
 **The allow hook is a subcommand.** `hooks/hooks.json` registers a `PreToolUse` hook on `Bash`
-running `node ${CLAUDE_PLUGIN_ROOT}/bin/gh-security.ts allow-own-commands`, which reads the hook
+running `node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" allow-own-commands`, which reads the hook
 JSON on stdin and answers `hookSpecificOutput.permissionDecision: "allow"` with a reason, so this
 plugin's own commands do not prompt while skill `allowed-tools` pre-approval still misses plugin
 skills ([#16](https://github.com/SurveyMonkey/skills/issues/16)).
 
-It allows exactly one shape: `node <plugin root>/bin/gh-security.ts <registered subcommand>
+It allows exactly one shape: `node <plugin root>/scripts/gh-security.ts <registered subcommand>
 [args]`, where the entry point is resolved from where this plugin is installed
-(`import.meta.url`, two directories up from `src/commands/`) and never from the command being
+(`import.meta.url`, two directories up from `src/subcommands/`) and never from the command being
 judged, and every remaining argument is drawn from one explicit character set (letters, digits,
 and `. _ : / @ = + , -`) that contains no shell metacharacter. The installed location rather than
 `CLAUDE_PLUGIN_ROOT`: the hooks reference documents that name as a placeholder expanded inside a
@@ -118,7 +132,7 @@ says nothing about.
 
 ### Shared library
 
-**Everything under `src/lib/` is written once and imported everywhere. Nothing later defines its
+**Everything under `lib/` (the plugin's `src/lib`) is written once and imported everywhere. Nothing later defines its
 own runner, client, or envelope** ([#217](https://github.com/SurveyMonkey/skills/issues/217)).
 
 **The envelope is the contract between every layer.** ADR 001's four exit codes are four outcomes
@@ -145,7 +159,7 @@ here rather than by each caller.
 
 ## Adapter contract
 
-See [ADR 001](../../../docs/adr/001-ecosystem-adapter-contract.md). As amended by ADR 012 the
+See [ADR 001](../adr/001-ecosystem-adapter-contract.md). As amended by ADR 012 the
 contract is an in-process interface rather than a process: verbs are functions behind one adapter
 interface, and the four exit codes are the same four outcomes carried in a typed result envelope.
 The stdout and stderr split survives at the CLI entry point, where a command is invoked from a
@@ -746,7 +760,7 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 and `spec/fixtures/` (issue #216's decision comment). `.claude/rules/path-spec.md` applies to
 them unchanged: it points at the `testing` skill for every file under `spec/`. Shellspec covers
 the bash that remains. The strategy both suites are written to is the
-[`testing` skill](../../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
+[`testing` skill](../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
 and the rules about what this public repository may name are in the root `CLAUDE.md` (Testing
 section).
 
@@ -767,7 +781,7 @@ include: measuring them would let an unused helper move the number while no ship
 
 **Parity is what licenses a deletion.** A bash script is deleted only after its replacement is
 parity-green on every fixture that covered it
-([RFC 002](../../../docs/rfc/002-typescript-port.md)), and its spec file goes in the same commit,
+([RFC 002](../rfc/002-typescript-port.md)), and its spec file goes in the same commit,
 because two implementations of one behavior outlive their usefulness the moment one of them is
 authoritative. `spec/ts/parity-semver.test.ts` is the first such run, over `node.sh`'s two semver
 verbs. The runner itself is deleted in
@@ -777,7 +791,7 @@ against.
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
 statements), **with 95 as the floor the gate never goes below**, and exclusion by name with a
 stated reason as the only relief
-([ADR 012](../../../docs/adr/012-typescript-on-node-22-18.md),
+([ADR 012](../adr/012-typescript-on-node-22-18.md),
 [#211](https://github.com/SurveyMonkey/skills/issues/211)). The number is never lowered to
 accommodate one file: a lowered threshold hides every other file's regression behind the file
 that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it already has.
@@ -799,9 +813,13 @@ bash or jq mechanism the port removes, and
 [#241](https://github.com/SurveyMonkey/skills/issues/241) deletes it.** It governs the shipped
 scripts that have not been ported yet, plus `detect-capacity.sh` and `notice-scan.sh`, which stay
 bash for good (RFC 002, Non-Goals). Which is which is the rollout table in
-[RFC 002](../../../docs/rfc/002-typescript-port.md). These targets outlive this section:
-`scripts/CLAUDE.md` points here for them today, and is where they land beside the two scripts
-when this section goes.
+[RFC 002](../rfc/002-typescript-port.md). These targets outlive this section, and
+land in a section of their own beside the two scripts when this section goes.
+
+Two bash scripts ship from `scripts/common/` and stay bash: `notice-scan.sh`, the PostToolUse
+notice hook, which runs on every Bash call, where a node process start would be a standing cost
+paid per tool call for a grep; and `detect-capacity.sh`, three machine probes, called once per
+dispatch. Anything else still under `scripts/` is mid-port.
 
 **Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
 Homebrew, so anything the two versions read differently goes green locally and red only in CI.

@@ -41,7 +41,7 @@
 #     whitespace and leading v/=, keep a plain nonnegative leading integer,
 #     exclude anything else). jq's `unique` sorts them lexicographically as
 #     strings: this is a set for membership and reporting, never an ordered
-#     list — ordering versions stays behind the adapter (scripts/CLAUDE.md).
+#     list — ordering versions stays behind the adapter (docs/gh-security/GUIDE.md).
 #
 #   line_status —
 #     "resolved"            some copy's major equals `major_line`
@@ -79,7 +79,7 @@
 #   - Yarn `resolutions` cannot version-qualify today (a range in the key's
 #     parent half parses and then silently never matches, and the
 #     exact-locator form that could express the separation is unimplemented;
-#     scripts/CLAUDE.md, "An override's key is scoped"), so any shared
+#     docs/gh-security/GUIDE.md, "An override's key is scoped"), so any shared
 #     parent name across lines is the collapse shape there.
 #   - Under npm and pnpm, qualified keys separate the lines per parent COPY,
 #     so the inexpressible shape is a single copy (one `parent@version`)
@@ -104,7 +104,7 @@
 #
 # Contract discipline: an adapter reply missing a promised field, of the wrong
 # type, or empty on exit 0 is a broken read, checked with `has()` rather than
-# papered over with `// default` (scripts/CLAUDE.md). It classifies the group
+# papered over with `// default` (docs/gh-security/GUIDE.md). It classifies the group
 # "unknown" — fail-closed for this stage, whose only unsafe act is *removing*
 # a group from the queue. Hard `{"error": ...}` + non-zero exit is reserved
 # for bad input to this script itself: a missing --repo-root, or stdin that is
@@ -113,7 +113,7 @@
 # a second repo's groups would be classified, and potentially withdrawn, from
 # the wrong checkout entirely.
 #
-# "Zero resolved versions is an error, never a pass" (scripts/CLAUDE.md)
+# "Zero resolved versions is an error, never a pass" (docs/gh-security/GUIDE.md)
 # applies here too: `present: true` with an empty `versions[]` is a
 # parser-failure shape, not "the package resolves nowhere", so it is folded
 # into the same contract check as a missing field rather than left to reach
@@ -216,7 +216,7 @@ MAJOR_OF_JQ='
 
 # The `resolved_versions` contract: a reply of the wrong shape, or `present:
 # true` backed by zero versions, is a broken read, never a legitimate empty
-# answer (scripts/CLAUDE.md's "zero resolved versions is never a pass").
+# answer (docs/gh-security/GUIDE.md's "zero resolved versions is never a pass").
 CONTRACT_JQ='
   def valid_reply:
     type == "object"
@@ -239,11 +239,11 @@ cleanup() {
   if [ -n "$BASE_DIR" ]; then
     # `worktree remove` drops exactly this script's own registration; never
     # `worktree prune`, which walks every entry in the repository and can
-    # delete a sibling agent's live registration (scripts/CLAUDE.md). When
+    # delete a sibling agent's live registration (docs/gh-security/GUIDE.md). When
     # the remove fails, KEEP the directory: deleting it anyway would orphan
     # the registration in the user's repository as a path nothing can name
     # again (the mktemp dir is anonymous), which is the exact state
-    # scripts/CLAUDE.md documents as blocking later worktree adds — so leave
+    # docs/gh-security/GUIDE.md documents as blocking later worktree adds — so leave
     # the pair intact and say how to remove it.
     if git -C "$REPO_ROOT" worktree remove --force "$BASE_DIR/tree" >/dev/null 2>&1; then
       rm -rf "$BASE_DIR" || true

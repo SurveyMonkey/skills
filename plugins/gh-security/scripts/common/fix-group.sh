@@ -65,13 +65,13 @@
 #
 # All JSON goes to stdout; human-readable detail goes to stderr.
 #
-# `--env-prefix` is an opaque argv prefix (scripts/CLAUDE.md, "`env_prefix` is
+# `--env-prefix` is an opaque argv prefix (docs/gh-security/GUIDE.md, "`env_prefix` is
 # an opaque, optional seam"). It is split on whitespace and prepended verbatim
 # to every git, adapter and package-manager invocation, composed **after** any
 # `cd`: it injects environment, it does not chdir. Absent means bare.
 #
 # Dependencies are bash, jq and git only. `gh` is in the plugin's dependency
-# set (scripts/CLAUDE.md) but this script never calls it: every remote fact it
+# set (docs/gh-security/GUIDE.md) but this script never calls it: every remote fact it
 # needs comes from a fetched remote-tracking ref. bash 3.2: no associative
 # arrays, no `mapfile`, no `${var,,}`.
 
@@ -170,7 +170,7 @@ STATE=""
 # passed `load_state`'s `[ -f ]` check and handed every caller the empty
 # string. `$WT` was then empty, `[ -e "" ]` false, and the run proceeded to
 # `rm -rf "$WORK"` while the worktree registration under
-# `<git-common-dir>/worktrees/` survived — the exact state scripts/CLAUDE.md
+# `<git-common-dir>/worktrees/` survived — the exact state docs/gh-security/GUIDE.md
 # says blocks a later `worktree add` and `branch -D`.
 # Prints the value and returns 0; 1 when the file itself could not be read; 2
 # when the key is absent, null or empty. It reports rather than dies because
@@ -265,7 +265,7 @@ load_state() {
 # Adapter and git seams
 #
 # Every git call carries `-C`; every adapter call `cd`s into the worktree in a
-# subshell, exactly as scripts/CLAUDE.md's "No Bash snippet may depend on the
+# subshell, exactly as docs/gh-security/GUIDE.md's "No Bash snippet may depend on the
 # previous call" requires of the prescribed shapes this replaces. The adapter's
 # write verbs stay behind require-linked-worktree.sh either way.
 # ---------------------------------------------------------------------------
@@ -383,7 +383,7 @@ adapter_run() {
 # Reading a field the adapter contract promises
 #
 # "A field the contract promises arrives present and of the promised type, or
-# it is a hard error, never a default" (scripts/CLAUDE.md). A bare `jq -r` on
+# it is a hard error, never a default" (docs/gh-security/GUIDE.md). A bare `jq -r` on
 # an absent key yields the STRING `null`, which then takes a branch of its
 # own: `.peer_only` stops being `true` so the #103 dead-end check vanishes,
 # `.line_present` stops being `false` so its stop is bypassed, and
@@ -531,14 +531,14 @@ porcelain_paths() {
 }
 
 # ---------------------------------------------------------------------------
-# Version helpers — comparison stays behind the adapter (scripts/CLAUDE.md)
+# Version helpers — comparison stays behind the adapter (docs/gh-security/GUIDE.md)
 # ---------------------------------------------------------------------------
 
 # The versions of this group's line, sorted, as a compact JSON array, or a
 # non-zero status when the payload could not be read. A payload that is not an
 # object, or carries no `versions` array, or carries an entry whose `version`
 # is not a string, is an ERROR here and never an empty list: "zero resolved
-# versions is an error, never a pass" (scripts/CLAUDE.md).
+# versions is an error, never a pass" (docs/gh-security/GUIDE.md).
 #
 # The drift-cleared test compares two of these, so a failed read must never
 # come back as `[]`: two failed reads compare equal, and the run then reports
@@ -896,7 +896,7 @@ cmd_baseline() {
   local pre_drift=$ADAPTER_OUT
   # The same object assertion the other verbs carry: an adapter exiting 0 with
   # empty stdout otherwise sails past every later `has()` check rather than
-  # failing one (scripts/CLAUDE.md).
+  # failing one (docs/gh-security/GUIDE.md).
   adapter_field baseline "$pre_drift" "resolved_versions $PACKAGE (before the control install)" present
   state_set pre_drift "$pre_drift"
 
@@ -1016,7 +1016,7 @@ EOF
   APPLY_RESULT=$ADAPTER_OUT
   adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" written
   printf '%s' "$APPLY_RESULT" | jq -e '(.written | type) == "array"' >/dev/null 2>&1 \
-    || fail_phase apply "apply_constraint answered a 'written' that is not an array. It is the only statement of what actually changed (scripts/CLAUDE.md), and every classification below reads it."
+    || fail_phase apply "apply_constraint answered a 'written' that is not an array. It is the only statement of what actually changed (docs/gh-security/GUIDE.md), and every classification below reads it."
   adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" observations
   printf '%s' "$APPLY_RESULT" | jq -e '(.observations | type) == "array"' >/dev/null 2>&1 \
     || fail_phase apply "apply_constraint answered an 'observations' that is not an array. A missing one silently turns every tightened bare override into an added one in the PR body."
@@ -1152,7 +1152,7 @@ cmd_apply() {
     [ .[] | select((.vulnerable_range | type) != "string" or (.vulnerable_range | length) == 0)
       | (.number // "<unnumbered>") ]')
   [ "$unchecked" = "[]" ] \
-    || fail_phase apply "alert(s) $unchecked in this group carry no vulnerable_range, so validate cannot be asked whether they were cleared. Dropping them from --vulnerable would let unresolved_alerts come back empty for an alert nothing checked — the silent partial fix that flag exists to prevent (scripts/CLAUDE.md). Nothing was written."
+    || fail_phase apply "alert(s) $unchecked in this group carry no vulnerable_range, so validate cannot be asked whether they were cleared. Dropping them from --vulnerable would let unresolved_alerts come back empty for an alert nothing checked — the silent partial fix that flag exists to prevent (docs/gh-security/GUIDE.md). Nothing was written."
 
   local hfv
   hfv=$(state_get '.group.highest_fixed_version'); state_ok $? '.group.highest_fixed_version'
@@ -1907,7 +1907,7 @@ EOF
   # Never while the registration is still live. `rm -rf "$WORK"` used to run
   # unconditionally, so a failed `worktree remove` left the directory deleted
   # and its entry under `<git-common-dir>/worktrees/` intact — the exact state
-  # scripts/CLAUDE.md describes as blocking both a later `worktree add` on that
+  # docs/gh-security/GUIDE.md describes as blocking both a later `worktree add` on that
   # path and any `branch -D` of its branch, and which `git worktree remove`
   # itself then refuses to clean up.
   local work_action work_err
@@ -1920,7 +1920,7 @@ EOF
     # The status was never checked, so a removal that failed — a permission, a
     # busy mount, a read-only parent — reported `worktree_removed: true`,
     # `detail: null`, and no field naming `$WORK` at all. That is verbatim the
-    # failure scripts/CLAUDE.md records, on the other side of the same
+    # failure docs/gh-security/GUIDE.md records, on the other side of the same
     # operation. The stderr is kept and quoted, the way the reap keeps it: an
     # operator told only that a removal failed, and then told to finish it by
     # hand, has not been told the one thing that decides how.

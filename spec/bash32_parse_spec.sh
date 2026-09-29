@@ -2,7 +2,7 @@
 # shellcheck shell=sh
 # The bash 3.2 floor, enforced rather than asserted in a comment.
 #
-# scripts/CLAUDE.md targets bash 3.2 — the default macOS /bin/bash — and
+# docs/gh-security/GUIDE.md targets bash 3.2 — the default macOS /bin/bash — and
 # node.sh depends on it concretely: 3.2 scans for the closing `)` of a command
 # substitution while tracking double quotes, so a heredoc body carrying an
 # unpaired `"` is cut short and the rest of the file is parsed as shell. The
