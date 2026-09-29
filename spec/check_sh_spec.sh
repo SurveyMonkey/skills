@@ -115,7 +115,7 @@ Describe 'scripts/check.sh'
     End
 
     # The types gate (ADR 012, #214) discovers the same way, anchored at the
-    # three paths tsconfig.json includes, so `tsc` never sees an input the
+    # paths tsconfig.json includes, so `tsc` never sees an input the
     # configuration does not claim and a shrinking input set is refused rather
     # than reported as a clean type check.
     It 'fails types when no TypeScript files are tracked under the include paths'
@@ -431,7 +431,7 @@ JSON
     End
 
     # ADR 012, #211: the coverage gate also requires every tracked
-    # plugins/gh-security/src/**/*.ts file, unless vitest.config.mjs's own
+    # plugins/gh-security/src/**/*.ts file, unless vitest.config.ts's own
     # coverage.exclude names it: the same array vitest itself reads, so a
     # file excluded there is a file check.sh must not demand either.
     Describe 'the coverage floor over TypeScript source'
@@ -474,8 +474,8 @@ JSON
         The output should include 'coverage measured'
       End
 
-      It 'does not require a file named in vitest.config.mjs coverage.exclude'
-        cat > vitest.config.mjs <<'CONFIG'
+      It 'does not require a file named in vitest.config.ts coverage.exclude'
+        cat > vitest.config.ts <<'CONFIG'
 export default {
   test: {
     coverage: {
@@ -495,13 +495,13 @@ JSON
         The output should include 'coverage measured'
       End
 
-      # js_coverage_exclude reads vitest.config.mjs with node rather than a
+      # js_coverage_exclude reads vitest.config.ts with node rather than a
       # second bash-side copy of its exclude array (ADR 012, #211), so a
       # config that fails to import is this gate's own error path, not just
       # a hazard traced by hand: it must fail loudly rather than silently
       # falling back to "nothing excluded".
-      It 'fails when vitest.config.mjs fails to import'
-        cat > vitest.config.mjs <<'CONFIG'
+      It 'fails when vitest.config.ts fails to import'
+        cat > vitest.config.ts <<'CONFIG'
 export default {
 CONFIG
         git add -A
@@ -589,8 +589,8 @@ STUB
   Describe 'the types gate'
     stub_types() {
       scratch_repo || return 1
-      mkdir -p spec/ts bin node_modules
-      printf 'export const x = 1\n' > spec/ts/x.test.ts
+      mkdir -p tests bin node_modules
+      printf 'export const x = 1\n' > tests/x.test.ts
       printf '{}' > tsconfig.json
       git add -A
       cat > bin/node <<'STUB'

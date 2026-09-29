@@ -2,7 +2,12 @@
   "name": "surveymonkey-skills",
   "private": true,
   "type": "module",
-  "description": "Dev and CI toolchain for this marketplace. Not a shipped package, and not a dependency of any plugin: the plugin scripts remain bash + jq + gh (ADR 010).",
+  "imports": {
+    "#harness/*": "./harness/*",
+    "#lib/*": "./lib/*",
+    "#gh-security/*": "./plugins/gh-security/src/*"
+  },
+  "description": "Dev and CI toolchain for this marketplace. Not a shipped package, and not a dependency of any plugin: shipped code imports nothing outside its plugin, and the `imports` map is for tests only (ADR 012).",
   "packageManager": "pnpm@10.34.5",
   "scripts": {
     "test": "vitest run --coverage"

@@ -94,7 +94,7 @@ as a separate subprocess that cannot call a shell function and had to be handed 
 A method call needs none of that, and a defaulting layer with an override rule is exactly the
 conditional logic in test setup the SDK shape exists to remove.
 
-`spec/ts/support/gh-mock.ts` is those four semantics for vitest: a factory answering with a
+`harness/gh-mock.ts` is those four semantics for vitest: a factory answering with a
 `GhClient` whose every method throws until the example registers a reply or a failure for it, and
 whose request log records a call before it answers it.
 

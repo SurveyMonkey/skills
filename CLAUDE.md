@@ -55,13 +55,15 @@ The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
 then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
 buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The same gate
-covers every tracked `plugins/gh-security/src/**/*.ts` file, with a file that genuinely cannot
-reach 100 excluded by name in `vitest.config.mjs`, never by lowering the number
-([ADR 012](docs/adr/012-typescript-on-node-22-18.md), #211). That is a dev
-and CI dependency only; the TypeScript the plugin ships imports nothing outside the plugin, and
-the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`.
+covers every tracked `.ts` file under `lib/` and `plugins/gh-security/{scripts,src}/`, and no file
+is ever excluded by name to reach it ([ADR 012](docs/adr/012-typescript-on-node-22-18.md)). The
+TypeScript examples live in `tests/`, with the shared harness in `harness/`; the layout and its
+rules are `.claude/rules/type-ts.md`. That is a dev and CI dependency only; the TypeScript the
+plugin ships imports nothing outside the plugin, and the two bash scripts that remain keep the
+old constraint of `bash` + `jq` + `gh`.
 
-The TypeScript under `plugins/gh-security/` and the examples under `spec/ts/` are type-checked by
+The TypeScript under `lib/` and `plugins/gh-security/`, and the examples under `tests/` and
+`harness/`, are type-checked by
 `tsc -p tsconfig.json`, which emits nothing: direct execution means the file a reviewer reads on
 the default branch is the file node runs, so the compiler is a checker and never a build step.
 The same gate asserts that the running node meets the ADR 012 floor of 22.18, because a floor that
@@ -103,7 +105,8 @@ hooks run it on stock macOS.
 the verdict rather than the parse, where an expected value may come from, red-first and the fixture
 that lands with every fix, what may be mocked, when a prose pin is legitimate, and the review
 checklist all live there and are not repeated here. Invoke it with the Skill tool (`testing`) or
-`/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/` is read.
+`/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/`, `tests/` or
+`harness/` is read.
 
 **For a new script, follow the contract-first and red-first rules in the [testing skill's "New script" section](.claude/skills/testing/SKILL.md#new-script).**
 

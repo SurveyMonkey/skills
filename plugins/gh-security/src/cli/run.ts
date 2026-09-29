@@ -46,11 +46,11 @@ const emit = (io: Io, rendered: Rendered): ExitCode => {
  * unsupported toolchain stays exit 3 rather than collapsing into a generic
  * failure.
  */
-export const runCli = (
+export const runCli = async (
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   io: Io,
-): ExitCode => {
+): Promise<ExitCode> => {
   const parsed = parseArgs(argv)
   if (parsed.kind === 'help') {
     return emit(io, { stdout: helpText(), stderr: '', exitCode: EXIT_CODES.ok })
@@ -69,7 +69,8 @@ export const runCli = (
       exitCode: exitCodeFor(envelope),
     })
   }
-  const result: CommandResult = entry.handler({
+  const handler = await entry.load()
+  const result: CommandResult = handler({
     args: parsed.args,
     env,
     io,

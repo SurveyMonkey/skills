@@ -44,7 +44,7 @@ pre-commit:
     # decides when the step runs, not what it checks. It stays sub-second and
     # runs no suite, so the rule this file exists for (ADR 005 as amended by
     # #249) holds. `*.ts` here matches a nested staged file too (e.g.
-    # plugins/gh-security/src/lib/node-floor.ts), the same way the
+    # lib/node-floor.ts), the same way the
     # shellcheck step's `*.sh` above does.
     types:
       glob: '{*.ts,tsconfig.json}'
@@ -74,7 +74,7 @@ pre-commit:
         fi
     # The vitest examples that import what was staged (#219). `related` is
     # vitest's own reverse dependency walk, so staging a support module under
-    # spec/ts/support/ runs every example that uses it, and staging a source
+    # harness/ runs every example that uses it, and staging a source
     # file runs the examples that cover it. It answers "no test files found"
     # with exit 0, which is the right verdict here and not the empty-discovery
     # bug this repository refuses elsewhere: a staged file no example imports
@@ -86,7 +86,8 @@ pre-commit:
     # is the one the full suite produces in CI.
     #
     # `--exclude` keeps the parity examples out. A parity file spawns the bash
-    # side once per row (85 processes for spec/ts/parity-semver.test.ts), and
+    # side once per row (85 processes for
+    # tests/plugins/gh-security/semver/parity-semver.test.ts), and
     # `related` selects it from the shipped modules it imports, not only from
     # the runner: staging plugins/gh-security/src/semver/versions.ts was
     # measured here at 9.1s in this step against 0.5s for a source file with
@@ -96,7 +97,7 @@ pre-commit:
     # which is the thing ADR 005 (as amended by #249) refuses because it
     # trains people to --no-verify. CI runs them in `check.sh js`. The glob
     # covers the parity files by name, so a future one is excluded with
-    # nothing to remember; vitest merges the pattern with vitest.config.mjs's
+    # nothing to remember; vitest merges the pattern with vitest.config.ts's
     # own `exclude` rather than replacing it, and a commit that stages only a
     # parity file finds no related example and exits 0, the same as any other
     # file no example imports.
@@ -105,7 +106,7 @@ pre-commit:
       run: |
         if [ -d node_modules ]; then
           pnpm exec vitest related --run --coverage.enabled=false \
-            --exclude 'spec/ts/parity-*.test.ts' {staged_files}
+            --exclude 'tests/**/parity-*.test.ts' {staged_files}
         else
           printf '\n!! pre-commit: node_modules is absent, so the vitest step did not run here.\n' >&2
           printf '!! CI enforces it on the pull request. Install locally with:\n!!   pnpm install\n\n' >&2

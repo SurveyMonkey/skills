@@ -72,7 +72,9 @@ ported immediately after.
 **Goals**
 
 - Every deterministic script that runs as part of a fix or audit run is TypeScript, executed
-  directly by Node, behind one CLI entry point at `plugins/gh-security/bin/gh-security.ts`.
+  directly by Node, behind one CLI entry point at `plugins/gh-security/scripts/gh-security.ts`
+  (moved from `bin/` in [#273](https://github.com/SurveyMonkey/skills/issues/273): claude.ai
+  organization sync rejects a plugin with a top-level `bin/`).
 - The runtime floor is Node 22.18, the first release whose type stripping runs without a flag and
   without a warning on stderr (spike table and reasoning in
   [ADR 012](../adr/012-typescript-on-node-22-18.md), landed in Phase 0 by
@@ -83,8 +85,9 @@ ported immediately after.
   side by side until each bash script is retired.
 - The behavior a user sees does not change, other than the runtime floor and the launch-time error
   below it.
-- Coverage of the TypeScript source is 95 to 100 on all four buckets, preferably 100, with
-  exclusion by name and a stated reason as the only relief.
+- Coverage of the TypeScript source is 95 to 100 on all four buckets, preferably 100, ~~with
+  exclusion by name and a stated reason as the only relief~~ with no exclusion by name (**revised
+  in #273**).
 
 **Non-Goals**
 
@@ -124,19 +127,26 @@ trace when the running Node is older (#214, #224).
 ### Shape
 
 ```
+lib/                        # envelopes, process runner, git helpers, gh client (shared)
 plugins/gh-security/
-  bin/gh-security.ts        # one entry point; subcommand registry; JSON on stdout
+  scripts/
+    gh-security.ts          # one entry point; JSON on stdout
+    common/detect-capacity.sh
+    common/notice-scan.sh
   src/
-    lib/                    # envelopes, process runner, git helpers, gh client, state file
+    lib -> ../../../lib     # committed symlink, the only path out of the plugin
+    cli/                    # the lazy subcommand registry and dispatch
+    state.ts                # the fix driver's state file
     semver/                 # comparison and range facts
     lockfiles/              # npm, pnpm, Yarn Berry parsers
     adapters/               # the ADR 001 verbs as an in-process interface
-    commands/               # discovery, preflight, scoring, rendering, drivers
-  scripts/
-    common/detect-capacity.sh
-    common/notice-scan.sh
+    subcommands/            # discovery, preflight, scoring, rendering, drivers
   workflows/fix-groups.mjs
 ```
+
+The Shape was amended in [#273](https://github.com/SurveyMonkey/skills/issues/273): `bin/` became
+`scripts/`, `commands/` became `subcommands/`, and the shared library moved to a root `lib/` that
+the plugin reaches through its `src/lib` symlink (`.claude/rules/type-ts.md`).
 
 One entry point rather than eighteen executables is also what closes
 [#16](https://github.com/SurveyMonkey/skills/issues/16): the PreToolUse allow rule for the
@@ -354,15 +364,18 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
 - **`workflows/fix-groups.mjs` is untouched**, and ADR 010's harness-versus-user-shell boundary
   survives this RFC intact even though ADR 012 supersedes the ADR that drew it: what is
   superseded is ADR 010's bash-only rule for shipped scripts, not the boundary.
-- **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), with exclusion by
-  name and a reason as the only relief. The existing 100 floor on the workflow file does not move.
+- **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), ~~with exclusion by
+  name and a reason as the only relief~~ with no exclusion by name (**revised in #273**; ADR 012). The existing 100 floor on the workflow file does not move.
 - **The mechanical prose pins retire with the scripts they pin** (#197, #231). A pin is never kept
   beside its successor: two sources of truth for one behavior is worse than either alone, which is
   the rule ADR 010 already applied to the dispatch script's textual pins.
 - **The `testing` skill stays the policy**, amended rather than replaced (#216).
-- **The TypeScript tests live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`, with the
+- ~~**The TypeScript tests live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`, with the
   existing `path-spec` rule applying to them unchanged. Settled in #216's decision comment rather
-  than in #214, which this constrains: #214's vitest include globs follow from it.
+  than in #214, which this constrains: #214's vitest include globs follow from it.~~ **Revised in
+  [#273](https://github.com/SurveyMonkey/skills/issues/273):** the TypeScript tests live in `tests/`,
+  at the mirror of the code they cover, with the shared harness in `harness/`. The fixtures stay
+  in `spec/fixtures/`, and `path-spec` covers all three trees.
 
 To be spawned as this RFC executes:
 

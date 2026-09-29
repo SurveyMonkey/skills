@@ -1,8 +1,8 @@
 // What a command is, and the real io the entry point hands it (#224).
 //
 // A command is an exported, typed handler returning the envelope (issue
-// #216's decision comment); the registry is a map from a name to one of
-// those plus the line `--help` prints for it. The io is a parameter for the
+// #216's decision comment); the registry is a map from a name to a loader
+// for one of those plus the line `--help` prints for it. The io is a parameter for the
 // same reason the process runner's spawn is one: it is the boundary, so an
 // example substitutes it rather than reading the real process streams.
 //
@@ -48,7 +48,12 @@ export type CommandHandler = (context: CommandContext) => CommandResult
 export interface CommandEntry {
   /** One line, printed beside the name by `--help`. */
   readonly description: string
-  readonly handler: CommandHandler
+  /**
+   * The handler, reached by a dynamic import. A command nobody asked for is
+   * never loaded, which matters most for `allow-own-commands`: it runs on
+   * every Bash call in a session (#273).
+   */
+  readonly load: () => Promise<CommandHandler>
 }
 
 /** Standard input, as the descriptor number a hook's JSON arrives on. */

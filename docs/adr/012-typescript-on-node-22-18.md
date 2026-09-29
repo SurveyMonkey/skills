@@ -4,7 +4,7 @@ description: The gh-security deterministic layer runs on Node 22.18 or newer, ex
 status: stable
 created: 2026-09-12
 owner: brianespinosa
-related_issues: [213, 211]
+related_issues: [213, 211, 273]
 ---
 
 # ADR 012: TypeScript on Node 22.18, executed directly
@@ -92,11 +92,16 @@ version after install. The floor is a breaking runtime requirement, which is why
 to 1.0.0 with it (#238).
 
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
-statements), **with 95 as the floor the gate never goes below**, and **exclusion by name with a
+statements), **with 95 as the floor the gate never goes below**, and ~~**exclusion by name with a
 stated reason as the only relief**
 ([#211](https://github.com/SurveyMonkey/skills/issues/211)). A file that genuinely cannot reach
 100, a process boundary or a platform branch, is named in the exclusion list with a comment saying
-why; the number is never lowered to accommodate it, because a lowered threshold hides every other
+why;~~ **(amended in [#273](https://github.com/SurveyMonkey/skills/issues/273): no file is
+excluded by name. A branch no test can reach is restructured until it no longer exists, by
+lifting the decision into a function that takes what it depended on as an argument. To open the
+exclusion list is a maintainer decision, argued on its own pull request, never a step in the
+change that needs it. `.claude/rules/type-ts.md`, "Coverage", is the working rule.)** The number
+is never lowered to accommodate a file, because a lowered threshold hides every other
 file's regression behind the one file that earned the exception. The existing 100 floor on
 `workflows/fix-groups.mjs` does not move, and neither does the rule ADR 010 established alongside
 it: a threshold satisfied by an empty file set is this repository's signature bug, so
@@ -123,10 +128,10 @@ mechanism sections are rewritten ([#216](https://github.com/SurveyMonkey/skills/
   cold-cache failure ADR 001 named. The TypeScript that ships imports nothing outside the plugin;
   vitest, ajv, `typescript` and `@types/node` remain dev and CI dependencies, which is the same
   split ADR 010 drew.
-- **The exclusion list is the thing to watch.** A coverage policy whose relief valve is "name the
+- ~~**The exclusion list is the thing to watch.** A coverage policy whose relief valve is "name the
   file and say why" degrades exactly as fast as reviewers let entries accumulate. #211's acceptance
   criterion is that the list is empty or every entry carries a reason, and that is the standing
-  review obligation.
+  review obligation.~~ **(amended in #273: the list stays empty; see the Decision.)**
 - **Two ADRs are amended rather than rewritten**, below.
 
 ### ADR 001 amendment: the adapter contract is an interface, not a process
