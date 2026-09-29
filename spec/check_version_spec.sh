@@ -79,6 +79,50 @@ Describe 'scripts/check.sh version'
       The output should include 'no bump required'
     End
 
+    # A plugin that reaches the root lib/ through a committed src/lib symlink
+    # ships lib/, and git records the link as one entry, so an edit behind it
+    # never shows in a diff of the plugin directory alone (#273).
+    link_lib() {
+      mkdir -p lib plugins/example/src
+      printf 'export const x = 1\n' > lib/x.ts
+      ln -s ../../../lib plugins/example/src/lib
+      commit_all 'link lib'
+      git update-ref refs/remotes/origin/main HEAD
+    }
+
+    It 'fails when only the lib/ a plugin links to changed, with no bump'
+      link_lib
+      printf 'export const x = 2\n' > lib/x.ts
+      commit_all 'touch lib only'
+      When run "$CHECK" version
+      The status should eq 1
+      The output should include 'comparing against refs/remotes/origin/main'
+      The stderr should include 'plugins/example: files changed'
+      The stderr should include 'still 1.0.0'
+    End
+
+    It 'passes the same lib/ change when it carries a bump'
+      link_lib
+      printf 'export const x = 2\n' > lib/x.ts
+      write_plugin example 1.1.0
+      commit_all 'touch lib and release'
+      When run "$CHECK" version
+      The status should be success
+      The output should include 'plugins/example: 1.0.0 -> 1.1.0'
+    End
+
+    It 'does not charge a lib/ change to a plugin with no link to it'
+      mkdir -p lib
+      printf 'export const x = 1\n' > lib/x.ts
+      commit_all 'lib, no link'
+      git update-ref refs/remotes/origin/main HEAD
+      printf 'export const x = 2\n' > lib/x.ts
+      commit_all 'touch lib'
+      When run "$CHECK" version
+      The status should be success
+      The output should include 'plugins/example: unchanged since'
+    End
+
     It 'passes a plugin added since the base, which has no version to differ from'
       write_plugin newcomer 0.1.0
       commit_all 'add a second plugin'

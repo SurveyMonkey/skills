@@ -46,16 +46,18 @@ const emit = (io: Io, rendered: Rendered): ExitCode => {
  * unsupported toolchain stays exit 3 rather than collapsing into a generic
  * failure.
  */
-export const runCli = (
+export const runCli = async (
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   io: Io,
-): ExitCode => {
+): Promise<ExitCode> => {
   const parsed = parseArgs(argv)
   if (parsed.kind === 'help') {
     return emit(io, { stdout: helpText(), stderr: '', exitCode: EXIT_CODES.ok })
   }
-  const entry = COMMANDS[parsed.command]
+  // An own key only: `toString` or `constructor` would otherwise resolve to
+  // an Object.prototype member and crash here instead of being refused.
+  const entry = Object.hasOwn(COMMANDS, parsed.command) ? COMMANDS[parsed.command] : undefined
   if (entry === undefined) {
     const envelope = failure(
       `unknown command "${parsed.command}". Run gh-security --help for the list of commands.`,
@@ -69,7 +71,8 @@ export const runCli = (
       exitCode: exitCodeFor(envelope),
     })
   }
-  const result: CommandResult = entry.handler({
+  const handler = await entry.load()
+  const result: CommandResult = handler({
     args: parsed.args,
     env,
     io,

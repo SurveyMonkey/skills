@@ -12,6 +12,13 @@
       "description": "Resolve Dependabot alerts in parallel across a repo, org, or your own repos: one subagent per package major line per repo in an isolated worktree, ranked by severity and EPSS, with lockfile validation, major-bounded scoped overrides, and pull requests that open ready for review carrying a computed merge-risk rating and a matching merge-risk label. A separate pin audit, run on its own via /gh-security:audit-pins and preflighted against the repo's own open security PRs, finds overrides no longer needed and opens its own removal PR.",
       "category": "devops",
       "tags": ["github", "security", "dependabot", "cve", "overrides"]
+    },
+    {
+      "name": "typescript7-lsp",
+      "source": "./plugins/typescript7-lsp",
+      "description": "TypeScript 7's native language server (tsc --lsp --stdio) from the project's own TypeScript. Replaces typescript-lsp, which needs the tsserver TypeScript 7 no longer ships.",
+      "category": "development",
+      "tags": ["typescript", "lsp", "language-server"]
     }
   ]
 }

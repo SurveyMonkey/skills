@@ -12,7 +12,7 @@
 #
 # This script is the single home of `agents/audit-pins.md` phases 2, 4, 5 and
 # 7. **A prose re-derivation of any of it in an agent definition is a bug**
-# (scripts/CLAUDE.md, "The fix driver owns phases 1 to 5" — the same rule, one
+# (docs/gh-security/GUIDE.md, "The fix driver owns phases 1 to 5" — the same rule, one
 # flow over): the agent calls the steps below and applies judgment only where
 # the driver hands control back. Phase 1 (the worktree and its two `pr`-mode
 # guards), phase 3 (provenance), phase 6 (the report) and phase 8 (merge risk
@@ -62,7 +62,7 @@
 #
 # All JSON goes to stdout; human-readable detail goes to stderr.
 #
-# `--env-prefix` is an opaque argv prefix (scripts/CLAUDE.md, "`env_prefix` is
+# `--env-prefix` is an opaque argv prefix (docs/gh-security/GUIDE.md, "`env_prefix` is
 # an opaque, optional seam"). It is split on whitespace and prepended verbatim
 # to every git, adapter, package-manager and `check-advisories.sh` invocation,
 # composed **after** any `cd`: it injects environment, it does not chdir.
@@ -308,7 +308,7 @@ adapter_error_text() {
 # Reading a field the adapter contract promises
 #
 # "A field the contract promises arrives present and of the promised type, or
-# it is a hard error, never a default" (scripts/CLAUDE.md). A bare `jq -r` on
+# it is a hard error, never a default" (docs/gh-security/GUIDE.md). A bare `jq -r` on
 # an absent key yields the STRING `null`, which then takes a branch of its own.
 # Here that is not an abstraction: `present` read straight stops being `false`,
 # so the baseline stop for a parser that cannot find its own pinned package is
@@ -389,7 +389,7 @@ rv_versions() {
     elif any(.versions[]; (.version | type) != "string") then
       error("a versions entry carries no readable version string")
     else [ .versions[].version ] | unique
-    end' 2>/dev/null)     || fail_phase "$1" "$3 answered a versions list this flow cannot read: it is not an array, or an entry carries no version string. A parser that found nothing is never read as a package that resolves nothing (scripts/CLAUDE.md); here that reading becomes an empty delta, which is the cue for removable."
+    end' 2>/dev/null)     || fail_phase "$1" "$3 answered a versions list this flow cannot read: it is not an array, or an entry carries no version string. A parser that found nothing is never read as a package that resolves nothing (docs/gh-security/GUIDE.md); here that reading becomes an empty delta, which is the cue for removable."
   if [ "$present" = "true" ] && [ "$RV_VERSIONS" = "[]" ]; then
     fail_phase "$1" "$3 answered present: true with no versions at all. The two disagree, and the empty list is the dangerous half: it makes the delta empty, which this flow reads as 'nothing new resolved' and reports removable without a single advisory query."
   fi
@@ -554,7 +554,7 @@ EOF
 # check-advisories.sh
 #
 # "Removability is judged against the advisory database, never repo alert
-# history" (scripts/CLAUDE.md): a pin keeps vulnerable versions out of the
+# history" (docs/gh-security/GUIDE.md): a pin keeps vulnerable versions out of the
 # lockfile, so every advisory published after the pin produced no alert on this
 # repository, and asking the repo's own history asks "was anything reported
 # while we were protected", whose answer is no by construction.
@@ -858,7 +858,7 @@ cmd_baseline() {
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
     adapter_run resolved_versions "$pkg" \
-      || fail_phase install "the baseline lockfile could not be parsed for $pkg (resolved_versions): $(adapter_error_text). A failed parse is never an empty result (scripts/CLAUDE.md)."
+      || fail_phase install "the baseline lockfile could not be parsed for $pkg (resolved_versions): $(adapter_error_text). A failed parse is never an empty result (docs/gh-security/GUIDE.md)."
     local rv=$ADAPTER_OUT
     rv_versions install "$rv" "resolved_versions $pkg (the with-all-pins baseline)"
     local present=$ADAPTER_FIELD rv_list=$RV_VERSIONS

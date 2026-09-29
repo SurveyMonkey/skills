@@ -11,19 +11,21 @@
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; CI
 #             sets it, ADR 005). CHECK_SPEC_ONLY, if set, narrows the run to
 #             a whitespace-separated list of spec files instead of the whole
-#             suite (ADR 005 amendment, #208).
+#             suite: on macOS, CHECK_SPEC_ONLY=spec/bash32_parse_spec.sh with
+#             REQUIRE_BASH32=1 is how the bash 3.2 gate runs (ADR 005).
 #   js        the vitest suite over the Workflow script and the TypeScript
 #             source the plugin ships, with coverage thresholds at 100 on all
 #             four buckets for the workflow projection (ADR 010) and for
-#             every tracked plugins/gh-security/src/**/*.ts file not named in
-#             vitest.config.mjs's own coverage.exclude (ADR 012, #211), then
+#             every tracked lib/ and plugins/gh-security/{scripts,src}/ .ts
+#             file not named in vitest.config.ts's own coverage.exclude
+#             (empty by policy: ADR 012 as amended in #273), then
 #             `lefthook validate` over lefthook.yml. Both need an installed
 #             node_modules; run pnpm install first. lefthook's check lives
 #             here rather than under `validate` because the CI job named
 #             `validate` has no node_modules and this one already installs
 #             it for vitest (ADR 005 amendment, #249).
 #   types     `tsc -p tsconfig.json` over the TypeScript the plugin ships and
-#             the examples under spec/ts/, plus an assertion that the running
+#             lib/, harness/ and tests/, plus an assertion that the running
 #             node meets the ADR 012 floor. noEmit: this is a checker, never a
 #             build step, because the file a reviewer reads on the default
 #             branch is the file node runs. Needs an installed node_modules;
@@ -117,29 +119,32 @@ cmd_targets() {
 }
 
 # The vitest suite's targets, from the index like every other gate's. Anchored
-# at spec/js/ deliberately: spec/fixtures/ carries dozens of hand-authored
-# package.json and node_modules trees that are lockfile specimens, and a
-# broader pattern would collect a fixture as if it were this repo's own
-# project code. vitest.config.mjs states the same anchor to the runner.
+# at spec/js/ and tests/ deliberately: spec/fixtures/ carries dozens of
+# hand-authored package.json and node_modules trees that are lockfile
+# specimens, and a broader pattern would collect a fixture as if it were this
+# repo's own project code. vitest.config.ts states the same anchors to the
+# runner.
 js_targets() {
-  git ls-files -- 'spec/js/*.test.mjs'
+  git ls-files -- 'spec/js/*.test.mjs' 'tests/*.test.ts'
 }
 
 # The types gate's targets, from the index like every other gate's and
-# anchored at exactly the three paths tsconfig.json includes. Anchoring is
+# anchored at exactly the paths tsconfig.json includes. Anchoring is
 # what keeps the many hand-authored trees under spec/fixtures/ from being
 # type-checked as if they were this repository's own source, and it is what
 # lets the gate refuse a discovery that came back empty: `tsc` errors on no
 # inputs, but an include path that silently stopped matching is the quieter
 # failure, and it would leave a green gate checking less than it claims. A
-# single `*` below still matches a nested file (e.g. src/lib/node-floor.ts):
+# single `*` below still matches a nested file (e.g. src/cli/run.ts):
 # `git ls-files` pathspec globbing crosses directory separators, unlike a
 # shell glob, so this is not narrower than it looks.
 ts_targets() {
   git ls-files -- \
-    'plugins/gh-security/bin/*.ts' \
-    'plugins/gh-security/src/*.ts' \
-    'spec/ts/*.ts'
+    'lib/*.ts' \
+    'harness/*.ts' \
+    'tests/*.ts' \
+    'plugins/gh-security/scripts/*.ts' \
+    'plugins/gh-security/src/*.ts'
 }
 
 # The Biome gate's targets. Three suffixes, minus the three trees Biome is
@@ -253,8 +258,8 @@ cmd_spec() {
   fi
   # CHECK_SPEC_FORMAT routes to --format, the same seam and for the same
   # reason as the shell above: .shellspec sets --format documentation, which
-  # is what a human wants and what CI pays 1189 individually formatted lines
-  # per leg for. CI sets `progress`. The floor below reads the summary line,
+  # is what a human wants and what CI would pay 1189 individually formatted
+  # lines for. CI sets `progress`. The floor below reads the summary line,
   # which every formatter emits, so this cannot weaken it.
   if [ -n "${CHECK_SPEC_FORMAT:-}" ]; then
     args[${#args[@]}]=--format
@@ -263,13 +268,12 @@ cmd_spec() {
   # CHECK_SPEC_ONLY narrows the run to specific spec files, given as a
   # whitespace-separated list. shellspec takes file arguments after its
   # flags, so these are appended rather than routed through another flag.
-  # This exists for the macOS PR leg (ADR 005 amendment, issue #208): that
-  # runner is the only one that can execute the bash 3.2 parse gate, and on a
-  # pull request only that gate needs to run there, while the ubuntu leg
-  # still runs the full suite. Unset, every spec file runs, exactly as before
-  # this variable existed. `read -ra` does the splitting, so the value is
-  # never expanded unquoted (unlike the flag values above, this one is
-  # genuinely a list, not a single token).
+  # It is how the bash 3.2 parse gate runs, on a local macOS run only since
+  # CI dropped its macOS leg (ADR 005, #273): set it to
+  # spec/bash32_parse_spec.sh with REQUIRE_BASH32=1. Unset, every spec file
+  # runs. `read -ra` does the splitting, so the value is never expanded
+  # unquoted (unlike the flag values above, this one is genuinely a list, not
+  # a single token).
   local -a only=()
   if [ -n "${CHECK_SPEC_ONLY:-}" ]; then
     read -ra only <<< "$CHECK_SPEC_ONLY"
@@ -308,23 +312,23 @@ cmd_spec() {
 }
 
 # The workflow projection's coverage subject (ADR 010). Named here as well as
-# in vitest.config.mjs's `coverage.include`, because the whole hazard below is
+# in vitest.config.ts's `coverage.include`, because the whole hazard below is
 # a report that names nothing: a threshold satisfied by an empty file set.
 JS_COVERAGE_WORKFLOW_SUBJECT='spec/js/generated/workflow.mjs'
 
-# vitest.config.mjs's own `coverage.exclude`, read from that file rather than
+# vitest.config.ts's own `coverage.exclude`, read from that file rather than
 # copied into a second list here: it is the array the runner itself obeys
 # when deciding which src files even appear in the coverage summary, so a
 # bash-side copy could drift from it and this gate would then demand a file
-# vitest never measured (ADR 012, #211). A missing vitest.config.mjs means no
+# vitest never measured (ADR 012, #211). A missing vitest.config.ts means no
 # exclusions rather than a refusal: the only repo that lacks one is a scratch
 # test repo that never wrote one, and production always ships the real file.
 js_coverage_exclude() {
-  [ -f vitest.config.mjs ] || return 0
+  [ -f vitest.config.ts ] || return 0
   node -e '
     const path = require("path");
     const url = require("url");
-    const target = url.pathToFileURL(path.resolve("vitest.config.mjs")).href;
+    const target = url.pathToFileURL(path.resolve("vitest.config.ts")).href;
     import(target)
       .then((m) => {
         const coverage = (m.default && m.default.test && m.default.test.coverage) || {};
@@ -338,10 +342,12 @@ js_coverage_exclude() {
   '
 }
 
-# Every tracked TypeScript file the plugin ships, under bin/ and src/, that
-# vitest.config.mjs's own coverage.exclude does not name (ADR 012, #211).
-# Both paths, because the entry point under bin/ is code a user runs and is
-# measured with the rest (#224); the pair matches vitest.config.mjs's own
+# Every tracked TypeScript file the plugin ships, under lib/, scripts/ and
+# src/, that vitest.config.ts's own coverage.exclude does not name (ADR 012,
+# #211). All three, because the entry point under scripts/ is code a user
+# runs and is measured with the rest (#224), and the plugin reaches lib/
+# through its committed src/lib symlink, which git lists as one link rather
+# than as the files behind it; the set matches vitest.config.ts's own
 # coverage.include. Anchored the way ts_targets is: a single `*` still
 # matches a nested file because git ls-files pathspec globbing crosses
 # directory separators.
@@ -356,12 +362,12 @@ js_coverage_exclude() {
 # zero discovered spec/js/ test files.
 js_coverage_ts_subjects() {
   local tracked n=0 f
-  tracked=$(git ls-files -- 'plugins/gh-security/bin/*.ts' 'plugins/gh-security/src/*.ts')
+  tracked=$(git ls-files -- 'lib/*.ts' 'plugins/gh-security/scripts/*.ts' 'plugins/gh-security/src/*.ts')
   while IFS= read -r f; do
     if [ -n "$f" ]; then n=$((n + 1)); fi
   done < <(printf '%s\n' "$tracked")
   [ "$n" -gt 0 ] \
-    || die 'no TypeScript files discovered under plugins/gh-security/{bin,src}/*.ts; refusing to report a pass'
+    || die 'no TypeScript files discovered under lib/ or plugins/gh-security/{scripts,src}/; refusing to report a pass'
   local excluded
   excluded=$(js_coverage_exclude) \
     || return 1
@@ -493,7 +499,7 @@ cmd_js() {
   while IFS= read -r f; do
     if [ -n "$f" ]; then n=$((n + 1)); fi
   done < <(printf '%s\n' "$targets")
-  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
+  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/ or tests/; refusing to report a pass'
   [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
   command -v pnpm >/dev/null 2>&1 \
     || die 'pnpm is not installed; the js gate needs pnpm (ADR 010)'
@@ -503,7 +509,7 @@ cmd_js() {
   rm -f coverage/coverage-summary.json
   # `vitest run --coverage`, never watch mode: a gate that waits for a
   # keypress is a gate that hangs CI. passWithNoTests is false in
-  # vitest.config.mjs, so a collection that finds nothing fails there too —
+  # vitest.config.ts, so a collection that finds nothing fails there too —
   # the same floor stated twice, because this gate's discovery and the
   # runner's are separate.
   pnpm --silent test
@@ -644,7 +650,8 @@ version_base_ref() {
 
 cmd_version() {
   local plugins ref base short p touched head_manifest head_json head_v
-  local base_json base_v failed=0
+  local base_json base_v failed=0 link_mode
+  local -a paths
   read_plugin_dirs
   ref=$(version_base_ref) || exit
   git rev-parse --verify --quiet "$ref^{commit}" >/dev/null \
@@ -655,7 +662,15 @@ cmd_version() {
   printf 'check: comparing against %s (%s)\n' "$ref" "$short"
   for p in "${plugins[@]}"; do
     head_manifest=$p/.claude-plugin/plugin.json
-    touched=$(git diff --name-only "$base" HEAD -- "$p") \
+    # A plugin that reaches the root lib/ through a committed src/lib symlink
+    # ships lib/ too, but git records the link as one entry and never sees an
+    # edit behind it. So lib/ joins that plugin's pathspec: a change to shipped
+    # lib/ code is a change to the plugin, and needs its bump (#273).
+    paths=("$p")
+    link_mode=$(git ls-files -s -- "$p/src/lib" | awk '{ print $1 }') \
+      || die "git ls-files failed for $p/src/lib"
+    if [ "$link_mode" = 120000 ]; then paths[${#paths[@]}]=lib; fi
+    touched=$(git diff --name-only "$base" HEAD -- "${paths[@]}") \
       || die "git diff failed for $p"
     if [ -z "$touched" ]; then
       printf 'check: %s: unchanged since %s; no release, no bump required\n' "$p" "$short"

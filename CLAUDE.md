@@ -2,7 +2,7 @@
 
 Claude Code plugin marketplace. Installation and plugin overview: [README.md](README.md);
 structure: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Plugin conventions and domain rules: [plugins/gh-security/docs/GUIDE.md](plugins/gh-security/docs/GUIDE.md).
+Plugin conventions and domain rules: [docs/gh-security/GUIDE.md](docs/gh-security/GUIDE.md).
 
 ## Releasing a plugin
 
@@ -42,16 +42,13 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
-Sessions on this checkout run the TypeScript language server: `.claude/settings.json` enables
-`typescript-lsp@claude-plugins-official`, which expects the server on the PATH, so install it once
-per machine alongside the shellspec and ShellCheck installs above and below:
-
-```bash
-npm install -g typescript-language-server typescript
-```
-
-The server resolves the compiler it is given, and the repository pins its own `typescript` in
-devDependencies, so `tsc` and the editor answer from the same version. There is no pyright: this
+Sessions on this checkout run TypeScript 7's native language server through this marketplace's
+own `typescript7-lsp` plugin, which `.claude/settings.json` registers and enables
+(`typescript-lsp@claude-plugins-official` is disabled: it needs the `tsserver.js` that TypeScript
+7 no longer ships). The server runs `node_modules/typescript/bin/tsc --lsp --stdio`, so run
+`pnpm install` first; `tsc` and the editor then answer from the same pinned version. The plugin
+itself comes from this marketplace on GitHub's default branch, not from the checkout, so an edit
+to `plugins/typescript7-lsp/` reaches a session only after it merges with a version bump. There is no pyright: this
 repository has no Python and will not gain any. The milestone 7 adapter targets Python ecosystems
 (pip, uv) but is written in TypeScript, per
 [RFC 002](docs/rfc/002-typescript-port.md#alternatives-considered).
@@ -60,13 +57,15 @@ The one JavaScript file this repo ships — the dispatch Workflow script under
 `plugins/gh-security/workflows/` — is covered by [vitest](https://vitest.dev) instead: `pnpm install`,
 then `pnpm test`. Specs live in `spec/js/`, and coverage of that script is gated at 100 on all four
 buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The same gate
-covers every tracked `plugins/gh-security/src/**/*.ts` file, with a file that genuinely cannot
-reach 100 excluded by name in `vitest.config.mjs`, never by lowering the number
-([ADR 012](docs/adr/012-typescript-on-node-22-18.md), #211). That is a dev
-and CI dependency only; the TypeScript the plugin ships imports nothing outside the plugin, and
-the two bash scripts that remain keep the old constraint of `bash` + `jq` + `gh`.
+covers every tracked `.ts` file under `lib/` and `plugins/gh-security/{scripts,src}/`, and no file
+is ever excluded by name to reach it ([ADR 012](docs/adr/012-typescript-on-node-22-18.md)). The
+TypeScript examples live in `tests/`, with the shared harness in `harness/`; the layout and its
+rules are `.claude/rules/type-ts.md`. That is a dev and CI dependency only; the TypeScript the
+plugin ships imports nothing outside the plugin, and the two bash scripts that remain keep the
+old constraint of `bash` + `jq` + `gh`.
 
-The TypeScript under `plugins/gh-security/` and the examples under `spec/ts/` are type-checked by
+The TypeScript under `lib/` and `plugins/gh-security/`, and the examples under `tests/` and
+`harness/`, are type-checked by
 `tsc -p tsconfig.json`, which emits nothing: direct execution means the file a reviewer reads on
 the default branch is the file node runs, so the compiler is a checker and never a build step.
 The same gate asserts that the running node meets the ADR 012 floor of 22.18, because a floor that
@@ -87,14 +86,18 @@ through one entry point, `scripts/check.sh`
 lists live there and nowhere else, and empty discovery is a hard failure in every gate — including
 the coverage report, where a threshold satisfied by an empty file set is exactly that bug. Local
 git hooks are [lefthook](https://lefthook.dev), installed by `pnpm install` (or by hand with
-`pnpm exec lefthook install`); pre-commit runs ShellCheck over staged shell files, the `types`
+`pnpm exec lefthook install`). A local hook runs only what the staged files touch, never a full
+suite: a test runs in a hook only when it is related to a staged file, and every full suite runs in
+CI only. Pre-commit runs ShellCheck over staged shell files, the `types`
 gate when TypeScript or `tsconfig.json` is staged (the one step that checks the whole project
 rather than the staged files), the vitest examples related to the staged TypeScript
 (`vitest related`, with coverage off and the parity examples excluded: `related` runs a subset,
 and the thresholds and the parity runs both belong to the full suite in CI), Biome over the
 staged JSON, `.mjs` and `.ts`, and
 `claude plugin validate --strict` when a manifest is staged, and pre-push runs nothing: CI is
-the enforcement boundary (`.github/workflows/gates.yml`).
+the enforcement boundary (`.github/workflows/gates.yml`). CI runs every gate on a push to the
+default branch and on a pull request that is not a draft. A draft runs no gate, and the aggregate
+`gates` check fails on it until it is marked ready, which starts the first full run.
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
 and `types` gates — `pnpm` and `node` at the ADR 012 floor, but still targets bash 3.2 because the
@@ -104,7 +107,8 @@ hooks run it on stock macOS.
 the verdict rather than the parse, where an expected value may come from, red-first and the fixture
 that lands with every fix, what may be mocked, when a prose pin is legitimate, and the review
 checklist all live there and are not repeated here. Invoke it with the Skill tool (`testing`) or
-`/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/` is read.
+`/testing`; `.claude/rules/path-spec.md` points at it whenever a file under `spec/`, `tests/` or
+`harness/` is read.
 
 **For a new script, follow the contract-first and red-first rules in the [testing skill's "New script" section](.claude/skills/testing/SKILL.md#new-script).**
 

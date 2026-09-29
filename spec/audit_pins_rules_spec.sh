@@ -90,7 +90,7 @@ Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
   # Phases 2, 4, 5 and 7 are executed by common/audit-pins-driver.sh, so a rule
   # that is purely procedural now lives in the driver and is asserted there
-  # (scripts/CLAUDE.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
+  # (docs/gh-security/GUIDE.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
   # rules that still govern the agent's own reading of a driver answer stay in
   # the definition, and each example below says which file it is checking.
   DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/audit-pins-driver.sh"
@@ -460,7 +460,7 @@ Describe 'the rules that gate the removal PR'
   # longer dispatches the audit.
   Describe 'PR mode leads the choice wherever the mode is asked'
     Parameters
-      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
     End
 
     It "offers it first in $1"
@@ -477,7 +477,7 @@ Describe 'the rules that gate the removal PR'
   # widened. The audit is entered only via /gh-security:audit-pins now, and it
   # preflights for open security-labeled PRs before running.
   Describe 'the audit preflights for open security PRs, and resolve-alerts no longer dispatches it (#108)'
-    COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+    COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
     SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
 
     It 'checks for open security-labeled PRs before asking the mode question'
@@ -561,7 +561,7 @@ End
 # example, and splitting them across files is how the two drift apart.
 Describe 'the env_prefix dispatch contract (#106)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
-  COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+  COMMAND="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
 
   Describe 'the rule both agent definitions state'
     Parameters
@@ -606,7 +606,7 @@ Describe 'the env_prefix dispatch contract (#106)'
   Describe 'the session-context trigger sentence at every dispatch site'
     Parameters
       "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md" 1
-      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md" 1
+      "$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md" 1
     End
 
     It "takes the prefix from session context in $1"
@@ -644,9 +644,9 @@ Describe 'the env_prefix dispatch contract (#106)'
     The output should equal '3'
   End
 
-  # The audit's own dispatch point, decoupled into commands/audit-pins.md by
+  # The audit's own dispatch point, decoupled into skills/audit-pins/SKILL.md by
   # #108, carries the same optional field.
-  It 'carries env_prefix into the audit-pins Task payload in commands/audit-pins.md'
+  It 'carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md'
     When call rule_in "$COMMAND" "an OPTIONAL .env_prefix., plus the"
     The status should be success
     The output should equal '1'

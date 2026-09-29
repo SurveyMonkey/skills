@@ -458,7 +458,7 @@ SH
     # `rm -rf "$WORK"`: a worktree directory that is gone while its
     # registration survives blocks both a later `worktree add` on that path and
     # any `branch -D` of its branch, and `git worktree remove` refuses to clean
-    # it up afterwards (scripts/CLAUDE.md).
+    # it up afterwards (docs/gh-security/GUIDE.md).
     prepare_failing_remove() {
       make_repo
       cat > "$BIN/prefix" <<'SH'

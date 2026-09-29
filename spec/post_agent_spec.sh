@@ -580,7 +580,7 @@ SCRIPT
 
   # env_prefix is threaded to the pull-request read, which needs the repo's
   # identity, and never to the reap, which touches only a local directory and
-  # a local ref (scripts/CLAUDE.md, "env_prefix is an opaque, optional seam").
+  # a local ref (docs/gh-security/GUIDE.md, "env_prefix is an opaque, optional seam").
   Describe 'env_prefix'
     It 'wraps the pr-status.sh call and never the reap'
       make_repo

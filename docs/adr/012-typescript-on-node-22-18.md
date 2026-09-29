@@ -4,7 +4,7 @@ description: The gh-security deterministic layer runs on Node 22.18 or newer, ex
 status: stable
 created: 2026-09-12
 owner: brianespinosa
-related_issues: [213, 211]
+related_issues: [213, 211, 273]
 ---
 
 # ADR 012: TypeScript on Node 22.18, executed directly
@@ -92,11 +92,16 @@ version after install. The floor is a breaking runtime requirement, which is why
 to 1.0.0 with it (#238).
 
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
-statements), **with 95 as the floor the gate never goes below**, and **exclusion by name with a
+statements), **with 95 as the floor the gate never goes below**, and ~~**exclusion by name with a
 stated reason as the only relief**
 ([#211](https://github.com/SurveyMonkey/skills/issues/211)). A file that genuinely cannot reach
 100, a process boundary or a platform branch, is named in the exclusion list with a comment saying
-why; the number is never lowered to accommodate it, because a lowered threshold hides every other
+why;~~ **(amended in [#273](https://github.com/SurveyMonkey/skills/issues/273): no file is
+excluded by name. A branch no test can reach is restructured until it no longer exists, by
+lifting the decision into a function that takes what it depended on as an argument. To open the
+exclusion list is a maintainer decision, argued on its own pull request, never a step in the
+change that needs it. `.claude/rules/type-ts.md`, "Coverage", is the working rule.)** The number
+is never lowered to accommodate a file, because a lowered threshold hides every other
 file's regression behind the one file that earned the exception. The existing 100 floor on
 `workflows/fix-groups.mjs` does not move, and neither does the rule ADR 010 established alongside
 it: a threshold satisfied by an empty file set is this repository's signature bug, so
@@ -106,7 +111,7 @@ it: a threshold satisfied by an empty file set is this repository's signature bu
 not repealed, it is made irrelevant to the question it was drawn for: `workflows/fix-groups.mjs`
 stays exactly as it is, evaluated by the harness, and nothing in the port imports it or is imported
 by it. `notice-scan.sh` and `detect-capacity.sh` stay bash (RFC 002, Non-Goals). The domain rules
-in `plugins/gh-security/docs/GUIDE.md` remain the requirements document; only its bash-and-jq
+in `docs/gh-security/GUIDE.md` remain the requirements document; only its bash-and-jq
 mechanism sections are rewritten ([#216](https://github.com/SurveyMonkey/skills/issues/216)).
 
 ## Consequences
@@ -123,10 +128,10 @@ mechanism sections are rewritten ([#216](https://github.com/SurveyMonkey/skills/
   cold-cache failure ADR 001 named. The TypeScript that ships imports nothing outside the plugin;
   vitest, ajv, `typescript` and `@types/node` remain dev and CI dependencies, which is the same
   split ADR 010 drew.
-- **The exclusion list is the thing to watch.** A coverage policy whose relief valve is "name the
+- ~~**The exclusion list is the thing to watch.** A coverage policy whose relief valve is "name the
   file and say why" degrades exactly as fast as reviewers let entries accumulate. #211's acceptance
   criterion is that the list is empty or every entry carries a reason, and that is the standing
-  review obligation.
+  review obligation.~~ **(amended in #273: the list stays empty; see the Decision.)**
 - **Two ADRs are amended rather than rewritten**, below.
 
 ### ADR 001 amendment: the adapter contract is an interface, not a process
@@ -159,8 +164,9 @@ venues is unchanged by that substitution: one entry point in `scripts/check.sh`,
 as a hard failure in every gate, CI as the enforcement boundary, and the executed-example floor,
 which vitest needs for the same reason shellspec did.
 
-The macOS leg keeps its reason for existing, narrowed: it is still the only runner whose
-`/bin/bash` is 3.2, and after #240 that is all it runs.
+~~The macOS leg keeps its reason for existing, narrowed: it is still the only runner whose
+`/bin/bash` is 3.2, and after #240 that is all it runs.~~ **(amended in #273: CI has no macOS
+leg; the bash 3.2 gate runs on a local macOS run only, ADR 005.)**
 
 **What this ADR does not do to ADR 005 is reverse its lefthook refusal.** That refusal rests on
 two grounds: the dependency against the `bash`, `jq` and `gh` constraint, and `core.hooksPath`

@@ -87,11 +87,11 @@ Severity: 1 low | 2 moderate"
 
   # JSON-format audit output never matches a prose regex: the same
   # unmatchable-pattern bug class as the shipped v0.1.0 yarn validator
-  # (plugins/gh-security/scripts/CLAUDE.md, "The rule that matters most").
+  # (docs/gh-security/GUIDE.md, "The rule that matters most").
   Describe 'package manager audit output (JSON form)'
     # Prose regexes can never match this shape: the same unmatchable-pattern
     # bug class as the shipped v0.1.0 yarn lockfile validator
-    # (plugins/gh-security/scripts/CLAUDE.md, "The rule that matters most").
+    # (docs/gh-security/GUIDE.md, "The rule that matters most").
     Describe 'non-zero totals'
       # npm's own fixture is hand-authored (auditReportVersion 2, `.total`
       # present); npm's real shape is not in dispute (issue #32 notes it as

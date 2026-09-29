@@ -107,7 +107,7 @@ fi
 # npm/pnpm `audit --json` reports its count under a fixed key instead of the
 # prose form above; a plain text regex can never match it, the same class of
 # bug that made the shipped v0.1.0 yarn lockfile validator report a false
-# "clean" (see plugins/gh-security/scripts/CLAUDE.md, "The rule that matters
+# "clean" (see docs/gh-security/GUIDE.md, "The rule that matters
 # most"). jq is asked to parse only the JSON case, guarded with `2>/dev/null`
 # and an explicit type check so audit output that is not valid JSON (the
 # common case, npm/pnpm's default human-readable form) never trips `set -e`.
@@ -153,7 +153,7 @@ fi
 # never rule out a literal `{` occurring in an *earlier* field of the same
 # record (`Issue`, `URL`) without also being able to match a `}` there, which
 # is the same unmatchable-pattern bug class this file exists to avoid
-# (issue #41; plugins/gh-security/scripts/CLAUDE.md, "The rule that matters
+# (issue #41; docs/gh-security/GUIDE.md, "The rule that matters
 # most"). `-R` reads NDJSON one line at a time; the outer `try ... catch
 # empty` absorbs a line that is not valid JSON (`fromjson` fails) or whose
 # `children` is present but not an object (`.children.Severity` errors on a

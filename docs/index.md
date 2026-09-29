@@ -9,5 +9,6 @@ okf_version: "0.2"
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the marketplace and its plugins are structured, including the plugin directory layout, the scripts-do-agents-decide split, the adapter contract, worktree isolation, PR flow, and the quality gates, with pointers to the ADR recording each decision. |
 | [adr/](adr/index.md) | Architecture Decision Records, one per decision. |
 | [rfc/](rfc/index.md) | Requests for Comments driving longer-running initiatives. |
-| [diagrams/](diagrams/index.md) | Control-flow and state diagrams for the plugins' multi-phase flows. |
+| [flows/](flows/index.md) | One flow diagram directory for each skill: control flow, decisions and every terminal outcome. |
+| [gh-security/GUIDE.md](gh-security/GUIDE.md) | The gh-security plugin's conventions, domain rules, adapter contract, layout and testing policy; the requirements document for the TypeScript port. |
 | [rulesets/](rulesets/README.md) | Point-in-time export of the protect-default branch ruleset and how it relates to the gates workflow. |

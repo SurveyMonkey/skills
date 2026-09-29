@@ -26,7 +26,7 @@ silent-success failures: `jq -r` on a missing key yields the string `null`, whos
 fails on stderr inside an `if` that `set -e` never sees; a `die` inside `$( )` ends only the
 subshell; a jq that errors feeds a heredoc-driven loop nothing, so the loop body never runs and
 `all` over the resulting empty array is `true`. Each of those shapes has shipped a wrong answer as
-a confident one, and `plugins/gh-security/docs/GUIDE.md` is now largely a list of them with
+a confident one, and `docs/gh-security/GUIDE.md` is now largely a list of them with
 the discipline each one forced. A third cost is paid by everyone working in the tree and is harder
 to put a number on: there is no language server for bash, so no rename, no go-to-definition, and
 no type across the JSON contracts that every script both promises and consumes.
@@ -34,7 +34,7 @@ no type across the JSON contracts that every script both promises and consumes.
 ## Motivation
 
 This is not a design from scratch, and treating it as one would be the failure mode. The domain
-rules in `plugins/gh-security/docs/GUIDE.md` and the 90 fixture directories under
+rules in `docs/gh-security/GUIDE.md` and the 90 fixture directories under
 `spec/fixtures/` are the requirements; every one of them was written to a defect found in the
 field or in review. What this RFC proposes is a change of substrate under those requirements, not
 a change to them.
@@ -55,7 +55,7 @@ the Bash tool imposes on every call, which is already why `fix-group.sh` is step
 one run.
 
 **The defect classes are substrate-specific.** Every rule quoted in the Summary exists because
-bash and jq make the wrong thing the quiet thing. `plugins/gh-security/docs/GUIDE.md` records
+bash and jq make the wrong thing the quiet thing. `docs/gh-security/GUIDE.md` records
 the rules that answer them: a field the contract promises is present and typed or it is a hard
 error, never a default; there is no unchecked state reader to reach for; a reply is asserted to be
 a JSON object before any field of it is read. A typed boundary answers the same class by
@@ -72,7 +72,9 @@ ported immediately after.
 **Goals**
 
 - Every deterministic script that runs as part of a fix or audit run is TypeScript, executed
-  directly by Node, behind one CLI entry point at `plugins/gh-security/bin/gh-security.ts`.
+  directly by Node, behind one CLI entry point at `plugins/gh-security/scripts/gh-security.ts`
+  (moved from `bin/` in [#273](https://github.com/SurveyMonkey/skills/issues/273): claude.ai
+  organization sync rejects a plugin with a top-level `bin/`).
 - The runtime floor is Node 22.18, the first release whose type stripping runs without a flag and
   without a warning on stderr (spike table and reasoning in
   [ADR 012](../adr/012-typescript-on-node-22-18.md), landed in Phase 0 by
@@ -83,8 +85,9 @@ ported immediately after.
   side by side until each bash script is retired.
 - The behavior a user sees does not change, other than the runtime floor and the launch-time error
   below it.
-- Coverage of the TypeScript source is 95 to 100 on all four buckets, preferably 100, with
-  exclusion by name and a stated reason as the only relief.
+- Coverage of the TypeScript source is 95 to 100 on all four buckets, preferably 100, ~~with
+  exclusion by name and a stated reason as the only relief~~ with no exclusion by name (**revised
+  in #273**).
 
 **Non-Goals**
 
@@ -99,7 +102,7 @@ ported immediately after.
 - **The #193 commands are not ported.** They do not exist yet. They are built in TypeScript inside
   Phase 3, against the contracts agreed in their own issues.
 - **No change to the domain rules.** Where the port disagrees with
-  `plugins/gh-security/docs/GUIDE.md`, the document wins and the port is wrong, except for the
+  `docs/gh-security/GUIDE.md`, the document wins and the port is wrong, except for the
   bash-and-jq mechanism sections, which #216 rewrites because they describe a substrate that is
   going away.
 - **No published npm package, no build step, and no bundler.** The plugin ships `.ts` files that
@@ -124,19 +127,26 @@ trace when the running Node is older (#214, #224).
 ### Shape
 
 ```
+lib/                        # envelopes, process runner, git helpers, gh client (shared)
 plugins/gh-security/
-  bin/gh-security.ts        # one entry point; subcommand registry; JSON on stdout
+  scripts/
+    gh-security.ts          # one entry point; JSON on stdout
+    common/detect-capacity.sh
+    common/notice-scan.sh
   src/
-    lib/                    # envelopes, process runner, git helpers, gh client, state file
+    lib -> ../../../lib     # committed symlink, the only path out of the plugin
+    cli/                    # the lazy subcommand registry and dispatch
+    state.ts                # the fix driver's state file
     semver/                 # comparison and range facts
     lockfiles/              # npm, pnpm, Yarn Berry parsers
     adapters/               # the ADR 001 verbs as an in-process interface
-    commands/               # discovery, preflight, scoring, rendering, drivers
-  scripts/
-    common/detect-capacity.sh
-    common/notice-scan.sh
+    subcommands/            # discovery, preflight, scoring, rendering, drivers
   workflows/fix-groups.mjs
 ```
+
+The Shape was amended in [#273](https://github.com/SurveyMonkey/skills/issues/273): `bin/` became
+`scripts/`, `commands/` became `subcommands/`, and the shared library moved to a root `lib/` that
+the plugin reaches through its `src/lib` symlink (`.claude/rules/type-ts.md`).
 
 One entry point rather than eighteen executables is also what closes
 [#16](https://github.com/SurveyMonkey/skills/issues/16): the PreToolUse allow rule for the
@@ -231,7 +241,7 @@ genuinely need one.
   bounded: #240 narrows the shellspec job and #241 deletes the parity runner.
 - **A type system is not a domain check.** Nothing about TypeScript catches an adapter that reads
   a Yarn `resolution:` entry's `dependencies` block and forgets its peers. The domain rules in
-  `plugins/gh-security/docs/GUIDE.md` remain the requirements document, and the fixture that
+  `docs/gh-security/GUIDE.md` remain the requirements document, and the fixture that
   covers each one remains the enforcement.
 - **The in-process adapter loses one property the process boundary gave for free**: an adapter
   crash used to be an exit code the caller handled, and in process it is an exception that can
@@ -255,7 +265,7 @@ issues carry. Each phase leaves the plugin working.
 | P0-1 | [#212](https://github.com/SurveyMonkey/skills/issues/212) | This RFC |
 | P0-2 | [#213](https://github.com/SurveyMonkey/skills/issues/213) | ADR 012, superseding ADR 010; amendments to ADR 001 and ADR 005 |
 | P0-3 | [#214](https://github.com/SurveyMonkey/skills/issues/214) | `tsconfig.json`, pinned `typescript` and `@types/node`, the `types` gate, the Node floor preamble |
-| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/GUIDE.md` and rewritten; the `testing` skill's bash-specific parts amended |
+| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/GUIDE.md` (since moved to `docs/gh-security/GUIDE.md` in #273) and rewritten; the `testing` skill's bash-specific parts amended |
 | P0-5 | [#215](https://github.com/SurveyMonkey/skills/issues/215) | TypeScript language server on for every session on this checkout |
 
 **Phase 1: foundations.**
@@ -354,15 +364,18 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
 - **`workflows/fix-groups.mjs` is untouched**, and ADR 010's harness-versus-user-shell boundary
   survives this RFC intact even though ADR 012 supersedes the ADR that drew it: what is
   superseded is ADR 010's bash-only rule for shipped scripts, not the boundary.
-- **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), with exclusion by
-  name and a reason as the only relief. The existing 100 floor on the workflow file does not move.
+- **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), ~~with exclusion by
+  name and a reason as the only relief~~ with no exclusion by name (**revised in #273**; ADR 012). The existing 100 floor on the workflow file does not move.
 - **The mechanical prose pins retire with the scripts they pin** (#197, #231). A pin is never kept
   beside its successor: two sources of truth for one behavior is worse than either alone, which is
   the rule ADR 010 already applied to the dispatch script's textual pins.
 - **The `testing` skill stays the policy**, amended rather than replaced (#216).
-- **The TypeScript tests live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`, with the
+- ~~**The TypeScript tests live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`, with the
   existing `path-spec` rule applying to them unchanged. Settled in #216's decision comment rather
-  than in #214, which this constrains: #214's vitest include globs follow from it.
+  than in #214, which this constrains: #214's vitest include globs follow from it.~~ **Revised in
+  [#273](https://github.com/SurveyMonkey/skills/issues/273):** the TypeScript tests live in `tests/`,
+  at the mirror of the code they cover, with the shared harness in `harness/`. The fixtures stay
+  in `spec/fixtures/`, and `path-spec` covers all three trees.
 
 To be spawned as this RFC executes:
 
@@ -376,7 +389,7 @@ To be spawned as this RFC executes:
 
 - [Milestone 6: TypeScript port, v1.0](https://github.com/SurveyMonkey/skills/milestone/6) and
   [milestone 5: CI cost](https://github.com/SurveyMonkey/skills/milestone/5)
-- Requirements: `plugins/gh-security/docs/GUIDE.md`, `spec/fixtures/`, `spec/PINS.md`
+- Requirements: `docs/gh-security/GUIDE.md`, `spec/fixtures/`, `spec/PINS.md`
 - [RFC 001: Orchestrated multi-agent security alert resolution](001-alert-orchestration.md)
 - [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
 - [ADR 005: Quality gate venues and automation](../adr/005-quality-gate-venues.md)

@@ -1,0 +1,12 @@
+{
+  "name": "typescript7-lsp",
+  "version": "0.1.0",
+  "description": "TypeScript 7's native language server (tsc --lsp --stdio) from the project's own TypeScript. Replaces typescript-lsp, which needs the tsserver TypeScript 7 no longer ships.",
+  "author": {
+    "name": "Brian Espinosa",
+    "email": "b@bje.co"
+  },
+  "homepage": "https://github.com/SurveyMonkey/skills/tree/main/plugins/typescript7-lsp",
+  "license": "MIT",
+  "keywords": ["typescript", "lsp", "language-server", "tsc"]
+}

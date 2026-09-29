@@ -1,7 +1,16 @@
 {
   "autoMemoryEnabled": false,
+  "extraKnownMarketplaces": {
+    "skills": {
+      "source": {
+        "source": "github",
+        "repo": "SurveyMonkey/skills"
+      }
+    }
+  },
   "enabledPlugins": {
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": false,
+    "typescript7-lsp@skills": true
   },
   "attribution": {
     "commit": "",

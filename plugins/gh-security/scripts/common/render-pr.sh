@@ -27,11 +27,11 @@
 # the `## Global override` section's reasoning (why no scoped form covered
 # every path). Pass `--collateral-note <file>` / `--global-override-note
 # <file>` for those; omitting a required note is a clear `{"error": ...}`,
-# never invented prose (scripts/CLAUDE.md's zero-found-is-an-error rule
+# never invented prose (docs/gh-security/GUIDE.md's zero-found-is-an-error rule
 # applied to narrative: a missing explanation is a hole, not an empty one to
 # paper over).
 #
-# Dependencies are bash, jq and gh only (scripts/CLAUDE.md). bash 3.2, jq 1.7:
+# Dependencies are bash, jq and gh only (docs/gh-security/GUIDE.md). bash 3.2, jq 1.7:
 # no associative arrays, `//` parenthesized before `as`.
 
 set -uo pipefail
@@ -82,7 +82,7 @@ require_ok() {
 # promises arrives present and non-null, or it is a hard error — never a bare
 # `jq -r`, whose answer for an absent key is the STRING "null", which then
 # renders into the PR body as literal text or takes a branch of its own
-# (scripts/CLAUDE.md, "A field the contract promises..."). `false`, `0`, and
+# (docs/gh-security/GUIDE.md, "A field the contract promises..."). `false`, `0`, and
 # `[]` are legitimate answers and pass; only an absent key or an explicit
 # JSON `null` does not, and jq's own `-r` reader cannot tell those two apart
 # from a genuinely missing field either, so this checks with `has` first
@@ -141,7 +141,7 @@ run_env() {
 # so `parent_of` returns null for them rather than inventing one.
 #
 # This is a deliberately independent copy, not a shared library — the two
-# scripts have no shared-code mechanism (scripts/CLAUDE.md: bash/jq/gh only,
+# scripts have no shared-code mechanism (docs/gh-security/GUIDE.md: bash/jq/gh only,
 # nothing to `source`) — and it has already diverged from fix-group.sh's
 # `uncovered_parents` in one respect that matters: a SCOPED parent
 # (`node_modules/@nestjs/core/node_modules/<pkg>`) needs both the `@scope`

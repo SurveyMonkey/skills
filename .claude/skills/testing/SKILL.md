@@ -15,13 +15,14 @@ Paired worked examples from this suite: [tests.md](tests.md). Mocking: [mocking.
 
 **For a TypeScript command, the seam is the exported handler.** A command is an exported, typed
 function taking its parsed arguments plus an injected io and `gh` client, and returning the
-envelope; `bin/gh-security.ts` is a thin registry over those handlers. An example calls the
+envelope; `scripts/gh-security.ts` is a thin entry point over a registry of those handlers. An example calls the
 export directly. A spawned process covers only what the entry point itself adds: the Node-floor
 preamble, argument parsing, the exit code, the stdout and stderr split. The registry adds nothing
 else (issue #216's decision comment, which constrains #224).
 
-**Those examples live in `spec/ts/`**, beside `spec/js/` and `spec/fixtures/`. The `path-spec`
-rule applies to them unchanged: it points at this skill for every file under `spec/`.
+**Those examples live in `tests/`**, at the mirror of the code they cover, with the shared
+harness in `harness/` and the fixtures in `spec/fixtures/` (`.claude/rules/type-ts.md`). The
+`path-spec` rule points at this skill for every file under `spec/`, `tests/` and `harness/`.
 
 **For a shell script, meaning the bash that remains and everything not yet ported, the CLI and
 the JSON it writes to stdout are the seam.** That pair is the contract every consumer reads, so

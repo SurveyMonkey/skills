@@ -18,7 +18,7 @@
 
 Describe 'scope is the checkouts on disk, in prose (issue #188)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
-  CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/commands/audit-pins.md"
+  CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
 
   # A wrapped paragraph is not one grep line, so the file is flattened first.
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }

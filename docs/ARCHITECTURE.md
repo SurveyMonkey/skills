@@ -20,16 +20,19 @@ Skills within a plugin are invoked as `/namespace:skill-name`. One namespace per
 concern per namespace.
 
 ```
+lib/                # shared TypeScript; a plugin reaches it through its src/lib symlink
 plugins/
   gh-security/
     .claude-plugin/
       plugin.json   # the plugin's identity and version; the whole release is bumping it
-    skills/         # orchestrators that run in the main session
+    skills/         # entry points: orchestrators that run in the main session
     agents/         # subagents dispatched in parallel; each declares its model in frontmatter
-    commands/       # explicit entry points
     workflows/      # Workflow tool scripts (JavaScript), run by the harness, not the user's
                     # shell; tested by vitest with coverage at 100 (ADR 010)
+    src/            # TypeScript commands behind the CLI (.claude/rules/type-ts.md)
+      lib -> ../../../lib
     scripts/
+      gh-security.ts  # the one CLI entry point
       common/       # ecosystem-agnostic: checkout discovery, scope, alert discovery,
                     # adapter routing, risk scoring, capacity detection, PR state,
                     # advisory lookup
@@ -40,16 +43,18 @@ plugins/
 
 ## Scripts do, agents decide
 
-Deterministic work belongs in `scripts/` with a JSON contract; skills, agents, and commands carry
-only the judgment. Scripts depend on `bash`, `jq`, and `gh` alone — a rule about what runs on the
-user's machine, which is every script under `scripts/`; the one JavaScript file under
-`workflows/` is evaluated by the Claude Code harness, which is already node, and no script here
-may call into it ([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Scripts
-target bash 3.2 (the macOS
-default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
+Deterministic work belongs in `scripts/` with a JSON contract; skills and agents carry
+only the judgment. Tests, docs and flow diagrams live outside the plugin directory, which ships
+only its run-time files (`.claude/rules/path-plugins.md`). What runs on the user's machine
+takes no dependency beyond its runtime: `scripts/gh-security.ts` and `src/` need node 22.18
+([ADR 012](adr/012-typescript-on-node-22-18.md)), and the bash scripts under `scripts/common/` and
+`scripts/ecosystems/` need `bash`, `jq` and `gh`. The one JavaScript file under `workflows/` is
+evaluated by the Claude Code harness, and no script here may call into it
+([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The bash scripts target
+bash 3.2 (the macOS default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
 pass**. Conventions and their reasoning live in
-[plugins/gh-security/docs/GUIDE.md](../plugins/gh-security/docs/GUIDE.md).
+[docs/gh-security/GUIDE.md](gh-security/GUIDE.md).
 
 ## The decisions, and where they are recorded
 
@@ -70,11 +75,12 @@ pass**. Conventions and their reasoning live in
 - **Subagent model tiering** ([ADR 004](adr/004-subagent-model-tiering.md)). The fix subagent is
   pinned to sonnet in its frontmatter; the orchestrator inherits the session model.
 - **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md),
-  [ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Five gates (shellspec
+  [ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Seven gates (shellspec
   suite, ShellCheck, `claude plugin validate --strict`, the vitest suite with coverage at 100 on
-  the Workflow script, and a plugin version gate) run through one entry
+  the Workflow script and the TypeScript source, the TypeScript type check, Biome, and a plugin
+  version gate) run through one entry
   point, `scripts/check.sh`, from committed git hooks locally and from
-  `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions. The version
+  `.github/workflows/gates.yml` in CI on ubuntu with pinned tool versions. The version
   gate is CI-only: it requires a plugin whose files changed to carry a changed `plugin.json`
   version, and only CI has an unambiguous base to compare against.
 - **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening

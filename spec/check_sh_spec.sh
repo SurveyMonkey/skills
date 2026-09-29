@@ -115,7 +115,7 @@ Describe 'scripts/check.sh'
     End
 
     # The types gate (ADR 012, #214) discovers the same way, anchored at the
-    # three paths tsconfig.json includes, so `tsc` never sees an input the
+    # paths tsconfig.json includes, so `tsc` never sees an input the
     # configuration does not claim and a shrinking input set is refused rather
     # than reported as a clean type check.
     It 'fails types when no TypeScript files are tracked under the include paths'
@@ -227,7 +227,7 @@ Describe 'scripts/check.sh'
     # Describe, just one step further downstream: it needs a stub pnpm that
     # actually publishes a passing workflow-only summary, so the run reaches
     # subject discovery rather than dying earlier for an unrelated reason.
-    It 'fails js when no tracked TypeScript files exist under plugins/gh-security bin or src'
+    It 'fails js when no tracked TypeScript files exist under lib/ or the plugin scripts/ or src/'
       mkdir -p spec/js bin node_modules
       printf 'x\n' > spec/js/x.test.mjs
       printf '{"private":true}' > package.json
@@ -246,7 +246,7 @@ STUB
       export PATH
       When run "$CHECK" js
       The status should eq 2
-      The stderr should include 'no TypeScript files discovered under plugins/gh-security/{bin,src}'
+      The stderr should include 'no TypeScript files discovered under lib/ or plugins/gh-security/{scripts,src}/'
       The output should include 'coverage measured'
     End
   End
@@ -264,7 +264,7 @@ STUB
       scratch_repo || return 1
       mkdir -p spec/js bin coverage node_modules
       printf 'x\n' > spec/js/x.test.mjs
-      printf '{"private":true}' > package.json
+      printf '{"private":true,"type":"module"}' > package.json
       # cmd_js's own gate on lefthook.yml (#249) runs after the suite and its
       # coverage assertion, but still inside this one function, so a missing
       # lefthook.yml would fail every example below with an unrelated
@@ -278,8 +278,8 @@ STUB
       # above. Named base.ts, distinct from the "coverage floor over
       # TypeScript source" Describe's example.ts below, since ts_stub_pnpm
       # builds on this same fixture and tracks both.
-      mkdir -p plugins/gh-security/src/lib
-      printf 'export const x = 1\n' > plugins/gh-security/src/lib/base.ts
+      mkdir -p lib
+      printf 'export const x = 1\n' > lib/base.ts
       git add -A
       # cmd_js clears any stale summary before running the suite, so the
       # stub pnpm is what publishes the one each example wants — exactly where
@@ -337,7 +337,7 @@ JSON
     It 'accepts a report whose subject is fully covered'
       # base.ts (stub_pnpm) is a subject too, so it needs its own entry.
       summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/lib/base.ts":$(full 100 100 100 100)}
 JSON
       When run "$CHECK" js
       The status should be success
@@ -431,14 +431,14 @@ JSON
     End
 
     # ADR 012, #211: the coverage gate also requires every tracked
-    # plugins/gh-security/src/**/*.ts file, unless vitest.config.mjs's own
+    # lib/ and plugins/gh-security/{scripts,src}/ .ts file, unless vitest.config.ts's own
     # coverage.exclude names it: the same array vitest itself reads, so a
     # file excluded there is a file check.sh must not demand either.
     Describe 'the coverage floor over TypeScript source'
       ts_stub_pnpm() {
         stub_pnpm || return 1
-        mkdir -p plugins/gh-security/src/lib
-        printf 'export const x = 1\n' > plugins/gh-security/src/lib/example.ts
+        mkdir -p plugins/gh-security/scripts
+        printf 'export const x = 1\n' > plugins/gh-security/scripts/example.ts
         git add -A
       }
       Before ts_stub_pnpm
@@ -449,17 +449,17 @@ JSON
 JSON
         When run "$CHECK" js
         The status should eq 2
-        The stderr should include 'names no entry ending in plugins/gh-security/src/lib/example.ts'
+        The stderr should include 'names no entry ending in plugins/gh-security/scripts/example.ts'
         The output should include 'coverage measured'
       End
 
       It 'fails when a src file is below 100 on one bucket, naming file and bucket'
         summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 92 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/scripts/example.ts":$(full 100 92 100 100)}
 JSON
         When run "$CHECK" js
         The status should eq 2
-        The stderr should include 'plugins/gh-security/src/lib/example.ts: branches is 92%'
+        The stderr should include 'plugins/gh-security/scripts/example.ts: branches is 92%'
         The stderr should include 'is not 100 on all four buckets'
         The output should include 'coverage measured'
       End
@@ -467,19 +467,19 @@ JSON
       It 'accepts a report where the workflow and the src file are both fully covered'
         # base.ts (stub_pnpm) is a subject too, so it needs its own entry.
         summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/example.ts":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/scripts/example.ts":$(full 100 100 100 100),"/x/lib/base.ts":$(full 100 100 100 100)}
 JSON
         When run "$CHECK" js
         The status should be success
         The output should include 'coverage measured'
       End
 
-      It 'does not require a file named in vitest.config.mjs coverage.exclude'
-        cat > vitest.config.mjs <<'CONFIG'
+      It 'does not require a file named in vitest.config.ts coverage.exclude'
+        cat > vitest.config.ts <<'CONFIG'
 export default {
   test: {
     coverage: {
-      exclude: ['plugins/gh-security/src/lib/example.ts'],
+      exclude: ['plugins/gh-security/scripts/example.ts'],
     },
   },
 }
@@ -488,20 +488,20 @@ CONFIG
         # example.ts is excluded, but base.ts (stub_pnpm) is not, so it still
         # needs its own entry.
         summary <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/plugins/gh-security/src/lib/base.ts":$(full 100 100 100 100)}
+{"total":{},"/x/spec/js/generated/workflow.mjs":$(full 100 100 100 100),"/x/lib/base.ts":$(full 100 100 100 100)}
 JSON
         When run "$CHECK" js
         The status should be success
         The output should include 'coverage measured'
       End
 
-      # js_coverage_exclude reads vitest.config.mjs with node rather than a
+      # js_coverage_exclude reads vitest.config.ts with node rather than a
       # second bash-side copy of its exclude array (ADR 012, #211), so a
       # config that fails to import is this gate's own error path, not just
       # a hazard traced by hand: it must fail loudly rather than silently
       # falling back to "nothing excluded".
-      It 'fails when vitest.config.mjs fails to import'
-        cat > vitest.config.mjs <<'CONFIG'
+      It 'fails when vitest.config.ts fails to import'
+        cat > vitest.config.ts <<'CONFIG'
 export default {
 CONFIG
         git add -A
@@ -532,8 +532,8 @@ JSON
       # empty-discovery refusal never fires here: this Describe is about the
       # lefthook check, which runs after the coverage assertion, so it needs
       # a subject list the stub's summary below actually satisfies.
-      mkdir -p plugins/gh-security/src/lib
-      printf 'export const x = 1\n' > plugins/gh-security/src/lib/base.ts
+      mkdir -p lib
+      printf 'export const x = 1\n' > lib/base.ts
       git add -A
       # `pnpm --silent test` always publishes a fully-covered summary, so
       # every example here reaches the lefthook check; `pnpm exec lefthook
@@ -546,7 +546,7 @@ if [ "$1" = exec ]; then
 fi
 mkdir -p coverage
 cat > coverage/coverage-summary.json <<JSON
-{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}},"/x/plugins/gh-security/src/lib/base.ts":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
+{"total":{},"/x/spec/js/generated/workflow.mjs":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}},"/x/lib/base.ts":{"lines":{"pct":100},"branches":{"pct":100},"functions":{"pct":100},"statements":{"pct":100}}}
 JSON
 exit 0
 STUB
@@ -589,8 +589,8 @@ STUB
   Describe 'the types gate'
     stub_types() {
       scratch_repo || return 1
-      mkdir -p spec/ts bin node_modules
-      printf 'export const x = 1\n' > spec/ts/x.test.ts
+      mkdir -p tests bin node_modules
+      printf 'export const x = 1\n' > tests/x.test.ts
       printf '{}' > tsconfig.json
       git add -A
       cat > bin/node <<'STUB'
@@ -853,8 +853,8 @@ STUB
     End
 
     It 'passes CHECK_SPEC_ONLY through as trailing file arguments'
-      # The macOS PR leg narrows to the bash 3.2 gate alone (ADR 005
-      # amendment, issue #208), so this has to travel as real shellspec file
+      # A local macOS run narrows to the bash 3.2 gate alone (ADR 005, #273),
+      # so this has to travel as real shellspec file
       # arguments, appended after the flags, exactly like a human typing
       # `shellspec spec/one_spec.sh spec/two_spec.sh` would.
       #

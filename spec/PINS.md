@@ -289,7 +289,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 623 | carries env_prefix into the fix-dependency Task payload | mechanical | build-dispatches.sh |
 | 630 | runs a registry preflight probe once per repo before phase 6 dispatch | mechanical | preflight-repo.sh |
 | 641 | composes the probe as cd repo_root, then env_prefix, in every snippet | mechanical | preflight-repo.sh |
-| 649 | carries env_prefix into the audit-pins Task payload in commands/audit-pins.md | judgment | - |
+| 649 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
 | 664 | is stated in the audit agent | judgment | - |
 | 670 | is stated in the fix agent | judgment | - |
 
