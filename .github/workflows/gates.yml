@@ -227,8 +227,8 @@ jobs:
 
   types:
     # `tsc -p tsconfig.json` over lib/, harness/, tests/ and the plugin's
-    # scripts/ and src/ (ADR 012). ubuntu, like the js job: this is one compiler evaluating one
-    # configuration, with no platform surface. The type check is not a build
+    # scripts/ and src/ (ADR 012). ubuntu, like the js job: this is one
+    # compiler evaluating one configuration, with no platform surface. The type check is not a build
     # step and emits nothing; the file a reviewer reads on the default branch
     # is the file node runs.
     if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}

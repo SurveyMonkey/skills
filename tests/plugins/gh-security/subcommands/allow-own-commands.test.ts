@@ -41,11 +41,11 @@ describe('allowOwnCommands', () => {
 
   it('resolves the entry point it defends from its own installed location', () => {
     // Written from the repository root (`harness/paths.ts`) rather than from
-    // the module's own location, so an off-by-one in the module's `../..` disagrees with it. This is
-    // what replaces reading `CLAUDE_PLUGIN_ROOT` out of the environment: the
-    // hooks reference documents that name only as a placeholder expanded
-    // inside a hook's `command` string, never as a variable the hook process
-    // is given.
+    // the module's own location, so an off-by-one in the module's `../..`
+    // disagrees with it. This is what replaces reading `CLAUDE_PLUGIN_ROOT`
+    // out of the environment: the hooks reference documents that name only
+    // as a placeholder expanded inside a hook's `command` string, never as a
+    // variable the hook process is given.
     expect(ENTRY).toBe(GH_SECURITY_ENTRY)
   })
 

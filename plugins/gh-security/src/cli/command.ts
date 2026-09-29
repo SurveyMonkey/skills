@@ -2,9 +2,10 @@
 //
 // A command is an exported, typed handler returning the envelope (issue
 // #216's decision comment); the registry is a map from a name to a loader
-// for one of those plus the line `--help` prints for it. The io is a parameter for the
-// same reason the process runner's spawn is one: it is the boundary, so an
-// example substitutes it rather than reading the real process streams.
+// for one of those plus the line `--help` prints for it. The io is a
+// parameter for the same reason the process runner's spawn is one: it is the
+// boundary, so an example substitutes it rather than reading the real process
+// streams.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs`.

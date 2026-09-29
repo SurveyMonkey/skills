@@ -271,9 +271,9 @@ cmd_spec() {
   # It is how the bash 3.2 parse gate runs, on a local macOS run only since
   # CI dropped its macOS leg (ADR 005, #273): set it to
   # spec/bash32_parse_spec.sh with REQUIRE_BASH32=1. Unset, every spec file
-  # runs. `read -ra` does the splitting, so the value is
-  # never expanded unquoted (unlike the flag values above, this one is
-  # genuinely a list, not a single token).
+  # runs. `read -ra` does the splitting, so the value is never expanded
+  # unquoted (unlike the flag values above, this one is genuinely a list, not
+  # a single token).
   local -a only=()
   if [ -n "${CHECK_SPEC_ONLY:-}" ]; then
     read -ra only <<< "$CHECK_SPEC_ONLY"
@@ -668,7 +668,7 @@ cmd_version() {
     # lib/ code is a change to the plugin, and needs its bump (#273).
     paths=("$p")
     link_mode=$(git ls-files -s -- "$p/src/lib" | awk '{ print $1 }')
-    if [ "$link_mode" = 120000 ]; then paths+=(lib); fi
+    if [ "$link_mode" = 120000 ]; then paths[${#paths[@]}]=lib; fi
     touched=$(git diff --name-only "$base" HEAD -- "${paths[@]}") \
       || die "git diff failed for $p"
     if [ -z "$touched" ]; then

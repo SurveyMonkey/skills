@@ -15,10 +15,9 @@
 // and every token is checked: the runtime is `node` and nothing else, the
 // second token equals this plugin's entry point exactly, bare or wrapped in
 // one pair of double quotes (the form .claude/rules/file-skill-md.md
-// prescribes for a SKILL.md call site), the third is a
-// registered subcommand, and every remaining token is drawn from one
-// explicit character set that contains no shell metacharacter. Anything else
-// returns nothing.
+// prescribes for a SKILL.md call site), the third is a registered
+// subcommand, and every remaining token is drawn from one explicit character
+// set that contains no shell metacharacter. Anything else returns nothing.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `url`.

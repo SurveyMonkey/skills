@@ -68,9 +68,10 @@ export const libLinkViolations = (root: string, files: readonly string[]): strin
     const full = join(root, link)
     if (!lstatSync(full).isSymbolicLink()) {
       violations.push(`${link} is a directory, not the symlink ../../../lib`)
-    } else if (readlinkSync(full) !== '../../../lib') {
-      violations.push(`${link} points at ${readlinkSync(full)}, not ../../../lib`)
+      continue
     }
+    const target = readlinkSync(full)
+    if (target !== '../../../lib') violations.push(`${link} points at ${target}, not ../../../lib`)
   }
   return violations
 }
@@ -86,10 +87,14 @@ export const packageImports = (root: string, files: readonly string[]): string[]
       return !lstatSync(full).isSymbolicLink() && HASH_IMPORT.test(readFileSync(full, 'utf8'))
     })
 
+/** Every plugin skill, as `plugins/<plugin>/skills/<skill>/SKILL.md`. */
+export const pluginSkills = (files: readonly string[]): string[] =>
+  files.filter((path) => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(path))
+
 /** A SKILL.md that holds a command in a shell variable and expands it later. */
 export const commandVariables = (root: string, files: readonly string[]): string[] => {
   const violations: string[] = []
-  for (const path of files.filter((p) => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(p))) {
+  for (const path of pluginSkills(files)) {
     const text = readFileSync(join(root, path), 'utf8')
     const assignments = text.matchAll(
       /^\s*(?:(?:export|local|readonly|declare(?:\s+-\S+)*)\s+)?([A-Za-z_][A-Za-z0-9_]*)=(["'(]?)(.*)$/gm,
@@ -103,10 +108,6 @@ export const commandVariables = (root: string, files: readonly string[]): string
   }
   return violations
 }
-
-/** Every plugin skill, as `plugins/<plugin>/skills/<skill>/SKILL.md`. */
-export const pluginSkills = (files: readonly string[]): string[] =>
-  files.filter((path) => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(path))
 
 /** A plugin skill with no tracked `docs/flows/<plugin>/<skill>/_skill-flow.md`. */
 export const missingFlows = (files: readonly string[]): string[] => {
