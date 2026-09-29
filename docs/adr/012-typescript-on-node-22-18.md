@@ -100,7 +100,7 @@ why;~~ **(amended in [#273](https://github.com/SurveyMonkey/skills/issues/273): 
 excluded by name. A branch no test can reach is restructured until it no longer exists, by
 lifting the decision into a function that takes what it depended on as an argument. To open the
 exclusion list is a maintainer decision, argued on its own pull request, never a step in the
-change that needs it. `.claude/rules/type-ts.md`, "Coverage", is the working rule.)** The number
+change that needs it. The `testing` skill, "Coverage", is the working rule.)** The number
 is never lowered to accommodate a file, because a lowered threshold hides every other
 file's regression behind the one file that earned the exception. The existing 100 floor on
 `workflows/fix-groups.mjs` does not move, and neither does the rule ADR 010 established alongside

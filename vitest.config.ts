@@ -12,7 +12,7 @@ export default {
   test: {
     // spec/js/ is the Workflow script's suite (ADR 010); tests/ is the
     // TypeScript suite, at the mirror of the code it covers (ADR 012,
-    // .claude/rules/type-ts.md).
+    // the testing skill, "Layout").
     include: ['spec/js/**/*.test.mjs', 'tests/**/*.test.ts'],
     exclude: ['**/node_modules/**', '.claude/worktrees/**', '**/fixtures/**'],
     // A run that collects no files is not a pass. scripts/check.sh js also
@@ -56,7 +56,7 @@ export default {
         'plugins/gh-security/src/**/*.ts',
       ],
       // No file is named here. A branch no test can reach is restructured
-      // until it no longer exists, never excluded (.claude/rules/type-ts.md,
+      // until it no longer exists, never excluded (the testing skill,
       // "Coverage"; ADR 012). Opening this list is a maintainer decision,
       // argued on its own pull request.
       exclude: [],
