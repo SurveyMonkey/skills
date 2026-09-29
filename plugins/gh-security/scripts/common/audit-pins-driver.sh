@@ -389,7 +389,7 @@ rv_versions() {
     elif any(.versions[]; (.version | type) != "string") then
       error("a versions entry carries no readable version string")
     else [ .versions[].version ] | unique
-    end' 2>/dev/null)     || fail_phase "$1" "$3 answered a versions list this flow cannot read: it is not an array, or an entry carries no version string. A parser that found nothing is never read as a package that resolves nothing (.claude/skills/gh-security-guide/core.md); here that reading becomes an empty delta, which is the cue for removable."
+    end' 2>/dev/null)     || fail_phase "$1" "$3 answered a versions list this flow cannot read: it is not an array, or an entry carries no version string. A parser that found nothing is never read as a package that resolves nothing; here that reading becomes an empty delta, which is the cue for removable."
   if [ "$present" = "true" ] && [ "$RV_VERSIONS" = "[]" ]; then
     fail_phase "$1" "$3 answered present: true with no versions at all. The two disagree, and the empty list is the dangerous half: it makes the delta empty, which this flow reads as 'nothing new resolved' and reports removable without a single advisory query."
   fi
@@ -858,7 +858,7 @@ cmd_baseline() {
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
     adapter_run resolved_versions "$pkg" \
-      || fail_phase install "the baseline lockfile could not be parsed for $pkg (resolved_versions): $(adapter_error_text). A failed parse is never an empty result (.claude/skills/gh-security-guide/core.md)."
+      || fail_phase install "the baseline lockfile could not be parsed for $pkg (resolved_versions): $(adapter_error_text). A failed parse is never an empty result."
     local rv=$ADAPTER_OUT
     rv_versions install "$rv" "resolved_versions $pkg (the with-all-pins baseline)"
     local present=$ADAPTER_FIELD rv_list=$RV_VERSIONS

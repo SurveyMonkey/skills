@@ -53,8 +53,8 @@ A command may also answer with silence, which is exit 0 and nothing written at a
 **The allow hook is a subcommand.** `hooks/hooks.json` registers a `PreToolUse` hook on `Bash`
 running `node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" allow-own-commands`, which reads the hook
 JSON on stdin and answers `hookSpecificOutput.permissionDecision: "allow"` with a reason, so this
-plugin's own commands do not prompt while skill `allowed-tools` pre-approval still misses plugin
-skills ([#16](https://github.com/SurveyMonkey/skills/issues/16)).
+plugin's own commands do not prompt ([#16](https://github.com/SurveyMonkey/skills/issues/16);
+whether a plugin skill's `allowed-tools` now covers them is #280).
 
 It allows exactly one shape: `node <plugin root>/scripts/gh-security.ts <registered subcommand>
 [args]`, where the entry point is resolved from where this plugin is installed
@@ -106,5 +106,5 @@ Every command a skill or agent prescribes is written so that a permission rule c
 its own: literal paths, no variables, no conditionals, no redirections. Do not rely on a skill's
 `allowed-tools` frontmatter to suppress a prompt, and do not rely on the allow hook for a command
 outside the one shape it accepts. The plugin carried a permissions preflight that pre-approved its
-whole surface until v0.8.2, when `auto` became the recommended default mode
-([#86](https://github.com/SurveyMonkey/skills/issues/86)).
+whole surface in one decision until v0.8.2, when `auto` became the recommended default mode and
+the workaround was removed ([#86](https://github.com/SurveyMonkey/skills/issues/86)).

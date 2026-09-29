@@ -11,7 +11,7 @@ supplies.
 
 **The opacity is the agent's, not the dispatcher's.** The dispatcher does have to recognize a
 context statement, and to instantiate the prefix against a directory where the statement takes one
-(SKILL.md phase 1: the checkout itself, which always exists because nothing is ever cloned). That
+(`resolve-alerts` SKILL.md phase 1: the checkout itself, which always exists because nothing is ever cloned). That
 happens once, before the repo's first command. From then on the prefix is a literal string that is
 threaded and prepended and never re-derived, by the dispatcher or by any agent it dispatches.
 Absent any such context there is no prefix and nothing extra happens, which is the ordinary

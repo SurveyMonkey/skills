@@ -34,7 +34,8 @@
 Describe 'phase 6 dispatches one workflow (issue #175)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-  GIT_DOC="$SHELLSPEC_PROJECT_ROOT/.claude/skills/gh-security-guide/git.md"
+  GUIDE_DIR="$SHELLSPEC_PROJECT_ROOT/.claude/skills/gh-security-guide"
+  GIT_DOC="$GUIDE_DIR/git.md"
   CORE_DOC="$SHELLSPEC_PROJECT_ROOT/.claude/skills/gh-security-guide/core.md"
   REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
@@ -539,8 +540,8 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
 
     # pin: mechanical, retired by reap-batch.sh
     It 'no longer claims in the plugin guide that the reap runs on each completion'
-      no_completion_reap() { grep -c 'on each completion' "$1" || true; }
-      When call no_completion_reap "$GIT_DOC"
+      no_completion_reap() { cat "$1"/*.md | grep -c 'on each completion' || true; }
+      When call no_completion_reap "$GUIDE_DIR"
       The status should be success
       The output should equal '0'
     End

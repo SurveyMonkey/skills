@@ -31,7 +31,7 @@
 # applied to narrative: a missing explanation is a hole, not an empty one to
 # paper over).
 #
-# Dependencies are bash, jq and gh only (.claude/skills/gh-security-guide/bash.md). bash 3.2, jq 1.7:
+# Dependencies are bash, jq and gh only (.claude/skills/plugin-design/dependencies.md). bash 3.2, jq 1.7:
 # no associative arrays, `//` parenthesized before `as`.
 
 set -uo pipefail
@@ -141,7 +141,7 @@ run_env() {
 # so `parent_of` returns null for them rather than inventing one.
 #
 # This is a deliberately independent copy, not a shared library — the two
-# scripts have no shared-code mechanism (.claude/skills/gh-security-guide/core.md: bash/jq/gh only,
+# scripts have no shared-code mechanism (.claude/skills/plugin-design/dependencies.md: bash/jq/gh only,
 # nothing to `source`) — and it has already diverged from fix-group.sh's
 # `uncovered_parents` in one respect that matters: a SCOPED parent
 # (`node_modules/@nestjs/core/node_modules/<pkg>`) needs both the `@scope`

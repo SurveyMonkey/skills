@@ -71,7 +71,7 @@
 # `cd`: it injects environment, it does not chdir. Absent means bare.
 #
 # Dependencies are bash, jq and git only. `gh` is in the plugin's dependency
-# set (.claude/skills/gh-security-guide/core.md) but this script never calls it: every remote fact it
+# set (.claude/skills/plugin-design/dependencies.md) but this script never calls it: every remote fact it
 # needs comes from a fetched remote-tracking ref. bash 3.2: no associative
 # arrays, no `mapfile`, no `${var,,}`.
 
@@ -1016,7 +1016,7 @@ EOF
   APPLY_RESULT=$ADAPTER_OUT
   adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" written
   printf '%s' "$APPLY_RESULT" | jq -e '(.written | type) == "array"' >/dev/null 2>&1 \
-    || fail_phase apply "apply_constraint answered a 'written' that is not an array. It is the only statement of what actually changed (.claude/skills/gh-security-guide/fix-driver.md), and every classification below reads it."
+    || fail_phase apply "apply_constraint answered a 'written' that is not an array. It is the only statement of what actually changed, and every classification below reads it."
   adapter_field apply "$APPLY_RESULT" "apply_constraint $PACKAGE" observations
   printf '%s' "$APPLY_RESULT" | jq -e '(.observations | type) == "array"' >/dev/null 2>&1 \
     || fail_phase apply "apply_constraint answered an 'observations' that is not an array. A missing one silently turns every tightened bare override into an added one in the PR body."
@@ -1152,7 +1152,7 @@ cmd_apply() {
     [ .[] | select((.vulnerable_range | type) != "string" or (.vulnerable_range | length) == 0)
       | (.number // "<unnumbered>") ]')
   [ "$unchecked" = "[]" ] \
-    || fail_phase apply "alert(s) $unchecked in this group carry no vulnerable_range, so validate cannot be asked whether they were cleared. Dropping them from --vulnerable would let unresolved_alerts come back empty for an alert nothing checked — the silent partial fix that flag exists to prevent (.claude/skills/gh-security-guide/fix-driver.md). Nothing was written."
+    || fail_phase apply "alert(s) $unchecked in this group carry no vulnerable_range, so validate cannot be asked whether they were cleared. Dropping them from --vulnerable would let unresolved_alerts come back empty for an alert nothing checked — the silent partial fix that flag exists to prevent. Nothing was written."
 
   local hfv
   hfv=$(state_get '.group.highest_fixed_version'); state_ok $? '.group.highest_fixed_version'
@@ -1920,7 +1920,7 @@ EOF
     # The status was never checked, so a removal that failed — a permission, a
     # busy mount, a read-only parent — reported `worktree_removed: true`,
     # `detail: null`, and no field naming `$WORK` at all. That is verbatim the
-    # failure .claude/skills/gh-security-guide/git.md records, on the other side of the same
+    # failure reap-agent-artifacts.sh guards against, on the other side of the same
     # operation. The stderr is kept and quoted, the way the reap keeps it: an
     # operator told only that a removal failed, and then told to finish it by
     # hand, has not been told the one thing that decides how.

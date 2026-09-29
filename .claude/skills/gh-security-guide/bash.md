@@ -3,7 +3,7 @@
 ## Bash during the port
 
 **This section is the one deliberate exception to
-[#216](https://github.com/SurveyMonkey/skills/issues/216)'s rule that nothing here describes a
+[#216](https://github.com/SurveyMonkey/skills/issues/216)'s rule that nothing in this skill describes a
 bash or jq mechanism the port removes, and
 [#241](https://github.com/SurveyMonkey/skills/issues/241) deletes it.** It governs the shipped
 scripts that have not been ported yet, plus `detect-capacity.sh` and `notice-scan.sh`, which stay

@@ -36,8 +36,8 @@ What that header does not say, and what belongs here:
   physically, no `..` segment, contained under `<repo_root>/.claude/worktrees/`, plus one
   condition available only here: `--work` must name the workspace `setup` recorded. The removal's
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
-  `worktree_removed: true` with no field naming `$WORK` is the failure [git.md](git.md) records on
-  the reap's side of the same operation. **A populated `errors[]` exits non-zero**, as it does there
+  `worktree_removed: true` with no field naming `$WORK` is the failure `reap-agent-artifacts.sh`
+  guards against on its side of the same operation. **A populated `errors[]` exits non-zero**, as it does there
   (`reap-agent-artifacts.sh` ends the same way for the same reason): the fields without that
   exit still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup.
   **That exit 3 is a signal, not a verdict on the run**, and it is the one exit-3 the agent does

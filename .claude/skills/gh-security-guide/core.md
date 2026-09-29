@@ -8,7 +8,7 @@ typed JSON contract; interpreting failures and writing prose stays with the agen
 [RFC 002](../../../docs/rfc/002-typescript-port.md): one CLI entry point over typed commands that
 node executes directly. Which of them have been ported and which are still bash is the rollout
 table in that RFC, and that table is the source for what exists today rather than anything here.
-A script name used below (`common/fix-group.sh`, `ecosystems/node.sh`) names the home of a
+A script name used in these files (`common/fix-group.sh`, `ecosystems/node.sh`) names the home of a
 procedure, not a claim about the substrate it is written in this week.
 
 ## Hard constraints
