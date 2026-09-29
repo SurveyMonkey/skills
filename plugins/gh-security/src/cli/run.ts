@@ -55,7 +55,9 @@ export const runCli = async (
   if (parsed.kind === 'help') {
     return emit(io, { stdout: helpText(), stderr: '', exitCode: EXIT_CODES.ok })
   }
-  const entry = COMMANDS[parsed.command]
+  // An own key only: `toString` or `constructor` would otherwise resolve to
+  // an Object.prototype member and crash here instead of being refused.
+  const entry = Object.hasOwn(COMMANDS, parsed.command) ? COMMANDS[parsed.command] : undefined
   if (entry === undefined) {
     const envelope = failure(
       `unknown command "${parsed.command}". Run gh-security --help for the list of commands.`,

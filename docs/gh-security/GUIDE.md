@@ -756,9 +756,10 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 
 ## Testing
 
-**vitest is the primary venue, and the TypeScript tests live in `spec/ts/`**, beside `spec/js/`
-and `spec/fixtures/` (issue #216's decision comment). `.claude/rules/path-spec.md` applies to
-them unchanged: it points at the `testing` skill for every file under `spec/`. Shellspec covers
+**vitest is the primary venue, and the TypeScript tests live in `tests/`**, at the mirror of
+the code they cover, with the shared harness in `harness/` and the fixtures in `spec/fixtures/`
+(`.claude/rules/type-ts.md`; moved from `spec/ts/` in #273). `.claude/rules/path-spec.md`
+points at the `testing` skill for every file under `spec/`, `tests/` and `harness/`. Shellspec covers
 the bash that remains. The strategy both suites are written to is the
 [`testing` skill](../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
 and the rules about what this public repository may name are in the root `CLAUDE.md` (Testing
@@ -770,29 +771,30 @@ through. A spawned process covers the entry point's own behavior and nothing els
 client is mocked per method; `git`, the filesystem and the fixture corpus are real. The skill's
 `mocking.md` is the whole of that rule.
 
-**The harness is four modules under `spec/ts/support/`**
-([#219](https://github.com/SurveyMonkey/skills/issues/219)): `fixtures.ts` copies a committed
+**The harness is the modules under `harness/`**
+([#219](https://github.com/SurveyMonkey/skills/issues/219), moved in #273): `fixtures.ts` copies a committed
 specimen into a scratch directory per example, the vitest twin of `use_fixture`; `gh-mock.ts` is a
 `GhClient` whose every method throws until the example registers a reply or a failure for it;
 `git-repo.ts` builds a temp origin and a clone of it with real `git`; and `parity.ts` runs a bash
 command line and a TypeScript call on one input and reports the first path at which their JSON
-differs. They are test infrastructure, so they are not under `src/` and not in the coverage
+differs. `paths.ts` names the files a test needs on disk; `repo-layout.ts` holds the layout
+checks that `tests/repo/` runs; `setup.ts` clears the git variables a hook exports before any
+example runs. They are test infrastructure, so they are not under `src/` and not in the coverage
 include: measuring them would let an unused helper move the number while no shipped code changed.
 
 **Parity is what licenses a deletion.** A bash script is deleted only after its replacement is
 parity-green on every fixture that covered it
 ([RFC 002](../rfc/002-typescript-port.md)), and its spec file goes in the same commit,
 because two implementations of one behavior outlive their usefulness the moment one of them is
-authoritative. `spec/ts/parity-semver.test.ts` is the first such run, over `node.sh`'s two semver
+authoritative. `tests/plugins/gh-security/semver/parity-semver.test.ts` is the first such run, over `node.sh`'s two semver
 verbs. The runner itself is deleted in
 [#241](https://github.com/SurveyMonkey/skills/issues/241), when there is nothing left to compare
 against.
 
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
-statements), **with 95 as the floor the gate never goes below**, and exclusion by name with a
-stated reason as the only relief
-([ADR 012](../adr/012-typescript-on-node-22-18.md),
-[#211](https://github.com/SurveyMonkey/skills/issues/211)). The number is never lowered to
+statements), **with 95 as the floor the gate never goes below**, and no file is excluded by
+name ([ADR 012](../adr/012-typescript-on-node-22-18.md) as amended in #273;
+`.claude/rules/type-ts.md`, "Coverage"). The number is never lowered to
 accommodate one file: a lowered threshold hides every other file's regression behind the file
 that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it already has.
 
@@ -819,9 +821,9 @@ land in a section of their own beside the two scripts when this section goes.
 Two bash scripts ship from `scripts/common/` and stay bash: `notice-scan.sh`, the PostToolUse
 notice hook, which runs on every Bash call, where a node process start would be a standing cost
 paid per tool call for a grep; and `detect-capacity.sh`, three machine probes, called once per
-dispatch. Anything else still under `scripts/` is mid-port.
+dispatch. Any other `.sh` file under `scripts/` is mid-port.
 
-**Target jq 1.7** (ubuntu-latest's, and CI's Linux leg). Development machines run 1.8 from
+**Target jq 1.7** (ubuntu-latest's, which is what CI runs). Development machines run 1.8 from
 Homebrew, so anything the two versions read differently goes green locally and red only in CI.
 **Parenthesize a `//` default before binding it**: `(A // B) as $x`, never `A // B as $x`. `as`
 takes its whole right-hand side, so the unparenthesized form parses as `A // (B as $x | body)`

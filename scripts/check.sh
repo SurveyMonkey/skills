@@ -11,13 +11,14 @@
 #   spec      the shellspec suite (serial unless SHELLSPEC_JOBS=N is set; CI
 #             sets it, ADR 005). CHECK_SPEC_ONLY, if set, narrows the run to
 #             a whitespace-separated list of spec files instead of the whole
-#             suite (ADR 005 amendment, #208).
+#             suite: on macOS, CHECK_SPEC_ONLY=spec/bash32_parse_spec.sh with
+#             REQUIRE_BASH32=1 is how the bash 3.2 gate runs (ADR 005).
 #   js        the vitest suite over the Workflow script and the TypeScript
 #             source the plugin ships, with coverage thresholds at 100 on all
 #             four buckets for the workflow projection (ADR 010) and for
 #             every tracked lib/ and plugins/gh-security/{scripts,src}/ .ts
 #             file not named in vitest.config.ts's own coverage.exclude
-#             (ADR 012, #211), then
+#             (empty by policy: ADR 012 as amended in #273), then
 #             `lefthook validate` over lefthook.yml. Both need an installed
 #             node_modules; run pnpm install first. lefthook's check lives
 #             here rather than under `validate` because the CI job named
@@ -257,8 +258,8 @@ cmd_spec() {
   fi
   # CHECK_SPEC_FORMAT routes to --format, the same seam and for the same
   # reason as the shell above: .shellspec sets --format documentation, which
-  # is what a human wants and what CI pays 1189 individually formatted lines
-  # per leg for. CI sets `progress`. The floor below reads the summary line,
+  # is what a human wants and what CI would pay 1189 individually formatted
+  # lines for. CI sets `progress`. The floor below reads the summary line,
   # which every formatter emits, so this cannot weaken it.
   if [ -n "${CHECK_SPEC_FORMAT:-}" ]; then
     args[${#args[@]}]=--format
@@ -267,11 +268,10 @@ cmd_spec() {
   # CHECK_SPEC_ONLY narrows the run to specific spec files, given as a
   # whitespace-separated list. shellspec takes file arguments after its
   # flags, so these are appended rather than routed through another flag.
-  # This exists for the macOS PR leg (ADR 005 amendment, issue #208): that
-  # runner is the only one that can execute the bash 3.2 parse gate, and on a
-  # pull request only that gate needs to run there, while the ubuntu leg
-  # still runs the full suite. Unset, every spec file runs, exactly as before
-  # this variable existed. `read -ra` does the splitting, so the value is
+  # It is how the bash 3.2 parse gate runs, on a local macOS run only since
+  # CI dropped its macOS leg (ADR 005, #273): set it to
+  # spec/bash32_parse_spec.sh with REQUIRE_BASH32=1. Unset, every spec file
+  # runs. `read -ra` does the splitting, so the value is
   # never expanded unquoted (unlike the flag values above, this one is
   # genuinely a list, not a single token).
   local -a only=()
@@ -499,7 +499,7 @@ cmd_js() {
   while IFS= read -r f; do
     if [ -n "$f" ]; then n=$((n + 1)); fi
   done < <(printf '%s\n' "$targets")
-  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/; refusing to report a pass'
+  [ "$n" -gt 0 ] || die 'no JS test files discovered under spec/js/ or tests/; refusing to report a pass'
   [ -f package.json ] || die 'package.json is missing; the js gate has no project to run'
   command -v pnpm >/dev/null 2>&1 \
     || die 'pnpm is not installed; the js gate needs pnpm (ADR 010)'
@@ -650,7 +650,8 @@ version_base_ref() {
 
 cmd_version() {
   local plugins ref base short p touched head_manifest head_json head_v
-  local base_json base_v failed=0
+  local base_json base_v failed=0 link_mode
+  local -a paths
   read_plugin_dirs
   ref=$(version_base_ref) || exit
   git rev-parse --verify --quiet "$ref^{commit}" >/dev/null \
@@ -661,7 +662,14 @@ cmd_version() {
   printf 'check: comparing against %s (%s)\n' "$ref" "$short"
   for p in "${plugins[@]}"; do
     head_manifest=$p/.claude-plugin/plugin.json
-    touched=$(git diff --name-only "$base" HEAD -- "$p") \
+    # A plugin that reaches the root lib/ through a committed src/lib symlink
+    # ships lib/ too, but git records the link as one entry and never sees an
+    # edit behind it. So lib/ joins that plugin's pathspec: a change to shipped
+    # lib/ code is a change to the plugin, and needs its bump (#273).
+    paths=("$p")
+    link_mode=$(git ls-files -s -- "$p/src/lib" | awk '{ print $1 }')
+    if [ "$link_mode" = 120000 ]; then paths+=(lib); fi
+    touched=$(git diff --name-only "$base" HEAD -- "${paths[@]}") \
       || die "git diff failed for $p"
     if [ -z "$touched" ]; then
       printf 'check: %s: unchanged since %s; no release, no bump required\n' "$p" "$short"

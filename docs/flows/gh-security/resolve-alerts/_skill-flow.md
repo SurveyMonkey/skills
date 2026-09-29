@@ -9,8 +9,8 @@ stale_after: 2027-02-24
 # resolve-alerts: the orchestrator
 
 Every state the `resolve-alerts` skill can reach, and every branch between them. The skill is the
-source of truth; this is a map of it, kept outside the plugin because the phase prose is written
-to be executed in order and a reader tracing "where can this stop?" needs the shape instead. The
+source of truth; this is a map of it, kept apart from it and outside the plugin
+(`.claude/rules/file-skill-md.md`), because the phase prose is written to be executed in order and a reader tracing "where can this stop?" needs the shape instead. The
 fix agent it dispatches has its own flow, [fix-dependency-agent-flow.md](fix-dependency-agent-flow.md).
 
 | File | Role here |
@@ -18,7 +18,7 @@ fix agent it dispatches has its own flow, [fix-dependency-agent-flow.md](fix-dep
 | [`plugins/gh-security/skills/resolve-alerts/SKILL.md`](../../../../plugins/gh-security/skills/resolve-alerts/SKILL.md) | The orchestrator's phases. |
 
 **A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
-workflow — `common/fix-group.sh`, `common/audit-pins-driver.sh`, `workflows/fix-groups.mjs` — with
+workflow (`workflows/fix-groups.mjs`), with
 its branches decided in code and covered by the suite. Everything outside is prose a model reads
 and follows, which is why the unboxed nodes are the ones that ask the user something, write PR
 narrative, or apply judgment the driver deliberately hands back. The distinction is the point of
@@ -155,10 +155,6 @@ groups only. Nothing about a PR can withhold
 anything any more — there is no offer left to withhold, so a red check is reported and the run ends
 normally.
 
-Agent results are the other terminals: `success`, `no-op` or `failure` from a fix agent, `success`
-or `failure` from the audit. The three easiest to misread as each other are a fix agent's `failure`,
-its `no-op`, and an audit's null `pr`. `no-op` is a clean outcome the orchestrator reports on its own
-line. A `pr`-mode audit that succeeded with a null `pr` and one of the five reasons is a completed
-audit. A `pr`-mode **success** with a null `pr` and no reason is the contract violation, to report as
-a failure of the agent; a null `pr` on a `failure` result is not, because there the phase and detail
-carry the story.
+Agent results are the other terminals: `success`, `no-op` or `failure` from a fix agent. `no-op`
+is a clean outcome the orchestrator reports on its own line, and is easy to misread as a
+`failure`.

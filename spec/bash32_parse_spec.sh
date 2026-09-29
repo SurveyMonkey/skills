@@ -48,7 +48,7 @@ End
 # bash 3.2, so its absence there must fail rather than skip. The Skip above is
 # green, and without this example the parse gate could quietly stop running
 # while the run stays green. CI runs on ubuntu only since #273, so this gate
-# runs on a local macOS run only, until the bash it guards is gone (ADR 005).
+# runs on a local macOS run only (ADR 005).
 Describe 'the platform expected to supply bash 3.2'
   Skip if 'REQUIRE_BASH32 not set' [ "${REQUIRE_BASH32:-}" != 1 ]
 

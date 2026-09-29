@@ -265,7 +265,7 @@ issues carry. Each phase leaves the plugin working.
 | P0-1 | [#212](https://github.com/SurveyMonkey/skills/issues/212) | This RFC |
 | P0-2 | [#213](https://github.com/SurveyMonkey/skills/issues/213) | ADR 012, superseding ADR 010; amendments to ADR 001 and ADR 005 |
 | P0-3 | [#214](https://github.com/SurveyMonkey/skills/issues/214) | `tsconfig.json`, pinned `typescript` and `@types/node`, the `types` gate, the Node floor preamble |
-| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `docs/gh-security/GUIDE.md` and rewritten; the `testing` skill's bash-specific parts amended |
+| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/GUIDE.md` (since moved to `docs/gh-security/GUIDE.md` in #273) and rewritten; the `testing` skill's bash-specific parts amended |
 | P0-5 | [#215](https://github.com/SurveyMonkey/skills/issues/215) | TypeScript language server on for every session on this checkout |
 
 **Phase 1: foundations.**

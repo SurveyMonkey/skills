@@ -12,7 +12,7 @@
 // session might supply and an environment-injecting wrapper is another, and a
 // module that knew either name would be making the assumption the guide
 // forbids. `spec/env_prefix_seam_spec.sh` is the executable form of that
-// rule: it greps this whole plugin for such a name. Absent means bare, which
+// rule: it greps this whole plugin, and the lib/ it ships, for such a name. Absent means bare, which
 // is the ordinary single-login case.
 //
 // It wraps a command, never a shell builtin, so it can never stand in for a

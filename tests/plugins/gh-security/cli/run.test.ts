@@ -65,6 +65,19 @@ describe('runCli', () => {
     })
   })
 
+  it.each([['toString'], ['constructor'], ['__proto__'], ['hasOwnProperty']])(
+    'refuses %s, an Object.prototype key rather than a registered command',
+    async (name) => {
+      const { io, written } = capturing()
+      expect(await runCli([name], {}, io)).toBe(1)
+      const { stdout, stderr } = written()
+      expect(stdout).toBe('')
+      expect(JSON.parse(stderr)).toEqual({
+        error: `unknown command "${name}". Run gh-security --help for the list of commands.`,
+      })
+    },
+  )
+
   it("renders a command's envelope as JSON on stdout and exits with its code", async () => {
     const { io, written } = capturing()
     expect(await runCli(['version'], {}, io)).toBe(0)

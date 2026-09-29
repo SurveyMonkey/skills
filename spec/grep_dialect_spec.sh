@@ -2,8 +2,8 @@
 # shellcheck shell=sh
 # The grep dialect this suite writes in, enforced rather than left to review.
 #
-# BSD grep, which is what macOS ships and what one of the two CI legs runs,
-# reads a BRE `\|` as a literal bar and does not support `\s` at all. A
+# BSD grep, which is what macOS ships and so what every local run on a Mac
+# uses, reads a BRE `\|` as a literal bar and does not support `\s` at all. A
 # pattern carrying either matches nothing there, so an example asserting a
 # count of zero passes for the wrong reason and an example asserting a
 # non-zero count fails on one platform only. Both shapes have shipped here:

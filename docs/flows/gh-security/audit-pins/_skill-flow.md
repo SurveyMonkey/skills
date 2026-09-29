@@ -14,7 +14,7 @@ stale_after: 2027-02-24
 | [`plugins/gh-security/agents/audit-pins.md`](../../../../plugins/gh-security/agents/audit-pins.md) | The pin audit itself, dispatched only from that skill. |
 
 **A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
-workflow — `common/fix-group.sh`, `common/audit-pins-driver.sh`, `workflows/fix-groups.mjs` — with
+workflow (`common/audit-pins-driver.sh`), with
 its branches decided in code and covered by the suite. Everything outside is prose a model reads
 and follows, which is why the unboxed nodes are the ones that ask the user something, write PR
 narrative, or apply judgment the driver deliberately hands back. The distinction is the point of
@@ -190,3 +190,7 @@ the findings are produced either way, and only phases 7 and 8 are skipped. Guard
 and is why phase 8 is allowed to force-push and delete a local branch at all: without a proven
 remnant it pushes plainly, and anything it cannot prove ends the run.
 
+An audit's result is `success` or `failure`. A `pr`-mode audit that succeeded with a null `pr` and
+one of the five reasons is a completed audit. A `pr`-mode **success** with a null `pr` and no
+reason is the contract violation, to report as a failure of the agent; a null `pr` on a `failure`
+result is not, because there the phase and detail carry the story.

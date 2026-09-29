@@ -75,8 +75,8 @@ Signals of a god component. Each one is a reason to split it:
 ## Dependencies outside a plugin
 
 A plugin can assume node on the 22.18 floor, git and the GitHub CLI. It assumes nothing else.
-gh-security also needs `bash` and `jq` for its two remaining bash scripts, until the port removes
-them.
+gh-security also needs `bash` and `jq` for its bash scripts. Two of them, `notice-scan.sh` and
+`detect-capacity.sh`, stay bash after the port.
 It still checks each tool that it uses, so that a user who is not set up gets an early alert.
 
 - Declare each dependency (a tool, a `gh` extension, another plugin) in one table in the plugin.
@@ -104,8 +104,9 @@ It still checks each tool that it uses, so that a user who is not set up gets an
 - Do not check an optional plugin. A skill sees the available skills in its listing, and works
   around an absent one.
 
-Plugins that differ from this section today are tracked in issues: gh-security has no
-`SessionStart` check yet (#275). Do not migrate one as a side effect of other work.
+Plugins that differ from this file today are tracked in issues: gh-security has no
+`SessionStart` check yet (#275), and its `resolve-alerts` `SKILL.md` is over 500 lines (#237). Do
+not migrate one as a side effect of other work.
 
 ## Sources
 

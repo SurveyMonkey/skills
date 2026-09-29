@@ -216,11 +216,13 @@ Describe 'env_prefix as an opaque seam (issue #135)'
 
   # The verdict. `git grep` (no `--cached`) scans working-tree content of
   # tracked files under the pathspec, so a probe reintroduced in any plugin
-  # file — prose, script, or fixture — trips this.
+  # file — prose, script, or fixture — trips this. lib/ is named beside the
+  # plugin because the plugin ships it through its src/lib symlink, which git
+  # grep does not follow (#273).
   Describe 'no environment manager is named anywhere in the plugin'
     manager_words() {
       git -C "$SHELLSPEC_PROJECT_ROOT" grep -nEi \
-        -e 'direnv' -e 'envrc' -- 'plugins/gh-security'
+        -e 'direnv' -e 'envrc' -- 'plugins/gh-security' 'lib'
     }
 
     # Positive control: the same pattern over the whole tree must find

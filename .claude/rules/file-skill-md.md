@@ -6,8 +6,8 @@ paths:
 
 # Skill Files
 
-Every skill MUST have a flow directory, `docs/flows/<plugin>/<skill>/`. A repo-local skill uses
-`docs/flows/_repo/<skill>/`. The directory holds:
+Every plugin skill MUST have a flow directory, `docs/flows/<plugin>/<skill>/`. The directory
+holds:
 
 - `_skill-flow.md`: the flow of the skill.
 - `<agent>-agent-flow.md`: the flow of each subagent that the skill dispatches, such as

@@ -1,8 +1,9 @@
 // The layout rules of .claude/rules/path-plugins.md, type-ts.md and
 // file-skill-md.md, as functions over a checkout. Each one answers the
-// violations it found, one line each, so an empty list is the pass. They
-// read what git tracks, never the whole directory, because what ships is what
-// is committed: an untracked scratch file is not a defect.
+// violations it found, one entry each (the offending path, or a line naming
+// it), so an empty list is the pass. They judge what git tracks, never the
+// whole directory, because what ships is what is committed: an untracked
+// scratch file is neither a defect nor a fix.
 //
 // These are functions of a root rather than of this repository, so an example
 // can prove each one red against a scratch tree before it is trusted green on
@@ -10,7 +11,6 @@
 
 import { execFileSync } from 'node:child_process'
 import {
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -21,7 +21,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, normalize } from 'node:path'
 
 import { onTestFinished } from 'vitest'
 
@@ -75,7 +75,7 @@ export const libLinkViolations = (root: string, files: readonly string[]): strin
   return violations
 }
 
-const HASH_IMPORT = /(?:\bfrom\s+|\bimport\s*\(\s*)['"]#/
+const HASH_IMPORT = /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)['"]#/
 
 /** A `#` import in shipped code. Only the root package.json resolves it, and it does not ship. */
 export const packageImports = (root: string, files: readonly string[]): string[] =>
@@ -91,7 +91,12 @@ export const commandVariables = (root: string, files: readonly string[]): string
   const violations: string[] = []
   for (const path of files.filter((p) => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(p))) {
     const text = readFileSync(join(root, path), 'utf8')
-    for (const assignment of text.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)=["']?node\s/gm)) {
+    const assignments = text.matchAll(
+      /^\s*(?:(?:export|local|readonly|declare(?:\s+-\S+)*)\s+)?([A-Za-z_][A-Za-z0-9_]*)=(["'(]?)(.*)$/gm,
+    )
+    for (const assignment of assignments) {
+      const value = assignment[3] ?? ''
+      if (!/^node\s/.test(value) && !value.includes('CLAUDE_PLUGIN_ROOT}/scripts/')) continue
       const name = assignment[1] ?? ''
       if (new RegExp(`\\$\\{?${name}\\b`).test(text)) violations.push(`${path}: $${name}`)
     }
@@ -99,13 +104,49 @@ export const commandVariables = (root: string, files: readonly string[]): string
   return violations
 }
 
-/** A plugin skill with no `docs/flows/<plugin>/<skill>/_skill-flow.md`. */
-export const missingFlows = (root: string, files: readonly string[]): string[] =>
-  files
-    .map((path) => /^plugins\/([^/]+)\/skills\/([^/]+)\/SKILL\.md$/.exec(path))
-    .filter((match) => match !== null)
-    .map((match) => `docs/flows/${match[1]}/${match[2]}/_skill-flow.md`)
-    .filter((flow) => !existsSync(join(root, flow)))
+/** Every plugin skill, as `plugins/<plugin>/skills/<skill>/SKILL.md`. */
+export const pluginSkills = (files: readonly string[]): string[] =>
+  files.filter((path) => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(path))
+
+/** A plugin skill with no tracked `docs/flows/<plugin>/<skill>/_skill-flow.md`. */
+export const missingFlows = (files: readonly string[]): string[] => {
+  const tracked = new Set(files)
+  return pluginSkills(files)
+    .map((path) => path.split('/'))
+    .map(([, plugin, , skill]) => `docs/flows/${plugin}/${skill}/_skill-flow.md`)
+    .filter((flow) => !tracked.has(flow))
+}
+
+// A static import or re-export (its clause is identifiers, braces, commas,
+// `*` and whitespace only, so a `from '...'` inside a message is not one), a
+// side-effect import, or a dynamic import of a string literal.
+const SPECIFIER =
+  /^\s*(?:import|export)\s[\w\s{},*$]*?\bfrom\s+['"]([^'"]+)['"]|^\s*import\s+['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/gm
+
+/**
+ * An import in shipped code that leaves its own tree: a relative path out of
+ * `plugins/<p>/` (a plugin file reaching the root `lib/` around its
+ * `src/lib` link) or out of `lib/`, or a bare package specifier. Each
+ * resolves in this checkout, and none resolves for someone who installed the
+ * plugin. `node:` built-ins and `#` imports (`packageImports`) are left out.
+ */
+export const escapingImports = (root: string, files: readonly string[]): string[] => {
+  const violations: string[] = []
+  for (const path of files.filter((p) => /^(lib|plugins\/[^/]+)\/.*\.[cm]?[jt]s$/.test(p))) {
+    const full = join(root, path)
+    if (lstatSync(full).isSymbolicLink()) continue
+    const tree = path.startsWith('lib/') ? 'lib' : path.split('/').slice(0, 2).join('/')
+    for (const match of readFileSync(full, 'utf8').matchAll(SPECIFIER)) {
+      const specifier = match[1] ?? match[2] ?? match[3] ?? ''
+      if (specifier.startsWith('node:') || specifier.startsWith('#')) continue
+      const inside =
+        specifier.startsWith('.') &&
+        `${normalize(join(dirname(path), specifier))}/`.startsWith(`${tree}/`)
+      if (!inside) violations.push(`${path}: ${specifier}`)
+    }
+  }
+  return violations
+}
 
 /**
  * A git repository holding exactly these files and links, all staged, and

@@ -25,7 +25,7 @@ plugins/<plugin>/
     subcommands/<command>.ts    # one exported handler per subcommand: the seam
   hooks/
 harness/                        # the shared test harness; never shipped
-tests/                          # mirrors lib/ and plugins/<plugin>/src/; never shipped
+tests/                          # mirrors lib/ and plugins/<plugin>/; never shipped
   lib/<module>.test.ts
   plugins/<plugin>/subcommands/<command>.test.ts
   harness/<module>.test.ts
@@ -76,8 +76,10 @@ point for it.
   map in the root `package.json`. A plugin test reaches `lib/` as `#<p>/lib/...`, through the
   plugin's symlink, so it sees the same module the plugin sees. The harness reaches `lib/` as
   `#lib/...`.
-- A path a test needs on disk (an entry point to spawn, a bash script, the fixture root) comes
-  from `harness/paths.ts`, never from `../` counted from the test's own location.
+- A path a test needs on disk (an entry point to spawn, a bash script, a plugin file) comes from
+  `harness/paths.ts`, never from `../` counted from the test's own location. The one relative
+  import is the entry point test's own `import()` of `scripts/<plugin>.ts`, which `#<p>/*` does
+  not map, so that coverage measures the file.
 - Fixtures stay in `spec/fixtures/`. The shellspec suite and the vitest suite share them.
 - `spec/js/` stays the Workflow script's suite (ADR 010). The script must `return` at top level,
   which no ES module parser accepts.
@@ -89,7 +91,11 @@ point for it.
   The link target is the exact string `../../../lib`, because that string is what Claude Code's
   installer classifies. `tests/repo/repo-layout.test.ts` enforces it.
 - Never reach the root `lib/` around the link. A `../../../lib` import from a plugin file resolves
-  in this checkout only.
+  in this checkout only. `tests/repo/repo-layout.test.ts` refuses it, and a bare package
+  specifier.
+- The link resolves for an install from this marketplace: Claude Code dereferences a symlink
+  into the cache copy when its target is inside the same marketplace. It does not survive a
+  `--plugin-dir` load, a local-path install, or a Windows clone with `core.symlinks=false`.
 - Do not use a `#` import in a plugin or in `lib/`. Only the root `package.json` resolves it, and
   that file does not ship.
 - Shipped code takes no dependency: node's own built-ins, and nothing else at run time.

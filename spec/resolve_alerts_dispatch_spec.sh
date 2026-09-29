@@ -617,7 +617,7 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     End
 
     It 'forbids the shipped code from importing the workflow file'
-      When call blob_in "$SCRIPTS_DOC" 'Nothing under .bin/. or .src/. imports that file'
+      When call blob_in "$SCRIPTS_DOC" 'Nothing under .scripts/. or .src/. imports that file'
       The status should be success
       The output should equal '1'
     End

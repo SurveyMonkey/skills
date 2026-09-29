@@ -13,7 +13,9 @@
 // names is `gh-security.ts ...; rm -rf ~`, which contains a legitimate
 // invocation and must not be allowed. So the command is split into tokens
 // and every token is checked: the runtime is `node` and nothing else, the
-// second token equals this plugin's entry point exactly, the third is a
+// second token equals this plugin's entry point exactly, bare or wrapped in
+// one pair of double quotes (the form .claude/rules/file-skill-md.md
+// prescribes for a SKILL.md call site), the third is a
 // registered subcommand, and every remaining token is drawn from one
 // explicit character set that contains no shell metacharacter. Anything else
 // returns nothing.
@@ -115,7 +117,7 @@ export const allowOwnCommands = (
   if (command === undefined) return undefined
   const [runtime, named, subcommand, ...args] = command.trim().split(/ +/)
   if (runtime !== 'node') return undefined
-  if (named !== entry) return undefined
+  if (named !== entry && named !== `"${entry}"`) return undefined
   if (subcommand === undefined || !commandNames.includes(subcommand)) return undefined
   if (!args.every(isSafeArgument)) return undefined
   return {

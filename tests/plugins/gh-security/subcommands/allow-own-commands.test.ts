@@ -58,6 +58,9 @@ describe('allowOwnCommands', () => {
     ],
     ['repeated spaces between tokens', `node  ${FAKE_ENTRY}   version`],
     ['surrounding whitespace', `  node ${FAKE_ENTRY} version  `],
+    // The form .claude/rules/file-skill-md.md prescribes for a SKILL.md call
+    // site, once the placeholder is expanded.
+    ['the entry point in one pair of double quotes', `node "${FAKE_ENTRY}" version`],
   ])('allows %s', (_case, command) => {
     expect(decide(command)).toEqual({
       hookSpecificOutput: {
@@ -90,6 +93,9 @@ describe('allowOwnCommands', () => {
     // an argument before testing it is a change no example fails.
     ['a newline ending an otherwise valid argument', `node ${FAKE_ENTRY} version a-b\n rm -rf /`],
     ['a quoted argument', `node ${FAKE_ENTRY} version "a b"`],
+    ['the entry point in single quotes', `node '${FAKE_ENTRY}' version`],
+    ['the entry point with an unclosed quote', `node "${FAKE_ENTRY} version`],
+    ['the entry point quoted with a suffix after the quote', `node "${FAKE_ENTRY}"x version`],
     ['a glob', `node ${FAKE_ENTRY} version *`],
     ['a tilde', `node ${FAKE_ENTRY} version ~/secrets`],
     ['an unknown subcommand', `node ${FAKE_ENTRY} drop-everything`],

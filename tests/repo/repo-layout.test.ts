@@ -9,6 +9,7 @@ import {
   binDirectories,
   commandDirectories,
   developmentFiles,
+  escapingImports,
   libLinkViolations,
   packageImports,
   scratchTree,
@@ -86,20 +87,44 @@ describe('plugins/<p>/src/lib is the exact link ../../../lib', () => {
 })
 
 describe('no # import in shipped code', () => {
-  it('names a static and a dynamic # import, and not one in a test', () => {
+  it('names a static, a dynamic and a side-effect # import, and not one in a test', () => {
     const root = scratchTree({
       'lib/a.ts': "import { x } from '#lib/b.ts'\n",
+      'lib/e.ts': "import '#lib/f.ts'\n",
       'plugins/p/src/c.ts': "const m = await import('#p/d.ts')\n",
       'plugins/p/src/ok.ts': "import { y } from './lib/b.ts'\n",
       'tests/lib/a.test.ts': "import { x } from '#lib/a.ts'\n",
     })
     expect(packageImports(root, trackedFiles(root)).sort()).toEqual([
       'lib/a.ts',
+      'lib/e.ts',
       'plugins/p/src/c.ts',
     ])
   })
 
   it('holds for this repository', () => {
     expect(packageImports(REPO_ROOT, repo)).toEqual([])
+  })
+})
+
+describe('shipped code imports nothing outside its own tree', () => {
+  it('names an import around the lib link, one out of lib/, and a bare package', () => {
+    const root = scratchTree({
+      'plugins/p/src/a.ts': "import { x } from '../../../lib/x.ts'\n",
+      'plugins/p/src/b.ts': "import { y } from 'semver'\n",
+      'lib/c.ts': "import { z } from '../plugins/p/src/z.ts'\n",
+      'plugins/p/src/ok.ts':
+        "import { x } from './lib/x.ts'\nimport { r } from 'node:fs'\nimport type { T } from '../scripts/t.ts'\n",
+      'lib/ok.ts': "import { e } from './envelope.ts'\n",
+    })
+    expect(escapingImports(root, trackedFiles(root)).sort()).toEqual([
+      'lib/c.ts: ../plugins/p/src/z.ts',
+      'plugins/p/src/a.ts: ../../../lib/x.ts',
+      'plugins/p/src/b.ts: semver',
+    ])
+  })
+
+  it('holds for this repository', () => {
+    expect(escapingImports(REPO_ROOT, repo)).toEqual([])
   })
 })

@@ -28,11 +28,12 @@ on:
     # aggregate `gates` check needs every job on every run. A few minutes of
     # runner time per description edit buys a gate that is actually reached.
     #
-    # `ready_for_review` is what starts the first run: no gate runs while a
-    # pull request is a draft (the `if:` on every job below). A draft cannot
-    # merge, so a skipped required check on one blocks nothing, and a stacked
-    # port pull request that is pushed and rebased many times before review
-    # pays for one full run, not one per push (#273, ADR 005).
+    # No gate runs while a pull request is a draft (the `if:` on every gate
+    # job below), so a stacked port pull request that is pushed and rebased
+    # many times before review pays for one full run, not one per push. For a
+    # pull request opened as a draft, `ready_for_review` starts that first
+    # run (#273, ADR 005). The aggregate `gates` job still runs on a draft,
+    # and fails: see it for why.
     types: [opened, synchronize, reopened, edited, ready_for_review]
   push:
     branches: [main]
@@ -118,9 +119,9 @@ jobs:
     # ubuntu only (#273). The macOS leg was the critical path of every run
     # (340-430s against 110-170s on ubuntu, #208), and it existed only to run
     # spec/bash32_parse_spec.sh under the bash 3.2 that stock macOS ships.
-    # That gate now runs on a local macOS run only, until the bash that it
-    # guards is gone (#240, #241): spec/bash32_parse_spec.sh skips here,
-    # because REQUIRE_BASH32 is unset and ubuntu has no bash 3.x.
+    # That gate now runs on a local macOS run only (ADR 005, #273):
+    # spec/bash32_parse_spec.sh skips here, because REQUIRE_BASH32 is unset
+    # and ubuntu has no bash 3.x.
     if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     env:
@@ -225,9 +226,8 @@ jobs:
         run: ./scripts/check.sh js
 
   types:
-    # `tsc -p tsconfig.json` over the TypeScript the plugin ships and the
-    # examples under spec/ts/ (ADR 012). ubuntu alone, for the same reason
-    # the js job runs there alone: this is one compiler evaluating one
+    # `tsc -p tsconfig.json` over lib/, harness/, tests/ and the plugin's
+    # scripts/ and src/ (ADR 012). ubuntu, like the js job: this is one compiler evaluating one
     # configuration, with no platform surface. The type check is not a build
     # step and emits nothing; the file a reviewer reads on the default branch
     # is the file node runs.
@@ -314,8 +314,8 @@ jobs:
     # The stacked-layer skip is a step that exits 0, never an `if:` on the
     # job: `gates` needs this job's result, and a skipped need is not a
     # success. The draft condition below is the one job-level `if:`, and it
-    # is safe because `gates` carries the same condition: on a draft, both
-    # skip, and a draft cannot merge.
+    # is safe because `gates` does not carry it: on a draft, `gates` runs,
+    # sees this job skipped, and fails.
     if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
@@ -405,15 +405,25 @@ jobs:
     # a gate?
     # Follow the checklist: docs/adr/005-quality-gate-venues.md#gate-change-checklist.
     needs: [lint, validate, spec, js, types, biome, version]
-    # Drafts run no gate, this one included (see the trigger above).
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.pull_request.draft == false) }}
+    # This job runs on a draft too, deliberately, and fails there. GitHub
+    # reports a job skipped by `if:` as a success, even for a required
+    # check, so a skipped `gates` would leave a passing check on the head
+    # commit that tested nothing, in force until the `ready_for_review` run
+    # replaces it. A red `gates` on a draft costs nothing: a draft cannot
+    # merge (#273).
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: All gates green
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
         run: |
           echo "gate results: $RESULTS"
+          if [ "$DRAFT" = true ]; then
+            echo "this pull request is a draft, so no gate ran; mark it ready for review to run them"
+            exit 1
+          fi
           n=0
           saw_cancelled=0
           for r in $RESULTS; do

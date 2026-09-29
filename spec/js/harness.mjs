@@ -8,7 +8,7 @@
 // the projection equivalent to covering the shipped file.
 //
 // Nothing here is the subject of the coverage gate: this file and the test
-// file are test infrastructure, and vitest.config.mjs's `include` names only
+// file are test infrastructure, and vitest.config.ts's `include` names only
 // the projection. Measuring the harness would let a helper nobody calls drag
 // the number around without any shipped code changing.
 

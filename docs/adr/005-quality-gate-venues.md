@@ -1,6 +1,6 @@
 ---
 type: ADR
-description: The quality gates run from one entry point, split across git hooks by cost (fast gates pre-commit, the suite pre-push) and all enforced in CI on ubuntu with pinned tool versions, on every pull request that is not a draft, with the plugin version gate running in CI alone because only there is its comparison base unambiguous.
+description: The quality gates run from one entry point, split across git hooks by cost (fast, staged-only checks pre-commit, nothing pre-push) and all enforced in CI on ubuntu with pinned tool versions, on every pull request that is not a draft, with the plugin version gate running in CI alone because only there is its comparison base unambiguous.
 status: stable
 created: 2026-08-20
 owner: brianespinosa
@@ -87,9 +87,10 @@ never a changed-file selection, per the `paths:`-filter prohibition above.)** **
 [#273](https://github.com/SurveyMonkey/skills/issues/273): the macOS leg is removed, and the spec
 job runs on ubuntu alone. Even narrowed to one file, the macOS leg stayed the slowest job, and
 the TypeScript port lands in stacked pull requests that are pushed and rebased many times. The
-bash 3.2 parse gate now runs only on a local macOS run (`shellspec spec/bash32_parse_spec.sh`
-with `REQUIRE_BASH32=1`), until #240 and #241 remove the bash it guards. That is a known gap in
-the enforcement boundary for the two bash scripts that remain, accepted for that window.)**
+bash 3.2 parse gate now runs only on a local macOS run (`CHECK_SPEC_ONLY=spec/bash32_parse_spec.sh
+REQUIRE_BASH32=1 ./scripts/check.sh spec`). That is a known, open-ended gap in the enforcement
+boundary: today it covers every bash script not yet ported, and after #240 and #241 it covers
+`notice-scan.sh`, `detect-capacity.sh` and `scripts/check.sh`, which stay bash.)**
 
 **No gate runs on a draft pull request** ([#273](https://github.com/SurveyMonkey/skills/issues/273)).
 Every job, `gates` included, runs on a `push` to the default branch, or on a pull request that is
@@ -257,8 +258,7 @@ gates run:
   maintenance, not drift.
 - ~~The bash 3.2 gate depends on GitHub continuing to provide a macOS runner whose `/bin/bash` is
   3.2. If that changes, `REQUIRE_BASH32=1` makes the change loud instead of silent.~~ **(amended
-  in #273: CI no longer runs the bash 3.2 gate. It runs on a local macOS run only, until the bash
-  is gone.)**
+  in #273: CI no longer runs the bash 3.2 gate. It runs on a local macOS run only.)**
 - Dependabot alerts are enabled on this repo while security updates are not, and
   `spec/fixtures/` deliberately pins vulnerable versions. An alert pointing into `spec/fixtures/`
   is about a specimen: do not "fix" the fixture, per the `testing` skill (a shape found in the wild

@@ -13,10 +13,10 @@ stale_after: 2027-02-24
 | [`plugins/gh-security/agents/fix-dependency.md`](../../../../plugins/gh-security/agents/fix-dependency.md) | One group's fix. |
 
 **A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
-workflow — `common/fix-group.sh`, `common/audit-pins-driver.sh`, `workflows/fix-groups.mjs` — with
+workflow (`common/fix-group.sh`), with
 its branches decided in code and covered by the suite. Everything outside is prose a model reads
-and follows, which is why the unboxed nodes are the ones that ask the user something, write PR
-narrative, or apply judgment the driver deliberately hands back. The distinction is the point of
+and follows, which is why the unboxed nodes are the ones that write PR narrative or apply
+judgment the driver deliberately hands back. The distinction is the point of
 the drivers: a branch inside a box fails a test when it regresses, and a branch outside one is
 only as reliable as the sentence describing it, so re-deriving a boxed procedure in agent prose is
 a bug rather than a fallback (`docs/gh-security/GUIDE.md`).

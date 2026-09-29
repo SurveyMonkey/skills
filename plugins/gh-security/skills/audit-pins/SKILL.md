@@ -23,7 +23,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/common/detect-scope.sh
 The audit is **repo-scoped**, and stays so even when `resolve-alerts` runs across several
 checkouts: one `audit-pins` agent tests one repository's pins. `scope` is `repo` when the working
 directory is inside a git repository and `null` when it is not; nothing is inferred from what the
-directories are named (issue #134). If `scope` is null, say that this command audits a single
+directories are named (issue #134). If `scope` is null, say that this skill audits a single
 repository and ask which one, or ask the user to run it from that repo's checkout; then continue
 from that checkout. **Re-run `detect-scope.sh <that checkout>` and read `nwo`, `default_branch`
 and `repo_root` from the second output**, never from the first: the first ran outside every
@@ -47,7 +47,7 @@ verbatim; when no such context exists, there is none and those commands run bare
 guards against is manager-agnostic: where `gh`, `git`, and the package manager get their identity
 per directory rather than from a single ambient login, the tools that arrange that load through
 interactive shell hooks that a non-interactive tool shell never runs, so a bare `gh` or `git`
-silently resolves the wrong identity. Every `gh`, `git`, and plugin-script invocation this command
+silently resolves the wrong identity. Every `gh`, `git`, and plugin-script invocation this skill
 makes — step 3's `gh pr list`, step 7's `pr-status.sh` — runs under it; the prefix injects
 environment without changing directory, so it composes with, never replaces, whatever `cd` or `-C`
 locator a command already carries.
@@ -57,7 +57,7 @@ locator a command already carries.
 Two separate questions, in this order.
 
 **Is there a manifest?** Use Glob or `test -f <repo_root>/package.json`. `npm` is the only
-ecosystem with an adapter today, so a repository with no node manifest has nothing this command
+ecosystem with an adapter today, so a repository with no node manifest has nothing this skill
 can audit: report exactly that and stop, without dispatching an agent that would only fail on its
 first adapter call.
 
@@ -141,7 +141,7 @@ agent prepends it verbatim to every `gh`, `git`, package-manager, and adapter-sc
 composed after each command's own `cd` locator, and runs those commands bare when the field is
 absent.
 
-This command runs no registry preflight, deliberately: it dispatches one agent, so a dead
+This skill runs no registry preflight, deliberately: it dispatches one agent, so a dead
 registry token costs one failed install and one clear failure report — there is no fan-out to
 protect, which is what the `resolve-alerts` probe exists for.
 
@@ -239,9 +239,9 @@ is. Report what follows, then stop.
   `failed` names `failing_checks`, which is the one worth saying loudly. `merge_state: UNKNOWN` is
   ordinary right after a push and is neither clean nor behind.
 
-**That is the end of the command.** There is no further step and nothing to offer.
+**That is the end of the skill.** There is no further step and nothing to offer.
 
 A conflicted removal PR is better regenerated than hand-resolved: close it and re-run this
-command. There is no branch to clean up by hand. The audit owns `chore/dependabot-remove-pins`,
+skill. There is no branch to clean up by hand. The audit owns `chore/dependabot-remove-pins`,
 creates it only at commit time, deletes any local remnant and force-pushes over a remote one that
 carries no open PR, so the next run rebuilds it from the current default branch on its own.

@@ -46,7 +46,9 @@ Sessions on this checkout run TypeScript 7's native language server through this
 own `typescript7-lsp` plugin, which `.claude/settings.json` registers and enables
 (`typescript-lsp@claude-plugins-official` is disabled: it needs the `tsserver.js` that TypeScript
 7 no longer ships). The server runs `node_modules/typescript/bin/tsc --lsp --stdio`, so run
-`pnpm install` first; `tsc` and the editor then answer from the same pinned version. There is no pyright: this
+`pnpm install` first; `tsc` and the editor then answer from the same pinned version. The plugin
+itself comes from this marketplace on GitHub's default branch, not from the checkout, so an edit
+to `plugins/typescript7-lsp/` reaches a session only after it merges with a version bump. There is no pyright: this
 repository has no Python and will not gain any. The milestone 7 adapter targets Python ecosystems
 (pip, uv) but is written in TypeScript, per
 [RFC 002](docs/rfc/002-typescript-port.md#alternatives-considered).

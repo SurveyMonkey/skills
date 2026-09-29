@@ -45,12 +45,13 @@ plugins/
 
 Deterministic work belongs in `scripts/` with a JSON contract; skills and agents carry
 only the judgment. Tests, docs and flow diagrams live outside the plugin directory, which ships
-only its run-time files (`.claude/rules/path-plugins.md`). Scripts depend on `bash`, `jq`, and `gh` alone — a rule about what runs on the
-user's machine, which is every script under `scripts/`; the one JavaScript file under
-`workflows/` is evaluated by the Claude Code harness, which is already node, and no script here
-may call into it ([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Scripts
-target bash 3.2 (the macOS
-default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
+only its run-time files (`.claude/rules/path-plugins.md`). What runs on the user's machine
+takes no dependency beyond its runtime: `scripts/gh-security.ts` and `src/` need node 22.18
+([ADR 012](adr/012-typescript-on-node-22-18.md)), and the bash scripts under `scripts/common/` and
+`scripts/ecosystems/` need `bash`, `jq` and `gh`. The one JavaScript file under `workflows/` is
+evaluated by the Claude Code harness, and no script here may call into it
+([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The bash scripts target
+bash 3.2 (the macOS default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
 pass**. Conventions and their reasoning live in
 [docs/gh-security/GUIDE.md](gh-security/GUIDE.md).
@@ -78,7 +79,7 @@ pass**. Conventions and their reasoning live in
   suite, ShellCheck, `claude plugin validate --strict`, the vitest suite with coverage at 100 on
   the Workflow script, and a plugin version gate) run through one entry
   point, `scripts/check.sh`, from committed git hooks locally and from
-  `.github/workflows/gates.yml` in CI on ubuntu and macOS with pinned tool versions. The version
+  `.github/workflows/gates.yml` in CI on ubuntu with pinned tool versions. The version
   gate is CI-only: it requires a plugin whose files changed to carry a changed `plugin.json`
   version, and only CI has an unambiguous base to compare against.
 - **Pin-removal PRs** ([ADR 007](adr/007-pin-removal-prs.md)). The pin audit defaults to opening
