@@ -42,16 +42,11 @@ several plugins at independent versions.
 Bash scripts are covered by [shellspec](https://shellspec.info): `brew install shellspec`, then
 `shellspec` from the repo root. Specs live in `spec/`, config in `.shellspec`.
 
-Sessions on this checkout run the TypeScript language server: `.claude/settings.json` enables
-`typescript-lsp@claude-plugins-official`, which expects the server on the PATH, so install it once
-per machine alongside the shellspec and ShellCheck installs above and below:
-
-```bash
-npm install -g typescript-language-server typescript
-```
-
-The server resolves the compiler it is given, and the repository pins its own `typescript` in
-devDependencies, so `tsc` and the editor answer from the same version. There is no pyright: this
+Sessions on this checkout run TypeScript 7's native language server through this marketplace's
+own `typescript7-lsp` plugin, which `.claude/settings.json` registers and enables
+(`typescript-lsp@claude-plugins-official` is disabled: it needs the `tsserver.js` that TypeScript
+7 no longer ships). The server runs `node_modules/typescript/bin/tsc --lsp --stdio`, so run
+`pnpm install` first; `tsc` and the editor then answer from the same pinned version. There is no pyright: this
 repository has no Python and will not gain any. The milestone 7 adapter targets Python ecosystems
 (pip, uv) but is written in TypeScript, per
 [RFC 002](docs/rfc/002-typescript-port.md#alternatives-considered).

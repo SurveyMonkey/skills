@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/bin/gh-security.ts allow-own-commands"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/gh-security.ts\" allow-own-commands"
           }
         ]
       }

@@ -17,6 +17,7 @@ claude plugin install gh-security@SurveyMonkey/skills
 | Plugin | Namespace | Summary |
 |---|---|---|
 | [gh-security](#gh-security) | `/gh-security:*` | Orchestrated, multi-subagent resolution of Dependabot security alerts, plus an audit of the dependency pins earlier fixes leave behind that opens its own removal PR |
+| [typescript7-lsp](plugins/typescript7-lsp/README.md) | none | TypeScript 7's native language server (`tsc --lsp --stdio`) from the project's own `node_modules/typescript` |
 
 ### gh-security
 
