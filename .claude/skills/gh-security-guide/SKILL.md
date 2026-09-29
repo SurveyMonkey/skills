@@ -5,8 +5,8 @@ description: The gh-security plugin's domain rules and conventions, which are th
 
 # gh-security guide
 
-Where the code disagrees with these files, the files win (RFC 002). Read only the file for the
-task at hand.
+These files are the requirements. Where the code disagrees with them, the files win (RFC 002).
+Read only the file for your task.
 
 - [core.md](core.md): agents decide and commands do, the process seams, the adapter contract, the
   rule that matters most, and the supported toolchains. Read it first for any change.

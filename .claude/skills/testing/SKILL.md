@@ -70,15 +70,20 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
   `harness/paths.ts`, never from a `../` path relative to the test. The one relative
   import is the entry point test's own `import()` of `scripts/<plugin>.ts`, which `#<p>/*` does
   not map, so that coverage measures the file.
-- The harness modules: `fixtures.ts` copies a committed specimen into a scratch directory per
-  example, the vitest twin of `use_fixture`; `gh-mock.ts` is a `GhClient` whose every method
-  throws until the example registers a reply or a failure for it; `git-repo.ts` builds a temp
-  origin and a clone of it with real `git`; `parity.ts` runs a bash command line and a TypeScript
-  call on one input and reports the first path at which their JSON differs; `paths.ts` names the
-  files a test needs on disk; `repo-layout.ts` holds the layout checks that `tests/repo/` runs;
-  `setup.ts` clears the git variables a hook exports before any example runs (#219, moved in
-  #273). They are test infrastructure, outside `src/` and outside the coverage include: measuring
-  them would let an unused helper move the number while no shipped code changed.
+- The harness modules (#219, moved in #273):
+  - `fixtures.ts` copies a committed specimen into a scratch directory per example. It is the
+    vitest twin of `use_fixture`.
+  - `gh-mock.ts` is a `GhClient`. Each method throws until the example registers a reply or a
+    failure for it.
+  - `git-repo.ts` builds a temp origin and a clone of it with real `git`.
+  - `parity.ts` runs a bash command line and a TypeScript call on one input. It reports the first
+    path at which their JSON differs.
+  - `paths.ts` names the files a test needs on disk.
+  - `repo-layout.ts` holds the layout checks that `tests/repo/` runs.
+  - `setup.ts` clears the git variables that a hook exports, before any example runs.
+
+  They are test infrastructure, outside `src/` and outside the coverage include. If coverage
+  measured them, an unused helper could move the number with no change to shipped code.
 - Tests of `harness/` go in `tests/harness/`. Checks of this repository's own layout go in
   `tests/repo/`.
 - Fixtures stay in `spec/fixtures/`. The shellspec suite and the vitest suite share them.

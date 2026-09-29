@@ -102,9 +102,9 @@ here rather than by each caller.
 
 ## Prescribed shapes are pre-approvable on their own
 
-Every command a skill or agent prescribes is written so that a permission rule can approve it on
+Write each command that a skill or agent prescribes so that a permission rule can approve it on
 its own: literal paths, no variables, no conditionals, no redirections. Do not rely on a skill's
-`allowed-tools` frontmatter to suppress a prompt, and do not rely on the allow hook for a command
-outside the one shape it accepts. The plugin carried a permissions preflight that pre-approved its
-whole surface in one decision until v0.8.2, when `auto` became the recommended default mode and
-the workaround was removed ([#86](https://github.com/SurveyMonkey/skills/issues/86)).
+`allowed-tools` frontmatter to suppress a prompt. Do not rely on the allow hook for a command
+outside the one shape it accepts. Until v0.8.2, a permissions preflight pre-approved the whole
+plugin surface in one decision. v0.8.2 made `auto` the recommended default mode and removed the
+preflight ([#86](https://github.com/SurveyMonkey/skills/issues/86)).
