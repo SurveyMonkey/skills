@@ -6,7 +6,7 @@ paths:
 # Architecture Decision Records (ADRs)
 
 An ADR records one decision, after it is made. Several decisions that need buy-in first are an
-RFC. The shared frontmatter rules are in `path-docs.md`.
+RFC.
 
 - Name: `docs/adr/NNN-descriptive-slug.md`, a zero-padded sequential number plus a slug.
 - Frontmatter:

@@ -5,14 +5,14 @@ description: How to design or change a skill, agent, hook, script, command or pl
 
 # Plugin design
 
-The rules that always apply are in `.claude/rules/_design-principles.md`, `type-ts.md`,
-`path-plugins.md`, `path-hooks.md` and `file-skill-md.md`. This skill holds the detail and the
-reasoning behind them. Read only the file the task needs.
+This skill holds the detail and reasons behind `.claude/rules/_design-principles.md`,
+`type-ts.md`, `path-plugins.md`, `path-hooks.md` and `file-skill-md.md`. Read only the file the
+task needs.
 
 - [composition.md](composition.md): how to split a component, the signals of a god component,
   which mechanism to pick (hook, skill, subagent), subagent sizing and waits, where plugin state
-  lives, and the official sources to cite when you challenge a design. Read it before you choose a
-  mechanism, split a component, or challenge a design.
+  lives, and the official sources to cite. Read it before you choose a mechanism, split a
+  component, or challenge a design.
 - [dependencies.md](dependencies.md): what a plugin may assume, the dependency table, and the
   `SessionStart` check with its output contract. Read it before you add a tool a plugin calls, or
   a hook that checks one.

@@ -7,10 +7,10 @@ paths:
 
 # Specs
 
-This repository's test strategy is the `testing` skill: invoke it with the Skill tool (`testing`, or `/testing`) before writing or reviewing an example here.
+Before you write or review an example here, invoke the `testing` skill (Skill tool `testing`, or
+`/testing`). It holds the whole test strategy, with no second copy. Where a test lives, how it
+imports, and the coverage rule are its Layout and Coverage sections. The gate commands, the
+ShellCheck rules and what this public repository may name are in the root `CLAUDE.md`.
 
-It owns the whole of that strategy, so there is no second copy to consult. The gate commands, the ShellCheck rules and the rules about what this public repository may name stay in the root `CLAUDE.md`.
-
-Where a test lives, how it imports, and the coverage rule are the skill's Layout and Coverage sections.
-
-This rule covers both suites: vitest under `tests/` (with `harness/`) and `spec/js/`, and shellspec everywhere else under `spec/`.
+Two suites: vitest in `tests/` (with `harness/`) and `spec/js/`, and shellspec in the rest of
+`spec/`.

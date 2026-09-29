@@ -9,7 +9,7 @@ paths:
 - Every plugin skill MUST have a flow directory, `docs/flows/<plugin>/<skill>/`, holding
   `_skill-flow.md`, one `<agent>-agent-flow.md` for each subagent the skill dispatches, and one
   `<subcommand>-flow.md` for each CLI subcommand the skill runs once it has branches worth a
-  diagram (the gh-security skills start to run subcommands with #237).
+  diagram.
 - Each file holds one `mermaid` diagram, with the OKF frontmatter of `path-docs.md`, and a row in
   `docs/flows/index.md`.
 - The diagram does not go in `SKILL.md`, and `SKILL.md` does not reference it.
@@ -27,6 +27,5 @@ paths:
   does not word-split the expansion, so the call exits 127, and the Bash tool keeps no shell
   state between calls.
 
-`tests/repo/skills.test.ts` enforces the `_skill-flow.md` file and the no-variable rule; the
-rest is on review. How to draw a diagram, and why it stays out of the
-skill, is in the `plugin-design` skill (`flows.md`).
+`tests/repo/skills.test.ts` enforces the `_skill-flow.md` file and the no-variable rule. How to
+draw a diagram is in the `plugin-design` skill (`flows.md`).

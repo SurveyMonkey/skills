@@ -60,14 +60,14 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
 
 - A test lives under `tests/`, at the mirror of the code it covers: `tests/lib/args.test.ts` for
   `lib/args.ts`, `tests/plugins/<p>/subcommands/<command>.test.ts` for
-  `plugins/<p>/src/subcommands/<command>.ts`. `.claude/rules/path-plugins.md` says why nothing
-  test-only goes in a plugin.
+  `plugins/<p>/src/subcommands/<command>.ts`. Nothing test-only goes in a plugin
+  (`.claude/rules/path-plugins.md`).
 - A test imports plugin code as `#<p>/...` and the harness as `#harness/...`, from the `imports`
   map in the root `package.json`. A plugin test reaches `lib/` as `#<p>/lib/...`, through the
   plugin's symlink, so it sees the same module the plugin sees. The harness reaches `lib/` as
   `#lib/...`.
 - A path a test needs on disk (an entry point to spawn, a bash script, a plugin file) comes from
-  `harness/paths.ts`, never from `../` counted from the test's own location. The one relative
+  `harness/paths.ts`, never from a `../` path relative to the test. The one relative
   import is the entry point test's own `import()` of `scripts/<plugin>.ts`, which `#<p>/*` does
   not map, so that coverage measures the file.
 - Tests of `harness/` go in `tests/harness/`. Checks of this repository's own layout go in
@@ -196,12 +196,11 @@ retired.
 
 **100 on all four buckets** (lines, branches, functions, statements) for the TypeScript source,
 **with 95 as the floor the gate never goes below**, over the named source set in
-`vitest.config.ts`, **and no file is excluded by name** (ADR 012 as
-amended in #273). The gate does not move to fit the code. Do not lower a threshold, and do not add
-a name to `coverage.exclude`, even for a file you judge a process boundary or a platform branch.
-The remedy for a branch no test can reach is to restructure the code until the branch no longer
-exists: lift the decision into a function that takes, as an argument, what it depended on. To
-open the exclusion list is a maintainer decision, argued on its own pull request.
+`vitest.config.ts`, **and no file is excluded by name** (ADR 012 as amended in #273). Do not lower
+a threshold, and do not add a name to `coverage.exclude`, even for a file you judge a process
+boundary or a platform branch. For a branch no test can reach, restructure the code until the
+branch no longer exists: lift the decision into a function that takes, as an argument, what it
+depended on. Only a maintainer opens the exclusion list, on its own pull request.
 `workflows/fix-groups.mjs` keeps the 100 floor it already has. A threshold satisfied by an empty
 file set is this repository's signature bug, so a coverage report naming no files is a failure
 rather than a pass.

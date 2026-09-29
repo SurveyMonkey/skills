@@ -5,8 +5,8 @@ paths:
 
 # Documentation Frontmatter (OKF profile)
 
-Every non-reserved `.md` file under `docs/` carries YAML frontmatter conforming to this profile of
-the [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
+Every non-reserved `.md` file under `docs/` carries YAML frontmatter in this profile of the
+[Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
 `index.md` and `log.md` are reserved and exempt. Agent-context files such as `CLAUDE.md` carry no
 OKF frontmatter, wherever they sit.
 
@@ -27,6 +27,5 @@ description: <one line>  # required: the doc's subject, readable standalone
   change does not advance `generated.at`.
 - A new doc adds its row to its bundle's `index.md` in the same PR.
 
-Per-type rules (`path-docs-adr.md`, `path-docs-rfc.md`) add only their own deltas. Before you
-create, amend, supersede or decline a doc, invoke the `docs-authoring` skill: the status mapping,
-shared keys, reference formats, trust, staleness and navigation detail are there (`okf.md`).
+Before you create, amend, supersede or decline a doc, or add trust or staleness metadata, invoke
+the `docs-authoring` skill.

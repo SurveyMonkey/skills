@@ -5,9 +5,8 @@ description: How to write or change a doc under docs/ in this repository. Covers
 
 # Docs authoring
 
-The rules that always apply are in `.claude/rules/path-docs.md`, `path-docs-adr.md` and
-`path-docs-rfc.md`. This skill holds the detail and the reasoning behind them. Read only the file
-the task needs.
+This skill holds the detail and reasons behind `.claude/rules/path-docs.md`, `path-docs-adr.md`
+and `path-docs-rfc.md`. Read only the file the task needs.
 
 - [okf.md](okf.md): how richer status vocabularies map onto the three values, how a declined
   proposal is recorded, the shared keys and their reference formats, trust (`generated`,

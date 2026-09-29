@@ -1,7 +1,7 @@
 # Design Principles
 
-Every skill, agent, hook, script and command function here is small, does one job, and composes
-with the others. Each one costs tokens and time on every use, so keep both low.
+Every skill, agent, hook, script and command is small, does one job, and composes with the
+others. Each costs tokens and time on every use, so keep both low.
 
 - Anything deterministic runs in a script, not an agent. The script emits structured output, and
   the agent decides from it.
@@ -18,16 +18,16 @@ before work starts:
 
 1. Name the rule, and cite the official source that supports it
    ([Sources](../skills/plugin-design/composition.md#sources)).
-2. Propose the smaller alternative. Look for one or two parts that you can remove, or move into
-   a script or a shared function, to make the design much simpler.
+2. Propose the smaller alternative: one or two parts to remove, or to move into a script or a
+   shared function.
 3. Let the user decide. When the user keeps the divergence, record the ruling on the issue.
 
-Make the challenge also when the user asks for the divergent design. Do not silently build a
+Challenge also when the user asks for the divergent design. Do not silently build a
 simpler design than the one approved.
 
-Plugins that differ from these rules today are tracked in issues: gh-security has no
-`SessionStart` check yet (#275), and its `resolve-alerts` `SKILL.md` is over 500 lines (#237). Do
-not migrate one as a side effect of other work.
+Known divergences have issues: gh-security has no `SessionStart` check yet (#275), and its
+`resolve-alerts` `SKILL.md` is over 500 lines (#237). Do not migrate one as a side effect of other
+work.
 
 Before you design or change a skill, agent, hook, script, command or plugin, invoke the
 `plugin-design` skill.
