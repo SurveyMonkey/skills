@@ -9,7 +9,8 @@ others. Each costs tokens and time on every use, so keep both low.
   subagent is only for context isolation or parallel work.
 - An orchestrator holds the order of steps and the decisions between them, and no other logic.
 - Derive what a plugin needs on each run. State on disk is a last resort, and lives under
-  `${CLAUDE_PLUGIN_DATA}`. A literal path in a plugin is a defect.
+  `${CLAUDE_PLUGIN_DATA}`. A plugin that keeps state owns its whole lifecycle, through archive or
+  removal. A literal path, or a tool the dependency check does not cover, is a defect.
 
 ## Challenge a divergence
 

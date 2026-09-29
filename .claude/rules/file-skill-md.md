@@ -8,8 +8,8 @@ paths:
 
 - Every plugin skill MUST have a flow directory, `docs/flows/<plugin>/<skill>/`, holding
   `_skill-flow.md`, one `<agent>-agent-flow.md` for each subagent the skill dispatches, and one
-  `<subcommand>-flow.md` for each CLI subcommand the skill runs once it has branches worth a
-  diagram.
+  `<subcommand>-flow.md` for each CLI subcommand the skill runs, once that subcommand has
+  branches of its own worth a diagram.
 - Each file holds one `mermaid` diagram, with the OKF frontmatter of `path-docs.md`, and a row in
   `docs/flows/index.md`.
 - The diagram does not go in `SKILL.md`, and `SKILL.md` does not reference it.

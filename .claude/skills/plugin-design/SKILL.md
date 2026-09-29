@@ -6,7 +6,7 @@ description: How to design or change a skill, agent, hook, script, command or pl
 # Plugin design
 
 This skill holds the detail and reasons behind `.claude/rules/_design-principles.md`,
-`type-ts.md`, `path-plugins.md`, `path-hooks.md` and `file-skill-md.md`. Read only the file the
+`type-ts.md`, `path-plugins.md`, `path-hooks.md`, `file-skill-md.md` and `file-agent-md.md`. Read only the file the
 task needs.
 
 - [composition.md](composition.md): how to split a component, the signals of a god component,

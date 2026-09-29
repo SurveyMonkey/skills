@@ -13,8 +13,8 @@ cache. So a plugin directory holds only files an installed plugin uses at run ti
   `tests/lib/`. The shared harness is `harness/`, and fixtures are in `spec/fixtures/`.
 - Documentation goes under `docs/`, not in the plugin. Flow diagrams go in
   `docs/flows/<plugin>/<skill>/` (`.claude/rules/file-skill-md.md`).
-- No `CLAUDE.md` in a plugin. `claude plugin validate --strict` refuses one at the plugin root,
-  and anywhere else the name promises memory semantics the file does not have.
+- No `CLAUDE.md` in a plugin. `claude plugin validate --strict` refuses one at the plugin root.
+  Anywhere else, the name promises memory semantics the file does not have.
 - The component names are `commands`, `agents`, `skills`, `hooks`, `output-styles`, `workflows`,
   `themes`, `monitors`, `bin` and `evals`. Give a directory one of these names only when it is
   that component at the plugin root. Do not use `commands/`: use `skills/`. Do not use `bin/`: use
