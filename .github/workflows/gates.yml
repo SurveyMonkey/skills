@@ -314,8 +314,8 @@ jobs:
     # The stacked-layer skip is a step that exits 0, never an `if:` on the
     # job: `gates` needs this job's result, and a skipped need is not a
     # success. The draft condition below is the one job-level `if:`, and it
-    # is safe because `gates` does not carry it: on a draft, `gates` runs,
-    # sees this job skipped, and fails.
+    # is safe because `gates` does not carry it: on a draft, `gates` runs and
+    # fails on the draft check itself.
     if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:

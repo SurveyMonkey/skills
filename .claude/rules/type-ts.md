@@ -25,7 +25,7 @@ plugins/<plugin>/
     subcommands/<command>.ts    # one exported handler per subcommand: the seam
   hooks/
 harness/                        # the shared test harness; never shipped
-tests/                          # mirrors lib/ and plugins/<plugin>/; never shipped
+tests/                          # mirrors lib/ and plugins/<plugin>/ (src/ elided); never shipped
   lib/<module>.test.ts
   plugins/<plugin>/subcommands/<command>.test.ts
   harness/<module>.test.ts

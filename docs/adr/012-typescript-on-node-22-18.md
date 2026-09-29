@@ -164,8 +164,9 @@ venues is unchanged by that substitution: one entry point in `scripts/check.sh`,
 as a hard failure in every gate, CI as the enforcement boundary, and the executed-example floor,
 which vitest needs for the same reason shellspec did.
 
-The macOS leg keeps its reason for existing, narrowed: it is still the only runner whose
-`/bin/bash` is 3.2, and after #240 that is all it runs.
+~~The macOS leg keeps its reason for existing, narrowed: it is still the only runner whose
+`/bin/bash` is 3.2, and after #240 that is all it runs.~~ **(amended in #273: CI has no macOS
+leg; the bash 3.2 gate runs on a local macOS run only, ADR 005.)**
 
 **What this ADR does not do to ADR 005 is reverse its lefthook refusal.** That refusal rests on
 two grounds: the dependency against the `bash`, `jq` and `gh` constraint, and `core.hooksPath`

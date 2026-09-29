@@ -667,7 +667,8 @@ cmd_version() {
     # edit behind it. So lib/ joins that plugin's pathspec: a change to shipped
     # lib/ code is a change to the plugin, and needs its bump (#273).
     paths=("$p")
-    link_mode=$(git ls-files -s -- "$p/src/lib" | awk '{ print $1 }')
+    link_mode=$(git ls-files -s -- "$p/src/lib" | awk '{ print $1 }') \
+      || die "git ls-files failed for $p/src/lib"
     if [ "$link_mode" = 120000 ]; then paths[${#paths[@]}]=lib; fi
     touched=$(git diff --name-only "$base" HEAD -- "${paths[@]}") \
       || die "git diff failed for $p"

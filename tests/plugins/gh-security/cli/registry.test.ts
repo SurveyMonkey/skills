@@ -13,9 +13,11 @@ import { GH_SECURITY_ROOT } from '#harness/paths.ts'
 const source = readFileSync(join(GH_SECURITY_ROOT, 'src', 'cli', 'registry.ts'), 'utf8')
 
 describe('the registry', () => {
-  it('imports no handler statically, only types', () => {
-    const imports = source.split('\n').filter((line) => /^import\s/.test(line))
-    expect(imports.filter((line) => !/^import type\s/.test(line))).toEqual([])
+  it('imports and re-exports no handler statically, only types', () => {
+    const statements = source
+      .split('\n')
+      .filter((line) => /^(import|export)\s.*\bfrom\s/.test(line))
+    expect(statements.filter((line) => !/^(import|export) type\s/.test(line))).toEqual([])
   })
 
   it('reaches each handler through a dynamic import of its own subcommand module', () => {

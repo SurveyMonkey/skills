@@ -93,10 +93,12 @@ boundary: today it covers every bash script not yet ported, and after #240 and #
 `notice-scan.sh`, `detect-capacity.sh` and `scripts/check.sh`, which stay bash.)**
 
 **No gate runs on a draft pull request** ([#273](https://github.com/SurveyMonkey/skills/issues/273)).
-Every job, `gates` included, runs on a `push` to the default branch, or on a pull request that is
-not a draft. The `pull_request` trigger lists `ready_for_review`, so marking a draft ready starts
-the first full run. A draft cannot merge, so the required `gates` check skipped on a draft blocks
-nothing. Local hooks run only what the staged files touch: the checks of those files, and the
+Every gate job runs on a `push` to the default branch, or on a pull request that is not a draft.
+The aggregate `gates` job runs on a draft too, and fails there. GitHub reports a job skipped by
+`if:` as a success, so a skipped `gates` would leave a passing required check that tested
+nothing. A red `gates` on a draft blocks nothing, because a draft cannot merge. The
+`pull_request` trigger lists `ready_for_review`, so marking a draft ready starts the first full
+run. Local hooks run only what the staged files touch: the checks of those files, and the
 vitest examples related to them (`vitest related`, coverage off, parity examples excluded). A
 full suite runs only in CI.
 

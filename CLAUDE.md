@@ -96,8 +96,8 @@ and the thresholds and the parity runs both belong to the full suite in CI), Bio
 staged JSON, `.mjs` and `.ts`, and
 `claude plugin validate --strict` when a manifest is staged, and pre-push runs nothing: CI is
 the enforcement boundary (`.github/workflows/gates.yml`). CI runs every gate on a push to the
-default branch and on a pull request that is not a draft; a draft runs none, and marking it
-ready starts the first full run.
+default branch and on a pull request that is not a draft. A draft runs no gate, and the aggregate
+`gates` check fails on it until it is marked ready, which starts the first full run.
 Venue decisions and pins: [ADR 005](docs/adr/005-quality-gate-venues.md). Unlike the plugin
 scripts, `scripts/check.sh` may assume `git`, `jq`, `shellcheck`, `shellspec`, and — for the `js`
 and `types` gates — `pnpm` and `node` at the ADR 012 floor, but still targets bash 3.2 because the

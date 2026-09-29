@@ -75,9 +75,10 @@ pass**. Conventions and their reasoning live in
 - **Subagent model tiering** ([ADR 004](adr/004-subagent-model-tiering.md)). The fix subagent is
   pinned to sonnet in its frontmatter; the orchestrator inherits the session model.
 - **Quality gates** ([ADR 005](adr/005-quality-gate-venues.md),
-  [ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Five gates (shellspec
+  [ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Seven gates (shellspec
   suite, ShellCheck, `claude plugin validate --strict`, the vitest suite with coverage at 100 on
-  the Workflow script, and a plugin version gate) run through one entry
+  the Workflow script and the TypeScript source, the TypeScript type check, Biome, and a plugin
+  version gate) run through one entry
   point, `scripts/check.sh`, from committed git hooks locally and from
   `.github/workflows/gates.yml` in CI on ubuntu with pinned tool versions. The version
   gate is CI-only: it requires a plugin whose files changed to carry a changed `plugin.json`

@@ -50,6 +50,8 @@ describe('no command held in a shell variable in a SKILL.md', () => {
   it.each([
     ['an exported assignment', `export S="node ${PLUGIN_ROOT}/scripts/p.ts"\n$S sync`],
     ['a local assignment', `local S="node ${PLUGIN_ROOT}/scripts/p.ts"\n"$S" sync`],
+    ['a readonly assignment', `readonly S="node ${PLUGIN_ROOT}/scripts/p.ts"\n$S sync`],
+    ['a declare assignment', `declare -r S="node ${PLUGIN_ROOT}/scripts/p.ts"\n$S sync`],
     ['an array', `S=(node ${PLUGIN_ROOT}/scripts/p.ts)\n"\${S[@]}" sync`],
     ['the script path alone', `S="${PLUGIN_ROOT}/scripts/p.ts"\nnode "$S" sync`],
   ])('names %s', (_case, body) => {

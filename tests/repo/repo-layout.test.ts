@@ -18,6 +18,15 @@ import {
 
 const repo = trackedFiles(REPO_ROOT)
 
+// The floor under every repository example below: a tracked list that came
+// back empty, or lost the plugin or lib/, would make them pass while checking
+// nothing.
+it('lists the plugin source and lib/ as tracked', () => {
+  expect(repo).toEqual(
+    expect.arrayContaining(['plugins/gh-security/src/cli/registry.ts', 'lib/envelope.ts']),
+  )
+})
+
 describe('no top-level bin/ in a plugin', () => {
   it('names a plugin that carries one', () => {
     const root = scratchTree({ 'plugins/p/bin/p.ts': '', 'plugins/p/scripts/p.ts': '' })
@@ -108,10 +117,14 @@ describe('no # import in shipped code', () => {
 })
 
 describe('shipped code imports nothing outside its own tree', () => {
-  it('names an import around the lib link, one out of lib/, and a bare package', () => {
+  it('names every import form that leaves its tree, and not a from in a message', () => {
     const root = scratchTree({
       'plugins/p/src/a.ts': "import { x } from '../../../lib/x.ts'\n",
       'plugins/p/src/b.ts': "import { y } from 'semver'\n",
+      'plugins/p/src/d.ts': "import '../../../lib/side.ts'\n",
+      'plugins/p/src/e.ts': "const m = await import('semver')\n",
+      'plugins/p/src/f.ts': "export { q } from 'lodash'\n",
+      'plugins/p/src/message.ts': 'throw new Error("read x from \'y\'")\n',
       'lib/c.ts': "import { z } from '../plugins/p/src/z.ts'\n",
       'plugins/p/src/ok.ts':
         "import { x } from './lib/x.ts'\nimport { r } from 'node:fs'\nimport type { T } from '../scripts/t.ts'\n",
@@ -121,6 +134,9 @@ describe('shipped code imports nothing outside its own tree', () => {
       'lib/c.ts: ../plugins/p/src/z.ts',
       'plugins/p/src/a.ts: ../../../lib/x.ts',
       'plugins/p/src/b.ts: semver',
+      'plugins/p/src/d.ts: ../../../lib/side.ts',
+      'plugins/p/src/e.ts: semver',
+      'plugins/p/src/f.ts: lodash',
     ])
   })
 

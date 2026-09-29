@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
 
 import { scrubGitEnvironment } from '#harness/setup.ts'
 
+import config from '../../vitest.config.ts'
+
 describe('scrubGitEnvironment', () => {
   it('removes every repository-locating and config-override variable, and nothing else', () => {
     const env: NodeJS.ProcessEnv = {
@@ -31,9 +33,7 @@ describe('scrubGitEnvironment', () => {
     })
   })
 
-  it('has already run for this example, through vitest.config.ts setupFiles', () => {
-    expect(
-      Object.keys(process.env).filter((name) => /^GIT_(DIR|INDEX_FILE|WORK_TREE)$/.test(name)),
-    ).toEqual([])
+  it('runs before every test file, as a vitest.config.ts setupFiles entry', () => {
+    expect(config.test.setupFiles).toContain('harness/setup.ts')
   })
 })
