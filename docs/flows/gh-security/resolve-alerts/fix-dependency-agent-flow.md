@@ -19,7 +19,7 @@ and follows, which is why the unboxed nodes are the ones that write PR narrative
 judgment the driver deliberately hands back. The distinction is the point of
 the drivers: a branch inside a box fails a test when it regresses, and a branch outside one is
 only as reliable as the sentence describing it, so re-deriving a boxed procedure in agent prose is
-a bug rather than a fallback (`docs/gh-security/GUIDE.md`).
+a bug rather than a fallback (`.claude/skills/gh-security-guide/fix-driver.md`).
 
 The boxes hold the steps, not their verdicts. A driver's failure terminals sit outside its box on
 purpose: the driver decides them, and the agent is what maps them onto a result block and reports

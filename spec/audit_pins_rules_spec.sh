@@ -90,7 +90,7 @@ Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
   # Phases 2, 4, 5 and 7 are executed by common/audit-pins-driver.sh, so a rule
   # that is purely procedural now lives in the driver and is asserted there
-  # (docs/gh-security/GUIDE.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
+  # (.claude/skills/gh-security-guide/audit-driver.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
   # rules that still govern the agent's own reading of a driver answer stay in
   # the definition, and each example below says which file it is checking.
   DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/audit-pins-driver.sh"

@@ -53,8 +53,8 @@ evaluated by the Claude Code harness, and no script here may call into it
 ([ADR 010](adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). The bash scripts target
 bash 3.2 (the macOS default), and treat a contract field that is missing, mistyped, or empty as a hard error rather
 than a default. The rule that anchors the whole repo: **finding nothing is an error, never a
-pass**. Conventions and their reasoning live in
-[docs/gh-security/GUIDE.md](gh-security/GUIDE.md).
+pass**. Conventions and their reasoning live in the
+[`gh-security-guide` skill](../.claude/skills/gh-security-guide/SKILL.md).
 
 ## The decisions, and where they are recorded
 
