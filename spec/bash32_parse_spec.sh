@@ -44,11 +44,11 @@ Describe 'the shipped scripts parse under bash 3.2'
   End
 End
 
-# CI's macOS leg sets REQUIRE_BASH32=1: that platform is supposed to supply
+# Set REQUIRE_BASH32=1 on a macOS run: that platform is supposed to supply
 # bash 3.2, so its absence there must fail rather than skip. The Skip above is
-# green, and without this example the parse gate could quietly stop running on
-# the one runner that exists to run it while the job stays green
-# (.github/workflows/gates.yml).
+# green, and without this example the parse gate could quietly stop running
+# while the run stays green. CI runs on ubuntu only since #273, so this gate
+# runs on a local macOS run only, until the bash it guards is gone (ADR 005).
 Describe 'the platform expected to supply bash 3.2'
   Skip if 'REQUIRE_BASH32 not set' [ "${REQUIRE_BASH32:-}" != 1 ]
 

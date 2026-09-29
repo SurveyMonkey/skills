@@ -27,7 +27,13 @@ on:
     # `edited` cannot be narrowed to base changes at the trigger and the
     # aggregate `gates` check needs every job on every run. A few minutes of
     # runner time per description edit buys a gate that is actually reached.
-    types: [opened, synchronize, reopened, edited]
+    #
+    # `ready_for_review` is what starts the first run: no gate runs while a
+    # pull request is a draft (the `if:` on every job below). A draft cannot
+    # merge, so a skipped required check on one blocks nothing, and a stacked
+    # port pull request that is pushed and rebased many times before review
+    # pays for one full run, not one per push (#273, ADR 005).
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   push:
     branches: [main]
 
@@ -54,6 +60,7 @@ env:
 
 jobs:
   lint:
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,6 +86,7 @@ jobs:
         run: ./scripts/check.sh lint
 
   validate:
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     env:
       # Without this the CLI can self-update inside the job, which silently
@@ -107,40 +115,25 @@ jobs:
         run: ./scripts/check.sh validate
 
   spec:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # ubuntu only (#273). The macOS leg was the critical path of every run
+    # (340-430s against 110-170s on ubuntu, #208), and it existed only to run
+    # spec/bash32_parse_spec.sh under the bash 3.2 that stock macOS ships.
+    # That gate now runs on a local macOS run only, until the bash that it
+    # guards is gone (#240, #241): spec/bash32_parse_spec.sh skips here,
+    # because REQUIRE_BASH32 is unset and ubuntu has no bash 3.x.
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
     env:
-      # macOS is the platform that supplies the bash 3.2 the scripts target,
-      # so there spec/bash32_parse_spec.sh must run rather than skip; a skip
-      # is green, and the parse gate silently not running is exactly the
-      # failure mode this flag exists to refuse. ubuntu has no /bin/bash 3.x
-      # and legitimately skips it, contributing modern-bash (5.x) coverage
-      # instead: .shellspec says --shell sh, which is bash 3.2 on macOS but
-      # dash on ubuntu, and dash cannot run the bash-shebanged scripts at all
-      # (the first run proved it: set -o pipefail is not a dash option, issue
-      # #57), so the ubuntu leg overrides the shell rather than testing a
-      # target that never existed.
-      REQUIRE_BASH32: ${{ matrix.os == 'macos-latest' && '1' || '' }}
-      CHECK_SPEC_SHELL: ${{ matrix.os == 'ubuntu-latest' && 'bash' || 'sh' }}
+      # .shellspec says --shell sh, which is dash on ubuntu, and dash cannot
+      # run the bash-shebanged scripts at all (set -o pipefail is not a dash
+      # option, issue #57), so the job runs the suite under bash.
+      CHECK_SPEC_SHELL: bash
       # .shellspec sets --format documentation, which is the right default for
-      # a human reading a local run and 1189 individually formatted lines per
-      # leg here. The failure re-run below inherits this, which is fine: it
+      # a human reading a local run and 1189 individually formatted lines
+      # here. The failure re-run below inherits this, which is fine: it
       # exists to produce an unreduced report, not a differently formatted
       # one, and every formatter names the failing examples.
       CHECK_SPEC_FORMAT: progress
-      # The macOS leg is the critical path of every PR run (340-430s against
-      # 110-170s on ubuntu, ADR 005 amendment, issue #208): it exists only to
-      # be the one runner that can execute spec/bash32_parse_spec.sh, so on a
-      # pull request that is the only file it runs, while ubuntu still runs
-      # the full suite. CI runs full suites rather than a changed-file
-      # selection (never `paths:` filters, above), so this narrows by gate,
-      # not by diff, and it is deliberately gate-scoped rather than
-      # push-scoped: main keeps running the full suite on macOS on every
-      # push, so a full macOS record still exists there.
-      CHECK_SPEC_ONLY: ${{ (matrix.os == 'macos-latest' && github.event_name == 'pull_request') && 'spec/bash32_parse_spec.sh' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -192,10 +185,10 @@ jobs:
 
   js:
     # The vitest suite over plugins/gh-security/workflows/fix-groups.mjs, the
-    # one piece of shipped JavaScript in this repository (ADR 010). It runs on
-    # ubuntu alone: unlike the bash scripts, whose target shell differs per
-    # platform (bash 3.2 on macOS, and the reason the spec job is a matrix),
-    # this is one node version evaluating one file with no platform surface.
+    # one piece of shipped JavaScript in this repository (ADR 010), and the
+    # TypeScript the plugin ships (ADR 012). It runs on ubuntu: this is one
+    # node version evaluating the source, with no platform surface.
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -238,6 +231,7 @@ jobs:
     # configuration, with no platform surface. The type check is not a build
     # step and emits nothing; the file a reviewer reads on the default branch
     # is the file node runs.
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -272,6 +266,7 @@ jobs:
     # (#250), the whole tree at once. ubuntu alone, like the js and types
     # jobs: one tool, one configuration, no platform surface. ShellCheck in
     # the `lint` job still covers the bash; the two tools do not overlap.
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -316,8 +311,12 @@ jobs:
     #                 what landed. This is the backstop the pull request
     #                 venue cannot be: it sees what actually merged.
     #
-    # The skip is a step that exits 0, never an `if:` on the job: `gates`
-    # needs this job's result, and a skipped need is not a success.
+    # The stacked-layer skip is a step that exits 0, never an `if:` on the
+    # job: `gates` needs this job's result, and a skipped need is not a
+    # success. The draft condition below is the one job-level `if:`, and it
+    # is safe because `gates` carries the same condition: on a draft, both
+    # skip, and a draft cannot merge.
+    if: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -406,7 +405,8 @@ jobs:
     # a gate?
     # Follow the checklist: docs/adr/005-quality-gate-venues.md#gate-change-checklist.
     needs: [lint, validate, spec, js, types, biome, version]
-    if: ${{ !cancelled() }}
+    # Drafts run no gate, this one included (see the trigger above).
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     steps:
       - name: All gates green

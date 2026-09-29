@@ -1,10 +1,10 @@
 ---
 type: ADR
-description: The quality gates run from one entry point, split across git hooks by cost (fast gates pre-commit, the suite pre-push) and all enforced in CI on ubuntu plus macOS with pinned tool versions, with the plugin version gate running in CI alone because only there is its comparison base unambiguous.
+description: The quality gates run from one entry point, split across git hooks by cost (fast gates pre-commit, the suite pre-push) and all enforced in CI on ubuntu with pinned tool versions, on every pull request that is not a draft, with the plugin version gate running in CI alone because only there is its comparison base unambiguous.
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [10, 143]
+related_issues: [10, 143, 273]
 ---
 
 # ADR 005: Quality gate venues and automation
@@ -83,7 +83,21 @@ to run one file of, `spec/bash32_parse_spec.sh`; `CHECK_SPEC_ONLY` (`scripts/che
 narrows a `pull_request` run on macOS to that file alone, while ubuntu keeps running the full
 suite and the `push` venue on the default branch runs the full suite on both legs, so main still
 records a full macOS run. The narrowing is by gate, not by diff: CI still runs full suites,
-never a changed-file selection, per the `paths:`-filter prohibition above.)**
+never a changed-file selection, per the `paths:`-filter prohibition above.)** **(amended in
+[#273](https://github.com/SurveyMonkey/skills/issues/273): the macOS leg is removed, and the spec
+job runs on ubuntu alone. Even narrowed to one file, the macOS leg stayed the slowest job, and
+the TypeScript port lands in stacked pull requests that are pushed and rebased many times. The
+bash 3.2 parse gate now runs only on a local macOS run (`shellspec spec/bash32_parse_spec.sh`
+with `REQUIRE_BASH32=1`), until #240 and #241 remove the bash it guards. That is a known gap in
+the enforcement boundary for the two bash scripts that remain, accepted for that window.)**
+
+**No gate runs on a draft pull request** ([#273](https://github.com/SurveyMonkey/skills/issues/273)).
+Every job, `gates` included, runs on a `push` to the default branch, or on a pull request that is
+not a draft. The `pull_request` trigger lists `ready_for_review`, so marking a draft ready starts
+the first full run. A draft cannot merge, so the required `gates` check skipped on a draft blocks
+nothing. Local hooks run only what the staged files touch: the checks of those files, and the
+vitest examples related to them (`vitest related`, coverage off, parity examples excluded). A
+full suite runs only in CI.
 
 **Amended by [ADR 012](012-typescript-on-node-22-18.md)
 ([#213](https://github.com/SurveyMonkey/skills/issues/213)): vitest is the primary suite venue, and
@@ -93,8 +107,8 @@ the shellspec suite is no longer where most behavior is covered; after
 `detect_capacity`, `check_sh`, `reference_scrub` and `bash32_parse`. Nothing this ADR
 decides about venues changes with the substitution: one entry point, empty discovery as a hard
 failure, an executed-example floor (which vitest needs for the same reason shellspec does), and CI
-as the enforcement boundary. Fact 2 above keeps the macOS leg alive for the same reason it always
-had, narrowed to it.
+as the enforcement boundary. ~~Fact 2 above keeps the macOS leg alive for the same reason it always
+had, narrowed to it.~~ **(amended in #273: the macOS leg is removed; see above.)**
 
 **One knock-on, stated so it is not read as more than it is.** The lefthook refusal at the end of
 this Decision rests on two grounds: that lefthook adds a dependency to a repo whose stated
@@ -241,8 +255,10 @@ gates run:
 - The three pins need manual bumps, and CI will not notice when a newer Claude CLI would reject
   these manifests, which is what users actually run. Bumping the pins periodically is deliberate
   maintenance, not drift.
-- The bash 3.2 gate depends on GitHub continuing to provide a macOS runner whose `/bin/bash` is
-  3.2. If that changes, `REQUIRE_BASH32=1` makes the change loud instead of silent.
+- ~~The bash 3.2 gate depends on GitHub continuing to provide a macOS runner whose `/bin/bash` is
+  3.2. If that changes, `REQUIRE_BASH32=1` makes the change loud instead of silent.~~ **(amended
+  in #273: CI no longer runs the bash 3.2 gate. It runs on a local macOS run only, until the bash
+  is gone.)**
 - Dependabot alerts are enabled on this repo while security updates are not, and
   `spec/fixtures/` deliberately pins vulnerable versions. An alert pointing into `spec/fixtures/`
   is about a specimen: do not "fix" the fixture, per the `testing` skill (a shape found in the wild
