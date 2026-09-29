@@ -1,6 +1,6 @@
 ---
 name: testing
-description: This repository's test strategy, covering seams, asserting the verdict rather than the parse, independent expected values, red-first, what may be mocked, the coverage goal, when a prose pin is legitimate, and the review checklist. Use when writing or reviewing a vitest or shellspec example, when adding a command or script under plugins, and when fixing a defect found by running the code.
+description: This repository's test strategy, covering seams, where a test lives and how it imports, asserting the verdict rather than the parse, independent expected values, red-first, what may be mocked, the coverage goal, when a prose pin is legitimate, and the review checklist. Use when writing or reviewing a vitest or shellspec example, when adding a command or script under plugins, and when fixing a defect found by running the code.
 ---
 
 # Testing
@@ -21,7 +21,7 @@ preamble, argument parsing, the exit code, the stdout and stderr split. The regi
 else (issue #216's decision comment, which constrains #224).
 
 **Those examples live in `tests/`**, at the mirror of the code they cover, with the shared
-harness in `harness/` and the fixtures in `spec/fixtures/` (`.claude/rules/type-ts.md`). The
+harness in `harness/` and the fixtures in `spec/fixtures/` (Layout, below). The
 `path-spec` rule points at this skill for every file under `spec/`, `tests/` and `harness/`.
 
 **For a shell script, meaning the bash that remains and everything not yet ported, the CLI and
@@ -55,6 +55,26 @@ the exports into module-private state still is.
 and its JSON output shape, error cases included, before any code is written; that block is what the
 specs then test at, and the reviewer of the plan is agreeing to the seam, not only to the idea
 (issue #198).
+
+## Layout
+
+- A test lives under `tests/`, at the mirror of the code it covers: `tests/lib/args.test.ts` for
+  `lib/args.ts`, `tests/plugins/<p>/subcommands/<command>.test.ts` for
+  `plugins/<p>/src/subcommands/<command>.ts`. Nothing test-only goes in a plugin
+  (`.claude/rules/path-plugins.md`).
+- A test imports plugin code as `#<p>/...` and the harness as `#harness/...`, from the `imports`
+  map in the root `package.json`. A plugin test reaches `lib/` as `#<p>/lib/...`, through the
+  plugin's symlink, so it sees the same module the plugin sees. The harness reaches `lib/` as
+  `#lib/...`.
+- A path a test needs on disk (an entry point to spawn, a bash script, a plugin file) comes from
+  `harness/paths.ts`, never from a `../` path relative to the test. The one relative
+  import is the entry point test's own `import()` of `scripts/<plugin>.ts`, which `#<p>/*` does
+  not map, so that coverage measures the file.
+- Tests of `harness/` go in `tests/harness/`. Checks of this repository's own layout go in
+  `tests/repo/`.
+- Fixtures stay in `spec/fixtures/`. The shellspec suite and the vitest suite share them.
+- `spec/js/` stays the Workflow script's suite (ADR 010). The script must `return` at top level,
+  which no ES module parser accepts.
 
 ## New script
 
@@ -175,13 +195,15 @@ retired.
 ## Coverage
 
 **100 on all four buckets** (lines, branches, functions, statements) for the TypeScript source,
-**with 95 as the floor the gate never goes below**, and **exclusion by name with a stated reason
-as the only relief** (ADR 012, #211). A file that genuinely cannot reach 100, a process boundary
-or a platform branch, is named in the exclusion list with a comment saying why; the number is
-never lowered to accommodate it, because a lowered threshold hides every other file's regression
-behind the one file that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it
-already has. A threshold satisfied by an empty file set is this repository's signature bug, so a
-coverage report naming no files is a failure rather than a pass.
+**with 95 as the floor the gate never goes below**, over the named source set in
+`vitest.config.ts`, **and no file is excluded by name** (ADR 012 as amended in #273). Do not lower
+a threshold, and do not add a name to `coverage.exclude`, even for a file you judge a process
+boundary or a platform branch. For a branch no test can reach, restructure the code until the
+branch no longer exists: lift the decision into a function that takes, as an argument, what it
+depended on. Only a maintainer opens the exclusion list, on its own pull request.
+`workflows/fix-groups.mjs` keeps the 100 floor it already has. A threshold satisfied by an empty
+file set is this repository's signature bug, so a coverage report naming no files is a failure
+rather than a pass.
 
 ## Good and bad tests
 

@@ -60,9 +60,9 @@ buckets ([ADR 010](docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.m
 covers every tracked `.ts` file under `lib/` and `plugins/gh-security/{scripts,src}/`, and no file
 is ever excluded by name to reach it ([ADR 012](docs/adr/012-typescript-on-node-22-18.md)). The
 TypeScript examples live in `tests/`, with the shared harness in `harness/`; the layout and its
-rules are `.claude/rules/type-ts.md`. That is a dev and CI dependency only; the TypeScript the
-plugin ships imports nothing outside the plugin, and the two bash scripts that remain keep the
-old constraint of `bash` + `jq` + `gh`.
+rules are `.claude/rules/type-ts.md` and the `testing` skill's Layout section. That is a dev and
+CI dependency only; the TypeScript the plugin ships imports nothing outside the plugin, and the
+bash scripts keep the old constraint of `bash` + `jq` + `gh`.
 
 The TypeScript under `lib/` and `plugins/gh-security/`, and the examples under `tests/` and
 `harness/`, are type-checked by

@@ -758,7 +758,7 @@ Same treatment for non-`npm` advisory ecosystems in `select-adapter.sh`: skipped
 
 **vitest is the primary venue, and the TypeScript tests live in `tests/`**, at the mirror of
 the code they cover, with the shared harness in `harness/` and the fixtures in `spec/fixtures/`
-(`.claude/rules/type-ts.md`; moved from `spec/ts/` in #273). `.claude/rules/path-spec.md`
+(the `testing` skill, "Layout"; moved from `spec/ts/` in #273). `.claude/rules/path-spec.md`
 points at the `testing` skill for every file under `spec/`, `tests/` and `harness/`. Shellspec covers
 the bash that remains. The strategy both suites are written to is the
 [`testing` skill](../../.claude/skills/testing/SKILL.md); the gate commands, the ShellCheck rules
@@ -794,7 +794,7 @@ against.
 **Coverage of the TypeScript source is 100 on all four buckets** (lines, branches, functions,
 statements), **with 95 as the floor the gate never goes below**, and no file is excluded by
 name ([ADR 012](../adr/012-typescript-on-node-22-18.md) as amended in #273;
-`.claude/rules/type-ts.md`, "Coverage"). The number is never lowered to
+the `testing` skill, "Coverage"). The number is never lowered to
 accommodate one file: a lowered threshold hides every other file's regression behind the file
 that earned the exception. `workflows/fix-groups.mjs` keeps the 100 floor it already has.
 
