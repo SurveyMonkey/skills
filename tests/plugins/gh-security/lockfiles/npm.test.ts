@@ -220,6 +220,37 @@ describe('malformed input', () => {
     expect(attempt).toThrow(expect.objectContaining({ cause: expect.any(SyntaxError) }))
   })
 
+  // jq's `[(.dependencies // {}), ...] | add` stops for a block that is not
+  // an object, and node.sh stops with it. A block read as empty loses a parent.
+  it.each([
+    ['a text', 'lodash'],
+    ['a list', ['lodash']],
+    ['a number', 1],
+  ])('refuses a declaration block that is %s, in parents and in copies', (_shape, block) => {
+    const text = JSON.stringify({
+      packages: {
+        '': {},
+        'node_modules/a': { version: '1.0.0', peerDependencies: block },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    const message =
+      'package-lock.json: node_modules/a has a peerDependencies block that is not an object'
+    expect(() => parents(text, 'lodash')).toThrow(new LockfileError(message))
+    expect(() => parents(text, 'lodash')).toThrow(LockfileError)
+    expect(() => copies(text, 'lodash')).toThrow(new LockfileError(message))
+  })
+
+  it('reads a declaration block that is null or false as no block, as jq does', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/a': { version: '1.0.0', dependencies: null, peerDependencies: false },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    expect(parents(text, 'lodash')).toEqual([{ name: 'b', version: '1.0.0' }])
+  })
+
   it('reads text that starts with a byte order mark, as jq does', () => {
     const text = `\uFEFF${JSON.stringify({ packages: { 'node_modules/a': { version: '1.0.0' } } })}`
     expect(resolutionMap(text).resolutions).toEqual({ a: ['1.0.0'] })

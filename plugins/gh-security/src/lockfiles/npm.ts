@@ -115,12 +115,27 @@ export const resolutionMap = (text: string): ResolutionMap => {
   return { coverage, resolutions: groupResolutions(rowEntries(entries).flatMap(rowOf)) }
 }
 
-/** The three blocks of an entry that declare a dependency, merged. A later block wins a key. */
-const declarationsOf = (value: Readonly<Record<string, unknown>>) => ({
-  ...recordOf(value.dependencies),
-  ...recordOf(value.optionalDependencies),
-  ...recordOf(value.peerDependencies),
-})
+const BLOCKS = ['dependencies', 'optionalDependencies', 'peerDependencies'] as const
+
+/**
+ * The three blocks of an entry that declare a dependency, merged. A later
+ * block wins a key. jq's `// {}` reads null and false as no block. For
+ * another value that is not an object, jq's `add` stops, and so does this.
+ */
+const declarationsOf = ({ key, value }: Entry): Readonly<Record<string, unknown>> =>
+  Object.assign(
+    {},
+    ...BLOCKS.map((block) => {
+      const declared = value[block]
+      if (declared === undefined || declared === null || declared === false) return EMPTY
+      if (!isRecord(declared)) {
+        throw new LockfileError(
+          `package-lock.json: ${key} has a ${block} block that is not an object`,
+        )
+      }
+      return declared
+    }),
+  )
 
 /**
  * The `NPM_PATH_JQ` walk up `node_modules`: `path`, then each directory above
@@ -153,7 +168,7 @@ export const copies = (text: string, pkg: string): readonly Copy[] => {
   return entries
     .filter(({ key }) => key !== '')
     .flatMap(({ key: path, value }) =>
-      Object.entries(declarationsOf(value)).flatMap(([key, specifier]): Copy[] => {
+      Object.entries(declarationsOf({ key: path, value })).flatMap(([key, specifier]): Copy[] => {
         if (typeof specifier !== 'string') return []
         if (key !== pkg && !specifier.startsWith(alias)) return []
         const resolved = candidates(path, key)
@@ -182,8 +197,8 @@ export const parents = (text: string, pkg: string): readonly Parent[] =>
   uniqueParents(
     entriesOf(text)
       .filter(({ key }) => key !== '')
-      .filter(({ value }) =>
-        Object.entries(declarationsOf(value)).some(
+      .filter((entry) =>
+        Object.entries(declarationsOf(entry)).some(
           ([name, specifier]) =>
             typeof specifier === 'string' && (name === pkg || aliasTarget(specifier) === pkg),
         ),
