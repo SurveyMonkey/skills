@@ -4,7 +4,9 @@
 // The lockfile readers throw a `LockfileError` for a lockfile that they
 // refuse, and the semver module throws a `SemverParseError` for a version
 // with nothing in it to compare. node.sh stops with exit 1 for each (or with
-// jq's own status 5), so the caller reports and stops.
+// jq's own status 5), so the caller reports and stops. The read of the
+// lockfile can also throw, for example for a file that is not there. Any
+// other throw becomes `failed` too (#221, mid-round ruling 13).
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -15,6 +17,6 @@ export const attempt = <T>(compute: () => T): Envelope<T> => {
   try {
     return ok(compute())
   } catch (error) {
-    return failed((error as Error).message)
+    return failed(error instanceof Error ? error.message : String(error))
   }
 }
