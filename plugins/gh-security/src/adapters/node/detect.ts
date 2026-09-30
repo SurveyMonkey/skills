@@ -9,7 +9,8 @@
 //
 // `detect` reads the tree at `root` and the `PATH` it is given. It never
 // reads `process.env` or `process.cwd()` (#221, round 3 ruling 9), and it
-// starts no process: a PATH lookup is a scan of directories.
+// starts no process: a PATH lookup is a scan of directories. The caller gives
+// an absolute `root`. A relative one resolves from the working directory.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -80,11 +81,14 @@ const linesOf = (path: string): readonly string[] => {
 }
 
 /**
- * `command -v tool`, as bash answers it. Each PATH entry is a directory. An
- * empty entry is the current directory, which is `root` here, and a relative
- * entry is relative to `root`. Any entry that is not a directory is a match,
- * with or without its execute bit: bash also names a file that it cannot
- * run. An absent PATH has no entries.
+ * `command -v tool`, as bash answers it for a PATH that is set. Each PATH
+ * entry is a directory. An empty entry is the current directory, which is
+ * `root` here, and a relative entry is relative to `root`. Any `entry/tool`
+ * that exists and is not a directory is a match, with or without its execute
+ * bit: bash also names a file that it cannot run.
+ *
+ * An absent PATH has no entries here. bash uses its own default PATH for it.
+ * That difference is a declared divergence (#221, mid-round ruling 13).
  */
 const onPath = (tool: string, root: string, env: Environment): boolean =>
   env.PATH === undefined
@@ -97,13 +101,19 @@ const onPath = (tool: string, root: string, env: Environment): boolean =>
 // jq reads a byte order mark at the start of the file. `JSON.parse` does not.
 const BYTE_ORDER_MARK = /^\uFEFF/
 
+// jq reads a file that holds only JSON white space as no document, and
+// writes nothing. For both of the jq programs below, that answer is the same
+// as the answer for a top level of null.
+const NO_DOCUMENT = /^[ \t\n\r]*$/
+
 /** What {@link manifestOf} answers for a manifest that is absent or does not parse. */
 const UNREADABLE = Symbol('unreadable')
 
-/** `package.json` at `root`, parsed, or {@link UNREADABLE}. */
+/** `package.json` at `root`, parsed, null when it holds no document, or {@link UNREADABLE}. */
 const manifestOf = (root: string): unknown => {
   try {
-    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8').replace(BYTE_ORDER_MARK, ''))
+    const text = readFileSync(join(root, 'package.json'), 'utf8').replace(BYTE_ORDER_MARK, '')
+    return NO_DOCUMENT.test(text) ? null : JSON.parse(text)
   } catch {
     return UNREADABLE
   }
@@ -154,8 +164,9 @@ const PNPM_MAJOR = /^pnpm@([0-9]+)/
 /**
  * `pnpm_manifest_major`: the digits of the pnpm major that `packageManager`
  * pins, '' when it pins no pnpm major, or null when jq stops. jq stops on a
- * manifest that it cannot parse, on a top level that is not an object or
- * null, and on a `packageManager` that is not a string, null or false.
+ * manifest that is absent or that it cannot parse, on a top level that is
+ * not an object or null, and on a `packageManager` that is not a string,
+ * null or false.
  */
 const pnpmMajorOf = (root: string): string | null => {
   const manifest = manifestOf(root)

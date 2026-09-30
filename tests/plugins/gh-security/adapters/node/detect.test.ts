@@ -6,8 +6,8 @@
 // The PATH is the parameter that `detect` takes (#221, round 3 ruling 9).
 // Each example gives a directory that holds an empty file for each tool that
 // it puts on PATH. `detect` only looks for the name, and never runs it, so
-// the file stands in for the tool. That is the machine probe, the one
-// boundary that `mocking.md` lets a test substitute.
+// the file stands in for the tool. PATH is a parameter of `detect`, so the
+// test gives the tools through it (`mocking.md`, "The injected collaborator").
 //
 // Where no fixture carries a branch, the example changes a copy of the
 // nearest specimen, as spec/node_lockfiles_spec.sh and
@@ -120,6 +120,22 @@ describe('lockfile precedence', () => {
     const detection = node.detect(root, { PATH: pathWith() })
     expect(detection.outcome === 'ok' && detection.value.pm).toBe(pm)
   })
+
+  it('does not read a directory as a lockfile', () => {
+    const root = copyOf('npm-v3')
+    mkdirSync(join(root, 'pnpm-lock.yaml'))
+    const detection = node.detect(root, { PATH: pathWith() })
+    expect(detection.outcome === 'ok' && detection.value.pm).toBe('npm')
+  })
+
+  it('refuses Yarn Classic before it reads the npm lockfile', () => {
+    const root = copyOf('yarn-classic')
+    copyFileSync(join(fixture('npm-v3'), 'package-lock.json'), join(root, 'package-lock.json'))
+    expect(node.detect(root, { PATH: pathWith() })).toMatchObject({
+      outcome: 'unsupported',
+      unsupported: 'yarn-classic',
+    })
+  })
 })
 
 describe('the pnpm override file and major', () => {
@@ -163,6 +179,12 @@ describe('the pnpm override file and major', () => {
     expect(pnpmFacts(root)).toEqual({ override_file: 'pnpm-workspace.yaml', pnpm_major: 10 })
   })
 
+  it('reads a quoted overrides key in pnpm-workspace.yaml', () => {
+    const root = copyOf('pnpm-cross-line')
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), "'overrides':\n  foo: 1.0.0\n")
+    expect(pnpmFacts(root)).toEqual({ override_file: 'pnpm-workspace.yaml', pnpm_major: 10 })
+  })
+
   it('answers a null major for a packageManager that pins another manager', () => {
     const root = copyOf('pnpm-cross-line')
     setManifestField(root, 'packageManager', 'yarn@4.13.0')
@@ -170,9 +192,17 @@ describe('the pnpm override file and major', () => {
   })
 
   // jq's `.packageManager // ""` gives "" for null and false, and its
-  // `capture` stops on anything that is not a string.
+  // `capture` stops on anything that is not a string. jq reads no document
+  // in a file that holds only white space, and writes nothing.
   it.each([
     ['a null top level', 'null', { override_file: 'package.json', pnpm_major: null }],
+    ['an empty manifest', '', { override_file: 'package.json', pnpm_major: null }],
+    ['a manifest of white space', ' \n', { override_file: 'package.json', pnpm_major: null }],
+    [
+      'a null packageManager',
+      '{"packageManager":null}',
+      { override_file: 'package.json', pnpm_major: null },
+    ],
     [
       'a false packageManager',
       '{"packageManager":false}',
@@ -188,6 +218,7 @@ describe('the pnpm override file and major', () => {
     ['a manifest that is not JSON', '{ not json\n'],
     ['a top level that is an array', '[]'],
     ['a packageManager that is a number', '{"packageManager":11}'],
+    ['a packageManager of zero', '{"packageManager":0}'],
   ])('fails for %s, where jq stops', (_case, manifest) => {
     const root = copyOf('pnpm-cross-line')
     writeFileSync(join(root, 'package.json'), manifest)
@@ -248,6 +279,18 @@ describe('the runner', () => {
     expect(runnerOf(root, pathWith('corepack'))).toMatchObject({ pm_exec: 'yarn' })
   })
 
+  it('keeps the bare name for a null packageManager, as jq -e does', () => {
+    const root = copyOf('yarn-berry')
+    setManifestField(root, 'packageManager', null)
+    expect(runnerOf(root, pathWith('corepack'))).toMatchObject({ pm_exec: 'yarn' })
+  })
+
+  it('uses corepack for an empty packageManager, which jq -e reads as present', () => {
+    const root = copyOf('yarn-berry')
+    setManifestField(root, 'packageManager', '')
+    expect(runnerOf(root, pathWith('corepack'))).toMatchObject({ pm_exec: 'corepack yarn' })
+  })
+
   // jq reads a byte order mark at the start of the file, so node.sh does too.
   it('reads a package.json that starts with a byte order mark', () => {
     const root = copyOf('yarn-berry')
@@ -295,6 +338,17 @@ describe('the runner', () => {
       })
     })
 
+    it('reads the first yarnPath, as head -1 does', () => {
+      const root = copyOf('yarn-vendored')
+      writeFileSync(
+        join(root, '.yarnrc.yml'),
+        'yarnPath: .yarn/releases/yarn-4.13.0.cjs\nyarnPath: package.json\n',
+      )
+      expect(runnerOf(root, pathWith('node'))).toMatchObject({
+        pm_exec: 'node .yarn/releases/yarn-4.13.0.cjs',
+      })
+    })
+
     it('reads a quoted yarnPath', () => {
       const root = copyOf('yarn-vendored')
       writeFileSync(join(root, '.yarnrc.yml'), 'yarnPath: ".yarn/releases/yarn-4.13.0.cjs"\n')
@@ -332,6 +386,8 @@ describe('the runner', () => {
       expect(runnerOf(fixture('yarn-berry'), bin)).toMatchObject({ pm_exec: 'yarn' })
     })
 
+    // bash uses its own default PATH here: a declared divergence (#221,
+    // mid-round ruling 13).
     it('finds nothing on an absent PATH', () => {
       expect(runnerOf(fixture('yarn-berry'), undefined)).toMatchObject({ pm_exec: 'yarn' })
     })
