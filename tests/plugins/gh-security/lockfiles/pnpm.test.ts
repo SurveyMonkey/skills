@@ -429,6 +429,12 @@ describe('rootVersion', () => {
       "    dependencies:\n      'lodash':\n        specifier: ^4\n        version: '4.17.21'\n",
       '4.17.21',
     ],
+    // A new block ends the declaration before it, as `isdep = 0` in node.sh.
+    [
+      'a version line of the next block, after a declaration with no version',
+      '    dependencies:\n      lodash:\n        specifier: ^4\n    devDependencies:\n        version: 3.0.0\n',
+      null,
+    ],
   ])('reads %s', (_shape, block, version) => {
     const text = `importers:\n\n  .:\n${block}\npackages:\n`
     expect(rootVersion(text, 'lodash')).toBe(version)

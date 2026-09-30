@@ -422,6 +422,13 @@ describe('why refusals', () => {
       '{"dependencies": "x"}',
       'why: dependencies in package.json is not an object',
     ],
+    // jq's `map(has($pkg)) | any` reads all four blocks, so a bad block after
+    // a declaration still stops it.
+    [
+      'a bad block after a block that declares the package',
+      '{"dependencies": {"lodash": "^4"}, "peerDependencies": "x"}',
+      'why: peerDependencies in package.json is not an object',
+    ],
     ['no JSON document', ' \n', 'why: package.json holds no JSON document'],
     [
       'a top level that is a list',

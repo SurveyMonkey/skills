@@ -180,6 +180,28 @@ describe('parents', () => {
     expect(parents(text, 'x')).toEqual([])
   })
 
+  // The name ends at the first `@` after the first character. node.sh ends
+  // it at the last `@`, and names these `lodash@patch:lodash` and
+  // `aliased@npm:lodash` (mid-round ruling 15).
+  it('names a patch parent and an alias parent by the text before the first @', () => {
+    const text = [
+      '"lodash@patch:lodash@npm%3A4.17.21#./x.patch::locator=r%40workspace%3A.":',
+      '  version: 4.17.21',
+      '  resolution: "lodash@patch:lodash@npm%3A4.17.21#./x.patch::locator=r%40workspace%3A."',
+      '  dependencies:',
+      '    y: "npm:^1.0.0"',
+      '',
+      '"aliased@npm:lodash@^4.17.21":',
+      '  version: 4.17.21',
+      '  resolution: "aliased@npm:lodash@4.17.21"',
+      '  dependencies:',
+      '    y: "npm:^1.0.0"',
+      '',
+    ].join('\n')
+    expect(parents(text, 'y').map(({ name }) => name)).toEqual(['aliased', 'lodash'])
+    expect(copies(text, 'y').map(({ parent }) => parent)).toEqual(['lodash', 'aliased'])
+  })
+
   it('reads no declaration from an entry that has no resolution', () => {
     const text = `${entry('a', '  dependencies:\n    y: "npm:^1"\n')}"b@npm:^2":\n  dependencies:\n    x: "npm:^1"\n`
     expect(parents(text, 'x')).toEqual([])

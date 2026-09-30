@@ -338,6 +338,23 @@ describe('declared_ranges on one line', () => {
     })
   })
 
+  // node.sh reads the major of a row after `ltrimstr("v")`.
+  it('files a nested lockfile copy with a leading v by its major', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, 'package-lock.json', (json) => {
+      const packages = json.packages as Record<string, Record<string, unknown>>
+      packages['node_modules/test-exclude/node_modules/lodash'] = {
+        ...packages['node_modules/test-exclude/node_modules/lodash'],
+        version: 'v3.10.1',
+      }
+      return json
+    })
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', 4))).toMatchObject({
+      ranges: ['^4.17.20', '^4.17.21'],
+      parents_other_lines: ['test-exclude@6.0.0'],
+    })
+  })
+
   // node.sh writes `-` for a copy with no version, and names it by the parent alone.
   it('files a copy with no version on another line by its name alone', () => {
     const { root, detection } = copyOf('npm-v3')
@@ -571,6 +588,24 @@ describe('declared_ranges of an installed pnpm parent', () => {
       'local-lib@file:vendor/local-lib',
       'local-lib@file:vendor/other-lib',
     ])
+  })
+
+  // `pnpm_root_child_major` takes `${v%%.*}` with no `v` removed, and a major
+  // that is not all digits is unknown, so the root stays in.
+  it('keeps the root when its importers version has a leading v', () => {
+    const { root, detection } = copyOf('pnpm-v9')
+    const path = join(root, 'pnpm-lock.yaml')
+    const text = readFileSync(path, 'utf8')
+    const changed = text.replace(
+      '        specifier: ^4.18.2\n        version: 4.18.2\n',
+      '        specifier: ^4.18.2\n        version: v3.18.2\n',
+    )
+    expect(changed).not.toBe(text)
+    writeFileSync(path, changed)
+    expect(body(node.declaredRanges({ root, detection }, 'express', 4))).toMatchObject({
+      root_range: '^4.18.2',
+      parents_other_lines: [],
+    })
   })
 
   it('keeps the root range when importers records no version for it', () => {
