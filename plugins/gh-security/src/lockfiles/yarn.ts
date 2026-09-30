@@ -1,13 +1,189 @@
-import type { Parent, ResolutionMap, ResolvedVersions } from './shared.ts'
+// The Yarn Berry `yarn.lock` reader, ported from node.sh (#220, RFC 002):
+// `YARN_LOCATOR_AWK` behind `yarn_versions` and `yarn_resolution_pairs`, and
+// `YARN_DECLARATION_AWK` behind `yarn_parents`. The awk there is the
+// specification. This reads only the lines those programs read. It is not a
+// YAML parser.
+//
+// Every entry has one `resolution:` locator, which stays stable when several
+// descriptors share one block. Yarn Classic has none, and `detect` refuses it
+// before a reader runs.
+//
+// This file ships. It imports nothing outside the plugin.
 
-export const resolvedVersions = (_text: string, _pkg: string): ResolvedVersions => {
-  throw new Error('not implemented')
+import {
+  aliasTarget,
+  before,
+  type Coverage,
+  groupResolutions,
+  guarded,
+  type Parent,
+  type ResolutionMap,
+  type ResolvedVersions,
+  uniqueCopies,
+  uniqueParents,
+} from './shared.ts'
+
+/** What a locator resolves to: the three answers of `locator_row`. */
+type Reading =
+  | {
+      readonly kind: 'registry'
+      /** The package the code is. */
+      readonly name: string
+      /** The name the copy is installed under. */
+      readonly key: string
+      readonly version: string
+    }
+  | { readonly kind: 'local' | 'unreadable'; readonly version: null }
+
+const LOCAL: Reading = { kind: 'local', version: null }
+const UNREADABLE: Reading = { kind: 'unreadable', version: null }
+
+// Local or generated code, whose version is not a published release.
+const LOCAL_PROTOCOL =
+  /^(workspace|portal|exec|link|file|git|git[+]ssh|git[+]http|git[+]https|http|https|ssh|github|gitlab|bitbucket):$/
+
+// A full semver, not a leading digit: anything else is a misread locator.
+const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$/
+
+// The first `resolution: "` of a line, to the next quote.
+const RESOLUTION = /resolution: "([^"]*)"/
+
+const locatorOf = (line: string): string | null => RESOLUTION.exec(line)?.[1] ?? null
+
+/**
+ * The text before and after the first `@` after the first character, so a
+ * scoped name keeps its own `@`. With no such `@`, all of it is the name.
+ */
+const splitName = (locator: string): [string, string] => {
+  const at = `${locator}@`.indexOf('@', 1)
+  return [locator.slice(0, at), locator.slice(at + 1)]
 }
 
-export const resolutionMap = (_text: string): ResolutionMap => {
-  throw new Error('not implemented')
+/**
+ * One level of percent decoding. Berry encodes the locator a `patch:` wraps
+ * once per level of nesting, so `%25` is decoded last: first would open two
+ * levels in one pass.
+ */
+const decoded = (text: string): string =>
+  text
+    .replace(/%3[Aa]/g, ':')
+    .replaceAll('%23', '#')
+    .replaceAll('%40', '@')
+    .replaceAll('%25', '%')
+
+/**
+ * Read one locator. A `patch:` wraps a published release, so the reader
+ * unwraps it and asks again, once per level. An `npm:` descriptor that is not
+ * a version is an alias, and the copy is the package it names.
+ */
+const readLocator = (locator: string): Reading => {
+  const [key] = splitName(locator)
+  let name = key
+  let current = locator
+  for (;;) {
+    const [, descriptor] = splitName(decoded(current))
+    const colon = descriptor.indexOf(':') + 1
+    const protocol = descriptor.slice(0, colon)
+    const value = descriptor.slice(colon)
+    if (protocol === 'npm:') {
+      // Binding parameters after `::`, such as `__archiveUrl`, are not the version.
+      const version = before(value, '::')
+      if (SEMVER.test(version)) return { kind: 'registry', name, key, version }
+      // The alias target ends at the last `@`. With none after the first
+      // character, the next pass reads nothing.
+      const at = Math.max(version.lastIndexOf('@'), 0)
+      name = version.slice(0, at)
+      current = `${name}@npm:${version.slice(at + 1)}`
+    } else if (protocol === 'patch:') {
+      // From the first `#` on is the patch file and its data.
+      current = before(value, '#')
+    } else {
+      return LOCAL_PROTOCOL.test(protocol) ? LOCAL : UNREADABLE
+    }
+  }
 }
 
-export const parents = (_text: string, _pkg: string): readonly Parent[] => {
-  throw new Error('not implemented')
+const lines = (text: string): string[] => text.split('\n')
+
+const read = (text: string) => {
+  const readings = lines(text).flatMap((line) => {
+    const locator = locatorOf(line)
+    return locator === null ? [] : [{ locator, reading: readLocator(locator) }]
+  })
+  const coverage: Coverage = guarded('yarn', {
+    entries: readings.length,
+    expected: readings.length,
+    read: readings.filter(({ reading }) => reading.kind !== 'unreadable').length,
+  })
+  const rows = readings.flatMap(({ locator, reading }) =>
+    reading.kind === 'registry' ? [{ ...reading, locator }] : [],
+  )
+  return { coverage, rows }
+}
+
+/** Every copy of `pkg`, found by the package it is or by its alias key. */
+export const resolvedVersions = (text: string, pkg: string): ResolvedVersions => {
+  const { coverage, rows } = read(text)
+  const copies = rows
+    .filter(({ name, key }) => name === pkg || key === pkg)
+    .map(({ version, locator }) => ({ version, path: locator }))
+  return { coverage, copies: uniqueCopies(copies) }
+}
+
+/** Every package at a registry version, keyed by the package it is. */
+export const resolutionMap = (text: string): ResolutionMap => {
+  const { coverage, rows } = read(text)
+  return {
+    coverage,
+    resolutions: groupResolutions(rows.map(({ name, version }) => ({ package: name, version }))),
+  }
+}
+
+/**
+ * The parent an entry's locator names, or `null` for a workspace: that is the
+ * repository's own code, not a parent an override can be scoped to.
+ */
+const parentOf = (locator: string): Parent | null =>
+  locator.includes('@workspace:')
+    ? null
+    : { name: splitName(locator)[0], version: readLocator(locator).version }
+
+const DECLARATIONS = /^ {2}(dependencies|peerDependencies|optionalDependencies):/
+
+/**
+ * Each entry that declares `pkg` in `dependencies`, `optionalDependencies` or
+ * `peerDependencies`, by the name or through an `npm:` alias of it (#47, #49).
+ * The colon must follow the block name, so `peerDependenciesMeta` is not read.
+ */
+export const parents = (text: string, pkg: string): Parent[] => {
+  const found: Parent[] = []
+  let parent: Parent | null = null
+  let inDeclarations = false
+  for (const line of lines(text)) {
+    if (/^[^ \t\n\v\f\r#]/.test(line)) {
+      parent = null
+      inDeclarations = false
+    }
+    const locator = locatorOf(line)
+    if (locator !== null) {
+      parent = parentOf(locator)
+      continue
+    }
+    if (DECLARATIONS.test(line)) {
+      inDeclarations = true
+      continue
+    }
+    if (/^ {2}[a-zA-Z]/.test(line)) inDeclarations = false
+    if (parent !== null && inDeclarations && /^ {4}/.test(line)) {
+      const declaration = line.slice(4)
+      const declared = before(declaration, ':')
+      const name = declared.replaceAll('"', '')
+      const specifier = declaration
+        .slice(declared.length + 1)
+        .replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '')
+        .replaceAll('"', '')
+      if (name === pkg || aliasTarget(specifier) === pkg) found.push(parent)
+    }
+  }
+  return uniqueParents(found)
 }

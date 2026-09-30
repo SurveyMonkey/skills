@@ -113,7 +113,7 @@ export const resolutionMap = (text: string): ResolutionMap => {
  * `debug@git+ssh://git@host/...` has an `@` in its URL (#50).
  */
 const parentOf = (key: string): Parent => {
-  const at = (key + '@').indexOf('@', 1)
+  const at = `${key}@`.indexOf('@', 1)
   const version = key.slice(at + 1)
   return { name: key.slice(0, at), version: /^[0-9]/.test(version) ? version : null }
 }
