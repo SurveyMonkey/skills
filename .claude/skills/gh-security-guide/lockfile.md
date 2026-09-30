@@ -52,3 +52,10 @@ named in `parents_other_lines`; only an on-line copy whose manifest is truly abs
 `spec/fixtures/npm-alias-installed` is a separate specimen of the installed state `declared_ranges`
 reads. A fixture carrying a directory that does not exist where the verb runs is not a specimen of
 reality, and it is why the suite stayed green through this.
+
+## The TypeScript readers
+
+`plugins/gh-security/src/lockfiles/` has one reader for each format: `npm.ts`, `pnpm.ts` and
+`yarn.ts`. `shared.ts` has the parse guard and the answer types. Each reader gives resolved
+versions, the resolution map and the parents of a package, as plain data. They replace the
+lockfile parsers of `node.sh`, which stay until #223.
