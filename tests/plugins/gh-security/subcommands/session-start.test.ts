@@ -215,6 +215,26 @@ describe('sessionStartOutput', () => {
       })
     })
 
+    it('measures the deadline from the start of the check, not from clock zero', () => {
+      let time = 5_000
+      const asked: string[] = []
+      const output = sessionStartOutput(
+        [{ tool: 'jq', label: 'jq' }],
+        edges({
+          env: { PATH: '/a:/b' },
+          now: () => time,
+          executable: (path) => {
+            asked.push(path)
+            time += 10
+            return false
+          },
+        }),
+        100,
+      )
+      expect(asked).toEqual(['/a/jq', '/b/jq'])
+      expect(JSON.parse(output).systemMessage).toBe(`\n${problem('jq is missing')}`)
+    })
+
     it('uses a deadline well under the 3 second hook timeout', () => {
       expect(DEADLINE_MS).toBe(1500)
     })

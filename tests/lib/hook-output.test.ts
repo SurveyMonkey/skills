@@ -8,6 +8,7 @@ describe('colour', () => {
   it('leaves a line without the prefix unchanged', () => {
     expect(colour('demo', 'other: text')).toBe('other: text')
     expect(colour('demo', 'demo:text')).toBe('demo:text')
+    expect(colour('demo', 'not demo: text')).toBe('not demo: text')
   })
 
   it('makes a status line cyan, with the prefix in bold', () => {
