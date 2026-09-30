@@ -364,7 +364,8 @@ describe('why, with no raw text', () => {
   it('answers stdout and stderr both as raw, when the command exits with an error', async () => {
     const root = copyOf('npm-v3')
     const { detection } = treeAt(root)
-    const script = "process.stdout.write('OUT'),process.stderr.write('ERR'),process.exit(3)"
+    // `exitCode`, not `exit()`: node can end before a pipe write is done.
+    const script = "process.stdout.write('OUT'),process.stderr.write('ERR'),process.exitCode=3"
     const answer = await node.why(
       { root, detection: { ...detection, why_cmd: `node -e ${script}` } },
       'express',
@@ -379,7 +380,8 @@ describe('why, with no raw text', () => {
     expect(answer.outcome === 'ok' && answer.value.raw).toBe('spawn npm ENOENT')
   })
 
-  // A caller that fills `raw` from an optional flag gives `raw: undefined`.
+  // `raw: undefined` is the runner form too. A caller with a `raw` of type
+  // `string | undefined` must still give one of the two forms.
   it('runs why_cmd when raw is undefined', async () => {
     const root = copyOf('npm-v3')
     const answer = await node.why(treeAt(root), 'express', { raw: undefined, run, env: NO_PATH })
