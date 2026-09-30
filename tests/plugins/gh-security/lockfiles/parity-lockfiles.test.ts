@@ -20,13 +20,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { run } from '#gh-security/lib/process-runner.ts'
 import * as npm from '#gh-security/lockfiles/npm.ts'
 import * as pnpm from '#gh-security/lockfiles/pnpm.ts'
 import type { ResolutionMap, ResolvedVersions } from '#gh-security/lockfiles/shared.ts'
 import * as yarn from '#gh-security/lockfiles/yarn.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
-import { checkParity, type ParitySubject } from '#harness/parity.ts'
+import { checkParity, type ParitySubject, runBash } from '#harness/parity.ts'
 import { GH_SECURITY_ROOT } from '#harness/paths.ts'
 
 const ADAPTER = join(GH_SECURITY_ROOT, 'scripts', 'ecosystems', 'node.sh')
@@ -130,7 +129,7 @@ const resolvedVersionsSubject: ParitySubject<readonly [Case, string]> = {
 // `die` writes `{"error": ...}`. For lockfileVersion 1, jq writes its own error
 // line. The check is that the bash stderr contains the TypeScript message.
 const refusal = (bash: { cwd: string; args: string[] }, typescript: () => unknown): string => {
-  const result = run({ command: ADAPTER, args: bash.args, cwd: bash.cwd })
+  const result = runBash({ command: ADAPTER, args: bash.args, cwd: bash.cwd })
   let message = 'the TypeScript side answered'
   try {
     typescript()
@@ -144,7 +143,7 @@ const refusal = (bash: { cwd: string; args: string[] }, typescript: () => unknow
 // The package names of the bash map. Each one becomes a query for the
 // TypeScript side.
 const bashPackages = ({ dir }: Case): string[] => {
-  const result = run({ command: ADAPTER, args: ['resolution_map'], cwd: dir })
+  const result = runBash({ command: ADAPTER, args: ['resolution_map'], cwd: dir })
   const answer = JSON.parse(result.stdout) as { resolutions: Record<string, unknown> }
   return Object.keys(answer.resolutions)
 }

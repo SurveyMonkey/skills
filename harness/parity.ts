@@ -5,9 +5,8 @@
 // parity-green on every fixture that covered it.
 //
 // It is generic over an invocation pair on one input (this issue's plan
-// comment, ruling B): a bash command line, run through the process runner
-// with the real spawn because the bash side is the boundary being measured,
-// and a TypeScript call. Both answer JSON; a structural comparison reports
+// comment, ruling B): a bash command line, run as a real process because the
+// bash side is the boundary being measured, and a TypeScript call. Both answer JSON; a structural comparison reports
 // the first differing path in a form a reviewer can act on, because "the two
 // disagree" is a verdict nobody can fix from.
 //
@@ -19,13 +18,61 @@
 // coverage include, and it is deleted with the last bash script it has
 // anything left to compare against (#241).
 
+import { spawnSync } from 'node:child_process'
+import { constants } from 'node:os'
 import type { JsonValue } from '#lib/envelope.ts'
-import { describeRun, type RunRequest, run } from '#lib/process-runner.ts'
+
+/** One bash invocation. */
+export interface BashRequest {
+  readonly command: string
+  readonly args: readonly string[]
+  /** Where the command runs. Absent means the current directory. */
+  readonly cwd?: string
+}
+
+export interface BashResult {
+  readonly status: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/** 64 MiB, so that a large bash answer is not cut short. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+
+/**
+ * Run the bash side as a real process, synchronously, with no shell.
+ *
+ * Synchronous, and not `lib/process.ts`, because a suite calls it while
+ * vitest collects the examples (`parity-lockfiles.test.ts` finds its package
+ * names that way), and collection does not wait for a promise. The
+ * statuses are a shell's: 127 for a command that never started, and 128
+ * plus the signal number for a signal death.
+ */
+export const runBash = (request: BashRequest): BashResult => {
+  const result = spawnSync(request.command, [...request.args], {
+    cwd: request.cwd,
+    encoding: 'utf8',
+    maxBuffer: MAX_OUTPUT_BYTES,
+    shell: false,
+  })
+  if (result.error !== undefined) {
+    return { status: 127, stdout: '', stderr: result.error.message }
+  }
+  const status = result.status ?? 128 + constants.signals[result.signal as NodeJS.Signals]
+  return { status, stdout: result.stdout, stderr: result.stderr }
+}
+
+/** A failed bash run, in one line. */
+const describeRun = (request: BashRequest, result: BashResult): string => {
+  const detail = result.stderr.trim() || result.stdout.trim() || 'no output'
+  const invocation = [request.command, ...request.args].join(' ')
+  return `${invocation} failed (exit ${result.status}): ${detail}`
+}
 
 /** One behavior, spelled both ways. */
 export interface ParitySubject<Input> {
   /** The bash invocation for one input, run as a real process. */
-  readonly bash: (input: Input) => RunRequest
+  readonly bash: (input: Input) => BashRequest
   /** The TypeScript call for the same input, answering the same JSON. */
   readonly typescript: (input: Input) => JsonValue
 }
@@ -109,9 +156,9 @@ export const firstDifference = (
  */
 export const checkParity = <Input>(subject: ParitySubject<Input>, input: Input): ParityVerdict => {
   const request = subject.bash(input)
-  const result = run(request)
+  const result = runBash(request)
   if (result.status !== 0) {
-    return { matched: false, report: `bash did not answer: ${describeRun(result)}` }
+    return { matched: false, report: `bash did not answer: ${describeRun(request, result)}` }
   }
   let answered: JsonValue
   try {
