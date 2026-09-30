@@ -338,6 +338,19 @@ describe('declared_ranges on one line', () => {
     })
   })
 
+  // node.sh writes `-` for a copy with no version, and names it by the parent alone.
+  it('files a copy with no version on another line by its name alone', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, 'package-lock.json', (json) => {
+      const { packages } = json as unknown as { packages: Record<string, Record<string, unknown>> }
+      delete packages['node_modules/test-exclude']?.version
+      return json
+    })
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', 4)).parents_other_lines).toEqual(
+      ['test-exclude'],
+    )
+  })
+
   // No copy of lodash is installed for express or for the root, so both stay.
   it('keeps a dependent whose line is unknown', () => {
     expect(body(node.declaredRanges(tree('npm-v3'), 'lodash', 3))).toMatchObject({

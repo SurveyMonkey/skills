@@ -256,6 +256,14 @@ describe('malformed input', () => {
     expect(resolutionMap(text).resolutions).toEqual({ a: ['1.0.0'] })
   })
 
+  it('refuses a top level that is not an object, with the lockfileVersion 1 message', () => {
+    expect(() => resolutionMap('null')).toThrow(
+      new LockfileError(
+        'package-lock.json has no .packages object (lockfileVersion 1 is unsupported)',
+      ),
+    )
+  })
+
   it('refuses a packages value that is an array, with the lockfileVersion 1 message', () => {
     expect(() => resolutionMap('{"packages":[]}')).toThrow(
       new LockfileError(
