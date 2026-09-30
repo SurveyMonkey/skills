@@ -1,5 +1,5 @@
 // The entry point of the SessionStart hook. `hooks.json` runs it with node.
-// It holds no decisions: the `session-start` subcommand is the hook.
+// It holds no check logic: the `session-start` subcommand is the hook.
 //
 // **The floor guard is the only static import.** Node evaluates every
 // `import` before the first statement. A second static import would load
@@ -10,8 +10,8 @@
 //
 // **Below the floor, this file writes one `systemMessage` line.** A
 // SessionStart hook runs once, so it may say so. The line has no colour, and
-// this file imports no module to write it, because the old runtime may not
-// load one.
+// this file imports nothing more than the floor guard to write it, because
+// the old runtime may not load one.
 //
 // **Nothing here may stop a session.** An error inside the `try` block goes
 // to stderr as a stack, and the exit status stays 0. A failed `await import`

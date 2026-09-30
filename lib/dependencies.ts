@@ -1,5 +1,6 @@
-// The dependency check for a SessionStart hook (`.claude/rules/_design-principles.md`,
-// "Dependencies outside a plugin"). A plugin declares its tools as a table.
+// The dependency check for a SessionStart hook
+// (`.claude/skills/plugin-design/dependencies.md`). A plugin declares its
+// tools as a table.
 // The hook asks this file which of them are absent.
 //
 // This file is pure. It takes the table and the lookup as arguments, so a

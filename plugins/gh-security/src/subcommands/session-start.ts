@@ -3,7 +3,9 @@
 //
 // When all tools are present, it writes nothing. When one is missing, it
 // writes one JSON object with `systemMessage` and `additionalContext`. It
-// never writes plain text to stdout, and it always exits 0.
+// never writes plain text to stdout, and it returns success. When only the
+// deadline passed, nothing is known to be missing, so the object has no
+// `additionalContext`.
 //
 // A PATH scan does the lookup, so no child process starts. The scan has a
 // deadline. A tool that the scan did not reach counts as present, because
