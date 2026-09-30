@@ -11,13 +11,14 @@ import { notImplemented } from '../lib/envelope.ts'
 import type { Adapter } from './adapter.ts'
 import { detect, type NodeDetection } from './node/detect.ts'
 import { resolutionMap, resolvedVersions } from './node/lockfiles.ts'
+import { parents } from './node/parents.ts'
 import { compareVersions, rangeFacts } from './node/semver.ts'
 
 export const node: Adapter<NodeDetection> = {
   detect,
   resolvedVersions,
   resolutionMap,
-  parents: () => notImplemented('parents'),
+  parents,
   why: async () => notImplemented('why'),
   declaredRanges: () => notImplemented('declared_ranges'),
   listPins: () => notImplemented('list_pins'),
