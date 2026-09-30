@@ -1,11 +1,11 @@
 // What a command is, and the real io the entry point hands it (#224).
 //
-// A command is an exported, typed handler. It gives back an envelope, or a
-// promise of one (issue #216's decision comment). The registry is a map from a name to a loader
-// for one of those plus the line `--help` prints for it. The io is a
-// parameter for the same reason the `gh` client's `run` is one: it is the
-// boundary, so an example substitutes it rather than reading the real process
-// streams.
+// A command is an exported, typed handler. It gives back a `CommandResult`, or
+// a promise of one (issue #216's decision comment). The registry is a map from
+// a name to a loader for one of those plus the line `--help` prints for it.
+// The io is a parameter for the same reason the `gh` client's `run` is one: it
+// is the boundary, so an example substitutes it rather than reading the real
+// process streams.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs`.
@@ -37,8 +37,8 @@ export interface CommandContext {
 }
 
 /**
- * An envelope, a failed report, or silence. Silence is exit 0 with nothing written, which the
- * PreToolUse hook contract needs: no decision means the normal permission
+ * An envelope, a failed report, or silence. Silence is exit 0 with nothing
+ * written, which the PreToolUse hook contract needs: no decision means the normal permission
  * prompt stands, and a hook that printed something to say so would be
  * putting text into the transcript for every Bash command a session runs.
  */

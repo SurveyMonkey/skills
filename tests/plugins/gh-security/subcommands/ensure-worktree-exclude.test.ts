@@ -4,8 +4,8 @@
 // `parity-ensure-worktree-exclude.test.ts`.
 //
 // The concurrency example starts real processes, because the lock is for
-// processes. Inside one process, the read, the change and the write run without
-// a pause, but two calls can still overlap while they wait for git or the lock.
+// processes. Inside one process, the guarded section has no `await`, so two
+// calls cannot overlap in it. Only separate processes can.
 import {
   chmodSync,
   existsSync,

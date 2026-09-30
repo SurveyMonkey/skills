@@ -22,9 +22,10 @@
 //   no .git above the directory                    not a repository, refuse
 //
 // A submodule pointer is relative. A repository under a directory named
-// `modules` is an ordinary repository. So each marker is matched with its `/`
-// separators, and the marker that comes LAST decides: a submodule inside a
-// linked worktree carries both, and it is a submodule. The `.git/modules/`
+// `modules` is an ordinary repository. So the `/worktrees/` and `/modules/`
+// markers are matched with their `/` separators. The marker that comes LAST
+// decides: a submodule inside a linked worktree carries both, and it is a
+// submodule. The `.git/modules/`
 // probe covers a submodule whose path starts with `worktrees/`, where the last
 // marker is wrong. When the pointer is unclear, the guard refuses.
 //
@@ -111,8 +112,8 @@ export const requireLinkedWorktree = (
   directory: string,
   context: string = DEFAULT_CONTEXT,
 ): Envelope<string> => {
-  // The walk up needs an absolute path: `dirname('.')` is `.`, so a relative
-  // path would stop it after one step.
+  // The walk up needs an absolute path: `dirname('.')` is `.`, so the walk of
+  // a relative path never leaves the cwd.
   const start = resolve(directory)
   const top = enclosingTop(start)
   if (top === null) return refuse(context, `no git repository at or above ${start}`)
