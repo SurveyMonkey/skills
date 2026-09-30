@@ -42,7 +42,26 @@ export interface CommandContext {
  * prompt stands, and a hook that printed something to say so would be
  * putting text into the transcript for every Bash command a session runs.
  */
-export type CommandResult = Envelope<JsonValue> | undefined
+export type CommandResult = Envelope<JsonValue> | FailedReport | undefined
+
+/**
+ * A `failed` outcome that also carries the report the command built. The
+ * ADR 001 `failed` outcome has a message and no payload. A command that
+ * reports and fails (`pr-status`) needs a caller to read its report on
+ * stdout, with exit 1. `run.ts` writes the report to stdout and the
+ * message to stderr.
+ */
+export interface FailedReport {
+  readonly outcome: 'failed'
+  readonly error: string
+  readonly report: JsonValue
+}
+
+export const failedReport = (error: string, report: JsonValue): FailedReport => ({
+  outcome: 'failed',
+  error,
+  report,
+})
 
 export type CommandHandler = (context: CommandContext) => CommandResult
 
