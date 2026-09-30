@@ -18,7 +18,10 @@ import { delimiter, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { GH_SECURITY_ENTRY, GH_SECURITY_ROOT, PLUGIN_ROOT_PLACEHOLDER } from '#harness/paths.ts'
+import { PLUGIN_ROOT_PLACEHOLDER, pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
+const GH_SECURITY_ENTRY = join(GH_SECURITY_ROOT, 'scripts', 'gh-security.ts')
 
 type HookCommand = { readonly type: string; readonly command: string; readonly timeout?: number }
 type HooksFile = {

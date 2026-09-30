@@ -89,8 +89,8 @@ process boundary gave for free: a crash the caller could see as an exit code (RF
 
 **`lib/process.ts` runs a child process, and never rejects.** A child that fails, is killed at
 its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `startFailure`,
-`streamErrors`), not a throw. It is asynchronous. `lib/git.ts` runs git through it. `harness/parity.ts` is still
-synchronous, so it keeps a local runner until it converges.
+`streamErrors`), not a throw. It is asynchronous. `lib/git.ts` runs git through it. `harness/parity.ts` is
+synchronous, so it keeps a local runner.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
 into handlers and mocked one method at a time. Its API is the target stack's. It has one method,

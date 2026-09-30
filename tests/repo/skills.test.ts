@@ -3,7 +3,7 @@
 // is proven red on a scratch tree, then held green on this repository.
 import { describe, expect, it } from 'vitest'
 
-import { PLUGIN_ROOT_PLACEHOLDER as PLUGIN_ROOT, REPO_ROOT } from '#harness/paths.ts'
+import { PLUGIN_ROOT_PLACEHOLDER as PLUGIN_ROOT, ROOT } from '#harness/paths.ts'
 import {
   commandVariables,
   missingFlows,
@@ -12,7 +12,7 @@ import {
   trackedFiles,
 } from '#harness/repo-layout.ts'
 
-const repo = trackedFiles(REPO_ROOT)
+const repo = trackedFiles(ROOT)
 
 // The floor under both repository examples below: a discovery that stopped
 // matching would make them pass while checking nothing.
@@ -67,6 +67,6 @@ describe('no command held in a shell variable in a SKILL.md', () => {
   })
 
   it('holds for this repository', () => {
-    expect(commandVariables(REPO_ROOT, repo)).toEqual([])
+    expect(commandVariables(ROOT, repo)).toEqual([])
   })
 })

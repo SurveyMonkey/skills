@@ -36,7 +36,9 @@ import { describe, expect, it } from 'vitest'
 import { rangeFacts } from '#gh-security/semver/ranges.ts'
 import { versionFacts } from '#gh-security/semver/versions.ts'
 import { checkParity, type ParitySubject } from '#harness/parity.ts'
-import { GH_SECURITY_ROOT } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const ADAPTER = join(GH_SECURITY_ROOT, 'scripts', 'ecosystems', 'node.sh')
 

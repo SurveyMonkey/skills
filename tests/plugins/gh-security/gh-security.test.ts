@@ -14,7 +14,9 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { run } from '#gh-security/lib/process.ts'
-import { GH_SECURITY_ENTRY as ENTRY } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 
 const entry = (args: readonly string[], request: { input?: string } = {}) =>
   run(process.execPath, [ENTRY, ...args], { stdin: request.input })

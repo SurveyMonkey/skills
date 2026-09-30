@@ -4,7 +4,7 @@
 // more, pointing at the repository being committed to; `git -c` adds
 // GIT_CONFIG_PARAMETERS. The runners in `lib/` give the inherited environment
 // to a child by default. So under a hook, each git call an example makes,
-// including the calls on the scratch repositories that harness/git-repo.ts
+// including the calls on the scratch repositories that harness/git.ts
 // builds, would act on this repository instead. On #273 that wrote
 // `core.bare = true` and a test identity into the real `.git/config`, and
 // moved a worktree's HEAD.

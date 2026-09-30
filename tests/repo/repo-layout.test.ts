@@ -4,7 +4,7 @@
 // offending path, never a count read back from the code.
 import { describe, expect, it } from 'vitest'
 
-import { REPO_ROOT } from '#harness/paths.ts'
+import { ROOT } from '#harness/paths.ts'
 import {
   binDirectories,
   commandDirectories,
@@ -16,7 +16,7 @@ import {
   trackedFiles,
 } from '#harness/repo-layout.ts'
 
-const repo = trackedFiles(REPO_ROOT)
+const repo = trackedFiles(ROOT)
 
 // The floor under every repository example below: a tracked list that came
 // back empty, or lost the plugin or lib/, would make them pass while checking
@@ -91,7 +91,7 @@ describe('plugins/<p>/src/lib is the exact link ../../../lib', () => {
 
   it('holds for this repository, which has the link', () => {
     expect(repo).toContain('plugins/gh-security/src/lib')
-    expect(libLinkViolations(REPO_ROOT, repo)).toEqual([])
+    expect(libLinkViolations(ROOT, repo)).toEqual([])
   })
 })
 
@@ -112,7 +112,7 @@ describe('no # import in shipped code', () => {
   })
 
   it('holds for this repository', () => {
-    expect(packageImports(REPO_ROOT, repo)).toEqual([])
+    expect(packageImports(ROOT, repo)).toEqual([])
   })
 })
 
@@ -141,6 +141,6 @@ describe('shipped code imports nothing outside its own tree', () => {
   })
 
   it('holds for this repository', () => {
-    expect(escapingImports(REPO_ROOT, repo)).toEqual([])
+    expect(escapingImports(ROOT, repo)).toEqual([])
   })
 })
