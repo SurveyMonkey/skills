@@ -4,16 +4,28 @@
 // command is run here from the file itself, with the placeholder expanded the
 // way Claude Code expands it, and the allow hook is run end to end.
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { GH_SECURITY_ENTRY, GH_SECURITY_ROOT, PLUGIN_ROOT_PLACEHOLDER } from '#harness/paths.ts'
 
-type HookCommand = { readonly type: string; readonly command: string }
+type HookCommand = { readonly type: string; readonly command: string; readonly timeout?: number }
 type HooksFile = {
-  readonly hooks: Record<string, readonly { readonly hooks: readonly HookCommand[] }[]>
+  readonly hooks: Record<
+    string,
+    readonly { readonly matcher?: string; readonly hooks: readonly HookCommand[] }[]
+  >
 }
 
 const file = JSON.parse(
@@ -59,5 +71,60 @@ describe('hooks.json', () => {
         permissionDecisionReason: expect.stringContaining('version'),
       },
     })
+  })
+})
+
+describe('the SessionStart entry', () => {
+  const groups = file.hooks.SessionStart ?? []
+  const command = groups[0]?.hooks[0]?.command ?? ''
+  const directories: string[] = []
+  const pathWith = (make: (directory: string) => void): string => {
+    const directory = mkdtempSync(join(tmpdir(), 'gh-security-hooks-'))
+    directories.push(directory)
+    make(directory)
+    return directory
+  }
+  const toolPath = (tool: string): string => {
+    const found = (process.env.PATH ?? '')
+      .split(delimiter)
+      .filter((directory) => directory !== '')
+      .map((directory) => join(directory, tool))
+      .find((candidate) => existsSync(candidate))
+    if (found === undefined) throw new Error(`${tool} is needed on PATH to run this suite`)
+    return found
+  }
+  const sh = (PATH: string) =>
+    execFileSync('/bin/sh', ['-c', expand(command)], { env: { PATH }, encoding: 'utf8' })
+
+  afterEach(() => {
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true })
+  })
+
+  it('has one group with the matcher and the 3 second timeout', () => {
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.matcher).toBe('startup|resume|clear|compact')
+    expect(groups[0]?.hooks).toEqual([{ type: 'command', command, timeout: 3 }])
+  })
+
+  it('writes the systemMessage JSON and exits 0 when node is not on PATH', () => {
+    expect(sh('')).toBe('{"systemMessage":"\\ngh-security: ⚠️ node not found on PATH"}\n')
+    expect(JSON.parse(sh(''))).toEqual({ systemMessage: '\ngh-security: ⚠️ node not found on PATH' })
+  })
+
+  it('writes nothing when node and every other tool are on PATH', () => {
+    const PATH = pathWith((directory) => {
+      symlinkSync(process.execPath, join(directory, 'node'))
+      for (const tool of ['git', 'gh', 'bash', 'jq'])
+        symlinkSync(toolPath(tool), join(directory, tool))
+    })
+    expect(sh(PATH)).toBe('')
+  })
+
+  it('exits 0 when the hook file makes node exit non-zero', () => {
+    const PATH = pathWith((directory) => {
+      writeFileSync(join(directory, 'node'), '#!/bin/sh\nexit 5\n')
+      chmodSync(join(directory, 'node'), 0o755)
+    })
+    expect(sh(PATH)).toBe('')
   })
 })

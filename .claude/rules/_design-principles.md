@@ -26,9 +26,8 @@ before work starts:
 Challenge also when the user asks for the divergent design. Do not silently build a
 simpler design than the one approved.
 
-Known divergences have issues: gh-security has no `SessionStart` check yet (#275), and its
-`resolve-alerts` `SKILL.md` is over 500 lines (#237). Do not migrate one as a side effect of other
-work.
+A known divergence has an issue: the `resolve-alerts` `SKILL.md` of gh-security is over 500
+lines (#237). Do not migrate it as a side effect of other work.
 
 Before you design or change a skill, agent, hook, script, command or plugin, invoke the
 `plugin-design` skill.

@@ -25,7 +25,7 @@ It still checks each tool that it uses, so that a user who is not set up gets an
   `command -v node` and writes the `systemMessage` JSON itself. Shell in a `hooks.json` string is
   not a bash file.
 - A `SessionStart` hook runs once, not on every tool call. Below the node floor, it may write one
-  `systemMessage` line with the floor version. A hook on each tool call still checks
-  the floor and stays silent (`meetsNodeFloor`, which lands in `lib/node-floor.ts` with #274).
+  `systemMessage` line with the floor version. A hook on each tool call checks the floor with
+  `meetsNodeFloor` (in `lib/node-floor.ts`) and stays silent.
 - Do not check an optional plugin. A skill sees the available skills in its listing, and works
   around an absent one.
