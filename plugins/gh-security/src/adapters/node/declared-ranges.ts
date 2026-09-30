@@ -15,7 +15,10 @@
 // that the lockfile answers for gets its line from its row. For npm and
 // yarn, the root and a parent that its manifest answers for get the line
 // from node resolution over the installed tree. The nested copy is first,
-// then the hoisted one. The verb does not run `detect`.
+// then the hoisted one. For pnpm, the root gets its line from `importers:`,
+// and each parent from its rows.
+//
+// The verb does not run `detect`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -125,8 +128,9 @@ const fromCopies = (
       )
       continue
     }
-    // An empty range is no range. Only a pnpm row has none: its snapshots
-    // record what resolved, never what was declared (#100).
+    // A row with no range, an empty range or `-` is unread. Each pnpm row
+    // has no range: its snapshots record what resolved, never what was
+    // declared (#100). An npm or Yarn row gets here for a `""` or `-` range.
     if (row.range !== null && row.range !== '' && row.range !== '-') {
       collected.ranges.push(row.range)
       read = true

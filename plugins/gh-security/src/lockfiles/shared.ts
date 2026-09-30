@@ -55,7 +55,11 @@ export type Parent = {
  */
 export type Copy = {
   readonly parent: string
-  /** The version of this copy of the parent, or `null` if the reader finds none. */
+  /**
+   * The version of this copy of the parent, or `null` if the reader finds
+   * none. The Yarn reader gives `''` for an entry with no `version:` line,
+   * as `YARN_COPY_AWK` does.
+   */
   readonly parent_version: string | null
   /** The range that this copy declares, or `null`: pnpm records no declared range. */
   readonly range: string | null

@@ -88,7 +88,11 @@ export type RangeFactsAnswer = {
 /** A copy that declares a package, and the version that the lockfile records for it. */
 type ParentCopy = {
   readonly name: string
-  /** Null when the lockfile records no version for this copy, as for a git target. */
+  /**
+   * Null when the reader finds no version for this copy. The pnpm reader
+   * also gives null for a version that does not start with a digit, such as
+   * a `file:` or a git target.
+   */
   readonly version: string | null
 }
 
@@ -96,7 +100,10 @@ type ParentCopy = {
 export type ParentsAnswer = {
   readonly pm: string
   readonly package: string
-  /** Sorted as text by name and then version. The root is never a parent. */
+  /**
+   * Each copy once, sorted as the JSON text of `[name, version]`. For usual
+   * names, that is by name and then version. The root is never a parent.
+   */
   readonly parents: readonly ParentCopy[]
 }
 
@@ -141,8 +148,8 @@ export type WhySource =
 /**
  * The `declared_ranges` answer. `parents_read`, `parents_without_range`,
  * `parents_unreadable` and `parents_malformed` name each parent once.
- * `parents_other_lines` has one entry for each copy on another line, so an
- * entry can repeat. A parent can be in `parents_read` and in
+ * `parents_other_lines` has one entry for each lockfile row on another line,
+ * so an entry can repeat. A parent can be in `parents_read` and in
  * `parents_other_lines` both.
  */
 export type DeclaredRangesAnswer = {
@@ -150,7 +157,11 @@ export type DeclaredRangesAnswer = {
   readonly package: string
   /** The major line that the answer is limited to, or null for all lines. */
   readonly line: number | null
-  /** Unique and sorted as text. When `root_range` is not null, it is one of them. */
+  /**
+   * Unique and sorted as text. A range that holds a newline gives one entry
+   * for each line. So `root_range`, when not null, is one of them only when
+   * it has no newline.
+   */
   readonly ranges: readonly string[]
   /** The range that the root manifest declares, or null. */
   readonly root_range: string | null
@@ -160,8 +171,8 @@ export type DeclaredRangesAnswer = {
   /** No declaration could be read. The root copy is never in this list. */
   readonly parents_unreadable: readonly string[]
   /**
-   * The subset of `parents_unreadable` whose manifest is on disk, but does
-   * not parse or has a dependency block that jq cannot read.
+   * The subset of `parents_unreadable` whose manifest is on disk, but cannot
+   * be read, does not parse, or has a dependency block that jq cannot read.
    */
   readonly parents_malformed: readonly string[]
   /** On a different line than `line`: `name` or `name@version`, and `__root__` for the root. */

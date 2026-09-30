@@ -130,9 +130,11 @@ type Importer = { readonly path: string; readonly kind: ImporterKind }
 export type Edge = {
   readonly parent: Parent
   /**
-   * The text after the `@` of the parent key, or `null` when it is empty.
-   * `parent.version` holds only a version that starts with a digit. This
-   * also holds a `file:` or a URL version, as `pnpm_copy_rows` does.
+   * The text after the `@` that ends the parent name, or `null` when it is
+   * empty. `parent.version` holds only a version that starts with a digit.
+   * This also holds a `file:` or a URL version. `pnpm_copy_rows` splits the
+   * key at its last `@`, so for a URL with its own `@` the two differ, but
+   * `name@version` is the same text (#50).
    */
   readonly parentVersion: string | null
   /** The version that the edge resolves, or `null` when it does not start with a digit. */

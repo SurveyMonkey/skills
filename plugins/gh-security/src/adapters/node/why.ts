@@ -99,7 +99,8 @@ const factsOf = (tree: Tree<NodeDetection>, pkg: string): Omit<WhyAnswer, 'raw'>
  * The output of `why_cmd` for `pkg`: stdout and stderr both, in the order
  * that their chunks came in. node.sh writes the two to one file
  * (`> file 2>&1`), in the order of the writes, so the mix can differ. The
- * command splits at white space, as the shell splits an unquoted word.
+ * command splits at white space, as the shell splits an unquoted word. The
+ * shell also expands a glob in it, and this does not.
  */
 const runWhy = async (
   { root, detection }: Tree<NodeDetection>,

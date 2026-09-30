@@ -374,7 +374,7 @@ describe('copies', () => {
     ])
   })
 
-  // `pnpm_copy_rows` keeps the text after the `@` of the key, and makes only
+  // `pnpm_copy_rows` keeps the text after the `@` that ends the name, and makes only
   // an empty text null. A `file:` copy has a version that is no registry version.
   it('keeps a parent version that is not a registry version, and no version as null', () => {
     const text = [

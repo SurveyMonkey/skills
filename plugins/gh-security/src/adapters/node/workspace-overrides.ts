@@ -44,7 +44,7 @@ const scalarOf = (text: string): string => {
 
 /**
  * `parse_entry`: the key and the value of one line of the block. A quoted key
- * ends at its closing quote, when a colon and a space follow it.
+ * ends at the quote that ends it, when a colon and a space follow it.
  */
 const entryOf = (line: string): WorkspaceOverride => {
   const rest = line.slice(2)
