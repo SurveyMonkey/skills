@@ -171,6 +171,7 @@ describe('list_pins on each override location', () => {
     expect(
       answer.outcome === 'ok' && {
         file: answer.value.override_file,
+        manifest: answer.value.manifest_pnpm_overrides,
         counts: [answer.value.count, answer.value.bare_count],
         pins: answer.value.pins.map(({ key, package: name, selector, parents }) => ({
           key,
@@ -181,6 +182,7 @@ describe('list_pins on each override location', () => {
       },
     ).toEqual({
       file: 'package.json',
+      manifest: [],
       counts: [3, 2],
       pins: [
         { key: 'lodash', name: 'lodash', selector: null, parents: [] },
@@ -284,7 +286,7 @@ describe('list_pins with no pins', () => {
     const { root, detection } = copyOf('npm-v3')
     writeFileSync(join(root, 'package.json'), 'null\n')
     const answer = node.listPins({ root, detection })
-    expect(answer.outcome === 'ok' && answer.value.block_present).toBe(false)
+    expect(answer).toMatchObject({ outcome: 'ok', value: { block_present: false } })
   })
 
   it('reads a manifest with a byte order mark', () => {
@@ -366,6 +368,16 @@ describe('list_pins values', () => {
     put(root, path, { [key]: '^1' })
     const [pin] = pinsOf(node.listPins({ root, detection }))
     expect(pin).toMatchObject({ key, ...fields })
+  })
+
+  // Only a `.` under a parent names that parent. A `.` at the top is a key.
+  it('reads a `.` key at the top of npm overrides as a bare pin of that key', () => {
+    const { root, detection } = copyOf('npm-v3')
+    put(root, ['overrides'], { '.': '^1', a: { '.': '^2' } })
+    expect(pinsOf(node.listPins({ root, detection }))).toMatchObject([
+      { key: '.', path: ['.'], package: '.', parents: [], scope: 'bare' },
+      { key: 'a', path: ['a', '.'], package: 'a', parents: [], scope: 'bare' },
+    ])
   })
 
   it('reads an empty object in npm overrides as no pin', () => {
@@ -608,7 +620,7 @@ describe('list_pins through pnpm-workspace.yaml', () => {
         writeFileSync(path, text)
       }
       const answer = node.listPins(detected)
-      expect(answer.outcome === 'ok' && answer.value.block_present).toBe(false)
+      expect(answer).toMatchObject({ outcome: 'ok', value: { block_present: false } })
     }
   })
 
@@ -669,6 +681,37 @@ describe('list_pins through pnpm-workspace.yaml', () => {
     expect(node.listPins(detected)).toEqual({
       outcome: 'failed',
       error: notAnObjectOfNoType,
+    })
+  })
+
+  // `(.pnpm //= {})` makes the view, but the keys of package.json cannot be read.
+  it('refuses a pnpm field of false, where the keys of package.json are read', () => {
+    const detected = copyOf('pnpm11-workspace-overrides')
+    put(detected.root, ['pnpm'], false)
+    expect(node.listPins(detected)).toEqual({
+      outcome: 'failed',
+      error: 'list_pins: cannot read package.json',
+    })
+  })
+
+  it('reads pnpm.overrides of false in package.json as no keys', () => {
+    const detected = copyOf('pnpm11-workspace-overrides')
+    put(detected.root, ['pnpm', 'overrides'], false)
+    const answer = node.listPins(detected)
+    expect(
+      answer.outcome === 'ok' && [answer.value.count, answer.value.manifest_pnpm_overrides],
+    ).toEqual([4, []])
+  })
+
+  // The detection names pnpm-workspace.yaml (pnpm 11), and the file has no block.
+  it('refuses a pnpm field that is text when the workspace file has no block', () => {
+    const { root } = copyOf('pnpm-cross-line')
+    put(root, ['packageManager'], 'pnpm@11.9.0')
+    put(root, ['pnpm'], 'x')
+    expect(node.listPins(treeAt(root))).toEqual({
+      outcome: 'failed',
+      error:
+        "list_pins: the container holding 'pnpm.overrides' in package.json is not an object, so the override block cannot be read. Refusing to report a manifest this script cannot read as a repository with no pins.",
     })
   })
 

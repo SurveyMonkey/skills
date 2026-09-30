@@ -50,8 +50,8 @@ const entryOf = (line: string): WorkspaceOverride => {
   const rest = line.slice(2)
   let key: string
   let raw: string
-  // A throw from `scalarOf` for the key waits until the value checks are done,
-  // because `parse_entry` checks the value before it returns that error.
+  // A refusal of the key waits for the check for a comment: `parse_entry`
+  // makes that check first.
   let keyRefusal: Refusal | null = null
   const quote = rest.charAt(0)
   if (quote === "'" || quote === '"') {
@@ -74,8 +74,8 @@ const entryOf = (line: string): WorkspaceOverride => {
   if (text.startsWith('#') || INLINE_COMMENT.test(text)) {
     throw new Refusal('an entry carrying an inline comment')
   }
-  const value = scalarOf(text)
   if (keyRefusal !== null) throw keyRefusal
+  const value = scalarOf(text)
   if (value === '') throw new Refusal('an entry with no scalar value (a nested map or sequence)')
   if (/^[&*{[!]/.test(value)) throw new Refusal('an anchor, alias, tag or flow-style value')
   if (/^[|>][+-]?$/.test(value)) throw new Refusal('a block-scalar value')
@@ -155,6 +155,7 @@ export const workspaceOverrides = (root: string): readonly WorkspaceOverride[] =
       `pnpm-workspace.yaml overrides: cannot read the file at all (not a shape problem; check that it exists and is readable from ${root}).`,
     )
   }
-  // awk reads no record after the last newline.
-  return readLines(text.replace(/\n$/, '').split('\n'))
+  // After the last newline, the text has one more empty line than awk
+  // reads. The reader skips an empty line, so it has no effect.
+  return readLines(text.split('\n'))
 }
