@@ -51,10 +51,9 @@ const parse = (text: string): unknown => {
   try {
     return JSON.parse(text)
   } catch (error) {
-    throw new LockfileError(
-      `package-lock.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    )
+    throw new LockfileError(`package-lock.json is not valid JSON: ${String(error)}`, {
+      cause: error,
+    })
   }
 }
 
