@@ -37,7 +37,7 @@ describe('renderJson', () => {
   // 001 states: JSON on stdout, human-readable detail on stderr. The bash
   // `die` definitions print both, and a port that dropped the stdout half
   // would leave a caller parsing an empty string.
-  it('writes an error as {"error": ...} on stdout and the message on stderr', () => {
+  it('writes a failure as {"error": ...} on stdout and the message on stderr', () => {
     expect(renderJson(failed('no state file at /w/state.json; run setup first'))).toEqual({
       stdout: '{"error":"no state file at /w/state.json; run setup first"}',
       stderr: 'no state file at /w/state.json; run setup first',
@@ -63,6 +63,17 @@ describe('renderJson', () => {
       stderr: 'Yarn Classic (v1) is not supported. See .github/CONTRIBUTING.md to request support.',
       exitCode: 3,
     })
+  })
+
+  // A falsy payload is still a success. Reading the outcome off the truthiness
+  // of the value would send it down the failure path.
+  it.each([
+    [null, 'null'],
+    [0, '0'],
+    [false, 'false'],
+    ['', '""'],
+  ] as const)('writes the falsy success value %j as %s and exits 0', (value, json) => {
+    expect(renderJson(ok(value))).toEqual({ stdout: json, stderr: '', exitCode: 0 })
   })
 
   // Neither string carries a line ending. The entry point writes one; a
@@ -115,6 +126,26 @@ describe('unwrap', () => {
   // point renders `envelope`, so an `EnvelopeError` that carried only a
   // message would turn a `not-implemented` verb into a generic error and
   // change the exit code a caller responds to.
+  it.each([[null], [0], [false], ['']] as const)('returns the falsy success value %j', (value) => {
+    expect(unwrap(ok(value))).toBe(value)
+  })
+
+  // The toolchain field of an exit 3 has to survive the throw too.
+  it('keeps the toolchain of an unsupported failure', () => {
+    const failure = unsupported('bun', 'bun is not supported.')
+    let thrown: unknown
+    try {
+      unwrap(failure)
+    } catch (error) {
+      thrown = error
+    }
+    expect((thrown as EnvelopeError).envelope).toEqual({
+      outcome: 'unsupported',
+      error: 'bun is not supported. See .github/CONTRIBUTING.md to request support.',
+      unsupported: 'bun',
+    })
+  })
+
   it('throws an EnvelopeError carrying the whole failure', () => {
     let thrown: unknown
     try {
@@ -137,6 +168,10 @@ describe('unwrap', () => {
 describe('renderText', () => {
   // A payload that is already text is written as it is. `renderJson` would
   // quote it, which is a different contract with the same exit code.
+  it('writes an empty success payload as empty text and exits 0', () => {
+    expect(renderText(ok(''))).toEqual({ stdout: '', stderr: '', exitCode: 0 })
+  })
+
   it('writes a success payload verbatim and exits 0', () => {
     const url = 'https://example.test/view#abc'
     expect(renderText(ok(url))).toEqual({ stdout: url, stderr: '', exitCode: 0 })

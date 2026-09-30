@@ -29,8 +29,9 @@ export type JsonObject = { [key: string]: JsonValue }
  * The four ADR 001 outcomes. `failed` carries the message the twelve bash
  * `die` definitions used to print; `unsupported` additionally names the
  * toolchain, which is the field `node.sh` emits beside its exit 3 today.
- * The target stack names exit 1 `failed` and has no exit 3, so this type
- * matches it except for the two extra arms.
+ * The target stack has `failed` (exit 1) and `refused` (exit 2), and no
+ * exit 3. This type shares `failed`, drops `refused`, and adds
+ * `not-implemented` (exit 2) and `unsupported` (exit 3).
  */
 export type Failure =
   | { readonly outcome: 'failed'; readonly error: string }
