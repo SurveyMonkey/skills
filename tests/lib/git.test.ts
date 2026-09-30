@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 import {
   currentBranch,
@@ -44,13 +44,16 @@ const cleanEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => {
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith('GIT_')) env[key] = value
   }
-  return { ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', ...extra }
+  return { ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', LC_ALL: 'C', ...extra }
 }
 
 /** Real git, the setup path. It is a separate call from the code under test. */
 const setup = (dir: string, ...args: string[]): string => {
   const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: cleanEnv() })
-  if (result.status !== 0) throw new Error(`setup: git ${args.join(' ')}: ${result.stderr}`)
+  if (result.status !== 0) {
+    const why = result.error?.message ?? result.stderr
+    throw new Error(`setup: git ${args.join(' ')}: ${why}`)
+  }
   return result.stdout
 }
 
@@ -110,11 +113,28 @@ describe('runGit', () => {
   })
 
   it('gives git the environment it is given, and no other', async () => {
-    const env = stubGit('printf "%s" "$MARKER"')
+    const env = stubGit('printf "%s|%s" "$MARKER" "$LEAK"')
+    vi.stubEnv('LEAK', 'from-this-process')
+    try {
+      const result = await runGit(['anything'], { env: { ...env, MARKER: 'from-the-caller' } })
 
-    const result = await runGit(['anything'], { env: { ...env, MARKER: 'from-the-caller' } })
+      expect(result.stdout).toBe('from-the-caller|')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
 
-    expect(result.stdout).toBe('from-the-caller')
+  it('gives git this process environment and directory when it is given no options', async () => {
+    const bin = stubGit('printf "%s|%s" "$MARKER" "$(pwd -P)"')
+    vi.stubEnv('PATH', bin.PATH ?? '')
+    vi.stubEnv('MARKER', 'from-this-process')
+    try {
+      const result = await runGit(['anything'])
+
+      expect(result.stdout).toBe(`from-this-process|${realpathSync(process.cwd())}`)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('runs git in this checkout, with this environment, when it is given no options', async () => {
@@ -146,7 +166,7 @@ describe('runGit', () => {
   it('kills git at the time limit and reports it', async () => {
     const env = stubGit('exec sleep 30')
 
-    const result = await runGit(['fetch'], { env, timeoutMs: 100 })
+    const result = await runGit(['fetch'], { cwd: plainDirectory(), env, timeoutMs: 100 })
 
     expect(result.timedOut).toBe(true)
     expect(result.signal).toBe('SIGKILL')
@@ -168,6 +188,18 @@ describe('gitOut', () => {
     const env = stubGit('printf "line\\n\\n\\n"')
 
     await expect(gitOut(['x'], { env })).resolves.toBe('line')
+  })
+
+  it('strips newlines only, and keeps other trailing whitespace', async () => {
+    const env = stubGit('printf "a \\r\\n"')
+
+    await expect(gitOut(['x'], { env })).resolves.toBe('a \r')
+  })
+
+  it('drops stderr from the answer', async () => {
+    const env = stubGit('printf out; echo err >&2')
+
+    await expect(gitOut(['x'], { env })).resolves.toBe('out')
   })
 
   it('keeps leading space, which status --porcelain encodes', async () => {
@@ -213,6 +245,10 @@ describe('gitOut', () => {
   it('answers null, with the output dropped, when git said no after it printed', async () => {
     const env = stubGit('printf out; exit 3')
 
+    // Real git answers null here too, so first prove the stub ran.
+    const ran = await runGit(['x'], { env })
+    expect(ran.stdout).toBe('out')
+    expect(ran.status).toBe(3)
     await expect(gitOut(['x'], { env })).resolves.toBeNull()
   })
 
@@ -311,7 +347,9 @@ describe('toplevel', () => {
   })
 
   it('reads an empty answer as no answer', async () => {
-    await expect(toplevel({ cwd: plainDirectory(), env: stubGit('exit 0') })).resolves.toBeNull()
+    const { work } = repository()
+
+    await expect(toplevel({ cwd: work, env: stubGit('exit 0') })).resolves.toBeNull()
   })
 })
 
@@ -336,9 +374,9 @@ describe('currentBranch', () => {
   })
 
   it('reads an empty answer as no answer', async () => {
-    await expect(
-      currentBranch({ cwd: plainDirectory(), env: stubGit('exit 0') }),
-    ).resolves.toBeNull()
+    const { work } = repository()
+
+    await expect(currentBranch({ cwd: work, env: stubGit('exit 0') })).resolves.toBeNull()
   })
 })
 
@@ -374,9 +412,11 @@ describe('defaultBranch', () => {
   })
 
   it('reads an empty answer as no answer', async () => {
-    await expect(
-      defaultBranch({ cwd: plainDirectory(), env: stubGit('exit 0') }),
-    ).resolves.toBeNull()
+    const { work, env } = repository()
+    setup(work, 'remote', 'set-head', 'origin', 'main')
+    await expect(defaultBranch({ cwd: work, env })).resolves.toBe('main')
+
+    await expect(defaultBranch({ cwd: work, env: stubGit('exit 0') })).resolves.toBeNull()
   })
 })
 
