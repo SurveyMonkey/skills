@@ -3,7 +3,8 @@
 // and a real clone of it: the remote is the temp origin, and a push arrives
 // there.
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -17,7 +18,7 @@ const git = (dir: string, args: readonly string[]) =>
 /** git's stdout, trimmed. Throws when git failed. */
 const out = (dir: string, args: readonly string[]): string => {
   const result = git(dir, args)
-  if (result.status !== 0) throw new Error(result.stderr)
+  if (result.status !== 0) throw new Error(result.error?.message ?? result.stderr)
   return result.stdout.trim()
 }
 
@@ -73,7 +74,8 @@ describe('createGitRepo', () => {
   it('removes both repositories on cleanup', () => {
     const repo = createGitRepo()
     repo.cleanup()
-    expect(git(repo.clone, ['rev-parse', 'HEAD']).status).not.toBe(0)
+    expect(existsSync(repo.clone)).toBe(false)
+    expect(existsSync(repo.origin)).toBe(false)
   })
 
   it('tolerates a second cleanup', () => {
@@ -84,6 +86,17 @@ describe('createGitRepo', () => {
 })
 
 describe('commitFile', () => {
+  it("throws with git's own words when git fails", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-security-not-a-repo-'))
+    try {
+      expect(() => commitFile(dir, 'a.txt', 'a\n', 'chore: a')).toThrow(
+        /git repo builder: git add -- a\.txt failed: .+/,
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('writes the file and commits it', () => {
     const repo = createGitRepo()
     try {
@@ -92,7 +105,7 @@ describe('commitFile', () => {
       expect(out(repo.clone, ['log', '-1', '--format=%s'])).toBe('chore: nested')
       // Nothing left behind: a builder that staged without committing would
       // leave every later example running against a dirty tree.
-      expect(git(repo.clone, ['status', '--porcelain']).stdout).toBe('')
+      expect(out(repo.clone, ['status', '--porcelain'])).toBe('')
     } finally {
       repo.cleanup()
     }

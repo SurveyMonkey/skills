@@ -47,7 +47,9 @@ export interface GitRepo {
 const must = (dir: string, args: readonly string[]): string => {
   const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
   if (result.status !== 0) {
-    const why = result.error?.message ?? result.stderr.trim()
+    const why =
+      result.error?.message ??
+      (result.stderr.trim() || `status ${result.status}, signal ${result.signal}`)
     throw new Error(`git repo builder: git ${args.join(' ')} failed: ${why}`)
   }
   return result.stdout
