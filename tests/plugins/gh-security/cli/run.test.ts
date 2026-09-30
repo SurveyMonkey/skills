@@ -53,6 +53,20 @@ describe('runCli', () => {
     },
   )
 
+  it('inspects only the first token, so a help flag after it is not a help request', async () => {
+    // A command's own flags belong to that command. Intercepting a later
+    // `--help` would make a per-command usage message unreachable.
+    const { io, written } = capturing()
+    expect(await runCli(['version', '--help'], {}, io)).toBe(0)
+    expect(JSON.parse(written().stdout)).toEqual({ version: expect.any(String) })
+  })
+
+  it('reads a help flag in the first place as a help request, whatever follows', async () => {
+    const { io, written } = capturing()
+    expect(await runCli(['--help', 'version'], {}, io)).toBe(0)
+    expect(written().stdout).toBe(`${helpText()}\n`)
+  })
+
   it('reports an unknown command as an error envelope on stderr, with stdout empty', async () => {
     // stdout is this CLI's JSON contract. A dispatch failure written there
     // would be read by a caller as a command's payload.
