@@ -5,7 +5,6 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { parseArgs } from '../lib/args.ts'
 import { EXIT_CODES, type ExitCode, exitCodeFor, failure, renderEnvelope } from '../lib/envelope.ts'
 import type { CommandResult, Io } from './command.ts'
 import { COMMANDS, commandNames } from './registry.ts'
@@ -18,6 +17,28 @@ export const helpText = (): string => {
   const width = Math.max(...entries.map(([name]) => name.length))
   const lines = entries.map(([name, entry]) => `  ${name.padEnd(width)}  ${entry.description}`)
   return [USAGE, '', 'Commands:', ...lines].join('\n')
+}
+
+/**
+ * The flags that ask for the command list. A bare invocation asks for the
+ * same thing: a CLI that did nothing when run with no arguments would leave
+ * a reader with no way to find out what it does.
+ */
+const HELP_FLAGS: readonly string[] = ['--help', '-h']
+
+/**
+ * Split `process.argv.slice(2)`. Only the first token is inspected: a
+ * command's own flags belong to that command, so `--help` after a command
+ * name is passed through as one of its arguments.
+ */
+const splitArgv = (
+  argv: readonly string[],
+):
+  | { readonly kind: 'help' }
+  | { readonly kind: 'command'; readonly command: string; readonly args: readonly string[] } => {
+  const [command, ...args] = argv
+  if (command === undefined || HELP_FLAGS.includes(command)) return { kind: 'help' }
+  return { kind: 'command', command, args }
 }
 
 /** What the process writes and exits with. */
@@ -51,7 +72,7 @@ export const runCli = async (
   env: Readonly<Record<string, string | undefined>>,
   io: Io,
 ): Promise<ExitCode> => {
-  const parsed = parseArgs(argv)
+  const parsed = splitArgv(argv)
   if (parsed.kind === 'help') {
     return emit(io, { stdout: helpText(), stderr: '', exitCode: EXIT_CODES.ok })
   }
