@@ -16,6 +16,7 @@ import { isOk, unwrap } from '#gh-security/lib/envelope.ts'
 import {
   AGENT_WORKTREE_SEGMENT,
   containsDotDot,
+  type GitRequest,
   git,
   gitCommonDir,
   gitRun,
@@ -28,7 +29,6 @@ import {
   validateBranchName,
   withinAgentWorktrees,
 } from '#gh-security/lib/git.ts'
-import type { RunRequest } from '#gh-security/lib/process-runner.ts'
 
 // Scratch roots are resolved physically on creation: on macOS `/var` really
 // is `/private/var`, and a fixture that compared the unresolved spelling
@@ -64,8 +64,8 @@ const repository = (): string => {
 }
 
 const recordingSpawn = () => {
-  const seen: RunRequest[] = []
-  const spawn = (request: RunRequest) => {
+  const seen: GitRequest[] = []
+  const spawn = (request: GitRequest) => {
     seen.push(request)
     return { command: request.command, args: request.args, status: 0, stdout: 'ok\n', stderr: '' }
   }
@@ -274,7 +274,7 @@ describe('validateBranchName', () => {
 // guard is through the runner's documented spawn parameter, which is what
 // stands in for the process boundary here.
 describe('a git that answers nothing', () => {
-  const silentGit = (request: RunRequest) => ({
+  const silentGit = (request: GitRequest) => ({
     command: request.command,
     args: request.args,
     status: 0,
@@ -411,5 +411,62 @@ describe('the containment guard over a real worktree', () => {
         resolveExistingAncestor(join(root, AGENT_WORKTREE_SEGMENT, 'smuggled')),
       ),
     ).toBe(false)
+  })
+})
+
+// The local runner, at the real boundary: no substituted spawn. These
+// examples moved here with the runner. The child is reached through
+// `env_prefix`, because a prefix is the one way a caller runs a command
+// other than git. Each expected value is what a shell reports: 127 for a
+// command it cannot find, 128 plus the signal number for a signal death.
+describe('the local runner, with no spawn argument', () => {
+  const run = (prefix: string[]) => gitRun('/src/app', ['status'], { envPrefix: prefix })
+
+  it('captures stdout, stderr and the exit status of a real process', () => {
+    const program = 'process.stdout.write("out");process.stderr.write("err");process.exit(4)'
+    expect(unwrap(run([process.execPath, '-e', program]))).toEqual({
+      command: process.execPath,
+      args: ['-e', program, 'git', '-C', '/src/app', 'status'],
+      status: 4,
+      stdout: 'out',
+      stderr: 'err',
+    })
+  })
+
+  // A command that never started is 127 with node's own message, not an
+  // exception that goes up through a caller that did not expect one.
+  it('reports a command that is not on PATH as 127, quoting the spawn error', () => {
+    const result = unwrap(run(['gh-security-no-such-command']))
+    expect({ status: result.status, stdout: result.stdout }).toEqual({ status: 127, stdout: '' })
+    expect(result.stderr).toContain('ENOENT')
+  })
+
+  // A signal death has no exit code. 0 would read as success, and 1 would
+  // look like an ordinary failure.
+  it('reports a signal death as 128 plus the signal number', () => {
+    expect(unwrap(run(['/bin/sh', '-c', 'kill -9 $$'])).status).toBe(137)
+  })
+
+  it('allows an answer far larger than the 1 MiB node defaults to', () => {
+    const result = unwrap(
+      run([process.execPath, '-e', 'process.stdout.write("x".repeat(4194304))']),
+    )
+    expect({ status: result.status, length: result.stdout.length }).toEqual({
+      status: 0,
+      length: 4 * 1024 * 1024,
+    })
+  })
+
+  // `git` reads a non-zero status as a failure, and says what the command
+  // said: stderr first, then stdout, then that there was nothing.
+  it.each([
+    ['stderr', 'echo out; echo err >&2; exit 3', 'err'],
+    ['stdout, when stderr is empty', 'echo out; exit 3', 'out'],
+    ['that there was no output', 'exit 3', 'no output'],
+  ])('describes a failure by %s', (_case, script, detail) => {
+    expect(git('/src/app', ['status'], { envPrefix: ['/bin/sh', '-c', script] })).toEqual({
+      outcome: 'failed',
+      error: `/bin/sh -c ${script} git -C /src/app status failed (exit 3): ${detail}`,
+    })
   })
 })

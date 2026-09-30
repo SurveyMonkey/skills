@@ -2,11 +2,12 @@
 //
 // A git hook runs with GIT_DIR and GIT_INDEX_FILE, and in a linked worktree
 // more, pointing at the repository being committed to; `git -c` adds
-// GIT_CONFIG_PARAMETERS. The process runner passes the inherited environment
-// to every child, so under a hook each git call an example makes, including
-// the scratch repositories that harness/git-repo.ts builds, would act on this
-// repository instead. On #273 that wrote `core.bare = true` and a test
-// identity into the real `.git/config`, and moved a worktree's HEAD.
+// GIT_CONFIG_PARAMETERS. The runners in `lib/` give the inherited environment
+// to a child by default. So under a hook, each git call an example makes,
+// including the calls on the scratch repositories that harness/git-repo.ts
+// builds, would act on this repository instead. On #273 that wrote
+// `core.bare = true` and a test identity into the real `.git/config`, and
+// moved a worktree's HEAD.
 //
 // The names come from git itself (`rev-parse --local-env-vars`), so the list
 // cannot fall behind a newer git, plus the numbered GIT_CONFIG_KEY_<n> and

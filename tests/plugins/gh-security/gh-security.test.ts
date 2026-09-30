@@ -5,19 +5,19 @@
 // covered through that command's export (the testing skill's "Seams", and
 // issue #216's decision comment, which this entry point is thin for).
 //
-// The spawn goes through `run` from the shared process runner with its real
-// spawn: the child process IS the thing under test here, so a substituted
-// spawn would assert nothing.
+// The spawn goes through `run` from `lib/process.ts`, a real child: the
+// child process IS the thing under test here, so a substituted spawn would
+// assert nothing.
 //
 // Every expected value below is hand-written from the contract on #224,
 // never read back out of the code under test.
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { run } from '#gh-security/lib/process-runner.ts'
+import { run } from '#gh-security/lib/process.ts'
 import { GH_SECURITY_ENTRY as ENTRY } from '#harness/paths.ts'
 
 const entry = (args: readonly string[], request: { input?: string } = {}) =>
-  run({ command: process.execPath, args: [ENTRY, ...args], input: request.input })
+  run(process.execPath, [ENTRY, ...args], { stdin: request.input })
 
 const hookInput = (command: string): string =>
   JSON.stringify({
@@ -34,8 +34,8 @@ afterEach(() => {
 describe('gh-security --help', () => {
   it.each([[['--help']], [['-h']], [[]]])(
     'lists every registered command on stdout for %j and exits 0',
-    (args) => {
-      const result = entry(args)
+    async (args) => {
+      const result = await entry(args)
       expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
       expect(result.stdout).toContain('usage: gh-security <command> [args]')
       expect(result.stdout).toContain('allow-own-commands')
@@ -45,8 +45,8 @@ describe('gh-security --help', () => {
 })
 
 describe('an unknown command', () => {
-  it('writes the error envelope to stderr, nothing to stdout, and exits 1', () => {
-    const result = entry(['drop-everything'])
+  it('writes the error envelope to stderr, nothing to stdout, and exits 1', async () => {
+    const result = await entry(['drop-everything'])
     expect({ status: result.status, stdout: result.stdout }).toEqual({ status: 1, stdout: '' })
     expect(JSON.parse(result.stderr)).toEqual({
       error: 'unknown command "drop-everything". Run gh-security --help for the list of commands.',
@@ -55,16 +55,18 @@ describe('an unknown command', () => {
 })
 
 describe("a command's result", () => {
-  it('is JSON on stdout with stderr left empty, and ADR 001 exit 0', () => {
-    const result = entry(['version'])
+  it('is JSON on stdout with stderr left empty, and ADR 001 exit 0', async () => {
+    const result = await entry(['version'])
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(JSON.parse(result.stdout)).toEqual({ version: expect.any(String) })
   })
 })
 
 describe('the allow hook, driven the way Claude Code drives it', () => {
-  it('answers an invocation of this entry point with an allow decision', () => {
-    const result = entry(['allow-own-commands'], { input: hookInput(`node ${ENTRY} version`) })
+  it('answers an invocation of this entry point with an allow decision', async () => {
+    const result = await entry(['allow-own-commands'], {
+      input: hookInput(`node ${ENTRY} version`),
+    })
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(JSON.parse(result.stdout)).toEqual({
       hookSpecificOutput: {
@@ -75,10 +77,10 @@ describe('the allow hook, driven the way Claude Code drives it', () => {
     })
   })
 
-  it('writes nothing at all for a command it does not recognise', () => {
+  it('writes nothing at all for a command it does not recognise', async () => {
     // Exit 0 with empty output is "no decision": the normal permission
     // prompt stands, which is what the chained `rm` here must still get.
-    const result = entry(['allow-own-commands'], {
+    const result = await entry(['allow-own-commands'], {
       input: hookInput(`node ${ENTRY} version; rm -rf ~`),
     })
     expect(result).toMatchObject({ status: 0, stdout: '', stderr: '' })

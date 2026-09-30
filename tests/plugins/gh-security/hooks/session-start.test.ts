@@ -9,7 +9,7 @@ import { delimiter, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { run } from '#gh-security/lib/process-runner.ts'
+import { run } from '#gh-security/lib/process.ts'
 import { GH_SECURITY_ROOT } from '#harness/paths.ts'
 
 const ENTRY = join(GH_SECURITY_ROOT, 'hooks', 'session-start.ts')
@@ -45,20 +45,17 @@ afterEach(() => {
 })
 
 describe('the hook as a process', () => {
-  const hook = (PATH: string) => run({ command: process.execPath, args: [ENTRY], env: { PATH } })
+  // `env` is the child's whole environment (`lib/process.ts`), so this one
+  // is this process's own with PATH replaced.
+  const hook = (PATH: string) => run(process.execPath, [ENTRY], { env: { ...process.env, PATH } })
 
-  it('writes nothing and exits 0 when every tool is present', () => {
-    expect(hook(pathWith(TOOLS))).toEqual({
-      command: process.execPath,
-      args: [ENTRY],
-      status: 0,
-      stdout: '',
-      stderr: '',
-    })
+  it('writes nothing and exits 0 when every tool is present', async () => {
+    const { status, stdout, stderr } = await hook(pathWith(TOOLS))
+    expect({ status, stdout, stderr }).toEqual({ status: 0, stdout: '', stderr: '' })
   })
 
-  it('writes one JSON object that names jq when jq is hidden, and exits 0', () => {
-    const result = hook(pathWith(['git', 'gh', 'bash']))
+  it('writes one JSON object that names jq when jq is hidden, and exits 0', async () => {
+    const result = await hook(pathWith(['git', 'gh', 'bash']))
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(result.stdout.endsWith('}\n')).toBe(true)
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)

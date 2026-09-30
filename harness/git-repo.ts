@@ -1,6 +1,6 @@
 // The git repo builder: a temp origin and a clone of it, both real
 // repositories driven through the #217 git helpers, which run real `git`
-// through the process runner's default spawn.
+// through the local runner of `lib/git.ts`.
 //
 // Git is never mocked (mocking.md): `spec/discover_repos_spec.sh` builds real
 // `git init` repositories in scratch directories, including the shapes that

@@ -1,582 +1,341 @@
-// The typed `gh` client: one method per operation the plugin performs,
-// injected into handlers and substituted per method by their examples (issue
-// #216's decision comment). `gh` is the one thing an example cannot run for
-// real, because it is the network and someone else's state, so here the
-// client's own two jobs are what is asserted: the request shape it builds,
-// and what it makes of the reply.
+// The real `gh` client. Nothing here starts `gh`: the client takes the
+// runner as its documented `run` option, so a stand-in drives the one thing
+// that would start `gh` (the testing skill's mocking.md, "The injected
+// collaborator"). One test gives the real runner a PATH with no `gh` on it.
+// The runner itself is tested against real children in `process.test.ts`.
 //
-// The substitution is the runner's documented spawn parameter, standing in
-// for `gh` the process. Every stdout below is a real `gh` output shape and
-// every stderr a real `gh` error spelling, tidied in neither direction:
-// `gh api` reports `gh: Not Found (HTTP 404)`, while a subcommand reports
-// `HTTP 422: Validation Failed: name already exists` with no `gh:` prefix.
+// Every expected argv and message is written by hand, never derived from the
+// client, so a change to the client can make a test disagree.
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseEnvPrefix } from '#gh-security/lib/env-prefix.ts'
-import { unwrap } from '#gh-security/lib/envelope.ts'
-import { createGhClient } from '#gh-security/lib/gh.ts'
-import type { RunRequest, RunResult } from '#gh-security/lib/process-runner.ts'
 
-const answering = (result: Partial<RunResult>) => {
-  const seen: RunRequest[] = []
-  const spawn = (request: RunRequest): RunResult => {
-    seen.push(request)
-    return {
-      command: request.command,
-      args: request.args,
-      status: 0,
-      stdout: '',
-      stderr: '',
-      ...result,
-    }
-  }
-  return { spawn, seen }
+import { createGhClient, type GhClientOptions, GhError } from '#gh-security/lib/gh.ts'
+import type { Runner, RunResult } from '#gh-security/lib/process.ts'
+
+const FIELDS =
+  'number,title,author,isDraft,labels,autoMergeRequest,mergeStateStatus,mergeable,' +
+  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision'
+
+interface Call {
+  readonly command: string
+  readonly args: readonly string[]
+  readonly cwd: string | undefined
+  readonly env: NodeJS.ProcessEnv | undefined
+  readonly timeoutMs: number | undefined
 }
 
-describe('listDependabotAlerts', () => {
-  // `--paginate --slurp` answers one array per response page, which is the
-  // nesting `discover-alerts.sh` collapses with `flatten` before it reads
-  // anything. A client that handed the pages through would give every
-  // consumer that job, and the one that forgot it would see a page as an
-  // alert.
-  it('asks the open-alerts endpoint and flattens the pages it answers with', () => {
-    const { spawn, seen } = answering({
-      stdout: '[[{"number":1},{"number":2}],[{"number":3}]]',
-    })
-    const client = createGhClient({ spawn })
-    expect(unwrap(client.listDependabotAlerts({ repo: 'octo/app' }))).toEqual([
-      { number: 1 },
-      { number: 2 },
-      { number: 3 },
-    ])
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'api',
-          'repos/octo/app/dependabot/alerts?state=open&per_page=100',
-          '--paginate',
-          '--slurp',
-        ],
-      },
-    ])
-  })
+/** What the runner answers with. A field not given is what a child that
+ *  succeeded and wrote nothing would report. */
+interface Reply {
+  readonly stdout?: string
+  readonly stderr?: string
+  readonly status?: number | null
+  readonly signal?: NodeJS.Signals
+  readonly timedOut?: boolean
+  readonly elapsedMs?: number
+  readonly startFailure?: { code: string; message: string }
+  readonly streamErrors?: Array<{ code: string; message: string }>
+}
 
-  // A JSON error object is not zero alerts. Read as one, a repository whose
-  // alerts could not be fetched reports clean, which is the shape ADR 001
-  // exists to refuse arriving through the network instead of a lockfile.
-  it('refuses an error body rather than reading it as no alerts', () => {
-    const { spawn } = answering({ stdout: '{"message":"Bad credentials"}' })
-    expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'failed',
-      error: 'Unexpected API response for alerts for octo/app: Bad credentials',
-    })
-  })
-
-  // A non-JSON body has no `.message` to read, so the two report differently
-  // rather than one of them reporting nothing.
-  it('reports a body that is not JSON at all as its own failure', () => {
-    const { spawn } = answering({ stdout: '<html>502 Bad Gateway</html>' })
-    expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'failed',
-      error: 'Invalid JSON response for alerts for octo/app',
-    })
-  })
-
-  // A JSON body with no `.message` has nothing to quote, so the report says
-  // what it saw instead of quoting an empty string.
-  it.each([
-    ['an object carrying no message', '{"documentation_url":"https://docs.github.com/rest"}'],
-    // A `message` that is not a string is quoted by nothing: reading it out
-    // regardless of type puts a number, or an object, where the report
-    // expects the API's own sentence.
-    ['an object whose message is not a string', '{"message":42}'],
-    ['a bare string', '"OPEN"'],
-    ['a number', '42'],
-  ])('reports %s as not being the array of pages it expected', (_shape, stdout) => {
-    const { spawn } = answering({ stdout })
-    expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'failed',
-      error: 'Unexpected API response for alerts for octo/app: response is not a JSON array',
-    })
-  })
-
-  it('reports a JSON array whose pages are not arrays', () => {
-    const { spawn } = answering({ stdout: '[{"number":1}]' })
-    const envelope = createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })
-    expect(envelope).toEqual({
-      outcome: 'failed',
-      error: 'Unexpected API response for alerts for octo/app: a page is not an array of results',
-    })
-  })
-
-  // No alerts is an answer, and it is not the same as a failed fetch.
-  it('answers an empty list for a repository with no open alerts', () => {
-    const { spawn } = answering({ stdout: '[[]]' })
-    expect(unwrap(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' }))).toEqual([])
-  })
-
-  // `gh api`'s own spelling, which is what a caller classifies. Copied, not
-  // tidied: the `gh: ` prefix is part of it.
-  it('carries the gh error wording when the fetch fails', () => {
-    const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
-    const envelope = createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })
-    expect(envelope.outcome === 'failed' && envelope.error).toContain('gh: Not Found (HTTP 404)')
-  })
+const asResult = (reply: Reply): RunResult => ({
+  status: reply.status === undefined ? 0 : reply.status,
+  signal: reply.signal ?? null,
+  stdout: reply.stdout ?? '',
+  stderr: reply.stderr ?? '',
+  combined: `${reply.stdout ?? ''}${reply.stderr ?? ''}`,
+  timedOut: reply.timedOut ?? false,
+  elapsedMs: reply.elapsedMs ?? 0,
+  startFailure: reply.startFailure ?? null,
+  streamErrors: reply.streamErrors ?? [],
 })
 
-describe('listAdvisories', () => {
-  it('narrows by package and ecosystem, and flattens the pages', () => {
-    const { spawn, seen } = answering({
-      stdout: '[[{"ghsa_id":"GHSA-1"}],[{"ghsa_id":"GHSA-2"}]]',
+/** A client whose runner answers `reply` and records each call. */
+const clientAnswering = (reply: Reply, options: Omit<GhClientOptions, 'run'> = {}) => {
+  const calls: Call[] = []
+  const answering: Runner = async (command, args, runOptions) => {
+    calls.push({
+      command,
+      args: args ?? [],
+      cwd: runOptions?.cwd,
+      env: runOptions?.env,
+      timeoutMs: runOptions?.timeoutMs,
     })
-    const client = createGhClient({ spawn })
-    expect(unwrap(client.listAdvisories({ package: 'lodash', ecosystem: 'npm' }))).toEqual([
-      { ghsa_id: 'GHSA-1' },
-      { ghsa_id: 'GHSA-2' },
-    ])
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'api',
-          'advisories?affects=lodash&ecosystem=npm&per_page=100',
-          '--paginate',
-          '--slurp',
-        ],
-      },
-    ])
-  })
-
-  // A scoped name reaches the query as written, which is what the script this
-  // replaces sends and what the field runs are evidence for.
-  it('sends a scoped package name as written', () => {
-    const { spawn, seen } = answering({ stdout: '[[]]' })
-    createGhClient({ spawn }).listAdvisories({ package: '@babel/core', ecosystem: 'npm' })
-    expect(seen[0]?.args[1]).toBe('advisories?affects=@babel/core&ecosystem=npm&per_page=100')
-  })
-})
-
-describe('findOpenPullRequest', () => {
-  it('searches by head branch and answers the first URL', () => {
-    const { spawn, seen } = answering({
-      stdout: '[{"url":"https://github.com/octo/app/pull/12"}]',
-    })
-    const client = createGhClient({ spawn })
-    expect(unwrap(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }))).toBe(
-      'https://github.com/octo/app/pull/12',
-    )
-    // The request shape: that the lookup searched `head:...`, scoped to the
-    // repository and to open PRs. Not a count and not an order.
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'pr',
-          'list',
-          '--repo',
-          'octo/app',
-          '--search',
-          'head:fix/lodash-4',
-          '--state',
-          'open',
-          '--json',
-          'url',
-        ],
-      },
-    ])
-  })
-
-  // No match is an answer, and it has to stay distinguishable from a search
-  // that could not run: folding them together is how a group whose PR is
-  // already open gets dispatched again.
-  it('answers null when no open PR is headed from the branch', () => {
-    const { spawn } = answering({ stdout: '[]\n' })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' })),
-    ).toBeNull()
-  })
-
-  // The first hit, not the last. `discover-alerts.sh:425` passes
-  // `--jq '.[0].url // empty'`, and the search can legitimately return more
-  // than one open PR headed from the same branch name across forks; taking
-  // the wrong end names a PR this plugin did not open.
-  it('answers the first hit when the search returns more than one', () => {
-    const { spawn } = answering({
-      stdout:
-        '[{"url":"https://github.com/octo/app/pull/12"},{"url":"https://github.com/octo/app/pull/9"}]',
-    })
-    const client = createGhClient({ spawn })
-    expect(unwrap(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }))).toBe(
-      'https://github.com/octo/app/pull/12',
-    )
-  })
-
-  it('is a failure, not a null, when the search itself failed', () => {
-    const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
-    const client = createGhClient({ spawn })
-    expect(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }).outcome).toBe(
-      'failed',
-    )
-  })
-
-  it.each([
-    ['{"message":"Validation Failed"}', 'is not an array'],
-    ['[{"number":12}]', 'carries no url'],
-    ['[{"url":""}]', 'carries an empty url'],
-    ['["https://github.com/octo/app/pull/12"]', 'is not a result object'],
-    ['not json at all', 'is not JSON'],
-  ])('refuses a reply that %s, rather than reading it as no PR', (stdout) => {
-    const { spawn } = answering({ stdout })
-    const client = createGhClient({ spawn })
-    expect(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }).outcome).toBe(
-      'failed',
-    )
-  })
-})
-
-describe('viewPullRequest', () => {
-  const view = {
-    number: 12,
-    state: 'OPEN',
-    isDraft: false,
-    headRefName: 'fix/lodash-4',
-    baseRefName: 'main',
-    mergeStateStatus: 'BEHIND',
-    statusCheckRollup: [{ name: 'gates', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    return asResult(reply)
   }
+  return { gh: createGhClient({ ...options, run: answering }), calls }
+}
 
-  it('asks for exactly the fields the status report is built from', () => {
-    const { spawn, seen } = answering({ stdout: JSON.stringify(view) })
-    const client = createGhClient({ spawn })
-    expect(unwrap(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }))).toEqual(
-      view,
-    )
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'pr',
-          'view',
-          'https://github.com/octo/app/pull/12',
-          '--json',
-          'number,state,isDraft,headRefName,baseRefName,mergeStateStatus,statusCheckRollup',
-        ],
-      },
+/** The error a call rejects with. */
+const refusal = async (reply: Reply, options: Omit<GhClientOptions, 'run'> = {}) => {
+  const { gh } = clientAnswering(reply, options)
+  return (await gh
+    .viewPullRequest({ pullRequest: 7 })
+    .catch((thrown: unknown) => thrown)) as GhError
+}
+
+describe('the argv', () => {
+  it('asks gh pr view for one pull request with the field list, and nothing more', async () => {
+    const { gh, calls } = clientAnswering({ stdout: '{}' })
+    await gh.viewPullRequest({ pullRequest: 7 })
+    // The whole argv, not a prefix: a slice lets a stray flag in at the end.
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      { command: 'gh', args: ['pr', 'view', '7', '--json', FIELDS] },
     ])
   })
 
-  // Both fields are legitimately null on a real PR: a rollup arrives null on
-  // a PR with no checks, and `mergeStateStatus` is null while GitHub is still
-  // computing mergeability.
-  it('reads a null rollup as no checks and a null merge state as unknown', () => {
-    const { spawn } = answering({
-      stdout: JSON.stringify({ ...view, mergeStateStatus: null, statusCheckRollup: null }),
-    })
-    const client = createGhClient({ spawn })
-    const answered = unwrap(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }))
-    expect(answered.mergeStateStatus).toBeNull()
-    expect(answered.statusCheckRollup).toEqual([])
+  it('names the repository when the client was given one', async () => {
+    const { gh, calls } = clientAnswering({ stdout: '{}' }, { repository: 'octo/app' })
+    await gh.viewPullRequest({ pullRequest: 7 })
+    expect(calls[0]?.args).toEqual(['pr', 'view', '7', '--repo', 'octo/app', '--json', FIELDS])
   })
 
-  // The same two, absent rather than null. They are the documented exception
-  // and nothing else is: `pr-status.sh` reads them this way today, so the
-  // reading is pinned here rather than left to be re-argued from the five
-  // fields below, every one of which hard-fails on absence.
-  it('reads an absent rollup and an absent merge state the same way as a null one', () => {
-    const { mergeStateStatus: _m, statusCheckRollup: _r, ...without } = view
-    const { spawn } = answering({ stdout: JSON.stringify(without) })
-    const client = createGhClient({ spawn })
-    const answered = unwrap(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }))
-    expect(answered.mergeStateStatus).toBeNull()
-    expect(answered.statusCheckRollup).toEqual([])
+  it('names an empty repository as given, rather than reading it as absent', async () => {
+    // `filter` tests `undefined`, not truthiness, as the target stack does.
+    const { gh, calls } = clientAnswering({ stdout: '{}' }, { repository: '' })
+    await gh.viewPullRequest({ pullRequest: 7 })
+    expect(calls[0]?.args).toEqual(['pr', 'view', '7', '--repo', '', '--json', FIELDS])
   })
 
-  // Present and of the promised type, or a hard error, never a default (ADR
-  // 001). One row per field, because a missing `isDraft` read straight takes
-  // a branch of its own: the PR reports as ready for review.
-  it.each([
-    ['number', { ...view, number: '12' }],
-    ['state', { ...view, state: 12 }],
-    ['isDraft', { ...view, isDraft: 'false' }],
-    ['headRefName', { ...view, headRefName: null }],
-    ['baseRefName', { ...view, baseRefName: [] }],
-    ['mergeStateStatus', { ...view, mergeStateStatus: 3 }],
-    ['statusCheckRollup', { ...view, statusCheckRollup: {} }],
-  ])('refuses a reply whose %s is not the promised type', (_field, body) => {
-    const { spawn } = answering({ stdout: JSON.stringify(body) })
-    const client = createGhClient({ spawn })
-    expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'failed',
-      error:
-        'gh pr view https://github.com/octo/app/pull/12 answered a pull request this client cannot read',
-    })
-  })
-
-  // The other five have no exception: an absent key is a hard error, so the
-  // mutant that extends the `??` above to another field dies here.
-  it.each([['number'], ['state'], ['isDraft'], ['headRefName'], ['baseRefName']] as const)(
-    'refuses a reply with no %s at all',
-    (field) => {
-      const body: Record<string, unknown> = { ...view }
-      delete body[field]
-      const { spawn } = answering({ stdout: JSON.stringify(body) })
-      const client = createGhClient({ spawn })
-      expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }).outcome).toBe(
-        'failed',
-      )
-    },
-  )
-
-  it.each([
-    ['an array', '[]'],
-    ['a bare string', '"OPEN"'],
-  ])('refuses a reply that is %s rather than an object', (_shape, stdout) => {
-    const { spawn } = answering({ stdout })
-    const client = createGhClient({ spawn })
-    expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'failed',
-      error: 'gh pr view https://github.com/octo/app/pull/12 did not answer with a JSON object',
-    })
-  })
-
-  // `gh`'s own chatter arrives on stderr WITH a zero exit (the release
-  // upgrade notice is the common one), which is why the runner keeps the two
-  // streams apart and this parses stdout alone.
-  it('parses stdout alone, ignoring chatter on stderr', () => {
-    const { spawn } = answering({
-      stdout: JSON.stringify(view),
-      stderr: 'A new release of gh is available: 2.62.0 -> 2.63.0\n',
-    })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).number,
-    ).toBe(12)
-  })
-
-  it('refuses a reply that is not JSON', () => {
-    const { spawn } = answering({ stdout: 'no such pull request' })
-    const client = createGhClient({ spawn })
-    expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'failed',
-      error: 'Invalid JSON response for gh pr view https://github.com/octo/app/pull/12',
-    })
-  })
-
-  it('carries the gh error wording when the view fails', () => {
-    const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
-    const client = createGhClient({ spawn })
-    const envelope = client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })
-    expect(envelope.outcome === 'failed' && envelope.error).toContain('gh: Not Found (HTTP 404)')
+  it('spells pull request 0 as 0', async () => {
+    const { gh, calls } = clientAnswering({ stdout: '{}' })
+    await gh.viewPullRequest({ pullRequest: 0 })
+    expect(calls[0]?.args).toEqual(['pr', 'view', '0', '--json', FIELDS])
   })
 })
 
-describe('createLabel', () => {
-  it('creates the label with its colour and description', () => {
-    const { spawn, seen } = answering({})
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(
-        client.createLabel({
-          repo: 'octo/app',
-          name: 'merge-risk:low',
-          color: '2da44e',
-          description: 'Low merge risk',
-        }),
-      ),
-    ).toEqual({ created: true })
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'label',
-          'create',
-          'merge-risk:low',
-          '--repo',
-          'octo/app',
-          '--color',
-          '2da44e',
-          '--description',
-          'Low merge risk',
-        ],
-      },
-    ])
+describe('the client options', () => {
+  it('runs gh where it was told to, and in the current directory otherwise', async () => {
+    const here = clientAnswering({ stdout: '{}' }, { cwd: '/w/app' })
+    await here.gh.viewPullRequest({ pullRequest: 7 })
+    const anywhere = clientAnswering({ stdout: '{}' })
+    await anywhere.gh.viewPullRequest({ pullRequest: 7 })
+    expect([here.calls[0]?.cwd, anywhere.calls[0]?.cwd]).toEqual(['/w/app', undefined])
   })
 
-  // Sibling agents in one batch race to create the same band label, and the
-  // loser's failure means the label is there, which is what it wanted. The
-  // spelling is `gh`'s real one for a subcommand: no `gh: ` prefix, unlike
-  // `gh api`'s.
-  it('treats a label that already exists as a success that created nothing', () => {
-    const { spawn } = answering({
-      status: 1,
-      stderr: 'HTTP 422: Validation Failed: name already exists',
-    })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(
-        client.createLabel({
-          repo: 'octo/app',
-          name: 'security',
-          color: 'D93F0B',
-          description: 'Security fix',
-        }),
-      ),
-    ).toEqual({ created: false })
+  it('hands gh the environment it was built with, and none otherwise', async () => {
+    const pinned = clientAnswering({ stdout: '{}' }, { env: { PATH: '/usr/bin' } })
+    await pinned.gh.viewPullRequest({ pullRequest: 7 })
+    const ambient = clientAnswering({ stdout: '{}' })
+    await ambient.gh.viewPullRequest({ pullRequest: 7 })
+    expect([pinned.calls[0]?.env, ambient.calls[0]?.env]).toEqual([{ PATH: '/usr/bin' }, undefined])
   })
 
-  // The match runs against stderr ALONE. Matching a combined stream let any
-  // failure whose stdout happened to carry the phrase read as success, which
-  // is a label the PR then fails to apply.
-  it('does not read the phrase out of stdout', () => {
-    const { spawn } = answering({
-      status: 1,
-      stdout: 'the label security already exists in some other repository',
-      stderr: 'HTTP 403: Resource not accessible by integration',
-    })
-    const client = createGhClient({ spawn })
-    expect(
-      client.createLabel({
-        repo: 'octo/app',
-        name: 'security',
-        color: 'D93F0B',
-        description: 'Security fix',
-      }).outcome,
-    ).toBe('failed')
-  })
-})
-
-describe('createPullRequest', () => {
-  it('opens the PR with every label and answers with its URL', () => {
-    const { spawn, seen } = answering({
-      stdout:
-        'Creating pull request for fix/lodash-4 into main in octo/app\n\nhttps://github.com/octo/app/pull/12\n',
-    })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(
-        client.createPullRequest({
-          repo: 'octo/app',
-          head: 'fix/lodash-4',
-          title: 'fix(deps): lodash 4.17.21',
-          bodyFile: '/w/fix/body.md',
-          labels: ['security', 'dependencies', 'merge-risk:low'],
-        }),
-      ),
-    ).toEqual({ url: 'https://github.com/octo/app/pull/12' })
-    expect(seen).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'pr',
-          'create',
-          '--repo',
-          'octo/app',
-          '--head',
-          'fix/lodash-4',
-          '--label',
-          'security',
-          '--label',
-          'dependencies',
-          '--label',
-          'merge-risk:low',
-          '--title',
-          'fix(deps): lodash 4.17.21',
-          '--body-file',
-          '/w/fix/body.md',
-        ],
-      },
-    ])
+  it('binds each call when the client has a bound, and leaves it unbound otherwise', async () => {
+    const bound = clientAnswering({ stdout: '{}' }, { boundMs: 5_000 })
+    await bound.gh.viewPullRequest({ pullRequest: 7 })
+    const unbound = clientAnswering({ stdout: '{}' })
+    await unbound.gh.viewPullRequest({ pullRequest: 7 })
+    expect([bound.calls[0]?.timeoutMs, unbound.calls[0]?.timeoutMs]).toEqual([5_000, undefined])
   })
 
-  it('opens a PR with no labels at all', () => {
-    const { spawn, seen } = answering({ stdout: 'https://github.com/octo/app/pull/13\n' })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(
-        client.createPullRequest({
-          repo: 'octo/app',
-          head: 'fix/lodash-4',
-          title: 't',
-          bodyFile: '/w/fix/body.md',
-          labels: [],
-        }),
-      ),
-    ).toEqual({ url: 'https://github.com/octo/app/pull/13' })
-    expect(seen[0]?.args).not.toContain('--label')
+  it("defaults to process.ts's runner, with the one endpoint present", () => {
+    // Built, not called: a call would start the real `gh`.
+    expect(Object.keys(createGhClient())).toEqual(['viewPullRequest'])
   })
 
-  // The LAST URL, not the first. `render-pr.sh:768` takes `tail -n1` for this
-  // reason: `gh` writes its own chatter before the PR it made, and that
-  // chatter carries URLs of its own, so reading the first one answers with a
-  // link to something that is not the pull request.
-  it('answers the last URL when the output carries more than one', () => {
-    const { spawn } = answering({
-      stdout:
-        'Warning: 2 uncommitted changes\nsee https://github.com/cli/cli/issues/1234 for details\n\nhttps://github.com/octo/app/pull/12\n',
-    })
-    const client = createGhClient({ spawn })
-    expect(
-      unwrap(
-        client.createPullRequest({
-          repo: 'octo/app',
-          head: 'fix/lodash-4',
-          title: 't',
-          bodyFile: '/w/fix/body.md',
-          labels: [],
-        }),
-      ),
-    ).toEqual({ url: 'https://github.com/octo/app/pull/12' })
-  })
-
-  // An exit 0 with no URL in the output is a success claim backed by nothing,
-  // and the PR URL is what every later phase reads.
-  it('refuses an exit 0 that produced no PR URL', () => {
-    const { spawn } = answering({ stdout: 'Warning: 1 uncommitted change\n' })
-    const client = createGhClient({ spawn })
-    expect(
-      client.createPullRequest({
-        repo: 'octo/app',
-        head: 'fix/lodash-4',
-        title: 't',
-        bodyFile: '/w/fix/body.md',
-        labels: [],
-      }),
-    ).toEqual({
-      outcome: 'failed',
-      error: 'gh pr create produced no PR URL. Output: Warning: 1 uncommitted change',
-    })
-  })
-
-  it('carries the gh error wording when the create fails', () => {
-    const { spawn } = answering({
-      status: 1,
-      stderr: 'pull request create failed: GraphQL: No commits between main and fix/lodash-4',
-    })
-    const client = createGhClient({ spawn })
-    const envelope = client.createPullRequest({
-      repo: 'octo/app',
-      head: 'fix/lodash-4',
-      title: 't',
-      bodyFile: '/w/fix/body.md',
-      labels: [],
-    })
-    expect(envelope.outcome === 'failed' && envelope.error).toContain('No commits between')
-  })
-})
-
-// The prefix reaches every method, because a bare `gh` in an environment that
-// needs one reports "please run gh auth login" on a correctly configured
-// machine (the plugin guide).
-describe('a client built with an env_prefix', () => {
-  it('runs gh under it', () => {
-    const { spawn, seen } = answering({ stdout: '[[]]' })
-    const client = createGhClient({ spawn, envPrefix: parseEnvPrefix('run-in exec /src/app') })
-    client.listDependabotAlerts({ repo: 'octo/app' })
-    client.createLabel({ repo: 'octo/app', name: 'security', color: 'D93F0B', description: 'x' })
-    for (const request of seen) {
-      expect(request.command).toBe('run-in')
-      expect(request.args.slice(0, 3)).toEqual(['exec', '/src/app', 'gh'])
+  // Mutant: a default runner other than `process.ts`'s. A PATH with no `gh`
+  // on it lets the real runner start nothing, so no `gh` on the machine runs.
+  it("runs gh through process.ts's runner when no run is given", async () => {
+    const empty = realpathSync(mkdtempSync(join(tmpdir(), 'gh-security-gh-')))
+    try {
+      const error = await createGhClient({ env: { PATH: empty } })
+        .viewPullRequest({ pullRequest: 7 })
+        .catch((thrown: unknown) => thrown)
+      expect(error).toBeInstanceOf(GhError)
+      expect({ detail: (error as GhError).detail, status: (error as GhError).status }).toEqual({
+        detail: 'cannot run gh: spawn gh ENOENT',
+        status: 127,
+      })
+    } finally {
+      rmSync(empty, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the answer', () => {
+  it('hands back the object gh printed', async () => {
+    const { gh } = clientAnswering({ stdout: '{"number":7,"state":"OPEN","isDraft":false}' })
+    await expect(gh.viewPullRequest({ pullRequest: 7 })).resolves.toEqual({
+      number: 7,
+      state: 'OPEN',
+      isDraft: false,
+    })
+  })
+
+  it('hands back an empty object as an answer', async () => {
+    const { gh } = clientAnswering({ stdout: '{}' })
+    await expect(gh.viewPullRequest({ pullRequest: 7 })).resolves.toEqual({})
+  })
+
+  it('answers from stdout alone, and leaves a notice on stderr out of it', async () => {
+    // gh writes release and auth notices to stderr when it exits 0.
+    const { gh } = clientAnswering({ stdout: '{"number":7}', stderr: 'gh: a new release\n' })
+    await expect(gh.viewPullRequest({ pullRequest: 7 })).resolves.toEqual({ number: 7 })
+  })
+})
+
+describe('GhError', () => {
+  it('carries its message, status, detail and cause, and names itself', () => {
+    const cause = { stderr: 'x' }
+    const error = new GhError('gh pr view 7 failed: x', 4, { cause, detail: 'x' })
+    expect(error).toBeInstanceOf(Error)
+    expect({
+      name: error.name,
+      message: error.message,
+      status: error.status,
+      detail: error.detail,
+      cause: error.cause,
+    }).toEqual({
+      name: 'GhError',
+      message: 'gh pr view 7 failed: x',
+      status: 4,
+      detail: 'x',
+      cause,
+    })
+  })
+})
+
+describe('a refusal', () => {
+  it("throws gh's own words, its status, and the whole run, when gh exits non-zero", async () => {
+    const error = await refusal({
+      status: 1,
+      stderr: 'GraphQL: Could not resolve to a PullRequest\n',
+    })
+    expect(error).toBeInstanceOf(GhError)
+    expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
+      message: `gh pr view 7 --json ${FIELDS} failed: GraphQL: Could not resolve to a PullRequest`,
+      detail: 'GraphQL: Could not resolve to a PullRequest',
+      status: 1,
+    })
+    expect(error.cause).toMatchObject({
+      status: 1,
+      stderr: 'GraphQL: Could not resolve to a PullRequest\n',
+    })
+  })
+
+  it('names the status when gh exited non-zero and said nothing', async () => {
+    const error = await refusal({ status: 1 })
+    expect(error.detail).toBe('gh exited 1')
+  })
+
+  it('names the status when stderr is only white space', async () => {
+    const error = await refusal({ status: 2, stderr: ' \n' })
+    expect(error.detail).toBe('gh exited 2')
+  })
+
+  // Mutant: the signal before stderr. gh's own words say more than the
+  // signal that ended it.
+  it("quotes gh's stderr, over the signal, when something killed gh", async () => {
+    const error = await refusal({ status: null, signal: 'SIGTERM', stderr: 'gh: interrupted\n' })
+    expect(error.detail).toBe('gh: interrupted')
+  })
+
+  it('names the signal when something killed gh', async () => {
+    const error = await refusal({ status: null, signal: 'SIGKILL' })
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'gh was killed by SIGKILL',
+      status: null,
+    })
+  })
+
+  it("reports a gh that never started as node's account, over what stderr says", async () => {
+    const error = await refusal({
+      status: 127,
+      stderr: 'stray\n',
+      timedOut: true,
+      startFailure: { code: 'ENOENT', message: 'spawn gh ENOENT' },
+    })
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'cannot run gh: spawn gh ENOENT',
+      status: 127,
+    })
+  })
+
+  it("reports a call that timed out as the bound, over gh's words and a pipe error", async () => {
+    // stderr is there, a pipe failed, and `elapsedMs` differs from the
+    // bound, so a reply that read any of them would turn this red.
+    const error = await refusal(
+      {
+        timedOut: true,
+        status: null,
+        signal: 'SIGKILL',
+        elapsedMs: 5_014,
+        stderr: 'gh: API rate limit exceeded\n',
+        streamErrors: [{ code: 'EIO', message: 'read EIO' }],
+      },
+      { boundMs: 5_000 },
+    )
+    expect(error.detail).toBe('gh did not answer in 5000 ms')
+  })
+
+  it('reports a bound of 0 as 0, not as the measured time', async () => {
+    const error = await refusal({ timedOut: true, status: null, elapsedMs: 3 }, { boundMs: 0 })
+    expect(error.detail).toBe('gh did not answer in 0 ms')
+  })
+
+  it('reports the measured time when a client with no bound times out', async () => {
+    const error = await refusal({ timedOut: true, status: null, elapsedMs: 1_234 })
+    expect(error.detail).toBe('gh did not answer in 1234 ms')
+  })
+
+  it("throws when one of gh's pipes failed, over gh's words, even on exit 0", async () => {
+    const error = await refusal({
+      stdout: '{"number":7}',
+      stderr: 'gh: a new release\n',
+      streamErrors: [{ code: 'EIO', message: 'read EIO' }],
+    })
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: "gh's output could not be read: EIO, read EIO",
+      status: 0,
+    })
+  })
+
+  // Mutant: the last pipe failure. The first one is where the output broke.
+  it('names the first pipe that failed, when more than one failed', async () => {
+    const error = await refusal({
+      streamErrors: [
+        { code: 'EIO', message: 'read EIO' },
+        { code: 'ENOSPC', message: 'write ENOSPC' },
+      ],
+    })
+    expect(error.detail).toBe("gh's output could not be read: EIO, read EIO")
+  })
+
+  it('throws when gh answered with something that is not JSON, with the run as cause', async () => {
+    const error = await refusal({ stdout: 'not json at all', stderr: 'a note\n' })
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.message).toMatch(/^gh answered gh pr view with something that is not JSON: /)
+    // No argv prefix to remove, so the account and the message are one.
+    expect(error.detail).toBe(error.message)
+    expect(error.status).toBe(0)
+    expect(error.cause).toMatchObject({ stdout: 'not json at all', stderr: 'a note\n' })
+  })
+
+  it('throws when gh answered nothing at all', async () => {
+    const error = await refusal({ stdout: '' })
+    expect(error.message).toMatch(/^gh answered gh pr view with something that is not JSON: /)
+  })
+
+  // The falsy JSON values are here on purpose: a guard that tested truthiness
+  // would pass `0`, `false` and `""` through as a pull request.
+  it.each([
+    ['null', 'null'],
+    ['a list', '[{"number":7}]'],
+    ['an empty list', '[]'],
+    ['a string', '"octo/app#7"'],
+    ['an empty string', '""'],
+    ['0', '0'],
+    ['false', 'false'],
+    ['a number', '7'],
+  ])('throws when gh answered %s', async (_shape, stdout) => {
+    const error = await refusal({ stdout })
+    expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
+      message: `gh answered gh pr view with something that is not an object: ${stdout}`,
+      detail: `gh answered gh pr view with something that is not an object: ${stdout}`,
+      status: 0,
+    })
+    expect(error.cause).toMatchObject({ stdout })
   })
 })

@@ -12,7 +12,8 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/cli/` | `registry.ts`, the subcommand map; `run.ts`, parse, dispatch, render, exit; `command.ts`, what a command is and the real io |
 | `lib/envelope.ts` | The four ADR 001 outcomes as one typed result, and the exit codes |
 | `lib/node-floor.ts` | The runtime floor, as a pure function over a version string |
-| `lib/process-runner.ts` | The one place a process starts, with the spawn as a parameter |
+| `lib/process.ts` | Runs one child with no shell and an optional time limit; never rejects |
+| `lib/streams.ts` | stdout and stderr writers that go quiet on a broken pipe |
 | `lib/env-prefix.ts` | The `env_prefix` seam |
 | `lib/git.ts` | Path containment, worktree queries, refs |
 | `lib/gh.ts` | The typed `gh` client |
@@ -86,19 +87,19 @@ what the scripts emit: a success payload is the value itself at the top level, e
 outcome is a value rather than a control-flow event, which is what answers the one property the
 process boundary gave for free: a crash the caller could see as an exit code (RFC 002).
 
-**The process runner is the only place a process starts, and its spawn is a parameter.** It
-defaults to a real child process and is substituted through that parameter by examples, which is
-how the `gh` client is exercised against real `gh` output shapes with no network. It is
-synchronous because every caller in this plugin is: a phase runs a command, reads its output, and
-decides the next one from it.
+**`lib/process.ts` runs a child process, and never rejects.** A child that fails, is killed at
+its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `startFailure`,
+`streamErrors`), not a throw. It is asynchronous. `lib/git.ts` and `harness/parity.ts` are still
+synchronous, so each keeps a local runner until it converges.
 
-**The `gh` client is SDK-style: one typed method per operation this plugin performs**, injected
-into handlers and mocked one method at a time. Adding a `gh` call means adding a method, which is
-what keeps the endpoints a handler touches legible from its substitution list. Octokit is not the
-client, because nothing shipped imports anything outside the plugin (ADR 012); `gh` stays the
-transport, since it already carries the user's authentication and takes the `env_prefix` wrapping.
-Every reply is validated where it enters, and `--paginate --slurp`'s page nesting is collapsed
-here rather than by each caller.
+**The `gh` client is SDK-style: one typed method per operation a command performs**, injected
+into handlers and mocked one method at a time. Its API is the target stack's. It has one method,
+`viewPullRequest`, and a method comes with the command that calls it. A method answers with the
+value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
+that error into an envelope. Octokit is not the client, because nothing shipped imports anything
+outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's
+authentication. The client takes no `env_prefix`; a caller that needs one wraps the client's `run`
+option. Every reply is parsed and checked where it enters, and never given a default.
 
 ## Prescribed shapes are pre-approvable on their own
 

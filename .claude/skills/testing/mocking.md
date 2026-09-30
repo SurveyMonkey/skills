@@ -95,8 +95,9 @@ A method call needs none of that, and a defaulting layer with an override rule i
 conditional logic in test setup the SDK shape exists to remove.
 
 `harness/gh-mock.ts` is those four semantics for vitest: a factory answering with a
-`GhClient` whose every method throws until the example registers a reply or a failure for it, and
-whose request log records a call before it answers it.
+`GhClient` whose every method rejects until the example registers a reply or a failure for it, and
+whose request log records a call before it answers it. A registered failure rejects with a
+`GhError` that carries the real wording as its `detail`.
 
 Until the last bash script is ported, the shellspec suite keeps its own command-based `gh` mock
 (`spec/support/gh-mock-dispatch.sh`, registered from `spec/spec_helper.sh`), carrying those same
