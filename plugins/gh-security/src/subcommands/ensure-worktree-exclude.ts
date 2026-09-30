@@ -83,10 +83,13 @@ const hasLine = (path: string): boolean => {
   }
 }
 
-/** Remove the lock directory. A failure is ignored: the lock then goes stale. */
-const removeLock = (lock: string): void => {
+/**
+ * Remove a path. A failure is ignored. A lock that stays goes stale, and the
+ * caller already has its own failure to report.
+ */
+const removeQuietly = (path: string): void => {
   try {
-    rmSync(lock, { recursive: true, force: true })
+    rmSync(path, { recursive: true, force: true })
   } catch {
     // The next run removes a stale lock, or reports that it cannot get the lock.
   }
@@ -112,7 +115,7 @@ const acquire = async (lock: string, timing: LockTiming): Promise<boolean> => {
   for (let attempt = 0; attempt < timing.attempts; attempt += 1) {
     const held = statOrNull(lock)
     if (held !== null && Date.now() - held.mtimeMs > STALE_LOCK_MS) {
-      removeLock(lock)
+      removeQuietly(lock)
     }
     if (tryLock(lock)) return true
     await wait(timing.waitMs)
@@ -160,7 +163,7 @@ const publish = (infoDir: string, exclude: string, existing: Existing): boolean 
     renameSync(temporary, exclude)
     return true
   } catch {
-    rmSync(temporary, { force: true })
+    removeQuietly(temporary)
     return false
   }
 }
@@ -203,7 +206,7 @@ export const ensureWorktreeExclude = async (
       ? report('added')
       : failed(`cannot publish ${exclude}`)
   } finally {
-    removeLock(lock)
+    removeQuietly(lock)
   }
 }
 
