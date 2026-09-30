@@ -8,16 +8,19 @@
 //
 // The answer types are the JSON that `node.sh` writes for each verb, with
 // the same keys. A promised field is present and typed, or the verb fails.
+// `parents` is not a verb of `node.sh`. It is new in #221, from the parent
+// readers inside `node.sh`.
 //
 // This file ships. It imports nothing outside the plugin.
 
 import type { Envelope } from '../lib/envelope.ts'
 
-/** The environment that `detect` reads. Only `PATH` has an effect. */
+/** The environment that `detect` reads. The node adapter reads only `PATH`. */
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /** A tree that `detect` examined: its root, and the answer that `detect` gave. */
 export type Tree<Detection> = {
+  /** An absolute path. */
   readonly root: string
   readonly detection: Detection
 }
@@ -100,8 +103,8 @@ export interface Adapter<Detection extends { readonly pm: string }> {
   readonly parents: (tree: Tree<Detection>, pkg: string) => Envelope<never>
   /**
    * Why `pkg` is in the tree. `raw` is the output of the package manager's
-   * own `why` command. When it is absent, the verb runs that command (#221,
-   * round 3 ruling 2).
+   * own `why` command. In the second layer of #221, the verb runs that
+   * command when `raw` is absent (#221, round 3 ruling 2).
    */
   readonly why: (tree: Tree<Detection>, pkg: string, raw?: string) => Promise<Envelope<never>>
   /** The ranges that the dependents of `pkg` declare, on one major `line` or on all when null. */
@@ -110,7 +113,7 @@ export interface Adapter<Detection extends { readonly pm: string }> {
     pkg: string,
     line: number | null,
   ) => Envelope<never>
-  /** Each constraint that the manifest declares. */
+  /** Each constraint in the override file that `detect` names. */
   readonly listPins: (tree: Tree<Detection>) => Envelope<never>
   /** How `a` and `b` compare, in this ecosystem's version rules. */
   readonly compareVersions: (a: string, b: string) => Envelope<CompareVersionsAnswer>

@@ -1,5 +1,5 @@
-// The node adapter: the verbs of `node.sh` behind the interface in
-// `adapter.ts`, for GitHub's `npm` advisory ecosystem (#221).
+// The node adapter: the read verbs of `node.sh`, and `parents`, behind the
+// interface in `adapter.ts`, for GitHub's `npm` advisory ecosystem (#221).
 //
 // `parents`, `why`, `declared_ranges` and `list_pins` answer
 // `not-implemented` (ADR 001, exit 2). The second layer of #221 ports them.
