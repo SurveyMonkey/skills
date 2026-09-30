@@ -181,7 +181,7 @@ const pnpmMajorOf = (root: string): string | null => {
 }
 
 /** `has_workspace_overrides_block`: a top-level `overrides:` key, plain or quoted. */
-const hasWorkspaceOverrides = (root: string): boolean => {
+export const hasWorkspaceOverrides = (root: string): boolean => {
   const path = join(root, 'pnpm-workspace.yaml')
   return isFile(path) && linesOf(path).some((line) => /^['"]?overrides['"]?:/.test(line))
 }

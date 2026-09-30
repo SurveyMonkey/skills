@@ -22,11 +22,9 @@ describe('the verbs that are not built yet', () => {
     expect([
       await node.why(tree, 'lodash', { raw: '' }),
       node.declaredRanges(tree, 'lodash', null),
-      node.listPins(tree),
     ]).toEqual([
       { outcome: 'not-implemented', error: 'why is not implemented' },
       { outcome: 'not-implemented', error: 'declared_ranges is not implemented' },
-      { outcome: 'not-implemented', error: 'list_pins is not implemented' },
     ])
   })
 })
