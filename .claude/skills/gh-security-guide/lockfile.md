@@ -58,7 +58,8 @@ reality, and it is why the suite stayed green through this.
 `plugins/gh-security/src/lockfiles/` has one reader for each format: `npm.ts`, `pnpm.ts` and
 `yarn.ts`. `shared.ts` has the parse guard and the answer types. Each reader gives resolved
 versions, the resolution map, the parents of a package, and the copy rows (`copies`), as plain
-data. A copy row is one declaration of the package (npm, Yarn) or one snapshot edge to it (pnpm). The pnpm reader also gives three more facts:
+data. A copy row is one declaration of the package (npm, Yarn) or one snapshot edge to it
+(pnpm). The pnpm reader also gives three more facts:
 
 - the `importers:` and `snapshots:` scan that `why` classifies peers on
 - the version that the root importer resolves
