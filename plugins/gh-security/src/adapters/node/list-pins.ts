@@ -22,6 +22,7 @@ import type { ListPinsAnswer, Pin, PinValue, Tree } from '../adapter.ts'
 import { attempt } from './attempt.ts'
 import { hasWorkspaceOverrides, type NodeDetection } from './detect.ts'
 import { field, isRecord, NO_DOCUMENT, readManifest } from './manifest.ts'
+import { byText } from './parents.ts'
 import { workspaceOverrides } from './workspace-overrides.ts'
 
 /** What {@link blockOf} answers where jq stops, for the `try` of `override_block`. */
@@ -99,12 +100,9 @@ const sourceOf = (tree: Tree<NodeDetection>, workspace: boolean): Envelope<unkno
   })
 }
 
-// Code unit order, which is the order of jq's `keys` for these names.
-const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
-
 /**
- * `(.pnpm.overrides // {}) | keys` of package.json. It throws where jq
- * stops. jq answers the indexes of an array. This port refuses an array,
+ * `(.pnpm.overrides // {}) | keys` of package.json, sorted as jq sorts
+ * them. It throws where jq stops. jq answers the indexes of an array. This port refuses an array,
  * which is not a block of override entries: a declared divergence.
  */
 const manifestOverrideKeys = (root: string): readonly string[] => {

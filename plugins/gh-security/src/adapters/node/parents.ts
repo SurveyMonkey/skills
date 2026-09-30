@@ -34,8 +34,8 @@ export const lockfileText = ({ root, detection }: Tree<NodeDetection>): string =
 /** The reader for the manager that the detection names. */
 export const readerOf = ({ detection }: Tree<NodeDetection>): Reader => READERS[detection.pm]
 
-// Code unit order, which is the order of jq's `unique`, and of `sort -u` in
-// the C locale, for these names.
+// Code unit order. For these names, it is the order of jq's `unique` and
+// `keys`, and of `sort -u` in the C locale.
 export const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
 
 /** The names of the parents, each once, sorted as text. */
