@@ -8,9 +8,9 @@
 // that `detect_raw` picks first. Two fixtures are out, and DECLARED below
 // names each with its reason.
 //
-// `parents` is not here. No node.sh verb returns it. The `why` and
-// `declared_ranges` verbs use it inside their own output, and both are #221.
-// The unit tests prove it.
+// `parents` is not here. No node.sh verb returns it, so the unit tests prove
+// it. The `why` and `declared_ranges` verbs use the parents in their own
+// answers, and parity-node-tree.test.ts compares those answers with node.sh.
 //
 // The TypeScript side adds the fields that the verb adds around the parser.
 // The semver parity run does the same for the arguments that `compare_versions`

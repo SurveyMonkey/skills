@@ -57,5 +57,12 @@ reality, and it is why the suite stayed green through this.
 
 `plugins/gh-security/src/lockfiles/` has one reader for each format: `npm.ts`, `pnpm.ts` and
 `yarn.ts`. `shared.ts` has the parse guard and the answer types. Each reader gives resolved
-versions, the resolution map and the parents of a package, as plain data. They port the lockfile
-parsers of `node.sh`. The bash parsers stay until #223.
+versions, the resolution map, the parents of a package, and one declaration row for each parent
+copy (`copies`), as plain data. The pnpm reader also gives the `importers:` and `snapshots:`
+scan that `why` classifies peers on, and the version that the root importer resolves. They port
+the lockfile parsers of `node.sh`. The bash parsers stay until #223.
+
+The adapter verbs under `src/adapters/node/` read these rows: `parents.ts`, `why.ts` and
+`declared-ranges.ts`. They name a parent as the readers do. A pnpm snapshot key names its parent
+by the text before its first `@` after the first character, so a git parent is `debug`, where
+`node.sh` names it `debug@git+ssh://git` (#50).

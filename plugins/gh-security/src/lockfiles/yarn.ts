@@ -1,8 +1,8 @@
 // The Yarn Berry `yarn.lock` reader, ported from node.sh (#220, RFC 002):
 // `YARN_LOCATOR_AWK` behind `yarn_versions` and `yarn_resolution_pairs`,
 // `YARN_DECLARATION_AWK` behind `yarn_parents`, and `YARN_COPY_AWK` behind
-// `yarn_copy_rows` (#221). The awk there is the specification. This reads only the lines those programs read. It is not a
-// YAML parser.
+// `yarn_copy_rows` (#221). The awk there is the specification. This reads
+// only the lines those programs read. It is not a YAML parser.
 //
 // Every entry has one `resolution:` locator, which stays stable when several
 // descriptors share one block. Yarn Classic has none, and `detect` refuses it
