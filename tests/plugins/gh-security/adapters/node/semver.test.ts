@@ -29,10 +29,13 @@ describe('compare_versions', () => {
     })
   })
 
-  it('fails for a version with nothing in it to compare', () => {
-    expect(node.compareVersions('v', '1.0.0')).toEqual({
+  it.each([
+    ['v', '1.0.0', 'v'],
+    ['1.0.0', '+build', '+build'],
+  ])('fails for %j %j, where one has nothing in it to compare', (a, b, bad) => {
+    expect(node.compareVersions(a, b)).toEqual({
       outcome: 'failed',
-      error: '"v" is not a version this adapter can read.',
+      error: `"${bad}" is not a version this adapter can read.`,
     })
   })
 })
@@ -53,7 +56,7 @@ describe('range_facts', () => {
     })
   })
 
-  it('answers every key as null for a range it cannot read', () => {
+  it('answers the last four keys as null for a range it cannot read', () => {
     expect(node.rangeFacts('workspace:^', '1.0.0')).toEqual({
       outcome: 'ok',
       value: {

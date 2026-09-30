@@ -14,7 +14,7 @@ import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 
-/** No PATH entry: which runner `detect` names does not matter to these verbs. */
+/** One empty PATH entry, the tree root, which holds no tool. The runner does not matter here. */
 const NO_PATH = { PATH: '' }
 
 const treeAt = (root: string): Tree<NodeDetection> => {
