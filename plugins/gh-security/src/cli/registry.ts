@@ -18,6 +18,10 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/allow-own-commands.ts')).allowOwnCommandsCommand,
   },
+  'session-start': {
+    description: 'Check that the tools this plugin needs are present (SessionStart hook)',
+    load: async () => (await import('../subcommands/session-start.ts')).sessionStartCommand,
+  },
   version: {
     description: 'Print the installed plugin version',
     load: async () => (await import('../subcommands/version.ts')).version,
