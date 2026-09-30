@@ -1,33 +1,25 @@
-// This file parses arguments. It wraps `node:util`'s `parseArgs` (#125's
-// scope line names it). This file writes the wrapper once, instead of in
-// each `bin`. RFC 001 decision 3 keeps `bin` a thin adapter with no
-// decisions in it. A parse with a return value is also testable without a
-// process.
-//
-// This file parses arguments. It wraps `node:util`'s `parseArgs`, so each
+// This file parses arguments. It wraps `parseArgs` from `node:util`, so an
 // entry point does not write the wrapper again. An entry point stays a thin
 // adapter with no decisions in it. A parse with a return value is also
 // testable without a process.
 //
-// **What this file adds to `parseArgs`.** node answers a bad command line
-// with a thrown `TypeError`. Here, the answer comes back as an envelope, so
-// a caller does not catch and translate the error. `choices` is the one
-// piece of `argparse` that node has no answer for.
+// **What this file adds to `parseArgs`.** Node answers a bad command line
+// with a thrown `TypeError`. Here, the answer is an envelope, so a caller
+// does not catch and translate the error. Node has no `choices` check, so
+// this file adds one.
 //
 // A bad command line is exit 1 here, as `failure` from `envelope.ts`. ADR 001
 // keeps exit 2 for a verb that is not implemented, so a refusal cannot use
-// it. The target stack has a separate `refused` outcome. It returns when
-// `envelope.ts` converges.
+// it.
 //
-// **What `parseArguments` deliberately does not add.** It does not add
-// positionals. `parseArgs` refuses them, and the refusal travels as an
-// envelope. `parseCommandLine` is the widened sibling for a command that
-// needs positionals. Every other caller keeps that path closed.
+// **What `parseArguments` does not add.** It does not add positionals.
+// `parseArgs` refuses them, and the refusal travels as an envelope.
+// `parseCommandLine` is the widened sibling for a command that needs
+// positionals. Every other caller keeps that path closed.
 //
-// This file also does not add support for `--help`. Help text is a
-// command's own sentence about itself. A command declares a `help` boolean
-// and prints its own text. That is one line there, against a text generator
-// here that every command would then have to fit.
+// This file does not add support for `--help`. Help text is a command's own
+// sentence about itself. A command declares a `help` boolean and prints its
+// own text.
 //
 // This file ships. It imports only `node:util` and `./envelope.ts`. It stays
 // inside the erasable subset (ADR 012).
@@ -133,9 +125,7 @@ const parseCore = <S extends ArgSpec>(
     // A default outside the option's own choices is a fault in the spec,
     // not in the command line. `parseArgs` fills in the default whenever
     // the flag is absent. Such a spec then refuses every command line, and
-    // names a flag the caller never typed and cannot correct. The target
-    // stack reports this as `failed` (exit 1), apart from a `refused`
-    // command line (exit 2). Here both are `failure`.
+    // names a flag the caller never typed and cannot correct.
     //
     // This check runs here, over the spec alone, before the command line
     // is parsed. The verdict then does not depend on argv. Asked from the

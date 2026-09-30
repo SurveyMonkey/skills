@@ -91,10 +91,8 @@ const compareTriples = (
 /**
  * Whether `version` is at or above {@link NODE_FLOOR}.
  *
- * This is the shape a hook needs. ADR 012 requires the hook guard to stay
- * silent. A hook runs on every tool call in a session. So it asks the
- * question and exits quietly. It does not catch a refusal that it must not
- * print.
+ * This is the shape a hook needs. A hook asks the question and stays
+ * quiet. It does not catch a refusal that it must not print.
  *
  * A version string that cannot be read as a release answers `false`. An
  * unreadable version is not proof that the floor is met. To treat it as
