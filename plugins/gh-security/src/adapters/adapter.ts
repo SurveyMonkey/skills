@@ -23,7 +23,7 @@ export type Tree<Detection> = {
 }
 
 /** One installed copy of a package. */
-export type ResolvedVersion = {
+type ResolvedVersion = {
   readonly version: string
   /** Where the lockfile records the copy: its key or its locator. */
   readonly path: string
