@@ -85,7 +85,7 @@ const readLocator = (locator: string): Reading => {
     const protocol = descriptor.slice(0, colon)
     const value = descriptor.slice(colon)
     if (protocol === 'npm:') {
-      // Binding parameters after `::`, such as `__archiveUrl`, are not the version.
+      // Parameters that Berry adds after `::`, such as `__archiveUrl`, are not the version.
       const version = before(value, '::')
       if (SEMVER.test(version)) return { kind: 'registry', name, key, version }
       // The alias target ends at the last `@`. With none after the first
@@ -139,20 +139,24 @@ export const resolutionMap = (text: string): ResolutionMap => {
 }
 
 /**
- * The parent an entry's locator names, or `null` for a workspace: that is the
- * repository's own code, not a parent an override can be scoped to.
+ * The parent that the locator of an entry names. A workspace gives `null`: it
+ * is the repository's own code, so an override cannot be scoped to it. An empty
+ * locator has no name, so it also gives `null`.
  */
-const parentOf = (locator: string): Parent | null =>
-  locator.includes('@workspace:')
+const parentOf = (locator: string): Parent | null => {
+  const [name] = splitName(locator)
+  return name === '' || locator.includes('@workspace:')
     ? null
-    : { name: splitName(locator)[0], version: readLocator(locator).version }
+    : { name, version: readLocator(locator).version }
+}
 
 const DECLARATIONS = /^ {2}(dependencies|peerDependencies|optionalDependencies):/
 
 /**
  * Each entry that declares `pkg` in `dependencies`, `optionalDependencies` or
- * `peerDependencies`, by the name or through an `npm:` alias of it (#47, #49).
- * The colon must follow the block name, so `peerDependenciesMeta` is not read.
+ * `peerDependencies`, by the name or through an `npm:` alias of it. See #47
+ * and #49. The colon must follow the block name, so `peerDependenciesMeta` is
+ * not read.
  */
 export const parents = (text: string, pkg: string): readonly Parent[] => {
   const found: Parent[] = []

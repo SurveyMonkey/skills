@@ -1,7 +1,7 @@
 // The Yarn Berry `yarn.lock` reader (#220). Each expected value is written by
 // hand from the fixture it names. The parity run holds the agreement with
-// node.sh, so this file holds the behavior, and `parents`, which has no bash
-// verb yet.
+// node.sh. This file holds the behavior. It also holds `parents`, which no
+// bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -166,6 +166,24 @@ describe('parents', () => {
     const text = entry('a', '  dependencies:\n    x\n')
     expect(parents(text, 'x')).toEqual([])
   })
+
+  it('names no parent for an empty locator', () => {
+    const text = '"a@npm:1.0.0":\n  resolution: ""\n  dependencies:\n    x: "npm:^1"\n'
+    expect(parents(text, 'x')).toEqual([])
+  })
+
+  it('reads no declaration from peerDependenciesMeta', () => {
+    const text = entry(
+      'a',
+      '  peerDependencies:\n    y: "*"\n  peerDependenciesMeta:\n    x:\n      optional: true\n',
+    )
+    expect(parents(text, 'x')).toEqual([])
+  })
+
+  it('reads no declaration from an entry that has no resolution', () => {
+    const text = `${entry('a', '  dependencies:\n    y: "npm:^1"\n')}"b@npm:^2":\n  dependencies:\n    x: "npm:^1"\n`
+    expect(parents(text, 'x')).toEqual([])
+  })
 })
 
 describe('locator readings', () => {
@@ -195,6 +213,22 @@ describe('locator readings', () => {
 
   it.each(['1.0.0-rc.1', '1.0.0+build.5', '1.0.0-rc.1+build.5'])('reads the version %s', (v) => {
     expect(resolutionMap(entry(`pkg@npm:${v}`)).resolutions).toEqual({ pkg: [v] })
+  })
+
+  it.each([
+    ['a lowercase percent code', 'pkg@patch:pkg@npm%3a1.0.0#x', { pkg: ['1.0.0'] }],
+    ['an encoded percent sign', 'pkg@npm%253A1.0.0', { ok: ['1.0.0'] }],
+    ['a protocol with a prefix', 'pkg@xfile:y', { ok: ['1.0.0'] }],
+  ])('reads %s', (_name, locator, resolutions) => {
+    expect(resolutionMap(`${entry(locator)}\n${ok}`).resolutions).toEqual({
+      ok: ['1.0.0'],
+      ...resolutions,
+    })
+  })
+
+  it('counts an empty locator as an entry that it cannot read', () => {
+    const text = `${ok}\n"a@npm:1.0.0":\n  version: 1.0.0\n  resolution: ""\n`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
   })
 
   it('allows a lockfile it reads exactly half of', () => {
