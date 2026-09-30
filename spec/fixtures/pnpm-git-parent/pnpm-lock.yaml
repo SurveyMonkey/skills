@@ -1,0 +1,44 @@
+# A git dependency that is the parent of a registry package (#50). This file
+# starts from a real `pnpm install --lockfile-only` run (pnpm 10.34.5,
+# lockfileVersion 9.0) on `debug` 4.3.4 and its dependency `ms`. pnpm wrote a
+# codeload tarball for that GitHub host. Here the host is a plain git host, so
+# the entry takes the `git+ssh` shape of pnpm-local instead.
+#
+# The snapshots key has an `@` in its URL. A split on the last `@` names the
+# parent `debug@git+ssh://git`. The parent is `debug`.
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      debug:
+        specifier: git+ssh://git@git.example.com/example/debug.git#4.3.4
+        version: git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc
+
+packages:
+
+  debug@git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc:
+    resolution: {commit: da66c86c5fd71ef570f36b5b1edfa4472149f1bc, repo: git+ssh://git@git.example.com/example/debug.git, type: git}
+    version: 4.3.4
+    engines: {node: '>=6.0'}
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
+
+  ms@2.1.2:
+    resolution: {integrity: sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w==}
+
+snapshots:
+
+  debug@git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc:
+    dependencies:
+      ms: 2.1.2
+
+  ms@2.1.2: {}

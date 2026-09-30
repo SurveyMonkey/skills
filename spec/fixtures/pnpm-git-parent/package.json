@@ -1,0 +1,8 @@
+{
+  "name": "demo-git-parent",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "git+ssh://git@git.example.com/example/debug.git#4.3.4"
+  }
+}
