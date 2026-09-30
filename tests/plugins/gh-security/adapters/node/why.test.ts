@@ -379,6 +379,13 @@ describe('why, with no raw text', () => {
     expect(answer.outcome === 'ok' && answer.value.raw).toBe('spawn npm ENOENT')
   })
 
+  // A caller that fills `raw` from an optional flag gives `raw: undefined`.
+  it('runs why_cmd when raw is undefined', async () => {
+    const root = copyOf('npm-v3')
+    const answer = await node.why(treeAt(root), 'express', { raw: undefined, run, env: NO_PATH })
+    expect(answer.outcome === 'ok' && answer.value.raw).toBe('spawn npm ENOENT')
+  })
+
   it('does not start the package manager when the tree cannot answer', async () => {
     const started: string[] = []
     const answer = await node.why(tree('npm-v1'), 'lodash', {

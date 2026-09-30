@@ -15,7 +15,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** An entry of the block: the key and the value, without their quotes. */
-export type WorkspaceOverride = { readonly key: string; readonly value: string }
+type WorkspaceOverride = { readonly key: string; readonly value: string }
 
 // The `[[:space:]]` class of awk is spelled out: JavaScript `\s` also
 // matches Unicode space.

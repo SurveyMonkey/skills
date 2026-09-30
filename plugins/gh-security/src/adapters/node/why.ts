@@ -16,6 +16,7 @@
 import { join } from 'node:path'
 
 import { type Envelope, failed, ok } from '../../lib/envelope.ts'
+import type { Runner } from '../../lib/process.ts'
 import * as pnpm from '../../lockfiles/pnpm.ts'
 import type { Tree, WhyAnswer, WhySource } from '../adapter.ts'
 import { attempt } from './attempt.ts'
@@ -96,7 +97,7 @@ const factsOf = (tree: Tree<NodeDetection>, pkg: string): Omit<WhyAnswer, 'raw'>
 const runWhy = async (
   { root, detection }: Tree<NodeDetection>,
   pkg: string,
-  { run, env }: Extract<WhySource, { run: unknown }>,
+  { run, env }: Extract<WhySource, { run: Runner }>,
 ): Promise<string> => {
   const [command, ...args] = detection.why_cmd.split(/[ \t\n]+/).filter((word) => word !== '') as [
     string,
@@ -115,7 +116,7 @@ export const why = async (
   if (pkg === '') return failed('why requires a package name')
   const facts = attempt(() => factsOf(tree, pkg))
   if (facts.outcome !== 'ok') return facts
-  const raw = 'raw' in source ? source.raw : await runWhy(tree, pkg, source)
+  const raw = source.raw === undefined ? await runWhy(tree, pkg, source) : source.raw
   // node.sh strips the trailing newlines of the output.
   return ok({ ...facts.value, raw: raw.replace(/\n+$/, '') })
 }

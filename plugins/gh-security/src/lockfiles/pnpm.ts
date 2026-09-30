@@ -124,7 +124,7 @@ const parentOf = (key: string): Parent => {
 type ImporterKind = 'dependencies' | 'devDependencies' | 'optionalDependencies'
 
 /** An importer (the root `.` or a workspace package) that declares the package. */
-export type Importer = { readonly path: string; readonly kind: ImporterKind }
+type Importer = { readonly path: string; readonly kind: ImporterKind }
 
 /** A `dependencies:` or `optionalDependencies:` edge from a snapshot to the package. */
 export type Edge = {
@@ -143,7 +143,7 @@ export type Edge = {
 }
 
 /** What `pnpm_scan_rows` finds for one package. */
-export type Scan = {
+type Scan = {
   readonly importers: readonly Importer[]
   /** Each snapshot whose key has a `(pkg@` peer suffix, in the order of the file. */
   readonly suffixes: readonly Parent[]

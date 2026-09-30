@@ -127,11 +127,12 @@ export type WhyAnswer = {
 /**
  * Where `why` gets its `raw` text. `raw` is the output that the package
  * manager's own `why` command wrote. Without it, the verb runs that command
- * in the tree with `run`, in the environment `env`.
+ * in the tree with `run`. `env` is the whole environment of that command.
+ * The two forms do not mix.
  */
 export type WhySource =
-  | { readonly raw: string }
-  | { readonly run: Runner; readonly env: Environment }
+  | { readonly raw: string; readonly run?: never; readonly env?: never }
+  | { readonly raw?: never; readonly run: Runner; readonly env: Environment }
 
 /** The `declared_ranges` answer. Each list of parents names each parent once. */
 export type DeclaredRangesAnswer = {
