@@ -531,11 +531,33 @@ describe('declared_ranges of an installed pnpm parent', () => {
     })
   })
 
-  // #50: the lockfile records no version for this copy, so the name has none.
-  it('files a pnpm git parent on another line by its name alone', () => {
+  // #50: the name ends at the first `@`. The rest of the key is the version
+  // of the copy, as node.sh writes it: the two sides give the same text here.
+  it('files a pnpm git parent on another line by its name and the rest of its key', () => {
     expect(body(node.declaredRanges(tree('pnpm-git-parent'), 'ms', 3))).toMatchObject({
-      parents_other_lines: ['debug'],
+      parents_other_lines: [
+        'debug@git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+      ],
     })
+  })
+
+  // Two `file:` copies of one parent, each on lodash 3. node.sh names each
+  // copy by the text after the `@` of its key.
+  it('files each file: copy of a parent on another line by its version text', () => {
+    const detected = copyOf('pnpm-local')
+    const path = join(detected.root, 'pnpm-lock.yaml')
+    const edges = '    dependencies:\n      lodash: 3.10.1\n'
+    writeFileSync(
+      path,
+      readFileSync(path, 'utf8').replace(
+        '  local-lib@file:vendor/local-lib: {}\n',
+        `  local-lib@file:vendor/local-lib:\n${edges}\n  local-lib@file:vendor/other-lib:\n${edges}`,
+      ),
+    )
+    expect(body(node.declaredRanges(detected, 'lodash', 4)).parents_other_lines).toEqual([
+      'local-lib@file:vendor/local-lib',
+      'local-lib@file:vendor/other-lib',
+    ])
   })
 
   it('keeps the root range when importers records no version for it', () => {

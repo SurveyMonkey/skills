@@ -239,12 +239,14 @@ describe('scan', () => {
       edges: [
         {
           parent: { name: '@vitejs/plugin-react', version: '4.3.4' },
+          parentVersion: '4.3.4',
           version: '6.4.3',
           kind: 'dependencies',
           suffixed: true,
         },
         {
           parent: { name: '@vitest/mocker', version: '3.0.5' },
+          parentVersion: '3.0.5',
           version: '6.4.3',
           kind: 'optionalDependencies',
           suffixed: true,
@@ -261,6 +263,7 @@ describe('scan', () => {
       edges: [
         {
           parent: { name: '@vitejs/plugin-react', version: '4.3.4' },
+          parentVersion: '4.3.4',
           version: '7.29.7',
           kind: 'dependencies',
           suffixed: false,
@@ -282,6 +285,8 @@ describe('scan', () => {
     expect(scan(lockfile('pnpm-git-parent'), 'ms').edges).toEqual([
       {
         parent: { name: 'debug', version: null },
+        parentVersion:
+          'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
         version: '2.1.2',
         kind: 'dependencies',
         suffixed: false,
@@ -293,12 +298,14 @@ describe('scan', () => {
     expect(scan(lockfile('pnpm-peer-variant'), 'minimist').edges).toEqual([
       {
         parent: { name: 'optimist', version: '0.5.2' },
+        parentVersion: '0.5.2',
         version: null,
         kind: 'dependencies',
         suffixed: false,
       },
       {
         parent: { name: 'optimist', version: '0.6.1' },
+        parentVersion: '0.6.1',
         version: '0.0.10',
         kind: 'dependencies',
         suffixed: false,
@@ -364,6 +371,29 @@ describe('copies', () => {
     expect(copies(lockfile('pnpm-peer-only'), 'vite')).toEqual([
       { parent: '@vitejs/plugin-react', parent_version: '4.3.4', range: null, resolved: '6.4.3' },
       { parent: '@vitest/mocker', parent_version: '3.0.5', range: null, resolved: '6.4.3' },
+    ])
+  })
+
+  // `pnpm_copy_rows` keeps the text after the `@` of the key, and makes only
+  // an empty text null. A `file:` copy has a version that is no registry version.
+  it('keeps a parent version that is not a registry version, and no version as null', () => {
+    const text = [
+      "lockfileVersion: '9.0'",
+      'snapshots:',
+      '  local-lib@file:vendor/local-lib:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+      '  local-lib@file:vendor/other-lib:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+      '  bare:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+    ].join('\n')
+    expect(copies(text, 'lodash').map(({ parent_version }) => parent_version)).toEqual([
+      'file:vendor/local-lib',
+      'file:vendor/other-lib',
+      null,
     ])
   })
 })

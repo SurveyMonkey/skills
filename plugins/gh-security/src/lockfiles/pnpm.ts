@@ -129,6 +129,12 @@ export type Importer = { readonly path: string; readonly kind: ImporterKind }
 /** A `dependencies:` or `optionalDependencies:` edge from a snapshot to the package. */
 export type Edge = {
   readonly parent: Parent
+  /**
+   * The text after the `@` of the parent key, or `null` when it is empty.
+   * `parent.version` holds only a registry version. This also holds a
+   * `file:` or a URL version, as `pnpm_copy_rows` does.
+   */
+  readonly parentVersion: string | null
   /** The version that the edge resolves, or `null` when it is not a registry version. */
   readonly version: string | null
   readonly kind: 'dependencies' | 'optionalDependencies'
@@ -165,6 +171,7 @@ export const scan = (text: string, pkg: string): Scan => {
   let importer = ''
   let importerKind: ImporterKind | null = null
   let parent: Parent | null = null
+  let parentVersion: string | null = null
   let suffixed = false
   let kind: Edge['kind'] | null = null
   for (const line of lines(text)) {
@@ -197,8 +204,10 @@ export const scan = (text: string, pkg: string): Scan => {
         .slice(2)
         .replace(/:[ \t\n\v\f\r]*(\{\})?[ \t\n\v\f\r]*$/, '')
         .replaceAll("'", '')
-      const named = parentOf(before(key, '('))
+      const locator = before(key, '(')
+      const named = parentOf(locator)
       parent = named.name === '' ? null : named
+      parentVersion = locator.slice(named.name.length + 1) || null
       suffixed = key.includes(`(${pkg}@`)
       if (parent !== null && suffixed) suffixes.push(parent)
       kind = null
@@ -223,6 +232,7 @@ export const scan = (text: string, pkg: string): Scan => {
         )
         edges.push({
           parent,
+          parentVersion,
           version: /^[0-9]/.test(resolved) ? resolved : null,
           kind,
           suffixed,
@@ -245,9 +255,9 @@ export const parents = (text: string, pkg: string): readonly Parent[] =>
  * resolved, never what was declared, so no row has a range (#100).
  */
 export const copies = (text: string, pkg: string): readonly Copy[] =>
-  scan(text, pkg).edges.map(({ parent, version }) => ({
+  scan(text, pkg).edges.map(({ parent, parentVersion, version }) => ({
     parent: parent.name,
-    parent_version: parent.version,
+    parent_version: parentVersion,
     range: null,
     resolved: version,
   }))
