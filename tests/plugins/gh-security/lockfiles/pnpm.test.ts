@@ -1,0 +1,221 @@
+// The pnpm `pnpm-lock.yaml` reader (#220). Each expected value is written by
+// hand from the fixture it names. The parity run holds the agreement with
+// node.sh. This file holds the behavior. It also holds `parents`, which no
+// bash verb returns.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/pnpm.ts'
+import { LockfileError } from '#gh-security/lockfiles/shared.ts'
+import { FIXTURES_ROOT } from '#harness/fixtures.ts'
+
+const lockfile = (fixture: string): string =>
+  readFileSync(join(FIXTURES_ROOT, fixture, 'pnpm-lock.yaml'), 'utf8')
+
+describe('resolvedVersions', () => {
+  it('finds a registry copy by its packages key', () => {
+    expect(resolvedVersions(lockfile('pnpm-v9'), 'lodash')).toEqual({
+      coverage: { entries: 5, expected: 5, read: 5 },
+      copies: [{ version: '4.17.21', path: 'lodash@4.17.21' }],
+    })
+  })
+
+  it('reads a quoted scoped key', () => {
+    expect(resolvedVersions(lockfile('pnpm-v9'), '@babel/core').copies).toEqual([
+      { version: '7.24.0', path: '@babel/core@7.24.0' },
+    ])
+  })
+
+  it('leaves the peer suffix out of the version', () => {
+    expect(resolvedVersions(lockfile('pnpm-v9'), 'react-dom').copies).toEqual([
+      { version: '18.2.0', path: 'react-dom@18.2.0' },
+    ])
+  })
+
+  it('names one copy for two peer variants of one version', () => {
+    const text =
+      'packages:\n\n  react-dom@18.2.0(react@17.0.2):\n    resolution: {}\n\n  react-dom@18.2.0(react@18.2.0):\n    resolution: {}\n'
+    expect(resolvedVersions(text, 'react-dom')).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      copies: [{ version: '18.2.0', path: 'react-dom@18.2.0' }],
+    })
+  })
+
+  it('answers no copies for a git target', () => {
+    expect(resolvedVersions(lockfile('pnpm-local'), 'ssh-dep').copies).toEqual([])
+  })
+
+  it('answers no copies for a package the lockfile does not hold', () => {
+    expect(resolvedVersions(lockfile('pnpm-v9'), 'left-pad').copies).toEqual([])
+  })
+})
+
+describe('resolutionMap', () => {
+  it('reads link, file, git and URL targets and keeps them out of the map', () => {
+    expect(resolutionMap(lockfile('pnpm-local'))).toEqual({
+      coverage: { entries: 6, expected: 6, read: 6 },
+      resolutions: { express: ['4.18.2'], lodash: ['4.17.21'] },
+    })
+  })
+
+  // A pin, not a fix: node.sh keeps the leading `/` in the name of a
+  // lockfileVersion 6 key. The parity run holds the module to node.sh.
+  it('reads a lockfileVersion 6 key through the split on its last @', () => {
+    expect(resolutionMap(lockfile('pnpm-v6'))).toEqual({
+      coverage: { entries: 3, expected: 3, read: 3 },
+      resolutions: {
+        '/@vitejs/plugin-react': ['4.3.4'],
+        '/@vitest/mocker': ['3.0.5'],
+        '/vite': ['6.4.3'],
+      },
+    })
+  })
+
+  it('keeps a git parent out of the map and its registry child in it', () => {
+    expect(resolutionMap(lockfile('pnpm-git-parent'))).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      resolutions: { ms: ['2.1.2'] },
+    })
+  })
+})
+
+describe('refusals', () => {
+  it.each([
+    ['resolvedVersions', (text: string) => resolvedVersions(text, 'lodash')],
+    ['resolutionMap', (text: string) => resolutionMap(text)],
+  ])('%s refuses a lockfile with no packages', (_name, read) => {
+    expect(() => read(lockfile('pnpm-no-overrides'))).toThrow(
+      new LockfileError(
+        "Parsed 0 entries from the lockfile for pm 'pnpm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result.",
+      ),
+    )
+  })
+})
+
+describe('parents', () => {
+  it('names the parent of a dependencies edge, with its version', () => {
+    expect(parents(lockfile('pnpm-v9'), 'lodash')).toEqual([{ name: 'express', version: '4.18.2' }])
+  })
+
+  it('names the parent of an optionalDependencies edge', () => {
+    expect(parents(lockfile('pnpm-optional-parent'), 'dompurify')).toEqual([
+      { name: 'jspdf', version: '4.2.1' },
+    ])
+  })
+
+  it('names a parent whose key carries a peer suffix, without the suffix', () => {
+    expect(parents(lockfile('pnpm-workspace-peer'), 'vite')).toEqual([
+      { name: '@vitejs/plugin-react', version: '4.3.4' },
+    ])
+  })
+
+  // #50: bash names this parent `debug@git+ssh://git`.
+  it('names a git parent by the name before its first @', () => {
+    expect(parents(lockfile('pnpm-git-parent'), 'ms')).toEqual([{ name: 'debug', version: null }])
+  })
+
+  it('reads no parents from a lockfileVersion 6 lockfile, which has no snapshots', () => {
+    expect(parents(lockfile('pnpm-v6'), 'vite')).toEqual([])
+  })
+
+  it('reads no edge from the peerDependencies of a packages entry', () => {
+    expect(parents(lockfile('pnpm-git-parent'), 'supports-color')).toEqual([])
+  })
+
+  it('names a parent once when two peer variants of it declare the package', () => {
+    expect(parents(lockfile('pnpm-peer-variant'), 'react')).toEqual([
+      { name: 'react-redux', version: '8.1.3' },
+    ])
+  })
+
+  it('reads a quoted scoped child', () => {
+    expect(parents(lockfile('pnpm-workspace-peer'), '@babel/core')).toEqual([
+      { name: '@vitejs/plugin-react', version: '4.3.4' },
+    ])
+  })
+
+  it('reads no edge from a line without a colon', () => {
+    const text = 'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      lodash\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no edge from a peerDependencies block of a snapshot', () => {
+    const text = 'snapshots:\n\n  a@1.0.0:\n    peerDependencies:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no snapshot after the section that follows snapshots', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0: {}\n\nother:\n  c@1.0.0:\n    dependencies:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no edge from a block that follows the edges', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      b: 1.0.0\n    transitivePeerDependencies:\n      lodash: x\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no edge under a key that has no edge block', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      b: 1.0.0\n  c@1.0.0:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('names no parent for a key that has no name', () => {
+    const text = "snapshots:\n\n  '(react@1.0.0)':\n    dependencies:\n      lodash: 4.17.21\n"
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+})
+
+describe('key readings', () => {
+  const keyed = (key: string): string => `packages:\n\n  ${key}:\n    resolution: {}\n`
+  const other = 'ok@1.0.0'
+
+  // Each target has a protocol, so it counts as read and stays out of the map.
+  it.each([
+    'link:../a',
+    'file:../a',
+    'workspace:*',
+    'portal:../a',
+    'catalog:',
+    'exec:./a',
+    'git:x',
+    'git+ssh://x',
+    'git+http://x',
+    'git+https://x',
+    'http://x',
+    'https://x',
+    'ssh://x',
+    'github:x/y',
+    'gitlab:x/y',
+    'bitbucket:x/y',
+  ])('reads a %s target and keeps it out of the map', (target) => {
+    const text = `${keyed(`pkg@${target}`)}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text)).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      resolutions: { ok: ['1.0.0'] },
+    })
+  })
+
+  it.each(['pkg@xfile:y', '@1.0.0'])('counts the key %s as unread', (key) => {
+    const text = `${keyed(key)}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
+  })
+
+  // Exactly half passes the guard.
+  it('counts a key it cannot read against the guard', () => {
+    const text = `${keyed('pkg@unknown:x')}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
+  })
+
+  it('refuses a lockfile it reads less than half of', () => {
+    const text = `${keyed('a@unknown:x')}\n  b@unknown:y:\n    resolution: {}\n\n  ${other}:\n`
+    expect(() => resolutionMap(text)).toThrow(
+      new LockfileError(
+        "Read 1 of 3 lockfile entries for pm 'pnpm'. The parser understands too little of this lockfile to describe the tree; refusing to report a mostly-unparsed lockfile as a clean result.",
+      ),
+    )
+  })
+})
