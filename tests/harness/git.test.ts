@@ -123,6 +123,22 @@ it('copies a repository that a test cannot tell from a seeded one', () => {
   )
 })
 
+it('seeds each repository with git when it is asked for fresh ones', () => {
+  // The copy and the seed give the same repository (the test above), so only
+  // a git that refuses `clone` tells them apart: a seed clones, a copy does
+  // not.
+  const sandbox = createSandbox()
+  const git = createGitFixtures(sandbox)
+  git.create(sandbox.join('first'))
+  const shim = git.gitShim('clone')
+  sandbox.env.PATH = `${shim.directory}${path.delimiter}${sandbox.env.PATH}`
+  sandbox.env.GIT_STUB_FAIL = shim.failing
+
+  expect(() => git.create(sandbox.join('copied'))).not.toThrow()
+  const seeded = createGitFixtures(sandbox, { fresh: true })
+  expect(() => seeded.create(sandbox.join('fresh'))).toThrow(/git stub: refusing clone/)
+})
+
 it('pushes a copy to its own origin and to no other', () => {
   const sandbox = createSandbox()
   const git = createGitFixtures(sandbox)
@@ -179,6 +195,17 @@ it('pushes the branch it is asked for', () => {
   git.push(work, 'feature')
 
   expect(git.sha(work, 'refs/remotes/origin/feature')).toBe(git.sha(work, 'feature'))
+})
+
+it('starts a branch at the default branch, not at the checked-out one', () => {
+  const { git, work } = repository()
+  git.branchWithWork(work, 'feature')
+  git.git(work, 'checkout', '-q', 'feature')
+
+  git.branch(work, 'from-default')
+
+  expect(git.sha(work, 'from-default')).toBe(git.sha(work, DEFAULT_BRANCH))
+  expect(git.sha(work, 'from-default')).not.toBe(git.headSha(work))
 })
 
 it('creates a branch without moving the checkout', () => {
@@ -326,6 +353,17 @@ it('produces a genuinely diverged branch', () => {
   ).toBe('1\t1')
 })
 
+it.each([
+  ['diverge', (git: GitFixtures, work: string) => git.diverge(work)],
+  ['remoteAdvance', (git: GitFixtures, work: string) => git.remoteAdvance(work)],
+])('%s leaves no scratch clone behind', (_name, build) => {
+  const { sandbox, git, work } = repository()
+
+  build(git, work)
+
+  expect(readdirSync(sandbox.path).filter((entry) => entry.startsWith('scratch-'))).toEqual([])
+})
+
 it('leaves the default branch behind origin after a remote advance', () => {
   const { git, work } = repository()
 
@@ -334,6 +372,10 @@ it('leaves the default branch behind origin after a remote advance', () => {
   git.git(work, 'fetch', '-q', 'origin')
   expect(git.git(work, 'rev-list', '--count', `HEAD..refs/remotes/origin/${DEFAULT_BRANCH}`)).toBe(
     '1',
+  )
+  // The tracked file is the one it advances by default.
+  expect(git.git(work, 'show', `refs/remotes/origin/${DEFAULT_BRANCH}:file.txt`)).toBe(
+    'base\nadvanced',
   )
 })
 
