@@ -73,7 +73,7 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
 - The harness modules (#219, moved in #273):
   - `fixtures.ts` copies a committed specimen into a scratch directory per example. It is the
     vitest twin of `use_fixture`.
-  - `gh-mock.ts` is a `GhClient`. Each method throws until the example registers a reply or a
+  - `gh-mock.ts` is a `GhClient`. Each method rejects until the example registers a reply or a
     failure for it.
   - `git-repo.ts` builds a temp origin and a clone of it with real `git`.
   - `parity.ts` runs a bash command line and a TypeScript call on one input. It reports the first
