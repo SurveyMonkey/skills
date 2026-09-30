@@ -75,7 +75,7 @@ specs then test at, and the reviewer of the plan is agreeing to the seam, not on
     vitest twin of `use_fixture`.
   - `gh.ts` is a `GhClient`. Each method rejects until the example registers a reply or a
     failure for it.
-  - `git.ts` builds real repositories in known states, each with a bare origin.
+  - `git.ts` builds real repositories in known states, each seeded with a bare origin.
   - `sandbox.ts` gives a test a private HOME and a child environment with no git or gh credentials.
   - `parity.ts` runs a bash command line and a TypeScript call on one input. It reports the first
     path at which their JSON differs.
