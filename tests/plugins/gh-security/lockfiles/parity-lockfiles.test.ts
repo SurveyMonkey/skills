@@ -9,8 +9,9 @@
 // names each with its reason.
 //
 // `parents` is not here. No node.sh verb returns it, so the unit tests prove
-// it. The `why` and `declared_ranges` verbs use the parents in their own
-// answers, and parity-node-tree.test.ts compares those answers with node.sh.
+// it. The `why` and `declared_ranges` verbs put the parents in their
+// answers. parity-node-tree.test.ts compares those answers with node.sh. It
+// does not compare them on the fixtures that it declares out.
 //
 // The TypeScript side adds the fields that the verb adds around the parser.
 // The semver parity run does the same for the arguments that `compare_versions`

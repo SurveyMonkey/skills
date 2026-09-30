@@ -1,15 +1,16 @@
 // `why` for the node adapter, ported from `verb_why` in node.sh (#221). The
 // lockfile readers under `src/lockfiles/` parse. This verb adds the facts of
-// the root manifest, and the `peer_only` rule of #103 for a pnpm
-// lockfileVersion 9 lockfile.
+// the root manifest, and the `peer_only` rule of #103 for a pnpm lockfile
+// at lockfileVersion 9.
 //
 // `raw` is the text of the package manager's own `why` command, for a
 // person to read. The verb takes it from its `source` (#221, round 3 ruling
-// 2). With no `raw`, it runs `why_cmd` of the detection in the tree, through
-// the runner that it is given, with the environment that it is given. That
-// is the one process seam of this verb. A command that does not start is no
-// failure: `raw` is then the message of the start failure, as node.sh puts
-// the message of the shell in `raw`. The verb does not run `detect`.
+// 2). With no `raw`, it runs `why_cmd` of the detection in the tree. It uses
+// the runner and the environment that it is given. That is the one process
+// seam of this verb. A command that does not start is no failure. `raw` is
+// then the message of the start failure, as node.sh puts the message of the
+// shell in `raw`. An exit that is not zero is no failure either. The verb
+// does not run `detect`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -37,12 +38,17 @@ type PeerFacts = Pick<WhyAnswer, 'peer_only' | 'peer_parents' | 'optional_peer_p
 const NO_PEERS: PeerFacts = { peer_only: false, peer_parents: [], optional_peer_parents: [] }
 
 /**
- * The `peer_only` rule of #103, for pnpm lockfileVersion 9 only. It holds
- * when the root does not declare the package, no importer declares it, some
- * edge or peer suffix reaches it, and each edge to it comes from a snapshot
- * key whose peer suffix names it. A parent is an optional peer when its
- * suffixed snapshot reaches the package only through `optionalDependencies:`.
- * `peer_parents` has the required peers first, and each group is sorted.
+ * The `peer_only` rule of #103, for a pnpm lockfile at lockfileVersion 9
+ * only. It holds when all of these are true:
+ *
+ * - The root does not declare the package.
+ * - No importer declares it.
+ * - An edge or a peer suffix reaches it.
+ * - Each edge to it comes from a snapshot key whose peer suffix names it.
+ *
+ * A parent is an optional peer when its suffixed snapshot reaches the
+ * package only through `optionalDependencies:`. `peer_parents` has the
+ * required peers first, and each group is sorted.
  */
 const peerFacts = (text: string, pkg: string, direct: boolean): PeerFacts => {
   if (!pnpm.isV9(text)) return NO_PEERS
@@ -90,9 +96,10 @@ const factsOf = (tree: Tree<NodeDetection>, pkg: string): Omit<WhyAnswer, 'raw'>
 }
 
 /**
- * The output of `why_cmd` for `pkg`, stdout and stderr both, as
- * `$why_cmd "$pkg" 2>&1` gives it. The command splits at white space, as
- * the shell splits an unquoted word.
+ * The output of `why_cmd` for `pkg`: stdout and stderr both, in the order
+ * that their chunks came in. node.sh writes the two to one file
+ * (`> file 2>&1`), in the order of the writes, so the mix can differ. The
+ * command splits at white space, as the shell splits an unquoted word.
  */
 const runWhy = async (
   { root, detection }: Tree<NodeDetection>,
@@ -117,6 +124,6 @@ export const why = async (
   const facts = attempt(() => factsOf(tree, pkg))
   if (facts.outcome !== 'ok') return facts
   const raw = source.raw === undefined ? await runWhy(tree, pkg, source) : source.raw
-  // node.sh strips the trailing newlines of the output.
+  // node.sh removes the newlines at the end of the output.
   return ok({ ...facts.value, raw: raw.replace(/\n+$/, '') })
 }

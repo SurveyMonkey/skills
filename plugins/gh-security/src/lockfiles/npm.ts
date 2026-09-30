@@ -156,10 +156,10 @@ const candidates = (path: string, key: string): readonly string[] =>
   prefixes(path).map((prefix) => `${prefix === '' ? '' : `${prefix}/`}${NODE_MODULES}${key}`)
 
 /**
- * `npm_copy_rows`: one row for each declaration of `pkg`, by the name or by
- * an `npm:${pkg}@` alias, in the three blocks of each copy. `resolved` is the
- * version of the first candidate on the walk up that has one. The root is
- * not a parent.
+ * `npm_copy_rows`: one row for each key that declares `pkg`, by the name or
+ * by an `npm:${pkg}@` alias. The three blocks of each copy merge first, and
+ * a later block wins a key. `resolved` is the version of the first candidate
+ * on the walk up that has one. The root is not a parent.
  */
 export const copies = (text: string, pkg: string): readonly Copy[] => {
   const entries = entriesOf(text)

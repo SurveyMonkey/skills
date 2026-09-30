@@ -113,14 +113,18 @@ export type WhyAnswer = {
   readonly parent_count: number
   /**
    * True when no override can move the package: pnpm resolves it only as a
-   * peer (#103). Always false outside a pnpm lockfileVersion 9 lockfile.
+   * peer (#103). Always false outside a pnpm lockfile at lockfileVersion 9.
    */
   readonly peer_only: boolean
-  /** The parents whose snapshot key has the package as a peer: required peers first. */
+  /**
+   * The parents whose snapshot key has the package as a peer. The required
+   * peers are first, and each group is sorted as text. Empty outside a pnpm
+   * lockfile at lockfileVersion 9.
+   */
   readonly peer_parents: readonly string[]
   /** The parents in `peer_parents` that reach the package only as an optional peer. */
   readonly optional_peer_parents: readonly string[]
-  /** The output of the package manager's own `why` command, with no trailing newline. */
+  /** The output of the package manager's own `why` command, with no newline at the end. */
   readonly raw: string
 }
 
@@ -134,13 +138,19 @@ export type WhySource =
   | { readonly raw: string; readonly run?: never; readonly env?: never }
   | { readonly raw?: never; readonly run: Runner; readonly env: Environment }
 
-/** The `declared_ranges` answer. Each list of parents names each parent once. */
+/**
+ * The `declared_ranges` answer. `parents_read`, `parents_without_range`,
+ * `parents_unreadable` and `parents_malformed` name each parent once.
+ * `parents_other_lines` has one entry for each copy on another line, so an
+ * entry can repeat. A parent can be in `parents_read` and in
+ * `parents_other_lines` both.
+ */
 export type DeclaredRangesAnswer = {
   readonly pm: string
   readonly package: string
   /** The major line that the answer is limited to, or null for all lines. */
   readonly line: number | null
-  /** Unique and sorted as text. The root range is one of them. */
+  /** Unique and sorted as text. When `root_range` is not null, it is one of them. */
   readonly ranges: readonly string[]
   /** The range that the root manifest declares, or null. */
   readonly root_range: string | null
@@ -149,7 +159,10 @@ export type DeclaredRangesAnswer = {
   readonly parents_without_range: readonly string[]
   /** No declaration could be read. The root copy is never in this list. */
   readonly parents_unreadable: readonly string[]
-  /** The subset of `parents_unreadable` whose manifest is on disk but does not parse. */
+  /**
+   * The subset of `parents_unreadable` whose manifest is on disk, but does
+   * not parse or has a dependency block that jq cannot read.
+   */
   readonly parents_malformed: readonly string[]
   /** On a different line than `line`: `name` or `name@version`, and `__root__` for the root. */
   readonly parents_other_lines: readonly string[]
@@ -168,7 +181,10 @@ export type PinValue =
 export type Pin = {
   /** The key in the block. For npm, the first key of the path. */
   readonly key: string
-  /** The parents and then the target, each without splits inside. For npm, every key down to the leaf. */
+  /**
+   * The parents, then the target with its selector. For npm, every key from
+   * the top of the block down to the leaf.
+   */
   readonly path: readonly string[]
   /** The target without its version selector. */
   readonly package: string

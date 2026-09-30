@@ -143,6 +143,11 @@ export const resolutionMap = (text: string): ResolutionMap => {
  * The parent that the locator of an entry names. A workspace gives `null`: it
  * is the repository's own code, so an override cannot be scoped to it. An empty
  * locator has no name, so it also gives `null`.
+ *
+ * The name ends at the first `@` after the first character. node.sh ends it
+ * at the last `@`. The two differ for an alias or a `patch:` entry: bash
+ * names `lodash@patch:lodash@npm%3A...` as `lodash@patch:lodash` (#221,
+ * mid-round ruling 15).
  */
 const parentOf = (locator: string): Parent | null => {
   const [name] = splitName(locator)

@@ -2,11 +2,11 @@
 // and `workspace_manifest_view` in node.sh (#221). The jq there is the
 // specification.
 //
-// The verb reads the override file that the detection names. When that file
-// is `pnpm-workspace.yaml`, the pins are the entries of its `overrides:`
-// block, and the `pnpm.overrides` of package.json is not read as pins
-// (#159). Its keys are in `manifest_pnpm_overrides`. The verb does not run
-// `detect`.
+// The verb reads the override file that the detection names. That file can
+// be `pnpm-workspace.yaml`. Then the pins are the entries of its
+// `overrides:` block, and the verb does not read the `pnpm.overrides` of
+// package.json as pins (#159). Its keys are in `manifest_pnpm_overrides`.
+// The verb does not run `detect`.
 //
 // Three states of the block, not two (ADR 001). No block is `count: 0`. A
 // block that is present but not an object is a failure: a count of 0 for it
@@ -28,7 +28,10 @@ import { workspaceOverrides } from './workspace-overrides.ts'
 /** What {@link blockOf} answers where jq stops, for the `try` of `override_block`. */
 const INVALID = Symbol('invalid')
 
-/** `override_block`: the block, null when there is none, or {@link INVALID}. */
+/**
+ * `override_block`: the block, null when there is none, or {@link INVALID}.
+ * A file that holds no document stays {@link NO_DOCUMENT}.
+ */
 const blockOf = (manifest: unknown, location: NodeDetection['override_location']): unknown => {
   if (manifest === NO_DOCUMENT) return manifest
   try {
@@ -102,8 +105,9 @@ const sourceOf = (tree: Tree<NodeDetection>, workspace: boolean): Envelope<unkno
 
 /**
  * `(.pnpm.overrides // {}) | keys` of package.json, sorted as jq sorts
- * them. It throws where jq stops. jq answers the indexes of an array. This port refuses an array,
- * which is not a block of override entries: a declared divergence.
+ * them. It throws where jq stops. For an array, jq answers its indexes.
+ * This port refuses an array, which is not a block of override entries.
+ * That is a divergence from node.sh. No fixture has this shape.
  */
 const manifestOverrideKeys = (root: string): readonly string[] => {
   try {

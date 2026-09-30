@@ -35,7 +35,8 @@ export const lockfileText = ({ root, detection }: Tree<NodeDetection>): string =
 export const readerOf = ({ detection }: Tree<NodeDetection>): Reader => READERS[detection.pm]
 
 // Code unit order. For these names, it is the order of jq's `unique` and
-// `keys`, and of `sort -u` in the C locale.
+// `keys`, and of `sort -u` in the C locale. node.sh does not set the locale,
+// so the order of its `sort -u` is the same only in the C locale.
 export const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
 
 /** The names of the parents, each once, sorted as text. */

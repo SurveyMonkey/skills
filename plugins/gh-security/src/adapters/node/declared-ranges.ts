@@ -3,18 +3,19 @@
 // bash there is the specification.
 //
 // The verb collects the ranges that the dependents of a package declare: the
-// root manifest, and each parent. A parent with one copy, and a manifest
-// installed at `node_modules/<parent>/`, answers from that manifest. It is
-// the state that the install left. Else the lockfile answers for each copy
-// of the parent (#85). pnpm records no declared range, so a pnpm copy on the
-// line is unreadable, but its line is known (#100).
+// root manifest, and each parent. Some parents answer from the manifest at
+// `node_modules/<parent>/`, which is the state that the install left. These
+// are a parent with no copy row, and a parent with one copy and an installed
+// manifest. Else the lockfile answers for each copy of the parent (#85). A
+// pnpm copy row has no range, but its line is known (#100).
 //
 // With a `line`, a dependent whose copy of the package is on another major
 // line is in `parents_other_lines` (#76). A dependent whose line is unknown
-// stays in: a range too many is safe, and a range dropped is not. For npm
-// and yarn, the line comes from node resolution over the installed tree:
-// the nested copy first, then the hoisted one. The verb does not run
-// `detect`.
+// stays in: a range too many is safe, and a range dropped is not. A parent
+// that the lockfile answers for gets its line from its row. For npm and
+// yarn, the root and a parent that its manifest answers for get the line
+// from node resolution over the installed tree. The nested copy is first,
+// then the hoisted one. The verb does not run `detect`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -152,7 +153,8 @@ const fromManifest = (collected: Collected, root: string, parent: string, pkg: s
       pkg,
     )
   } catch {
-    // On disk but it does not parse: a damaged install, not an absent one.
+    // On disk, but it does not parse, or jq cannot read a block of it: a
+    // damaged install, not an absent one.
     collected.unreadable.push(parent)
     collected.malformed.push(parent)
     return
