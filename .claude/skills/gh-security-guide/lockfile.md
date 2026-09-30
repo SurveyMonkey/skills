@@ -57,5 +57,5 @@ reality, and it is why the suite stayed green through this.
 
 `plugins/gh-security/src/lockfiles/` has one reader for each format: `npm.ts`, `pnpm.ts` and
 `yarn.ts`. `shared.ts` has the parse guard and the answer types. Each reader gives resolved
-versions, the resolution map and the parents of a package, as plain data. They replace the
-lockfile parsers of `node.sh`, which stay until #223.
+versions, the resolution map and the parents of a package, as plain data. They port the lockfile
+parsers of `node.sh`. The bash parsers stay until #223.

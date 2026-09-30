@@ -1,18 +1,21 @@
 // Parity for the lockfile readers (RFC 002, "Parity is the migration
-// strategy"): the `resolution_map` and `resolved_versions` verbs of node.sh
-// against the npm, pnpm and yarn modules that replace their parsers (#220).
+// strategy"). It compares the `resolution_map` and `resolved_versions` verbs
+// of node.sh with the npm, pnpm and yarn modules that replace their parsers
+// (#220).
 //
 // The fixture set is discovered, not listed, so a new specimen joins this run
 // with nothing to remember. Each fixture goes to the reader of the lockfile
 // that `detect_raw` picks first. Two fixtures are out, and DECLARED below
 // names each with its reason.
 //
-// `parents` is not here. node.sh has no verb for it: `why` is the only path to
-// it (the `case "$VERB"` dispatch at the end of node.sh), and `why` is #221. The unit tests prove it.
+// `parents` is not here. No node.sh verb returns it. The `why` and
+// `declared_ranges` verbs use it inside their own output, and both are #221.
+// The unit tests prove it.
 //
-// The TypeScript side adds the fields the verb adds around the parser, the
-// way the semver parity run adds the arguments `compare_versions` echoes:
-// `pm`, `package`, `present`, `count` and the renamed coverage counts.
+// The TypeScript side adds the fields that the verb adds around the parser.
+// The semver parity run does the same for the arguments that `compare_versions`
+// echoes. The added fields are `pm`, `package`, `present`, `count` and the
+// renamed coverage counts.
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -50,9 +53,9 @@ const DECLARED: Readonly<Record<string, string>> = {
   'yarn-classic': 'refused by detect, not by a parser',
 }
 
-// The fixtures both sides must refuse, written from the fixtures by hand: an
-// empty lockfile, a lockfileVersion 1 lockfile, and a lockfile this parser
-// reads too little of.
+// The fixtures that both sides must refuse. They are an empty lockfile, a
+// lockfileVersion 1 lockfile, and a lockfile that the parser reads too little
+// of.
 const REFUSED = new Set([
   'empty-npm',
   'empty-yarn',
@@ -123,10 +126,9 @@ const resolvedVersionsSubject: ParitySubject<readonly [Case, string]> = {
     versionsAnswer(pm, pkg, reader.resolvedVersions(text, pkg)),
 }
 
-// Both sides refuse, for the same reason. bash writes the reason to stderr:
-// as `{"error": ...}` from `die`, or inside jq's own error line for the
-// lockfileVersion 1 refusal. So the check is that the bash stderr carries the
-// TypeScript message.
+// Both sides refuse for the same reason. bash writes the reason to stderr.
+// `die` writes `{"error": ...}`. For lockfileVersion 1, jq writes its own error
+// line. The check is that the bash stderr contains the TypeScript message.
 const refusal = (bash: { cwd: string; args: string[] }, typescript: () => unknown): string => {
   const result = run({ command: ADAPTER, args: bash.args, cwd: bash.cwd })
   let message = 'the TypeScript side answered'
@@ -139,8 +141,8 @@ const refusal = (bash: { cwd: string; args: string[] }, typescript: () => unknow
   return result.stderr.includes(message) ? 'both refuse' : `bash: ${result.stderr.trim()}`
 }
 
-// The package names of the bash map, which makes every package the bash side
-// sees a query for the TypeScript side.
+// The package names of the bash map. Each one becomes a query for the
+// TypeScript side.
 const bashPackages = ({ dir }: Case): string[] => {
   const result = run({ command: ADAPTER, args: ['resolution_map'], cwd: dir })
   const answer = JSON.parse(result.stdout) as { resolutions: Record<string, unknown> }

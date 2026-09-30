@@ -44,10 +44,10 @@ const readAt = (key: string, at: number): Reading => {
 }
 
 /**
- * Split on the first `@` after the first character, which is the separator
- * even for a git URL that has its own `@` (#49). When that split reads
- * nothing, try the last `@`: a lockfileVersion 6 key starts `/@scope/`, so
- * its first `@` is part of the name.
+ * Split on the first `@` after the first character. This is the separator
+ * even for a git URL that has its own `@` (#49). If that split reads nothing,
+ * try the last `@`. A scoped lockfileVersion 6 key starts `/@scope/`, so its
+ * first `@` is part of the name.
  */
 const readKey = (key: string): Reading =>
   [...new Set([key.indexOf('@', 1), key.lastIndexOf('@')])]
@@ -108,8 +108,8 @@ export const resolutionMap = (text: string): ResolutionMap => {
 }
 
 /**
- * The parent a `snapshots:` key names. The name ends at the first `@` after
- * the first character, never at the last one: a git key such as
+ * The parent that a `snapshots:` key names. The name ends at the first `@`
+ * after the first character, not at the last. A git key such as
  * `debug@git+ssh://git@host/...` has an `@` in its URL (#50).
  */
 const parentOf = (key: string): Parent => {
