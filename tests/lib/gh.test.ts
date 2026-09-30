@@ -67,7 +67,7 @@ describe('listDependabotAlerts', () => {
   it('refuses an error body rather than reading it as no alerts', () => {
     const { spawn } = answering({ stdout: '{"message":"Bad credentials"}' })
     expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'Unexpected API response for alerts for octo/app: Bad credentials',
     })
   })
@@ -77,7 +77,7 @@ describe('listDependabotAlerts', () => {
   it('reports a body that is not JSON at all as its own failure', () => {
     const { spawn } = answering({ stdout: '<html>502 Bad Gateway</html>' })
     expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'Invalid JSON response for alerts for octo/app',
     })
   })
@@ -95,7 +95,7 @@ describe('listDependabotAlerts', () => {
   ])('reports %s as not being the array of pages it expected', (_shape, stdout) => {
     const { spawn } = answering({ stdout })
     expect(createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'Unexpected API response for alerts for octo/app: response is not a JSON array',
     })
   })
@@ -104,7 +104,7 @@ describe('listDependabotAlerts', () => {
     const { spawn } = answering({ stdout: '[{"number":1}]' })
     const envelope = createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })
     expect(envelope).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'Unexpected API response for alerts for octo/app: a page is not an array of results',
     })
   })
@@ -120,7 +120,7 @@ describe('listDependabotAlerts', () => {
   it('carries the gh error wording when the fetch fails', () => {
     const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
     const envelope = createGhClient({ spawn }).listDependabotAlerts({ repo: 'octo/app' })
-    expect(envelope.outcome === 'error' && envelope.error).toContain('gh: Not Found (HTTP 404)')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('gh: Not Found (HTTP 404)')
   })
 })
 
@@ -216,7 +216,7 @@ describe('findOpenPullRequest', () => {
     const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
     const client = createGhClient({ spawn })
     expect(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }).outcome).toBe(
-      'error',
+      'failed',
     )
   })
 
@@ -230,7 +230,7 @@ describe('findOpenPullRequest', () => {
     const { spawn } = answering({ stdout })
     const client = createGhClient({ spawn })
     expect(client.findOpenPullRequest({ repo: 'octo/app', head: 'fix/lodash-4' }).outcome).toBe(
-      'error',
+      'failed',
     )
   })
 })
@@ -307,7 +307,7 @@ describe('viewPullRequest', () => {
     const { spawn } = answering({ stdout: JSON.stringify(body) })
     const client = createGhClient({ spawn })
     expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error:
         'gh pr view https://github.com/octo/app/pull/12 answered a pull request this client cannot read',
     })
@@ -323,7 +323,7 @@ describe('viewPullRequest', () => {
       const { spawn } = answering({ stdout: JSON.stringify(body) })
       const client = createGhClient({ spawn })
       expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' }).outcome).toBe(
-        'error',
+        'failed',
       )
     },
   )
@@ -335,7 +335,7 @@ describe('viewPullRequest', () => {
     const { spawn } = answering({ stdout })
     const client = createGhClient({ spawn })
     expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'gh pr view https://github.com/octo/app/pull/12 did not answer with a JSON object',
     })
   })
@@ -358,7 +358,7 @@ describe('viewPullRequest', () => {
     const { spawn } = answering({ stdout: 'no such pull request' })
     const client = createGhClient({ spawn })
     expect(client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'Invalid JSON response for gh pr view https://github.com/octo/app/pull/12',
     })
   })
@@ -367,7 +367,7 @@ describe('viewPullRequest', () => {
     const { spawn } = answering({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' })
     const client = createGhClient({ spawn })
     const envelope = client.viewPullRequest({ url: 'https://github.com/octo/app/pull/12' })
-    expect(envelope.outcome === 'error' && envelope.error).toContain('gh: Not Found (HTTP 404)')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('gh: Not Found (HTTP 404)')
   })
 })
 
@@ -442,7 +442,7 @@ describe('createLabel', () => {
         color: 'D93F0B',
         description: 'Security fix',
       }).outcome,
-    ).toBe('error')
+    ).toBe('failed')
   })
 })
 
@@ -543,7 +543,7 @@ describe('createPullRequest', () => {
         labels: [],
       }),
     ).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'gh pr create produced no PR URL. Output: Warning: 1 uncommitted change',
     })
   })
@@ -561,7 +561,7 @@ describe('createPullRequest', () => {
       bodyFile: '/w/fix/body.md',
       labels: [],
     })
-    expect(envelope.outcome === 'error' && envelope.error).toContain('No commits between')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('No commits between')
   })
 })
 

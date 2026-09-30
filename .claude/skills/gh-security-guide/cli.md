@@ -79,7 +79,7 @@ says nothing about.
 Nothing later defines its own runner, client, or envelope** ([#217](https://github.com/SurveyMonkey/skills/issues/217)).
 
 **The envelope is the contract between every layer.** ADR 001's four exit codes are four outcomes
-carried in one typed value (`ok`, `error`, `not-implemented`, `unsupported`), and only the entry
+carried in one typed value (`ok`, `failed`, `not-implemented`, `unsupported`), and only the entry
 point turns one back into a stdout/stderr pair and a process exit code. The JSON is unchanged from
 what the scripts emit: a success payload is the value itself at the top level, every failure is
 `{"error": ...}`, and an unsupported toolchain additionally names itself in `unsupported`. An

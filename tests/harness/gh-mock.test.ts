@@ -112,7 +112,7 @@ describe('the failure switch', () => {
             color: '0e8a16',
             description: 'low risk',
           })
-    expect(answered).toEqual({ outcome: 'error', error: wording })
+    expect(answered).toEqual({ outcome: 'failed', error: wording })
   })
 
   // Mutant: a failure switch that fails every operation at once. The example

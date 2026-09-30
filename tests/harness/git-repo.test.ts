@@ -67,7 +67,7 @@ describe('createGitRepo', () => {
   it('removes both repositories on cleanup', () => {
     const repo = createGitRepo()
     repo.cleanup()
-    expect(git(repo.clone, ['rev-parse', 'HEAD']).outcome).toBe('error')
+    expect(git(repo.clone, ['rev-parse', 'HEAD']).outcome).toBe('failed')
   })
 
   it('tolerates a second cleanup', () => {

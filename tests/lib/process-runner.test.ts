@@ -105,7 +105,7 @@ describe('runOk', () => {
       stderr: 'gh: Not Found (HTTP 404)\n',
     })
     expect(runOk({ command: 'gh', args: ['api', 'repos/octo/app/foo'] }, spawn)).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'gh api repos/octo/app/foo failed (exit 1): gh: Not Found (HTTP 404)',
     })
   })

@@ -8,7 +8,7 @@
 // does not catch and translate the error. Node has no `choices` check, so
 // this file adds one.
 //
-// A bad command line is exit 1 here, as `failure` from `envelope.ts`. ADR 001
+// A bad command line is exit 1 here, as `failed` from `envelope.ts`. ADR 001
 // keeps exit 2 for a verb that is not implemented, so a refusal cannot use
 // it.
 //
@@ -26,7 +26,7 @@
 
 import { parseArgs } from 'node:util'
 
-import { type Envelope, failure, ok } from './envelope.ts'
+import { type Envelope, failed, ok } from './envelope.ts'
 
 /**
  * One option. A string option carries a default value. It never allows
@@ -134,7 +134,7 @@ const parseCore = <S extends ArgSpec>(
     // value. The broken spec would then stay unreported, for as long as
     // anyone typed the wrong value.
     if (option.choices !== undefined && !option.choices.includes(option.default)) {
-      return failure(
+      return failed(
         `--${name} declares a default of "${option.default}", ` +
           `which is not one of ${option.choices.join(', ')}`,
       )
@@ -150,7 +150,7 @@ const parseCore = <S extends ArgSpec>(
     // directly. An `instanceof` guard here would add a branch no input can
     // reach. The coverage rule says to restructure that branch away, not
     // to exclude it.
-    return failure((error as Error).message)
+    return failed((error as Error).message)
   }
 
   for (const [name, option] of Object.entries(spec)) {
@@ -159,7 +159,7 @@ const parseCore = <S extends ArgSpec>(
     // construction. The cast is erased, and adds no branch.
     const value = parsed.values[name] as string
     if (!option.choices.includes(value)) {
-      return failure(`--${name} must be one of ${option.choices.join(', ')}, not "${value}"`)
+      return failed(`--${name} must be one of ${option.choices.join(', ')}, not "${value}"`)
     }
   }
 
@@ -172,7 +172,7 @@ const parseCore = <S extends ArgSpec>(
  * {@link parseCommandLine} instead (the header above says why that is the
  * default).
  *
- * A refusal is a `failure` (exit 1). It carries node's own wording for
+ * A refusal is a `failed` (exit 1). It carries node's own wording for
  * an unknown option, a missing value, or a stray positional. Its message
  * is not rewritten: node names the token that is wrong, which is what a
  * caller needs. A tidied spelling would be wording this repository then

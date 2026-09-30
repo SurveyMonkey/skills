@@ -53,16 +53,16 @@ describe('loadState', () => {
     const work = scratch()
     if (contents !== undefined) writeFileSync(join(work, 'state.json'), contents)
     const envelope = loadState(work)
-    expect(envelope.outcome).toBe('error')
+    expect(envelope.outcome).toBe('failed')
     // The failure names the file, because the answer to every one of these
     // is to inspect that path by hand rather than to rerun over it.
-    expect(envelope.outcome === 'error' && envelope.error).toContain(join(work, 'state.json'))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(join(work, 'state.json'))
   })
 
   it('refuses a state path that is a directory', () => {
     const work = scratch()
     mkdirSync(join(work, 'state.json'))
-    expect(loadState(work).outcome).toBe('error')
+    expect(loadState(work).outcome).toBe('failed')
   })
 
   // The OS error is quoted, not swallowed. "Run 'setup' first" is the right
@@ -76,7 +76,7 @@ describe('loadState', () => {
     const work = scratch()
     if (shape === 'directory') mkdirSync(join(work, 'state.json'))
     const envelope = loadState(work)
-    expect(envelope.outcome === 'error' && envelope.error).toContain(code)
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(code)
   })
 })
 
@@ -112,8 +112,8 @@ describe('createState and writeKey', () => {
 
   it('is a failure when the state file cannot be written', () => {
     const envelope = createState('/gh-security-no-such-directory', { package: 'lodash' })
-    expect(envelope.outcome).toBe('error')
-    expect(envelope.outcome === 'error' && envelope.error).toContain('cannot write the state file')
+    expect(envelope.outcome).toBe('failed')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('cannot write the state file')
   })
 })
 
@@ -140,8 +140,8 @@ describe('readValue', () => {
     ['a path through a non-object', { group: 'none' }, 'group.alerts'],
   ])('is a failure for %s', (_shape, data, path) => {
     const envelope = readValue(loaded(data), path)
-    expect(envelope.outcome).toBe('error')
-    expect(envelope.outcome === 'error' && envelope.error).toContain(`'${path}'`)
+    expect(envelope.outcome).toBe('failed')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(`'${path}'`)
   })
 
   // A falsy value is a value. `false` and `0` are answers a step legitimately
@@ -175,11 +175,11 @@ describe('readString', () => {
     ['an object', { path: '/w/fix' }],
   ])('refuses %s', (_shape, value) => {
     const envelope = readString(loaded({ worktree: value }), 'worktree')
-    expect(envelope.outcome).toBe('error')
+    expect(envelope.outcome).toBe('failed')
   })
 
   it('is a failure for an absent key', () => {
-    expect(readString(loaded({}), 'worktree').outcome).toBe('error')
+    expect(readString(loaded({}), 'worktree').outcome).toBe('failed')
   })
 })
 

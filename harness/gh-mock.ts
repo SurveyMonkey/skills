@@ -38,7 +38,7 @@
 // This is test infrastructure: it is not under `src/` and not in the coverage
 // include.
 
-import { type Envelope, failure, ok } from '#lib/envelope.ts'
+import { type Envelope, failed, ok } from '#lib/envelope.ts'
 import type { GhClient } from '#lib/gh.ts'
 
 /** The operations the client performs, named by the interface itself. */
@@ -92,7 +92,7 @@ export const createGhMock = (): GhMock => {
     }
     return registration.kind === 'reply'
       ? ok(registration.value as GhAnswer<M>)
-      : failure(registration.message)
+      : failed(registration.message)
   }
 
   // Spelled out method by method rather than generated, which is what makes a
