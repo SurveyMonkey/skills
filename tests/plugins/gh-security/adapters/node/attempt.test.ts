@@ -1,6 +1,6 @@
 // `attempt` of the node adapter (#221). The verbs reach it only with a throw
 // of an `Error`. A throw of any other value must still give an envelope with
-// a string `error` (ADR 001: a promised field is present and typed).
+// a string `error`. ADR 001 says that a promised field is present and typed.
 import { describe, expect, it } from 'vitest'
 
 import { attempt } from '#gh-security/adapters/node/attempt.ts'
@@ -24,5 +24,13 @@ describe('attempt', () => {
         throw 'a bare string'
       }),
     ).toEqual({ outcome: 'failed', error: 'a bare string' })
+  })
+
+  it('answers failed with the tag of a thrown value that String cannot convert', () => {
+    expect(
+      attempt(() => {
+        throw Object.create(null)
+      }),
+    ).toEqual({ outcome: 'failed', error: '[object Object]' })
   })
 })
