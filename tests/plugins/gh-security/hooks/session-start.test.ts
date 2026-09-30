@@ -94,6 +94,7 @@ describe('the hook in this process', () => {
       Object.defineProperty(process, 'version', { value: settings.version, configurable: true })
     }
     if (settings.path !== undefined) process.env.PATH = settings.path
+    process.exitCode = 7
     try {
       await import(`${ENTRY}?${Math.random()}`)
       return process.exitCode
@@ -126,6 +127,13 @@ describe('the hook in this process', () => {
     const exitCode = await load({ path: pathWith(['git', 'gh', 'bash']) })
     expect({ exitCode, err }).toEqual({ exitCode: 0, err: [] })
     expect(JSON.parse(out.join('')).systemMessage).toBe(`\n${problem('jq is missing')}`)
+  })
+
+  it('passes on the exit code that the CLI returns', async () => {
+    vi.doMock('#gh-security/cli/run.ts', () => ({ runCli: () => Promise.resolve(3) }))
+    const { out, err } = capture()
+    const exitCode = await load({})
+    expect({ exitCode, out, err }).toEqual({ exitCode: 3, out: [], err: [] })
   })
 
   it.each([

@@ -3,7 +3,7 @@
 // and the hook is a silent no-op for every Bash call in a session. So each
 // command is run here from the file itself, with the placeholder expanded the
 // way Claude Code expands it, and the allow hook is run end to end.
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -109,6 +109,14 @@ describe('the SessionStart entry', () => {
   it('writes the systemMessage JSON and exits 0 when node is not on PATH', () => {
     expect(sh('')).toBe('{"systemMessage":"\\ngh-security: ⚠️ node not found on PATH"}\n')
     expect(JSON.parse(sh(''))).toEqual({ systemMessage: '\ngh-security: ⚠️ node not found on PATH' })
+  })
+
+  it('writes nothing to stderr when node is not on PATH', () => {
+    const result = spawnSync('/bin/sh', ['-c', expand(command)], {
+      env: { PATH: '' },
+      encoding: 'utf8',
+    })
+    expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
   })
 
   it('writes nothing when node and every other tool are on PATH', () => {

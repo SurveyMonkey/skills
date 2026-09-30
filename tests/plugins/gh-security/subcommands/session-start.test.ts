@@ -3,11 +3,11 @@
 // runs with no real PATH. The command itself is run once against a real
 // directory of stub tools. Every expected string is written by hand from the
 // output contract in `.claude/rules/path-hooks.md`.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CommandContext } from '#gh-security/cli/command.ts'
 import { DEPENDENCIES } from '#gh-security/dependency-table.ts'
@@ -18,6 +18,7 @@ import {
   sessionStartCommand,
   sessionStartOutput,
 } from '#gh-security/subcommands/session-start.ts'
+import { GH_SECURITY_ROOT } from '#harness/paths.ts'
 
 const TABLE = [
   { tool: 'git', label: 'git' },
@@ -235,8 +236,14 @@ describe('sessionStartOutput', () => {
       expect(JSON.parse(output).systemMessage).toBe(`\n${problem('jq is missing')}`)
     })
 
-    it('uses a deadline well under the 3 second hook timeout', () => {
+    it('uses a deadline of half the hook timeout or less', () => {
+      const file = JSON.parse(
+        readFileSync(join(GH_SECURITY_ROOT, 'hooks', 'hooks.json'), 'utf8'),
+      ) as { hooks: { SessionStart: { hooks: { timeout: number }[] }[] } }
+      const timeout = file.hooks.SessionStart[0]?.hooks[0]?.timeout ?? 0
+      expect(timeout).toBe(3)
       expect(DEADLINE_MS).toBe(1500)
+      expect(DEADLINE_MS).toBeLessThanOrEqual((timeout * 1000) / 2)
     })
   })
 })
@@ -249,6 +256,7 @@ describe('with real files', () => {
     return directory
   }
   afterEach(() => {
+    vi.restoreAllMocks()
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true })
   })
 
@@ -298,6 +306,16 @@ describe('with real files', () => {
     const directory = stubs(['git', 'gh', 'bash', 'jq'])
     expect(sessionStartCommand(contextFor(directory, written))).toBeUndefined()
     expect(written).toEqual([])
+  })
+
+  it('the command reads the real clock against the deadline', () => {
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(DEADLINE_MS)
+    const written: string[] = []
+    const directory = stubs(['git', 'gh', 'bash', 'jq'])
+    expect(sessionStartCommand(contextFor(directory, written))).toBeUndefined()
+    expect(written).toEqual([
+      `{"systemMessage":"\\n${problem('the tool check ran out of time').replaceAll('\u001b', '\\u001b')}"}\n`,
+    ])
   })
 
   it('the command writes one JSON object to stdout when jq is missing', () => {

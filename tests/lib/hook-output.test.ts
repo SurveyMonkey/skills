@@ -51,6 +51,9 @@ describe('emit', () => {
   })
 
   it('keeps an empty additionalContext in the object', () => {
-    expect(emit('demo', 'demo: [item]', '')).toContain('"additionalContext":""')
+    expect(emit('demo', 'demo: [item]', '')).toBe(
+      '{"systemMessage":"\\n\\u001b[36m\\u001b[1mdemo:\\u001b[22m [item]\\u001b[0m",' +
+        '"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}\n',
+    )
   })
 })
