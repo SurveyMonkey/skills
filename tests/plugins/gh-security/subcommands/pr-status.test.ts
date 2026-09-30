@@ -249,6 +249,20 @@ describe('the checks derivation', () => {
       ['b'],
     ],
     [
+      'a node with no status at all: pending',
+      [{ name: 'a', conclusion: 'SUCCESS' }],
+      'pending',
+      [1, 0, 0, 1],
+      [],
+    ],
+    [
+      'a check with a status that is not COMPLETED: pending',
+      [{ name: 'a', status: 'WAITING', conclusion: 'SUCCESS' }],
+      'pending',
+      [1, 0, 0, 1],
+      [],
+    ],
+    [
       'a failing node with no name',
       [{ status: 'COMPLETED', conclusion: 'FAILURE' }],
       'failed',
@@ -304,6 +318,7 @@ describe('the error entries', () => {
     ['a URL that is not https', 'http://github.com/octo/app/pull/1'],
     ['a URL with text before it', 'see https://github.com/octo/app/pull/1'],
     ['a host that only looks like github.com', 'https://githubXcom/octo/app/pull/1'],
+    ['a URL with a segment before pull', 'https://github.com/octo/app/extra/pull/1'],
     ['a URL with no number', 'https://github.com/octo/app/pull/'],
     ['a word', 'not a url'],
     ['a number too large to name exactly', `https://github.com/octo/app/pull/${'9'.repeat(20)}`],
