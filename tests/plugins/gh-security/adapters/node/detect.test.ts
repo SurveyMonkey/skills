@@ -248,6 +248,14 @@ describe('the runner', () => {
     expect(runnerOf(root, pathWith('corepack'))).toMatchObject({ pm_exec: 'yarn' })
   })
 
+  // jq reads a byte order mark at the start of the file, so node.sh does too.
+  it('reads a package.json that starts with a byte order mark', () => {
+    const root = copyOf('yarn-berry')
+    const path = join(root, 'package.json')
+    writeFileSync(path, `\uFEFF${readFileSync(path, 'utf8')}`)
+    expect(runnerOf(root, pathWith('corepack'))).toMatchObject({ pm_exec: 'corepack yarn' })
+  })
+
   it('keeps the bare name when package.json is absent', () => {
     const root = copyOf('npm-v3')
     rmSync(join(root, 'package.json'))

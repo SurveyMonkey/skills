@@ -94,8 +94,8 @@ const onPath = (tool: string, root: string, env: Environment): boolean =>
         return stats !== null && !stats.isDirectory()
       })
 
-// jq reads a leading byte order mark, and `JSON.parse` does not.
-const BYTE_ORDER_MARK = /^﻿/
+// jq reads a byte order mark at the start of the file. `JSON.parse` does not.
+const BYTE_ORDER_MARK = /^\uFEFF/
 
 /** What {@link manifestOf} answers for a manifest that is absent or does not parse. */
 const UNREADABLE = Symbol('unreadable')
