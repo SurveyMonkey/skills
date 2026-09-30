@@ -62,6 +62,17 @@ describe('resolutionMap', () => {
     expect(lookup('toString')).toBeUndefined()
   })
 
+  it('lists the versions of one package in text order', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/a': { version: '9.0.0' },
+        'node_modules/b/node_modules/a': { version: '10.0.0' },
+        'node_modules/c/node_modules/a': { version: '1.0.0' },
+      },
+    })
+    expect(resolutionMap(text).resolutions).toEqual({ a: ['1.0.0', '10.0.0', '9.0.0'] })
+  })
+
   it('keeps an empty name field as the name', () => {
     const text = JSON.stringify({ packages: { 'node_modules/a': { name: '', version: '1.0.0' } } })
     expect(resolutionMap(text).resolutions).toEqual({ '': ['1.0.0'] })

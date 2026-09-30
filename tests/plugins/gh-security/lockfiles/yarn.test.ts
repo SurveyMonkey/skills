@@ -218,12 +218,16 @@ describe('locator readings', () => {
   it.each([
     ['a lowercase percent code', 'pkg@patch:pkg@npm%3a1.0.0#x', { pkg: ['1.0.0'] }],
     ['an encoded percent sign', 'pkg@npm%253A1.0.0', { ok: ['1.0.0'] }],
-    ['a protocol with a prefix', 'pkg@xfile:y', { ok: ['1.0.0'] }],
   ])('reads %s', (_name, locator, resolutions) => {
     expect(resolutionMap(`${entry(locator)}\n${ok}`).resolutions).toEqual({
       ok: ['1.0.0'],
       ...resolutions,
     })
+  })
+
+  it('counts a protocol with a prefix as unread', () => {
+    const text = `${entry('pkg@xfile:y')}\n${ok}`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
   })
 
   it('counts an empty locator as an entry that it cannot read', () => {
