@@ -6,8 +6,8 @@
 // The PATH is the parameter that `detect` takes (#221, round 3 ruling 9).
 // Each example gives a directory that holds an empty file for each tool that
 // it puts on PATH. `detect` only looks for the name, and never runs it, so
-// the file stands in for the tool. PATH is a parameter of `detect`, so the
-// test gives the tools through it (`mocking.md`, "The injected collaborator").
+// the file stands in for the tool. The test gives the tools through that
+// parameter (`mocking.md`, "The injected collaborator").
 //
 // Where no fixture carries a branch, the example changes a copy of the
 // nearest specimen, as spec/node_lockfiles_spec.sh and
@@ -179,11 +179,14 @@ describe('the pnpm override file and major', () => {
     expect(pnpmFacts(root)).toEqual({ override_file: 'pnpm-workspace.yaml', pnpm_major: 10 })
   })
 
-  it('reads a quoted overrides key in pnpm-workspace.yaml', () => {
-    const root = copyOf('pnpm-cross-line')
-    writeFileSync(join(root, 'pnpm-workspace.yaml'), "'overrides':\n  foo: 1.0.0\n")
-    expect(pnpmFacts(root)).toEqual({ override_file: 'pnpm-workspace.yaml', pnpm_major: 10 })
-  })
+  it.each(["'overrides':", '"overrides":'])(
+    'reads the quoted overrides key %s in pnpm-workspace.yaml',
+    (key) => {
+      const root = copyOf('pnpm-cross-line')
+      writeFileSync(join(root, 'pnpm-workspace.yaml'), `${key}\n  foo: 1.0.0\n`)
+      expect(pnpmFacts(root)).toEqual({ override_file: 'pnpm-workspace.yaml', pnpm_major: 10 })
+    },
+  )
 
   it('answers a null major for a packageManager that pins another manager', () => {
     const root = copyOf('pnpm-cross-line')
@@ -193,11 +196,13 @@ describe('the pnpm override file and major', () => {
 
   // jq's `.packageManager // ""` gives "" for null and false, and its
   // `capture` stops on anything that is not a string. jq reads no document
-  // in a file that holds only white space, and writes nothing.
+  // in a file that holds only JSON white space (space, tab, CR and LF), and
+  // writes nothing.
   it.each([
     ['a null top level', 'null', { override_file: 'package.json', pnpm_major: null }],
     ['an empty manifest', '', { override_file: 'package.json', pnpm_major: null }],
     ['a manifest of white space', ' \n', { override_file: 'package.json', pnpm_major: null }],
+    ['a manifest of tab, CR and LF', '\t\r\n', { override_file: 'package.json', pnpm_major: null }],
     [
       'a null packageManager',
       '{"packageManager":null}',
@@ -219,9 +224,21 @@ describe('the pnpm override file and major', () => {
     ['a top level that is an array', '[]'],
     ['a packageManager that is a number', '{"packageManager":11}'],
     ['a packageManager of zero', '{"packageManager":0}'],
+    // jq reads only JSON white space as no document.
+    ['a manifest of a form feed', '\f'],
+    ['a manifest of a no-break space', '\u00a0'],
   ])('fails for %s, where jq stops', (_case, manifest) => {
     const root = copyOf('pnpm-cross-line')
     writeFileSync(join(root, 'package.json'), manifest)
+    expect(pnpmFacts(root)).toEqual({
+      outcome: 'failed',
+      error: "detect: cannot read package.json's packageManager field",
+    })
+  })
+
+  it('fails for a pnpm tree with no package.json, where jq stops', () => {
+    const root = copyOf('pnpm-cross-line')
+    rmSync(join(root, 'package.json'))
     expect(pnpmFacts(root)).toEqual({
       outcome: 'failed',
       error: "detect: cannot read package.json's packageManager field",
@@ -347,6 +364,17 @@ describe('the runner', () => {
       expect(runnerOf(root, pathWith('node'))).toMatchObject({
         pm_exec: 'node .yarn/releases/yarn-4.13.0.cjs',
       })
+    })
+
+    // head -1 takes the first yarnPath before `[ -f ]` tests it, so a missing
+    // first release does not fall through to the second.
+    it('does not try a second yarnPath when the first names no file', () => {
+      const root = copyOf('yarn-vendored')
+      writeFileSync(
+        join(root, '.yarnrc.yml'),
+        'yarnPath: .yarn/releases/missing.cjs\nyarnPath: .yarn/releases/yarn-4.13.0.cjs\n',
+      )
+      expect(runnerOf(root, pathWith('node'))).toMatchObject({ pm_exec: 'yarn' })
     })
 
     it('reads a quoted yarnPath', () => {
