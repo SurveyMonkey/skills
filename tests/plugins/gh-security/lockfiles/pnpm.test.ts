@@ -1,7 +1,7 @@
 // The pnpm `pnpm-lock.yaml` reader (#220). Each expected value is written by
 // hand from the fixture it names. The parity run holds the agreement with
-// node.sh, so this file holds the behavior, and `parents`, which has no bash
-// verb yet.
+// node.sh. This file holds the behavior. It also holds `parents`, which no
+// bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -33,6 +33,15 @@ describe('resolvedVersions', () => {
     ])
   })
 
+  it('names one copy for two peer variants of one version', () => {
+    const text =
+      'packages:\n\n  react-dom@18.2.0(react@17.0.2):\n    resolution: {}\n\n  react-dom@18.2.0(react@18.2.0):\n    resolution: {}\n'
+    expect(resolvedVersions(text, 'react-dom')).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      copies: [{ version: '18.2.0', path: 'react-dom@18.2.0' }],
+    })
+  })
+
   it('answers no copies for a git target', () => {
     expect(resolvedVersions(lockfile('pnpm-local'), 'ssh-dep').copies).toEqual([])
   })
@@ -50,8 +59,8 @@ describe('resolutionMap', () => {
     })
   })
 
-  // A pin, not a fix: node.sh keeps the first `/` of a lockfileVersion 6
-  // key. The parity run holds the module to node.sh.
+  // A pin, not a fix: node.sh keeps the leading `/` in the name of a
+  // lockfileVersion 6 key. The parity run holds the module to node.sh.
   it('reads a lockfileVersion 6 key through the split on its last @', () => {
     expect(resolutionMap(lockfile('pnpm-v6'))).toEqual({
       coverage: { entries: 3, expected: 3, read: 3 },
@@ -131,6 +140,29 @@ describe('parents', () => {
     expect(parents(text, 'lodash')).toEqual([])
   })
 
+  it('reads no edge from a peerDependencies block of a snapshot', () => {
+    const text = 'snapshots:\n\n  a@1.0.0:\n    peerDependencies:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no snapshot after the section that follows snapshots', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0: {}\n\nother:\n  c@1.0.0:\n    dependencies:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no edge from a block that follows the edges', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      b: 1.0.0\n    transitivePeerDependencies:\n      lodash: x\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('reads no edge under a key that has no edge block', () => {
+    const text =
+      'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      b: 1.0.0\n  c@1.0.0:\n      lodash: 4.17.21\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
   it('names no parent for a key that has no name', () => {
     const text = "snapshots:\n\n  '(react@1.0.0)':\n    dependencies:\n      lodash: 4.17.21\n"
     expect(parents(text, 'lodash')).toEqual([])
@@ -141,7 +173,7 @@ describe('key readings', () => {
   const keyed = (key: string): string => `packages:\n\n  ${key}:\n    resolution: {}\n`
   const other = 'ok@1.0.0'
 
-  // One key in two is read; the other is not. Exactly half passes the guard.
+  // Each target has a protocol, so it counts as read and stays out of the map.
   it.each([
     'link:../a',
     'file:../a',
@@ -167,6 +199,12 @@ describe('key readings', () => {
     })
   })
 
+  it.each(['pkg@xfile:y', '@1.0.0'])('counts the key %s as unread', (key) => {
+    const text = `${keyed(key)}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
+  })
+
+  // Exactly half passes the guard.
   it('counts a key it cannot read against the guard', () => {
     const text = `${keyed('pkg@unknown:x')}\n  ${other}:\n    resolution: {}\n`
     expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
