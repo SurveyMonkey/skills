@@ -14,9 +14,12 @@ import { describe, expect, it } from 'vitest'
 import { createGhClient, type GhClientOptions, GhError } from '#gh-security/lib/gh.ts'
 import type { Runner, RunResult } from '#gh-security/lib/process.ts'
 
+// The target stack's list, then `headRefName` and `baseRefName`, which
+// `pr-status` reads (ruling 5 on #226).
 const FIELDS =
   'number,title,author,isDraft,labels,autoMergeRequest,mergeStateStatus,mergeable,' +
-  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision'
+  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision,' +
+  'headRefName,baseRefName'
 
 interface Call {
   readonly command: string

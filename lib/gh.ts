@@ -1,6 +1,7 @@
 // The `gh` client: the interface that a command is written against, and the
 // real implementation of it. The exported names and signatures are the
-// target stack's `lib/gh.ts`. This file has only one endpoint of the
+// target stack's `lib/gh.ts`. The one difference is the `gh pr view` field
+// list (see `PULL_REQUEST_FIELDS`). This file has only one endpoint of the
 // target's, `viewPullRequest`, because it is the one endpoint that a
 // planned caller (`pr-status`, #226) uses. A new endpoint comes with the
 // command that calls it, in the shape the target stack gives it (#274).
@@ -110,12 +111,16 @@ export interface GhClientOptions {
 }
 
 /**
- * The `--json` field list for `gh pr view`, the same list as the target
- * stack's.
+ * The `--json` field list for `gh pr view`: the target stack's list, and
+ * `headRefName` and `baseRefName` after it. The target list does not have
+ * those two. `pr-status` (#226) reports both, so this is a known divergence
+ * from the target stack (ruling 5 on #226). It keeps one endpoint and one
+ * list, where a second endpoint would add a call.
  */
 const PULL_REQUEST_FIELDS =
   'number,title,author,isDraft,labels,autoMergeRequest,mergeStateStatus,mergeable,' +
-  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision'
+  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision,' +
+  'headRefName,baseRefName'
 
 /** An optional filter, as the two argv words gh wants or as nothing at all. */
 const filter = (name: string, value: string | number | undefined): string[] =>
