@@ -1,12 +1,20 @@
-// The pnpm `pnpm-lock.yaml` reader (#220). Each expected value is written by
-// hand from the fixture it names. The parity run holds the agreement with
-// node.sh. This file holds the behavior. It also holds `parents`, which no
-// bash verb returns.
+// The pnpm `pnpm-lock.yaml` reader (#220, #221). Each expected value is
+// written by hand from the fixture it names. The parity runs hold the
+// agreement with node.sh. This file holds the behavior. It also holds
+// `parents`, which no bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/pnpm.ts'
+import {
+  copies,
+  isV9,
+  parents,
+  resolutionMap,
+  resolvedVersions,
+  rootVersion,
+  scan,
+} from '#gh-security/lockfiles/pnpm.ts'
 import { LockfileError } from '#gh-security/lockfiles/shared.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
@@ -217,5 +225,263 @@ describe('key readings', () => {
         "Read 1 of 3 lockfile entries for pm 'pnpm'. The parser understands too little of this lockfile to describe the tree; refusing to report a mostly-unparsed lockfile as a clean result.",
       ),
     )
+  })
+})
+
+describe('scan', () => {
+  it('finds each peer instantiation and each edge to a package that only peers reach', () => {
+    expect(scan(lockfile('pnpm-peer-only'), 'vite')).toEqual({
+      importers: [],
+      suffixes: [
+        { name: '@vitejs/plugin-react', version: '4.3.4' },
+        { name: '@vitest/mocker', version: '3.0.5' },
+      ],
+      edges: [
+        {
+          parent: { name: '@vitejs/plugin-react', version: '4.3.4' },
+          parentVersion: '4.3.4',
+          version: '6.4.3',
+          kind: 'dependencies',
+          suffixed: true,
+        },
+        {
+          parent: { name: '@vitest/mocker', version: '3.0.5' },
+          parentVersion: '3.0.5',
+          version: '6.4.3',
+          kind: 'optionalDependencies',
+          suffixed: true,
+        },
+      ],
+    })
+  })
+
+  // `next` has `@babel/core` as a peer, and `@vitejs/plugin-react` declares it.
+  it('marks an edge from a key without the peer suffix as not suffixed', () => {
+    expect(scan(lockfile('pnpm-peer-only'), '@babel/core')).toEqual({
+      importers: [],
+      suffixes: [{ name: 'next', version: '15.1.6' }],
+      edges: [
+        {
+          parent: { name: '@vitejs/plugin-react', version: '4.3.4' },
+          parentVersion: '4.3.4',
+          version: '7.29.7',
+          kind: 'dependencies',
+          suffixed: false,
+        },
+      ],
+    })
+  })
+
+  it('finds the importer that declares a package, with its block', () => {
+    expect(scan(lockfile('pnpm-peer-only'), 'next').importers).toEqual([
+      { path: '.', kind: 'dependencies' },
+    ])
+    expect(scan(lockfile('pnpm-workspace-peer'), 'vite').importers).toEqual([
+      { path: 'packages/app', kind: 'dependencies' },
+    ])
+  })
+
+  it('reads a git parent by the name before its first @, with no version (#50)', () => {
+    expect(scan(lockfile('pnpm-git-parent'), 'ms').edges).toEqual([
+      {
+        parent: { name: 'debug', version: null },
+        parentVersion:
+          'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+        version: '2.1.2',
+        kind: 'dependencies',
+        suffixed: false,
+      },
+    ])
+  })
+
+  it('reads a URL edge as no registry version', () => {
+    expect(scan(lockfile('pnpm-peer-variant'), 'minimist').edges).toEqual([
+      {
+        parent: { name: 'optimist', version: '0.5.2' },
+        parentVersion: '0.5.2',
+        version: null,
+        kind: 'dependencies',
+        suffixed: false,
+      },
+      {
+        parent: { name: 'optimist', version: '0.6.1' },
+        parentVersion: '0.6.1',
+        version: '0.0.10',
+        kind: 'dependencies',
+        suffixed: false,
+      },
+    ])
+  })
+
+  it.each([
+    ['a devDependencies block', '    devDependencies:\n      lodash: 1.0.0\n', ['devDependencies']],
+    [
+      'an optionalDependencies block',
+      '    optionalDependencies:\n      lodash: 1.0.0\n',
+      ['optionalDependencies'],
+    ],
+    ['a block that is not a dependency block', '    other:\n      lodash: 1.0.0\n', []],
+    [
+      'a block after the dependencies',
+      '    dependencies:\n      a: 1\n    other:\n      lodash: 1.0.0\n',
+      [],
+    ],
+    ['a line with no colon', '    dependencies:\n      lodash\n', []],
+    ['a line under a key with no block', '      lodash: 1.0.0\n', []],
+  ])('reads the importer rows of %s', (_shape, block, kinds) => {
+    const text = `importers:\n\n  .:\n${block}\npackages:\n`
+    expect(scan(text, 'lodash').importers.map(({ kind }) => kind)).toEqual(kinds)
+  })
+
+  it('reads no dependency line of an importer that has no block yet', () => {
+    const text = 'importers:\n  a:\n    dependencies:\n      x: 1.0.0\n  b:\n      lodash: 1.0.0\n'
+    expect(scan(text, 'lodash').importers).toEqual([])
+  })
+
+  it('reads no importer line that only starts with the name', () => {
+    const text = 'importers:\n  .:\n    dependencies:\n      lodash-es: 1.0.0\n'
+    expect(scan(text, 'lodash').importers).toEqual([])
+  })
+
+  it('reads no importer after the section that follows importers', () => {
+    const text = 'importers:\n  .: {}\nother:\n  x:\n    dependencies:\n      lodash: 1.0.0\n'
+    expect(scan(text, 'lodash')).toEqual({ importers: [], suffixes: [], edges: [] })
+  })
+
+  it('reads a peer suffix without an edge, and no suffix for a key with no name', () => {
+    const text = "snapshots:\n\n  a@1.0.0(lodash@4.17.21): {}\n  '(lodash@4.17.21)': {}\n"
+    expect(scan(text, 'lodash').suffixes).toEqual([{ name: 'a', version: '1.0.0' }])
+  })
+
+  // The suffix names the package, and an `@` follows the name.
+  it('reads no peer suffix of a package whose name only starts with the name', () => {
+    const text = 'snapshots:\n\n  a@1.0.0(lodash-es@4.17.21): {}\n'
+    expect(scan(text, 'lodash').suffixes).toEqual([])
+  })
+
+  it('takes the version of an edge without quotes, space or peer suffix', () => {
+    const text =
+      "snapshots:\n\n  a@1.0.0:\n    dependencies:\n      'lodash':  '4.17.21(b@1.0.0)'  \n"
+    expect(scan(text, 'lodash').edges.map(({ version }) => version)).toEqual(['4.17.21'])
+  })
+})
+
+describe('copies', () => {
+  it('gives one row for each edge, with the version each parent copy resolves', () => {
+    expect(copies(lockfile('pnpm-peer-only'), 'vite')).toEqual([
+      { parent: '@vitejs/plugin-react', parent_version: '4.3.4', range: null, resolved: '6.4.3' },
+      { parent: '@vitest/mocker', parent_version: '3.0.5', range: null, resolved: '6.4.3' },
+    ])
+  })
+
+  // `pnpm_copy_rows` keeps the text after the `@` that ends the name, and makes only
+  // an empty text null. A `file:` copy has a version that is no registry version.
+  it('keeps a parent version that is not a registry version, and no version as null', () => {
+    const text = [
+      "lockfileVersion: '9.0'",
+      'snapshots:',
+      '  local-lib@file:vendor/local-lib:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+      '  local-lib@file:vendor/other-lib:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+      '  bare:',
+      '    dependencies:',
+      '      lodash: 3.10.1',
+    ].join('\n')
+    expect(copies(text, 'lodash').map(({ parent_version }) => parent_version)).toEqual([
+      'file:vendor/local-lib',
+      'file:vendor/other-lib',
+      null,
+    ])
+  })
+})
+
+describe('rootVersion', () => {
+  it('reads the version that the root importer resolves, without the peer suffix', () => {
+    expect(rootVersion(lockfile('pnpm-peer-only'), '@vitejs/plugin-react')).toBe('4.3.4')
+    expect(rootVersion(lockfile('pnpm-peer-only'), 'next')).toBe('15.1.6')
+  })
+
+  it('reads nothing for a package that only a workspace importer declares', () => {
+    expect(rootVersion(lockfile('pnpm-workspace-peer'), 'vite')).toBeNull()
+  })
+
+  it.each([
+    [
+      'a devDependencies block',
+      '    devDependencies:\n      lodash:\n        version: 4.17.21\n',
+      '4.17.21',
+    ],
+    [
+      'a block that is not a dependency block',
+      '    other:\n      lodash:\n        version: 4.17.21\n',
+      null,
+    ],
+    [
+      'a declaration of another package',
+      '    dependencies:\n      a:\n        version: 1.0.0\n',
+      null,
+    ],
+    [
+      'a line of the declaration before its version',
+      "    dependencies:\n      'lodash':\n        specifier: ^4\n        version: '4.17.21'\n",
+      '4.17.21',
+    ],
+    // A new block ends the declaration before it, as `isdep = 0` in node.sh.
+    [
+      'a version line of the next block, after a declaration with no version',
+      '    dependencies:\n      lodash:\n        specifier: ^4\n    devDependencies:\n        version: 3.0.0\n',
+      null,
+    ],
+  ])('reads %s', (_shape, block, version) => {
+    const text = `importers:\n\n  .:\n${block}\npackages:\n`
+    expect(rootVersion(text, 'lodash')).toBe(version)
+  })
+
+  // `dependenciesMeta:` is not a dependency block, so it ends the one before it.
+  it('reads no version from a block after the dependency blocks', () => {
+    const text =
+      'importers:\n  .:\n    dependencies:\n      a:\n        version: 1.0.0\n    dependenciesMeta:\n      lodash:\n        version: 2.0.0\n'
+    expect(rootVersion(text, 'lodash')).toBeNull()
+  })
+
+  it('reads the version of the declaration of the package, not of the one before it', () => {
+    const text =
+      'importers:\n  .:\n    dependencies:\n      a:\n        version: 1.0.0\n      lodash:\n        version: 2.0.0(b@1.0.0)\n'
+    expect(rootVersion(text, 'lodash')).toBe('2.0.0')
+  })
+
+  it('reads no version from an importer that is not the root', () => {
+    const text =
+      'importers:\n  packages/a:\n    dependencies:\n      lodash:\n        version: 1.0.0\n'
+    expect(rootVersion(text, 'lodash')).toBeNull()
+  })
+
+  it('reads no version after the section that follows importers', () => {
+    const text =
+      'importers:\n  .: {}\nother:\n  .:\n    dependencies:\n      lodash:\n        version: 1.0.0\n'
+    expect(rootVersion(text, 'lodash')).toBeNull()
+  })
+})
+
+describe('isV9', () => {
+  it.each([
+    ['pnpm-v9', true],
+    ['pnpm-v6', false],
+  ])('reads the lockfile version of %s', (fixture, v9) => {
+    expect(isV9(lockfile(fixture))).toBe(v9)
+  })
+
+  it.each([
+    ['lockfileVersion: 9\n', true],
+    ['lockfileVersion: "9.0"\n', true],
+    ["lockfileVersion: '90.0'\n", false],
+    ['lockfileVersion:\n', false],
+    ["lockfileVersion: '6.0'\nlockfileVersion: '9.0'\n", false],
+    ['settings: {}\n', false],
+  ])('reads %j', (text, v9) => {
+    expect(isV9(text)).toBe(v9)
   })
 })

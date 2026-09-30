@@ -1,13 +1,13 @@
-// The Yarn Berry `yarn.lock` reader (#220). Each expected value is written by
-// hand from the fixture it names. The parity run holds the agreement with
-// node.sh. This file holds the behavior. It also holds `parents`, which no
+// The Yarn Berry `yarn.lock` reader (#220, #221). Each expected value is
+// written by hand from the fixture it names. The parity runs hold the
+// agreement with node.sh. This file holds the behavior. It also holds `parents`, which no
 // bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { LockfileError } from '#gh-security/lockfiles/shared.ts'
-import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/yarn.ts'
+import { copies, parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/yarn.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
 const lockfile = (fixture: string): string =>
@@ -180,6 +180,28 @@ describe('parents', () => {
     expect(parents(text, 'x')).toEqual([])
   })
 
+  // The name ends at the first `@` after the first character. node.sh ends
+  // it at the last `@`, and names these `lodash@patch:lodash` and
+  // `aliased@npm:lodash` (mid-round ruling 15).
+  it('names a patch parent and an alias parent by the text before the first @', () => {
+    const text = [
+      '"lodash@patch:lodash@npm%3A4.17.21#./x.patch::locator=r%40workspace%3A.":',
+      '  version: 4.17.21',
+      '  resolution: "lodash@patch:lodash@npm%3A4.17.21#./x.patch::locator=r%40workspace%3A."',
+      '  dependencies:',
+      '    y: "npm:^1.0.0"',
+      '',
+      '"aliased@npm:lodash@^4.17.21":',
+      '  version: 4.17.21',
+      '  resolution: "aliased@npm:lodash@4.17.21"',
+      '  dependencies:',
+      '    y: "npm:^1.0.0"',
+      '',
+    ].join('\n')
+    expect(parents(text, 'y').map(({ name }) => name)).toEqual(['aliased', 'lodash'])
+    expect(copies(text, 'y').map(({ parent }) => parent)).toEqual(['lodash', 'aliased'])
+  })
+
   it('reads no declaration from an entry that has no resolution', () => {
     const text = `${entry('a', '  dependencies:\n    y: "npm:^1"\n')}"b@npm:^2":\n  dependencies:\n    x: "npm:^1"\n`
     expect(parents(text, 'x')).toEqual([])
@@ -238,5 +260,66 @@ describe('locator readings', () => {
   it('allows a lockfile it reads exactly half of', () => {
     const text = `${entry('a@npm:1.0.0')}\n${entry('b@npm:2.0.0')}\n${entry('c@npm:x')}\n${entry('d@npm:y')}`
     expect(resolutionMap(text).coverage).toEqual({ entries: 4, expected: 4, read: 2 })
+  })
+})
+
+describe('copies', () => {
+  it('gives each parent copy its own range, resolved through its descriptor', () => {
+    expect(copies(lockfile('yarn-cross-line'), 'brace-expansion')).toEqual([
+      { parent: 'minimatch', parent_version: '10.2.5', range: '^5.0.5', resolved: '5.0.6' },
+      { parent: 'minimatch', parent_version: '3.1.5', range: '^1.1.7', resolved: '1.1.18' },
+    ])
+  })
+
+  // No key list names the descriptor `lodash-alias@npm:lodash@^4.18.0`.
+  it('reads an alias declaration under both names', () => {
+    expect(copies(lockfile('yarn-berry-alias-parent'), 'lodash')).toEqual([
+      { parent: 'express', parent_version: '4.18.2', range: '^4.18.0', resolved: null },
+    ])
+    expect(copies(lockfile('yarn-berry-alias-parent'), 'lodash-alias')).toEqual([
+      { parent: 'express', parent_version: '4.18.2', range: 'lodash@^4.18.0', resolved: null },
+    ])
+  })
+
+  it('reads the optional and the peer declarations', () => {
+    expect(copies(lockfile('yarn-berry-peer-parent'), 'sha.js')).toEqual([
+      { parent: 'express', parent_version: '4.18.2', range: '^2.4.11', resolved: null },
+      { parent: 'serve-static', parent_version: '1.15.0', range: '^2.4.0', resolved: null },
+    ])
+  })
+
+  it('reads no declaration of a workspace', () => {
+    expect(copies(lockfile('yarn-cross-line'), 'glob')).toEqual([])
+  })
+
+  it.each([
+    ['a line with no colon', '  dependencies:\n    x\n'],
+    ['a block that is not a declaration block', '  bin:\n    x: "npm:^1.0.0"\n'],
+    [
+      'a block after the declarations',
+      '  dependencies:\n    y: "npm:^1.0.0"\n  checksum: 0\n    x: "npm:^1.0.0"\n',
+    ],
+  ])('reads no declaration from %s', (_shape, block) => {
+    const text = `"a@npm:^1.0.0":\n  version: 1.0.0\n  resolution: "a@npm:1.0.0"\n${block}`
+    expect(copies(text, 'x')).toEqual([])
+  })
+
+  it('reads the version line of each entry, without its quotes, and none for an entry with none', () => {
+    const text =
+      '"a@npm:^1.0.0":\n  version: "1.0.0"\n  resolution: "a@npm:1.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n\n"b@npm:^2.0.0":\n  resolution: "b@npm:2.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n'
+    expect(copies(text, 'x').map(({ parent, parent_version }) => [parent, parent_version])).toEqual(
+      [
+        ['a', '1.0.0'],
+        ['b', ''],
+      ],
+    )
+  })
+
+  it('reads no descriptor from a key line that does not end with a colon', () => {
+    const text =
+      '"x@npm:^1.0.0"\n  version: 1.0.0\n\n"a@npm:^1.0.0":\n  version: 1.0.0\n  resolution: "a@npm:1.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n'
+    expect(copies(text, 'x')).toEqual([
+      { parent: 'a', parent_version: '1.0.0', range: '^1.0.0', resolved: null },
+    ])
   })
 })

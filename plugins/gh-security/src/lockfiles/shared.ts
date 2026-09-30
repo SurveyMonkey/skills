@@ -49,6 +49,24 @@ export type Parent = {
   readonly version: string | null
 }
 
+/**
+ * One declaration of a package by one copy of a parent, for
+ * `declared_ranges`. The key names that node.sh writes are kept.
+ */
+export type Copy = {
+  readonly parent: string
+  /**
+   * The version of this copy of the parent, or `null` if the reader finds
+   * none. The Yarn reader gives `''` for an entry with no `version:` line,
+   * as `YARN_COPY_AWK` does.
+   */
+  readonly parent_version: string | null
+  /** The range that this copy declares, or `null`: pnpm records no declared range. */
+  readonly range: string | null
+  /** The version of the package that this copy resolves, or `null` if the reader finds none. */
+  readonly resolved: string | null
+}
+
 /** The lockfile is one this module refuses to describe. */
 export class LockfileError extends Error {
   constructor(message: string, options?: ErrorOptions) {

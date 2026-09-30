@@ -1,12 +1,12 @@
-// The npm `package-lock.json` reader (#220). Each expected value is written by
-// hand from the fixture it names. The parity run holds the agreement with
-// node.sh. This file holds the behavior. It also holds `parents`, which no
+// The npm `package-lock.json` reader (#220, #221). Each expected value is
+// written by hand from the fixture it names. The parity runs hold the
+// agreement with node.sh. This file holds the behavior. It also holds `parents`, which no
 // bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/npm.ts'
+import { copies, parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/npm.ts'
 import { aliasTarget, LockfileError } from '#gh-security/lockfiles/shared.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
@@ -220,9 +220,75 @@ describe('malformed input', () => {
     expect(attempt).toThrow(expect.objectContaining({ cause: expect.any(SyntaxError) }))
   })
 
+  // jq's `[(.dependencies // {}), ...] | add` stops for a block that is not
+  // an object, and node.sh stops with it. A block read as empty loses a parent.
+  it.each([
+    ['a text', 'lodash'],
+    ['a list', ['lodash']],
+    ['a number', 1],
+  ])('refuses a declaration block that is %s, in parents and in copies', (_shape, block) => {
+    const text = JSON.stringify({
+      packages: {
+        '': {},
+        'node_modules/a': { version: '1.0.0', peerDependencies: block },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    const message =
+      'package-lock.json: node_modules/a has a peerDependencies block that is not an object'
+    expect(() => parents(text, 'lodash')).toThrow(new LockfileError(message))
+    expect(() => parents(text, 'lodash')).toThrow(LockfileError)
+    expect(() => copies(text, 'lodash')).toThrow(new LockfileError(message))
+  })
+
+  // jq runs `add` on the root entry too, before the root is dropped.
+  it('refuses a declaration block of the root entry that is not an object', () => {
+    const text = JSON.stringify({
+      packages: {
+        '': { peerDependencies: 'lodash' },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    const message =
+      'package-lock.json: the root entry has a peerDependencies block that is not an object'
+    expect(() => parents(text, 'lodash')).toThrow(new LockfileError(message))
+    expect(() => copies(text, 'lodash')).toThrow(new LockfileError(message))
+  })
+
+  // `JSON.parse` makes `__proto__` an own key, and jq's `add` keeps it. The
+  // text is written out: an object literal would set the prototype.
+  it('keeps a declaration under the key __proto__, as jq does', () => {
+    const text =
+      '{"packages":{"":{},"node_modules/a":{"version":"1.0.0",' +
+      '"dependencies":{"__proto__":"npm:lodash@^4.17.21"}},' +
+      '"node_modules/lodash":{"version":"4.17.21"}}}'
+    expect(parents(text, 'lodash')).toEqual([{ name: 'a', version: '1.0.0' }])
+    expect(copies(text, 'lodash')).toEqual([
+      { parent: 'a', parent_version: '1.0.0', range: '^4.17.21', resolved: null },
+    ])
+  })
+
+  it('reads a declaration block that is null or false as no block, as jq does', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/a': { version: '1.0.0', dependencies: null, peerDependencies: false },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    expect(parents(text, 'lodash')).toEqual([{ name: 'b', version: '1.0.0' }])
+  })
+
   it('reads text that starts with a byte order mark, as jq does', () => {
     const text = `\uFEFF${JSON.stringify({ packages: { 'node_modules/a': { version: '1.0.0' } } })}`
     expect(resolutionMap(text).resolutions).toEqual({ a: ['1.0.0'] })
+  })
+
+  it('refuses a top level that is not an object, with the lockfileVersion 1 message', () => {
+    expect(() => resolutionMap('null')).toThrow(
+      new LockfileError(
+        'package-lock.json has no .packages object (lockfileVersion 1 is unsupported)',
+      ),
+    )
   })
 
   it('refuses a packages value that is an array, with the lockfileVersion 1 message', () => {
@@ -277,5 +343,89 @@ describe('aliasTarget', () => {
     ['^4.0.0', null],
   ])('reads %s as %s', (specifier, expected) => {
     expect(aliasTarget(specifier)).toBe(expected)
+  })
+})
+
+describe('copies', () => {
+  // `express` reaches the hoisted copy. `test-exclude` has a nested copy.
+  it('resolves each declaration through the walk up node_modules', () => {
+    expect(copies(lockfile('npm-v3'), 'lodash')).toEqual([
+      { parent: 'express', parent_version: '4.18.2', range: '^4.17.20', resolved: '4.17.21' },
+      { parent: 'test-exclude', parent_version: '6.0.0', range: '^3.0.0', resolved: '3.10.1' },
+    ])
+  })
+
+  it('reads the range of an alias declaration, and resolves it by its install key', () => {
+    expect(copies(lockfile('npm-alias'), 'lodash')).toEqual([
+      { parent: 'alias-parent', parent_version: '1.0.0', range: '^4.18.0', resolved: '4.18.1' },
+      { parent: 'dupe-parent', parent_version: '1.0.0', range: '^4.17.21', resolved: '4.17.21' },
+    ])
+  })
+
+  // #121: a scoped segment is two path segments, and a workspace key walks to the root.
+  it('walks up past a scoped parent and from a workspace key', () => {
+    expect(copies(lockfile('npm-scoped-parents'), 'brace-expansion')).toEqual([
+      { parent: 'minimatch', parent_version: '10.0.3', range: '^5.0.5', resolved: '5.0.6' },
+      { parent: 'minimatch', parent_version: '10.2.5', range: '^5.0.5', resolved: '5.0.6' },
+      { parent: 'minimatch', parent_version: '7.4.9', range: '^2.0.2', resolved: '2.1.1' },
+      { parent: 'packages/tool', parent_version: '1.0.0', range: '^2.0.2', resolved: '2.1.1' },
+    ])
+  })
+
+  it.each([
+    [
+      'a candidate with no version',
+      { 'node_modules/a': { version: '1.0.0', dependencies: { x: '^1' } }, 'node_modules/x': {} },
+      null,
+    ],
+    [
+      'no candidate at all',
+      { 'node_modules/a': { version: '1.0.0', dependencies: { x: '^1' } } },
+      null,
+    ],
+    [
+      'a key that the walk cannot shorten',
+      {
+        'node_modules/a/': { version: '1.0.0', dependencies: { x: '^1' } },
+        'node_modules/x': { version: '1.0.0' },
+      },
+      null,
+    ],
+  ])('resolves nothing for %s', (_shape, packages, resolved) => {
+    const [row] = copies(JSON.stringify({ packages }), 'x')
+    expect(row?.resolved).toBe(resolved)
+  })
+
+  // #121: the walk up takes a scoped name as one step, and reaches the root.
+  it('walks up from a copy nested under a scoped package to the root', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/@s/p': { version: '1.0.0' },
+        'node_modules/@s/p/node_modules/c': { version: '1.0.0', dependencies: { x: '^1' } },
+        'node_modules/x': { version: '1.2.3' },
+      },
+    })
+    expect(copies(text, 'x')).toEqual([
+      { parent: 'c', parent_version: '1.0.0', range: '^1', resolved: '1.2.3' },
+    ])
+  })
+
+  it('reads no declaration that is not a string, of another package, or of the root', () => {
+    const text = JSON.stringify({
+      packages: {
+        '': { dependencies: { x: '^1' } },
+        'node_modules/a': { dependencies: { x: 1, y: 'npm:x' } },
+      },
+    })
+    expect(copies(text, 'x')).toEqual([])
+  })
+
+  it('gives a null parent version to a copy that records none', () => {
+    const text = JSON.stringify({
+      packages: { 'node_modules/a': { peerDependencies: { x: '^1' } } },
+    })
+    expect(copies(text, 'x')).toEqual([
+      { parent: 'a', parent_version: null, range: '^1', resolved: null },
+    ])
   })
 })
