@@ -47,9 +47,12 @@ const installedName = (key: string): string => key.replace(/^.*node_modules\//s,
 /** npm's own name for the copy: `.name` for an alias, else the installed name. */
 const packageName = ({ key, value }: Entry): string => textOf(value.name) ?? installedName(key)
 
+// jq reads a leading byte order mark, and `JSON.parse` does not.
+const BYTE_ORDER_MARK = /^\uFEFF/
+
 const parse = (text: string): unknown => {
   try {
-    return JSON.parse(text)
+    return JSON.parse(text.replace(BYTE_ORDER_MARK, ''))
   } catch (error) {
     throw new LockfileError(`package-lock.json is not valid JSON: ${String(error)}`, {
       cause: error,
@@ -114,7 +117,8 @@ export const resolutionMap = (text: string): ResolutionMap => {
  * Each copy that declares `pkg` in `dependencies`, `optionalDependencies` or
  * `peerDependencies`, by the name or through an `npm:` alias of it. A peer
  * declaration is why the copy is in the tree at all (#49). The root is not a
- * parent: an override cannot be scoped to it.
+ * parent: an override cannot be scoped to it. A workspace package is a parent,
+ * named by its path, as in `npm_parents`.
  */
 export const parents = (text: string, pkg: string): readonly Parent[] =>
   uniqueParents(

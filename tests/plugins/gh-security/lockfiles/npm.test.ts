@@ -1,7 +1,7 @@
 // The npm `package-lock.json` reader (#220). Each expected value is written by
 // hand from the fixture it names. The parity run holds the agreement with
-// node.sh, so this file holds the behavior, and `parents`, which has no bash
-// verb yet.
+// node.sh. This file holds the behavior. It also holds `parents`, which no
+// bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -48,9 +48,25 @@ describe('resolvedVersions', () => {
       { version: 'v1.2.3', path: 'node_modules/victim' },
     ])
   })
+
+  it('reads only the entries installed under node_modules', () => {
+    expect(resolvedVersions(lockfile('npm-scoped-parents'), 'tool').copies).toEqual([])
+  })
 })
 
 describe('resolutionMap', () => {
+  it('answers undefined, not an inherited member, for a name it does not hold', () => {
+    const { resolutions } = resolutionMap(lockfile('npm-alias'))
+    const lookup = (name: string) => resolutions[name]
+    expect(lookup('constructor')).toBeUndefined()
+    expect(lookup('toString')).toBeUndefined()
+  })
+
+  it('keeps an empty name field as the name', () => {
+    const text = JSON.stringify({ packages: { 'node_modules/a': { name: '', version: '1.0.0' } } })
+    expect(resolutionMap(text).resolutions).toEqual({ '': ['1.0.0'] })
+  })
+
   it('keeps workspace links out of the map and out of the expected count', () => {
     expect(resolutionMap(lockfile('npm-workspaces'))).toEqual({
       coverage: { entries: 16, expected: 4, read: 4 },
@@ -138,6 +154,41 @@ describe('parents', () => {
     ])
   })
 
+  it('lets a later block replace an earlier declaration of one name', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/a': {
+          version: '1.0.0',
+          dependencies: { x: 'npm:foo@1.0.0' },
+          peerDependencies: { x: '^1.0.0' },
+        },
+      },
+    })
+    expect(parents(text, 'foo')).toEqual([])
+    expect(parents(text, 'x')).toEqual([{ name: 'a', version: '1.0.0' }])
+  })
+
+  it('reads no declaration whose specifier is not a string', () => {
+    const text = JSON.stringify({ packages: { 'node_modules/a': { dependencies: { x: 1 } } } })
+    expect(parents(text, 'x')).toEqual([])
+  })
+
+  it('sorts parents as text by name and then version', () => {
+    const declares = { dependencies: { x: '*' } }
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/z': { version: '1.0.0', ...declares },
+        'node_modules/a': { version: '7.4.9', ...declares },
+        'node_modules/b/node_modules/a': { version: '10.0.3', ...declares },
+      },
+    })
+    expect(parents(text, 'x')).toEqual([
+      { name: 'a', version: '10.0.3' },
+      { name: 'a', version: '7.4.9' },
+      { name: 'z', version: '1.0.0' },
+    ])
+  })
+
   it('never names the root', () => {
     expect(parents(lockfile('npm-stale-nested'), 'nx')).toEqual([])
   })
@@ -155,10 +206,20 @@ describe('malformed input', () => {
     const attempt = () => resolutionMap('{"packages":')
     expect(attempt).toThrow(LockfileError)
     expect(attempt).toThrow(/^package-lock\.json is not valid JSON: /)
+    expect(attempt).toThrow(expect.objectContaining({ cause: expect.any(SyntaxError) }))
   })
 
-  it('reads only the entries installed under node_modules', () => {
-    expect(resolvedVersions(lockfile('npm-scoped-parents'), 'tool').copies).toEqual([])
+  it('reads text that starts with a byte order mark, as jq does', () => {
+    const text = `\uFEFF${JSON.stringify({ packages: { 'node_modules/a': { version: '1.0.0' } } })}`
+    expect(resolutionMap(text).resolutions).toEqual({ a: ['1.0.0'] })
+  })
+
+  it('refuses a packages value that is an array, with the lockfileVersion 1 message', () => {
+    expect(() => resolutionMap('{"packages":[]}')).toThrow(
+      new LockfileError(
+        'package-lock.json has no .packages object (lockfileVersion 1 is unsupported)',
+      ),
+    )
   })
 
   // 2 of 4 is exactly half, which the guard allows.

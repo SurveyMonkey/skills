@@ -1,5 +1,5 @@
-// The answer shapes the three lockfile readers share, the parse guard that
-// all of them apply (`guard_parse` in node.sh), and the small text rules that
+// The answer types that the three lockfile readers share. Also the parse guard
+// that all of them apply (`guard_parse` in node.sh), and the text rules that
 // more than one reader uses.
 //
 // This file ships. It imports nothing outside the plugin.
@@ -45,7 +45,7 @@ export type ResolutionMap = {
 /** A package that declares the one asked about. */
 export type Parent = {
   readonly name: string
-  /** The registry version of this copy, or `null` for a local, git or URL target. */
+  /** The version that the lockfile records for this copy, or `null` if the reader finds none. */
   readonly version: string | null
 }
 
@@ -80,7 +80,7 @@ export const guarded = (pm: Pm, coverage: Coverage): Coverage => {
 const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
 
 /** `unique_by(.version + .path)`: one copy per key, sorted by that key. */
-export const uniqueCopies = (copies: readonly ResolvedCopy[]): ResolvedCopy[] =>
+export const uniqueCopies = (copies: readonly ResolvedCopy[]): readonly ResolvedCopy[] =>
   [...new Map(copies.map((copy) => [copy.version + copy.path, copy]))]
     .sort(([a], [b]) => byText(a, b))
     .map(([, copy]) => copy)
@@ -93,8 +93,10 @@ export const groupResolutions = (
   for (const pair of pairs) {
     grouped.set(pair.package, (grouped.get(pair.package) ?? new Set()).add(pair.version))
   }
-  return Object.fromEntries(
-    [...grouped].map(([name, versions]) => [name, [...versions].sort(byText)]),
+  // The map has no prototype. A lookup of an absent `constructor` gives `undefined`.
+  return Object.setPrototypeOf(
+    Object.fromEntries([...grouped].map(([name, versions]) => [name, [...versions].sort(byText)])),
+    null,
   )
 }
 
