@@ -61,10 +61,9 @@ export interface CommandEntry {
 export const STDIN_FD = 0
 
 /**
- * Read a descriptor to the end, synchronously, the way every other process
- * seam in this plugin is synchronous. The descriptor is a parameter so the
- * read itself is exercised against a real file rather than against the
- * suite's own stdin.
+ * Read a descriptor to the end, synchronously. The descriptor is a parameter
+ * so the read itself is exercised against a real file rather than against
+ * the suite's own stdin.
  */
 export const readAll = (fd: number): string => readFileSync(fd, 'utf8')
 
