@@ -72,3 +72,6 @@ the whole set today; a verb that starts writing joins it, and the guard is its f
 requires the cwd to sit inside a **linked** worktree, which a primary checkout, any subdirectory
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
+The TypeScript port of the guard is `requireLinkedWorktree` in `plugins/gh-security/src/worktree.ts`.
+It is a function, not a command. The write verbs of the adapter call it in process (#222).
+`tests/plugins/gh-security/parity-worktree.test.ts` runs it against the script.

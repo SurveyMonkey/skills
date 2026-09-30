@@ -50,6 +50,10 @@ in prose on stderr. An unknown command is the one deliberate exception to that s
 command's result, so its envelope goes to stderr as JSON and stdout stays empty, because a caller
 reading stdout as this CLI's contract must never read "there is no such command" as a payload.
 A command may also answer with silence, which is exit 0 and nothing written at all.
+A handler may return a promise, and `run.ts` waits for it. A handler may also fail with a report
+(`failedReport` in `src/cli/command.ts`). The report goes to stdout, the message goes to stderr,
+and the exit code is 1. `pr-status` does this, so a caller reads the same JSON on stdout when a
+URL failed.
 
 **The allow hook is a subcommand.** `hooks/hooks.json` registers a `PreToolUse` hook on `Bash`
 running `node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" allow-own-commands`, which reads the hook

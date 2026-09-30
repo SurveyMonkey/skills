@@ -293,7 +293,7 @@ ported. P3-4 is the retirement issue and runs last, which is why its row sits at
 |---|---|---|
 | P3-1 | [#224](https://github.com/SurveyMonkey/skills/issues/224) | The CLI entry point and subcommand registry |
 | P3-2 | [#225](https://github.com/SurveyMonkey/skills/issues/225) | The discovery commands, folding in [#54](https://github.com/SurveyMonkey/skills/issues/54) (alert JSON on stdin, so grouping re-runs without re-fetching) and [#167](https://github.com/SurveyMonkey/skills/issues/167) (`default_branch` resolved from GitHub rather than a stale `origin/HEAD`) |
-| P3-3 | [#226](https://github.com/SurveyMonkey/skills/issues/226) | `pr-status`, `ensure-worktree-exclude`, `require-linked-worktree` |
+| P3-3 | [#226](https://github.com/SurveyMonkey/skills/issues/226) | `pr-status`, `ensure-worktree-exclude`, ~~`require-linked-worktree`~~ **Revised during #226:** `require-linked-worktree` is a plugin function (`requireLinkedWorktree` in `src/worktree.ts`), not a command. Its only caller is the write verbs of the adapter ([#222](https://github.com/SurveyMonkey/skills/issues/222)), and they call it in process. |
 | P3-5 | [#227](https://github.com/SurveyMonkey/skills/issues/227) | `prepare-checkout` and `merge-envelopes` |
 | P3-6 | [#228](https://github.com/SurveyMonkey/skills/issues/228) | `preflight-repo` and `build-dispatches` |
 | P3-7 | [#229](https://github.com/SurveyMonkey/skills/issues/229) | `reap-batch` and `summarize-run` |

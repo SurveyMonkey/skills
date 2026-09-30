@@ -13,7 +13,7 @@ import {
   type Rendered,
   renderJson,
 } from '../lib/envelope.ts'
-import type { CommandResult, Io } from './command.ts'
+import type { CommandResult, FailedReport, Io } from './command.ts'
 import { COMMANDS, commandNames } from './registry.ts'
 
 export const USAGE = 'usage: gh-security <command> [args]'
@@ -61,11 +61,26 @@ const emit = (io: Io, rendered: Rendered): ExitCode => {
 }
 
 /**
+ * A failure that carries a report writes the report to stdout and the
+ * message to stderr, with exit 1. A caller reads the same JSON on stdout
+ * whether the command passed or failed. Any other result renders as the
+ * envelope says.
+ */
+const render = (result: Exclude<CommandResult, undefined>): Rendered =>
+  'report' in result ? renderReport(result) : renderJson(result)
+
+const renderReport = (result: FailedReport): Rendered => ({
+  stdout: JSON.stringify(result.report),
+  stderr: result.error,
+  exitCode: EXIT_CODES.failed,
+})
+
+/**
  * Run one invocation and answer with the process exit code. ADR 001's four
  * exit codes come from the envelope the handler returned, through
  * `exitCodeFor`, so a verb that is not implemented stays exit 2 and an
  * unsupported toolchain stays exit 3 rather than collapsing into a generic
- * failure.
+ * failure. A failed report is the one exception: it is always exit 1.
  */
 export const runCli = async (
   argv: readonly string[],
@@ -93,12 +108,12 @@ export const runCli = async (
     })
   }
   const handler = await entry.load()
-  const result: CommandResult = handler({
+  const result: CommandResult = await handler({
     args: parsed.args,
     env,
     io,
     commandNames,
   })
   if (result === undefined) return EXIT_CODES.ok
-  return emit(io, renderJson(result))
+  return emit(io, render(result))
 }
