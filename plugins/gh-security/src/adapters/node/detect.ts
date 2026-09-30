@@ -8,9 +8,9 @@
 // failure.
 //
 // `detect` reads the tree at `root` and the `PATH` it is given. It never
-// reads `process.env` or `process.cwd()` (#221, round 3 ruling 9), and it
-// starts no process: a PATH lookup is a scan of directories. The caller gives
-// an absolute `root`. A relative one resolves from the working directory.
+// reads `process.env` (#221, round 3 ruling 9), and it starts no process: a
+// PATH lookup is a scan of directories. The caller gives an absolute `root`.
+// Only a relative `root` makes node read `process.cwd()`, to resolve it.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -85,7 +85,7 @@ const linesOf = (path: string): readonly string[] => {
  * entry is a directory. An empty entry is the current directory, which is
  * `root` here, and a relative entry is relative to `root`. Any `entry/tool`
  * that exists and is not a directory is a match, with or without its execute
- * bit: bash also names a file that it cannot run.
+ * bit. bash also names a file that it cannot run.
  *
  * An absent PATH has no entries here. bash uses its own default PATH for it.
  * That difference is a declared divergence (#221, mid-round ruling 13).
@@ -103,7 +103,9 @@ const BYTE_ORDER_MARK = /^\uFEFF/
 
 // jq reads a file that holds only JSON white space as no document, and
 // writes nothing. For both of the jq programs below, that answer is the same
-// as the answer for a top level of null.
+// as the answer for a top level of null. jq also reads a file of two or more
+// documents, and `JSON.parse` refuses it. That difference is a declared
+// divergence (#221, mid-round ruling 13).
 const NO_DOCUMENT = /^[ \t\n\r]*$/
 
 /** What {@link manifestOf} answers for a manifest that is absent or does not parse. */
@@ -164,9 +166,9 @@ const PNPM_MAJOR = /^pnpm@([0-9]+)/
 /**
  * `pnpm_manifest_major`: the digits of the pnpm major that `packageManager`
  * pins, '' when it pins no pnpm major, or null when jq stops. jq stops on a
- * manifest that is absent or that it cannot parse, on a top level that is
- * not an object or null, and on a `packageManager` that is not a string,
- * null or false.
+ * manifest that is absent or that it cannot parse. It also stops on a top
+ * level that is not an object or null, and on a `packageManager` that is not
+ * a string, null or false.
  */
 const pnpmMajorOf = (root: string): string | null => {
   const manifest = manifestOf(root)
@@ -208,6 +210,8 @@ export const detect = (root: string, env: Environment): Envelope<NodeDetection> 
       const run = runnerOf('pnpm', root, env)
       const major = pnpmMajorOf(root)
       if (major === null) return failed("detect: cannot read package.json's packageManager field")
+      // `Number` does not keep a very long major exact. A major of more than
+      // 18 digits is a declared divergence (#221, mid-round ruling 13).
       const pnpmMajor = major === '' ? null : Number(major)
       return ok({
         pm: 'pnpm',

@@ -90,7 +90,10 @@ export type RangeFactsAnswer = {
  * second layer of #221 gives each its answer type and its body.
  */
 export interface Adapter<Detection extends { readonly pm: string }> {
-  /** The package manager of the tree at `root`. It reads `PATH` from `env`, and never from the process. */
+  /**
+   * The package manager of the tree at `root`, an absolute path. It reads
+   * `PATH` from `env`, and never from the process.
+   */
   readonly detect: (root: string, env: Environment) => Envelope<Detection>
   /** Each installed copy of `pkg`, found by the name it resolves to or by its install key. */
   readonly resolvedVersions: (
@@ -113,7 +116,11 @@ export interface Adapter<Detection extends { readonly pm: string }> {
     pkg: string,
     line: number | null,
   ) => Envelope<never>
-  /** Each constraint in the override file that `detect` names. */
+  /**
+   * Each constraint in the override file that `detect` names. When that file
+   * is `pnpm-workspace.yaml`, also the keys that the `pnpm.overrides` of
+   * package.json still holds.
+   */
   readonly listPins: (tree: Tree<Detection>) => Envelope<never>
   /** How `a` and `b` compare, in this ecosystem's version rules. */
   readonly compareVersions: (a: string, b: string) => Envelope<CompareVersionsAnswer>

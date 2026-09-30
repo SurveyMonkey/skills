@@ -1,8 +1,9 @@
 // `compare_versions` and `range_facts` of the node adapter (#221). The seam
 // is the `node` adapter. Each expected value is written by hand from the
-// semver rules (semver.org) and from the usage lines of node.sh. The parity
-// run holds the agreement with node.sh, and the semver unit tests hold the
-// rules themselves.
+// semver rules (semver.org), from the usage lines of node.sh, and from the
+// refusal text of `src/semver/versions.ts`. The parity run holds the
+// agreement with node.sh, and the semver unit tests hold the rules
+// themselves.
 import { describe, expect, it } from 'vitest'
 
 import { node } from '#gh-security/adapters/node.ts'

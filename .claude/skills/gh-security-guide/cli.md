@@ -20,7 +20,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/state.ts` | The fix driver's state file, typed |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
-| `src/adapters/` | `adapter.ts`, the ADR 001 read verbs as one in-process interface; `node.ts`, the adapter for `npm` alerts; `node/`, its verbs, one file for each group |
+| `src/adapters/` | `adapter.ts`, the ADR 001 read verbs as one in-process interface; `node.ts`, the adapter for `npm` alerts; `node/`, its verbs in one file for each group, and `attempt.ts`, the rule that makes a throw `failed` |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, preflight, scoring, rendering, the drivers |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
