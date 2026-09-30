@@ -18,6 +18,16 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/allow-own-commands.ts')).allowOwnCommandsCommand,
   },
+  'ensure-worktree-exclude': {
+    description:
+      "Add the agents' worktree directory to .git/info/exclude: ensure-worktree-exclude <repo_root>",
+    load: async () =>
+      (await import('../subcommands/ensure-worktree-exclude.ts')).ensureWorktreeExcludeCommand,
+  },
+  'pr-status': {
+    description: 'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>...',
+    load: async () => (await import('../subcommands/pr-status.ts')).prStatusCommand,
+  },
   'session-start': {
     description: 'Check that the tools this plugin needs are present (SessionStart hook)',
     load: async () => (await import('../subcommands/session-start.ts')).sessionStartCommand,
