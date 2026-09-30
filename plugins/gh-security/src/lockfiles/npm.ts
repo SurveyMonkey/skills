@@ -1,6 +1,7 @@
 // The npm `package-lock.json` reader, ported from node.sh (#220, RFC 002):
-// `npm_versions`, `npm_parse_counts`, `npm_resolution_pairs` and the
-// declaration reader behind `npm_parents`. The jq there is the specification.
+// `npm_versions`, `npm_parse_counts`, `npm_resolution_pairs`, the
+// declaration reader behind `npm_parents`, and `NPM_COPY_ROWS_JQ` behind
+// `npm_copy_rows` (#221). The jq there is the specification.
 //
 // A copy is known by the name it resolves to and by the key it is installed
 // under. The two differ only for an `npm:` alias, which records the real name
@@ -10,6 +11,7 @@
 
 import {
   aliasTarget,
+  type Copy,
   type Coverage,
   groupResolutions,
   guarded,
@@ -113,6 +115,62 @@ export const resolutionMap = (text: string): ResolutionMap => {
   return { coverage, resolutions: groupResolutions(rowEntries(entries).flatMap(rowOf)) }
 }
 
+/** The three blocks of an entry that declare a dependency, merged. A later block wins a key. */
+const declarationsOf = (value: Readonly<Record<string, unknown>>) => ({
+  ...recordOf(value.dependencies),
+  ...recordOf(value.optionalDependencies),
+  ...recordOf(value.peerDependencies),
+})
+
+/**
+ * The `NPM_PATH_JQ` walk up `node_modules`: `path`, then each directory above
+ * it that npm looks in. A scoped name is two path segments (#121). A
+ * workspace key has no `node_modules/`, so the root follows it. A path that
+ * does not get shorter, but holds `node_modules/`, is a shape that the walk
+ * does not know, and the root does not follow it.
+ */
+const prefixes = (path: string): readonly string[] => {
+  if (path === '') return ['']
+  const rest = path.replace(/\/?node_modules\/(@[^/]+\/)?[^/]+$/, '')
+  if (rest !== path) return [path, ...prefixes(rest)]
+  return path.includes(NODE_MODULES) ? [path] : [path, '']
+}
+
+/** Where npm looks for the copy that the entry at `path` declares under `key`. */
+const candidates = (path: string, key: string): readonly string[] =>
+  prefixes(path).map((prefix) => `${prefix === '' ? '' : `${prefix}/`}${NODE_MODULES}${key}`)
+
+/**
+ * `npm_copy_rows`: one row for each declaration of `pkg`, by the name or by
+ * an `npm:${pkg}@` alias, in the three blocks of each copy. `resolved` is the
+ * version of the first candidate on the walk up that has one. The root is
+ * not a parent.
+ */
+export const copies = (text: string, pkg: string): readonly Copy[] => {
+  const entries = entriesOf(text)
+  const byKey = new Map(entries.map((entry) => [entry.key, entry.value]))
+  const alias = `npm:${pkg}@`
+  return entries
+    .filter(({ key }) => key !== '')
+    .flatMap(({ key: path, value }) =>
+      Object.entries(declarationsOf(value)).flatMap(([key, specifier]): Copy[] => {
+        if (typeof specifier !== 'string') return []
+        if (key !== pkg && !specifier.startsWith(alias)) return []
+        const resolved = candidates(path, key)
+          .map((candidate) => textOf(byKey.get(candidate)?.version))
+          .find((version) => version !== null)
+        return [
+          {
+            parent: installedName(path),
+            parent_version: textOf(value.version),
+            range: key === pkg ? specifier : specifier.slice(alias.length),
+            resolved: resolved ?? null,
+          },
+        ]
+      }),
+    )
+}
+
 /**
  * Each copy that declares `pkg` in `dependencies`, `optionalDependencies` or
  * `peerDependencies`, by the name or through an `npm:` alias of it. A peer
@@ -124,16 +182,11 @@ export const parents = (text: string, pkg: string): readonly Parent[] =>
   uniqueParents(
     entriesOf(text)
       .filter(({ key }) => key !== '')
-      .filter(({ value }) => {
-        const declared = {
-          ...recordOf(value.dependencies),
-          ...recordOf(value.optionalDependencies),
-          ...recordOf(value.peerDependencies),
-        }
-        return Object.entries(declared).some(
+      .filter(({ value }) =>
+        Object.entries(declarationsOf(value)).some(
           ([name, specifier]) =>
             typeof specifier === 'string' && (name === pkg || aliasTarget(specifier) === pkg),
-        )
-      })
+        ),
+      )
       .map((entry) => ({ name: installedName(entry.key), version: textOf(entry.value.version) })),
   )

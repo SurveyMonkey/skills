@@ -1,12 +1,12 @@
-// The npm `package-lock.json` reader (#220). Each expected value is written by
-// hand from the fixture it names. The parity run holds the agreement with
-// node.sh. This file holds the behavior. It also holds `parents`, which no
+// The npm `package-lock.json` reader (#220, #221). Each expected value is
+// written by hand from the fixture it names. The parity runs hold the
+// agreement with node.sh. This file holds the behavior. It also holds `parents`, which no
 // bash verb returns.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/npm.ts'
+import { copies, parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/npm.ts'
 import { aliasTarget, LockfileError } from '#gh-security/lockfiles/shared.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
@@ -277,5 +277,75 @@ describe('aliasTarget', () => {
     ['^4.0.0', null],
   ])('reads %s as %s', (specifier, expected) => {
     expect(aliasTarget(specifier)).toBe(expected)
+  })
+})
+
+describe('copies', () => {
+  // `express` reaches the hoisted copy. `test-exclude` has a nested copy.
+  it('resolves each declaration through the walk up node_modules', () => {
+    expect(copies(lockfile('npm-v3'), 'lodash')).toEqual([
+      { parent: 'express', parent_version: '4.18.2', range: '^4.17.20', resolved: '4.17.21' },
+      { parent: 'test-exclude', parent_version: '6.0.0', range: '^3.0.0', resolved: '3.10.1' },
+    ])
+  })
+
+  it('reads the range of an alias declaration, and resolves it by its install key', () => {
+    expect(copies(lockfile('npm-alias'), 'lodash')).toEqual([
+      { parent: 'alias-parent', parent_version: '1.0.0', range: '^4.18.0', resolved: '4.18.1' },
+      { parent: 'dupe-parent', parent_version: '1.0.0', range: '^4.17.21', resolved: '4.17.21' },
+    ])
+  })
+
+  // #121: a scoped segment is two path segments, and a workspace key walks to the root.
+  it('walks up past a scoped parent and from a workspace key', () => {
+    expect(copies(lockfile('npm-scoped-parents'), 'brace-expansion')).toEqual([
+      { parent: 'minimatch', parent_version: '10.0.3', range: '^5.0.5', resolved: '5.0.6' },
+      { parent: 'minimatch', parent_version: '10.2.5', range: '^5.0.5', resolved: '5.0.6' },
+      { parent: 'minimatch', parent_version: '7.4.9', range: '^2.0.2', resolved: '2.1.1' },
+      { parent: 'packages/tool', parent_version: '1.0.0', range: '^2.0.2', resolved: '2.1.1' },
+    ])
+  })
+
+  it.each([
+    [
+      'a candidate with no version',
+      { 'node_modules/a': { version: '1.0.0', dependencies: { x: '^1' } }, 'node_modules/x': {} },
+      null,
+    ],
+    [
+      'no candidate at all',
+      { 'node_modules/a': { version: '1.0.0', dependencies: { x: '^1' } } },
+      null,
+    ],
+    [
+      'a key that the walk cannot shorten',
+      {
+        'node_modules/a/': { version: '1.0.0', dependencies: { x: '^1' } },
+        'node_modules/x': { version: '1.0.0' },
+      },
+      null,
+    ],
+  ])('resolves nothing for %s', (_shape, packages, resolved) => {
+    const [row] = copies(JSON.stringify({ packages }), 'x')
+    expect(row?.resolved).toBe(resolved)
+  })
+
+  it('reads no declaration that is not a string, of another package, or of the root', () => {
+    const text = JSON.stringify({
+      packages: {
+        '': { dependencies: { x: '^1' } },
+        'node_modules/a': { dependencies: { x: 1, y: 'npm:x' } },
+      },
+    })
+    expect(copies(text, 'x')).toEqual([])
+  })
+
+  it('gives a null parent version to a copy that records none', () => {
+    const text = JSON.stringify({
+      packages: { 'node_modules/a': { peerDependencies: { x: '^1' } } },
+    })
+    expect(copies(text, 'x')).toEqual([
+      { parent: 'a', parent_version: null, range: '^1', resolved: null },
+    ])
   })
 })

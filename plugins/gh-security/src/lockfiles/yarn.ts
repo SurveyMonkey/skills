@@ -1,7 +1,7 @@
 // The Yarn Berry `yarn.lock` reader, ported from node.sh (#220, RFC 002):
-// `YARN_LOCATOR_AWK` behind `yarn_versions` and `yarn_resolution_pairs`, and
-// `YARN_DECLARATION_AWK` behind `yarn_parents`. The awk there is the
-// specification. This reads only the lines those programs read. It is not a
+// `YARN_LOCATOR_AWK` behind `yarn_versions` and `yarn_resolution_pairs`,
+// `YARN_DECLARATION_AWK` behind `yarn_parents`, and `YARN_COPY_AWK` behind
+// `yarn_copy_rows` (#221). The awk there is the specification. This reads only the lines those programs read. It is not a
 // YAML parser.
 //
 // Every entry has one `resolution:` locator, which stays stable when several
@@ -13,6 +13,7 @@
 import {
   aliasTarget,
   before,
+  type Copy,
   type Coverage,
   groupResolutions,
   guarded,
@@ -152,6 +153,22 @@ const parentOf = (locator: string): Parent | null => {
 
 const DECLARATIONS = /^ {2}(dependencies|peerDependencies|optionalDependencies):/
 
+/** A declaration line of a block: the declared name and specifier, without quotes. */
+const declarationOf = (line: string): { name: string; specifier: string } => {
+  const declaration = line.slice(4)
+  const declared = before(declaration, ':')
+  return {
+    name: declared.replaceAll('"', ''),
+    specifier: declaration
+      .slice(declared.length + 1)
+      .replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '')
+      .replaceAll('"', ''),
+  }
+}
+
+/** The start of an entry, or of the file header: a line that is not indented and not a comment. */
+const ENTRY_START = /^[^ \t\n\v\f\r#]/
+
 /**
  * Each entry that declares `pkg` in `dependencies`, `optionalDependencies` or
  * `peerDependencies`, by the name or through an `npm:` alias of it. See #47
@@ -163,7 +180,7 @@ export const parents = (text: string, pkg: string): readonly Parent[] => {
   let parent: Parent | null = null
   let inDeclarations = false
   for (const line of lines(text)) {
-    if (/^[^ \t\n\v\f\r#]/.test(line)) {
+    if (ENTRY_START.test(line)) {
       parent = null
       inDeclarations = false
     }
@@ -178,15 +195,64 @@ export const parents = (text: string, pkg: string): readonly Parent[] => {
     }
     if (/^ {2}[a-zA-Z]/.test(line)) inDeclarations = false
     if (parent !== null && inDeclarations && /^ {4}/.test(line) && line.includes(':')) {
-      const declaration = line.slice(4)
-      const declared = before(declaration, ':')
-      const name = declared.replaceAll('"', '')
-      const specifier = declaration
-        .slice(declared.length + 1)
-        .replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '')
-        .replaceAll('"', '')
+      const { name, specifier } = declarationOf(line)
       if (name === pkg || aliasTarget(specifier) === pkg) found.push(parent)
     }
   }
   return uniqueParents(found)
+}
+
+/**
+ * `yarn_copy_rows`: one row for each declaration of `pkg`, by the name or by
+ * an `npm:${pkg}@` alias, in the three blocks of each entry. The version of
+ * the parent is its `version:` line. `resolved` is the `version:` of the
+ * entry whose key list holds the descriptor `<name>@<specifier>`.
+ */
+export const copies = (text: string, pkg: string): readonly Copy[] => {
+  const versions = new Map<string, string>()
+  const declared: { parent: string; version: string; name: string; specifier: string }[] = []
+  let descriptors: readonly string[] = []
+  let version = ''
+  let parent: Parent | null = null
+  let inDeclarations = false
+  for (const line of lines(text)) {
+    if (ENTRY_START.test(line)) {
+      // The key list: `"a@npm:^1.0.0, a@npm:^1.1.0":`, without its quotes.
+      descriptors = line.endsWith(':') ? line.slice(0, -1).replaceAll('"', '').split(', ') : []
+      version = ''
+      parent = null
+      inDeclarations = false
+      continue
+    }
+    if (line.startsWith('  version: ')) {
+      version = line
+        .slice(11)
+        .replaceAll('"', '')
+        .replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '')
+      for (const descriptor of descriptors) versions.set(descriptor, version)
+      continue
+    }
+    const locator = locatorOf(line)
+    if (locator !== null) {
+      parent = parentOf(locator)
+      continue
+    }
+    if (DECLARATIONS.test(line)) {
+      inDeclarations = true
+      continue
+    }
+    if (/^ {2}[a-zA-Z]/.test(line)) inDeclarations = false
+    if (parent !== null && inDeclarations && /^ {4}/.test(line) && line.includes(':')) {
+      declared.push({ parent: parent.name, version, ...declarationOf(line) })
+    }
+  }
+  const alias = `npm:${pkg}@`
+  return declared
+    .filter(({ name, specifier }) => name === pkg || specifier.startsWith(alias))
+    .map(({ parent: owner, version: ownerVersion, name, specifier }) => ({
+      parent: owner,
+      parent_version: ownerVersion,
+      range: name === pkg ? specifier.replace(/^npm:/, '') : specifier.slice(alias.length),
+      resolved: versions.get(`${name}@${specifier}`) ?? null,
+    }))
 }
