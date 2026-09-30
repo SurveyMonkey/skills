@@ -9,7 +9,12 @@
 // empty, and ADR 001's exit codes.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { CommandContext, CommandEntry, Io } from '#gh-security/cli/command.ts'
+import {
+  type CommandContext,
+  type CommandEntry,
+  failedReport,
+  type Io,
+} from '#gh-security/cli/command.ts'
 import { COMMANDS, commandNames } from '#gh-security/cli/registry.ts'
 import { helpText, runCli, USAGE } from '#gh-security/cli/run.ts'
 
@@ -131,5 +136,44 @@ describe('runCli', () => {
     const { io, written } = capturing('not json')
     expect(await runCli(['allow-own-commands'], {}, io)).toBe(0)
     expect(written()).toEqual({ stdout: '', stderr: '' })
+  })
+
+  it('waits for a handler that answers with a promise, and renders that answer', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return { outcome: 'ok', value: { waited: true } }
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(0)
+    expect(written()).toEqual({ stdout: '{"waited":true}\n', stderr: '' })
+  })
+
+  it('waits for a promise that resolves to silence, and writes nothing', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => undefined)
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(0)
+    expect(written()).toEqual({ stdout: '', stderr: '' })
+  })
+
+  it('writes the report on stdout, and the message on stderr, for a failure that carries a report', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () =>
+      failedReport('1 of 2 could not be read', { prs: [{ url: 'u', error: 'e' }] }),
+    )
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"prs":[{"url":"u","error":"e"}]}\n',
+      stderr: '1 of 2 could not be read\n',
+    })
+  })
+
+  it('still renders a plain failure as the error envelope on stdout and stderr', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => ({
+      outcome: 'failed',
+      error: 'no',
+    }))
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({ stdout: '{"error":"no"}\n', stderr: 'no\n' })
   })
 })

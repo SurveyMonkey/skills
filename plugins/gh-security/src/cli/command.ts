@@ -63,7 +63,12 @@ export const failedReport = (error: string, report: JsonValue): FailedReport => 
   report,
 })
 
-export type CommandHandler = (context: CommandContext) => CommandResult
+/**
+ * A handler answers at once, or with a promise. A command that runs `gh` or
+ * `git` must wait for the child, so it returns a promise. A handler that
+ * needs no child stays synchronous.
+ */
+export type CommandHandler = (context: CommandContext) => CommandResult | Promise<CommandResult>
 
 export interface CommandEntry {
   /** One line, printed beside the name by `--help`. */
