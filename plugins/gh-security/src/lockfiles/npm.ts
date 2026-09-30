@@ -120,22 +120,37 @@ const BLOCKS = ['dependencies', 'optionalDependencies', 'peerDependencies'] as c
 /**
  * The three blocks of an entry that declare a dependency, merged. A later
  * block wins a key. jq's `// {}` reads null and false as no block. For
- * another value that is not an object, jq's `add` stops, and so does this.
+ * another value that is not an object, jq's `add` usually stops, and this
+ * always stops. jq does not stop when all three blocks are lists. That
+ * divergence is safe, and npm does not write that shape. `fromEntries`
+ * keeps a `__proto__` key, as `add` does.
  */
 const declarationsOf = ({ key, value }: Entry): Readonly<Record<string, unknown>> =>
-  Object.assign(
-    {},
-    ...BLOCKS.map((block) => {
+  Object.fromEntries(
+    BLOCKS.flatMap((block) => {
       const declared = value[block]
-      if (declared === undefined || declared === null || declared === false) return EMPTY
+      if (declared === undefined || declared === null || declared === false) return []
       if (!isRecord(declared)) {
+        const entry = key === '' ? 'the root entry' : key
         throw new LockfileError(
-          `package-lock.json: ${key} has a ${block} block that is not an object`,
+          `package-lock.json: ${entry} has a ${block} block that is not an object`,
         )
       }
-      return declared
+      return Object.entries(declared)
     }),
   )
+
+/**
+ * The entries that can be a parent, with their declarations. jq reads the
+ * blocks of the root entry too, and stops on them, before the root is
+ * dropped. The root is not a parent.
+ */
+const declaringEntries = (
+  entries: readonly Entry[],
+): { readonly entry: Entry; readonly declared: Readonly<Record<string, unknown>> }[] =>
+  entries
+    .map((entry) => ({ entry, declared: declarationsOf(entry) }))
+    .filter(({ entry }) => entry.key !== '')
 
 /**
  * The `NPM_PATH_JQ` walk up `node_modules`: `path`, then each directory above
@@ -165,25 +180,23 @@ export const copies = (text: string, pkg: string): readonly Copy[] => {
   const entries = entriesOf(text)
   const byKey = new Map(entries.map((entry) => [entry.key, entry.value]))
   const alias = `npm:${pkg}@`
-  return entries
-    .filter(({ key }) => key !== '')
-    .flatMap(({ key: path, value }) =>
-      Object.entries(declarationsOf({ key: path, value })).flatMap(([key, specifier]): Copy[] => {
-        if (typeof specifier !== 'string') return []
-        if (key !== pkg && !specifier.startsWith(alias)) return []
-        const resolved = candidates(path, key)
-          .map((candidate) => textOf(byKey.get(candidate)?.version))
-          .find((version) => version !== null)
-        return [
-          {
-            parent: installedName(path),
-            parent_version: textOf(value.version),
-            range: key === pkg ? specifier : specifier.slice(alias.length),
-            resolved: resolved ?? null,
-          },
-        ]
-      }),
-    )
+  return declaringEntries(entries).flatMap(({ entry: { key: path, value }, declared }) =>
+    Object.entries(declared).flatMap(([key, specifier]): Copy[] => {
+      if (typeof specifier !== 'string') return []
+      if (key !== pkg && !specifier.startsWith(alias)) return []
+      const resolved = candidates(path, key)
+        .map((candidate) => textOf(byKey.get(candidate)?.version))
+        .find((version) => version !== null)
+      return [
+        {
+          parent: installedName(path),
+          parent_version: textOf(value.version),
+          range: key === pkg ? specifier : specifier.slice(alias.length),
+          resolved: resolved ?? null,
+        },
+      ]
+    }),
+  )
 }
 
 /**
@@ -195,13 +208,15 @@ export const copies = (text: string, pkg: string): readonly Copy[] => {
  */
 export const parents = (text: string, pkg: string): readonly Parent[] =>
   uniqueParents(
-    entriesOf(text)
-      .filter(({ key }) => key !== '')
-      .filter((entry) =>
-        Object.entries(declarationsOf(entry)).some(
+    declaringEntries(entriesOf(text))
+      .filter(({ declared }) =>
+        Object.entries(declared).some(
           ([name, specifier]) =>
             typeof specifier === 'string' && (name === pkg || aliasTarget(specifier) === pkg),
         ),
       )
-      .map((entry) => ({ name: installedName(entry.key), version: textOf(entry.value.version) })),
+      .map(({ entry }) => ({
+        name: installedName(entry.key),
+        version: textOf(entry.value.version),
+      })),
   )

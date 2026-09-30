@@ -241,6 +241,33 @@ describe('malformed input', () => {
     expect(() => copies(text, 'lodash')).toThrow(new LockfileError(message))
   })
 
+  // jq runs `add` on the root entry too, before the root is dropped.
+  it('refuses a declaration block of the root entry that is not an object', () => {
+    const text = JSON.stringify({
+      packages: {
+        '': { peerDependencies: 'lodash' },
+        'node_modules/b': { version: '1.0.0', dependencies: { lodash: '^4' } },
+      },
+    })
+    const message =
+      'package-lock.json: the root entry has a peerDependencies block that is not an object'
+    expect(() => parents(text, 'lodash')).toThrow(new LockfileError(message))
+    expect(() => copies(text, 'lodash')).toThrow(new LockfileError(message))
+  })
+
+  // `JSON.parse` makes `__proto__` an own key, and jq's `add` keeps it. The
+  // text is written out: an object literal would set the prototype.
+  it('keeps a declaration under the key __proto__, as jq does', () => {
+    const text =
+      '{"packages":{"":{},"node_modules/a":{"version":"1.0.0",' +
+      '"dependencies":{"__proto__":"npm:lodash@^4.17.21"}},' +
+      '"node_modules/lodash":{"version":"4.17.21"}}}'
+    expect(parents(text, 'lodash')).toEqual([{ name: 'a', version: '1.0.0' }])
+    expect(copies(text, 'lodash')).toEqual([
+      { parent: 'a', parent_version: '1.0.0', range: '^4.17.21', resolved: null },
+    ])
+  })
+
   it('reads a declaration block that is null or false as no block, as jq does', () => {
     const text = JSON.stringify({
       packages: {
