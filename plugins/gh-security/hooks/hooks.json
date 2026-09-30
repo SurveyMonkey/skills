@@ -1,6 +1,18 @@
 {
-  "description": "Allow this plugin's own CLI invocations without a prompt (PreToolUse), and nudge toward gh-security resolve-alerts when a Bash (or backgrounded BashOutput) command's output carries a GitHub vulnerability notice or package manager audit findings (PostToolUse).",
+  "description": "Allow this plugin's own CLI invocations without a prompt (PreToolUse), and nudge toward gh-security resolve-alerts when a Bash (or backgrounded BashOutput) command's output carries a GitHub vulnerability notice or package manager audit findings (PostToolUse). Check at session start that the tools this plugin needs are present (SessionStart).",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if ! command -v node >/dev/null 2>&1; then printf '{\"systemMessage\":\"\\\\ngh-security: ⚠️ node not found on PATH\"}\\n'; exit 0; fi; node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.ts\"; exit 0",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
