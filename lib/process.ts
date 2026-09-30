@@ -32,10 +32,12 @@ export interface StartFailure {
    *   - a node `ERR_*` code, now `ERR_INVALID_ARG_VALUE`. node refused the
    *     argv before a child existed: a NUL byte in the command, an
    *     argument, `cwd`, or the environment.
+   *   - a libuv errno that `spawn` throws at once, such as `E2BIG` for an
+   *     argv that is too long. This is also a defect in the argv.
    *
    *  "Not ENOENT" does not mean "on PATH and still would not run". For the
-   *  second kind, the defect is in the argv. Branch on
-   *  `code.startsWith('ERR_')` for that case, and on `ENOENT` for the other.
+   *  second and third kinds, the defect is in the argv. Branch on `ENOENT`
+   *  for a command that is not there.
    */
   readonly code: string
   /** node's message. It names the command and the code. */
@@ -177,9 +179,10 @@ export const run: Runner = (command, args = [], options = {}) =>
     const startedAt = performance.now()
     // `spawn` reports most failures on the `error` event below. But it
     // checks argv synchronously, and throws for a NUL byte in the command or
-    // in an argument (`ERR_INVALID_ARG_VALUE`). A throw in this executor is
-    // a rejection, which {@link run} promises never to give. So it becomes
-    // the answer for a child that could not run.
+    // in an argument (`ERR_INVALID_ARG_VALUE`). It also throws some libuv
+    // errors at once, such as `E2BIG` for an argv that is too long. A throw
+    // in this executor is a rejection, which {@link run} promises never to
+    // give. So it becomes the answer for a child that could not run.
     let child: ChildProcessWithoutNullStreams | null = null
     try {
       child = spawn(command, [...args], {
@@ -195,9 +198,9 @@ export const run: Runner = (command, args = [], options = {}) =>
         shell: false,
       })
     } catch (error) {
-      // A type assertion, not a default. node's argv check always throws a
-      // `TypeError` with an `ERR_*` code, so no test can reach a fallback.
-      // The code is never `ENOENT`, so `startStatus` gives 126.
+      // A type assertion, not a default. Each synchronous throw from `spawn`
+      // has a code: `ERR_*` from the argv check, or a libuv errno such as
+      // `E2BIG`. The code is never `ENOENT`, so `startStatus` gives 126.
       const rejected = error as NodeJS.ErrnoException & { code: string }
       resolve(refusedToStart({ code: rejected.code, message: rejected.message }, startedAt))
     }
