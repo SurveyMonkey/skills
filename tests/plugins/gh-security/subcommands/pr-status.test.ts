@@ -270,6 +270,22 @@ describe('the checks derivation', () => {
     })
   })
 
+  it('reads a node with a null state as a CheckRun', async () => {
+    const node = { name: 'test', state: null, status: 'COMPLETED', conclusion: 'SUCCESS' }
+    expect(await oneReport(view({ statusCheckRollup: [node] }))).toEqual({
+      prs: [
+        entry({ checks: 'passed', check_counts: { total: 1, passed: 1, failed: 0, pending: 0 } }),
+      ],
+    })
+  })
+
+  it('names a failing node by its name before its context', async () => {
+    const node = { name: 'by-name', context: 'by-context', state: 'FAILURE' }
+    expect(await oneReport(view({ statusCheckRollup: [node] }))).toMatchObject({
+      prs: [{ failing_checks: ['by-name'] }],
+    })
+  })
+
   it('reads a null rollup as no checks, never as passed', async () => {
     expect(await oneReport(view({ statusCheckRollup: null }))).toEqual({ prs: [entry()] })
   })
@@ -286,6 +302,8 @@ describe('the error entries', () => {
     ['an issue URL', 'https://github.com/octo/app/issues/1'],
     ['a URL with a trailing path', 'https://github.com/octo/app/pull/1/files'],
     ['a URL that is not https', 'http://github.com/octo/app/pull/1'],
+    ['a URL with text before it', 'see https://github.com/octo/app/pull/1'],
+    ['a host that only looks like github.com', 'https://githubXcom/octo/app/pull/1'],
     ['a URL with no number', 'https://github.com/octo/app/pull/'],
     ['a word', 'not a url'],
     ['a number too large to name exactly', `https://github.com/octo/app/pull/${'9'.repeat(20)}`],
@@ -366,6 +384,25 @@ describe('the error entries', () => {
       },
     })
   })
+
+  it.each([
+    ['is false', false],
+    ['is a scalar', 0],
+  ])(
+    'cannot read a rollup that %s as a list of nodes, and reads false as none',
+    async (_n, statusCheckRollup) => {
+      const result = await prStatus(
+        context([APP]),
+        mockFactory({ 'octo/app#12': view({ statusCheckRollup }) }),
+        noProcess,
+      )
+      if (statusCheckRollup === false) {
+        expect(result).toEqual({ outcome: 'ok', value: { prs: [entry()] } })
+      } else {
+        expect(result).toMatchObject({ outcome: 'failed' })
+      }
+    },
+  )
 
   it('does not hide a defect: an error that is not from gh is thrown', async () => {
     await expect(
@@ -478,6 +515,27 @@ const recordingRunner = (stdout: string, stderr = '') => {
 
 describe('the process that runs gh', () => {
   const real: ClientFactory = createGhClient
+
+  it('gives a failed gh the words it wrote on stderr, with no wrapper and no newline', async () => {
+    const said = 'GraphQL: Could not resolve to a PullRequest with the number of 999.'
+    const runner: Runner = async () => ({
+      status: 1,
+      signal: null,
+      stdout: '',
+      stderr: `${said}\n`,
+      combined: `${said}\n`,
+      timedOut: false,
+      elapsedMs: 0,
+      startFailure: null,
+      streamErrors: [],
+    })
+    const url = 'https://github.com/octo/app/pull/999'
+    expect(await prStatus(context([url]), real, runner)).toEqual({
+      outcome: 'failed',
+      error: '1 of 1 pull request URLs could not be read',
+      report: { prs: [{ url, error: said }] },
+    })
+  })
 
   it('runs gh with the number and the repository, and the field list of the client', async () => {
     const { runner, calls } = recordingRunner(JSON.stringify(view()))

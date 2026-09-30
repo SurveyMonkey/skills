@@ -80,7 +80,7 @@ const renderReport = (result: FailedReport): Rendered => ({
  * exit codes come from the envelope the handler returned, through
  * `exitCodeFor`, so a verb that is not implemented stays exit 2 and an
  * unsupported toolchain stays exit 3 rather than collapsing into a generic
- * failure.
+ * failure. A failed report is the one exception: it is always exit 1.
  */
 export const runCli = async (
   argv: readonly string[],

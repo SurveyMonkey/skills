@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative as relative_ } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CONTEXT, requireLinkedWorktree } from '#gh-security/worktree.ts'
@@ -171,6 +171,8 @@ describe('requireLinkedWorktree: pointers that are written by hand', () => {
     ['gitdir: /abs/modules/app/.git/worktrees/fix', null],
     ['gitdir: /abs/main/.git/worktrees/modules', null],
     ['gitdir: /abs/main/.git/worktrees/wt\nsecond line', null],
+    ['gitdir: /abs/main/.git/worktrees/x/modules/app', 'this is a git submodule'],
+    ['gitdir: /abs/worktrees/x/modules/app/.git/worktrees/fix', null],
   ])('reads %j', (content, refusedAs) => {
     const built = scene()
     const directory = pointerAt(built, content)
@@ -225,6 +227,16 @@ describe('requireLinkedWorktree: pointers that are written by hand', () => {
     expect(requireLinkedWorktree(directory)).toEqual(
       refusal(`no git repository at or above ${directory}`),
     )
+  })
+})
+
+describe('requireLinkedWorktree: a relative directory', () => {
+  it('walks up from a relative path, as from the absolute one', () => {
+    const built = scene()
+    const { worktree } = linkedWorktree(built)
+    mkdirSync(join(worktree, 'sub'))
+    const relative = join(relative_(process.cwd(), worktree), 'sub')
+    expect(requireLinkedWorktree(relative)).toEqual({ outcome: 'ok', value: worktree })
   })
 })
 

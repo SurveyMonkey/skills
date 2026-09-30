@@ -2,8 +2,8 @@
 // real implementation of it. The exported names and signatures are the
 // target stack's `lib/gh.ts`. The one difference is the `gh pr view` field
 // list (see `PULL_REQUEST_FIELDS`). This file has only one endpoint of the
-// target's, `viewPullRequest`, because it is the one endpoint that a
-// planned caller (`pr-status`, #226) uses. A new endpoint comes with the
+// target's, `viewPullRequest`, because `pr-status` (#226) is the one caller
+// that uses an endpoint. A new endpoint comes with the
 // command that calls it, in the shape the target stack gives it (#274).
 //
 // A command gets a client as an argument, and never builds one itself. The

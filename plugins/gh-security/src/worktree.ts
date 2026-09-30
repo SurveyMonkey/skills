@@ -4,8 +4,8 @@
 // process. It has no subcommand (ruling 3 on #226).
 //
 // Cwd-sensitive work must land in the fix worktree and nowhere else. A lost
-// cwd is real: no Bash call inherits the cwd of the previous one, and a live
-// run once bumped a package in a real repository that way (issue #18).
+// cwd is real. No Bash call inherits the cwd of the previous one. A live run
+// once bumped a package in a real repository that way (issue #18).
 //
 // The guard finds the top of the enclosing repository by a walk up to the
 // first `.git`, then it classifies that `.git`. It reads files, and runs no
@@ -32,7 +32,7 @@
 // beyond `fs` and `path`.
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { type Envelope, failed, ok } from './lib/envelope.ts'
 
@@ -111,8 +111,11 @@ export const requireLinkedWorktree = (
   directory: string,
   context: string = DEFAULT_CONTEXT,
 ): Envelope<string> => {
-  const top = enclosingTop(directory)
-  if (top === null) return refuse(context, `no git repository at or above ${directory}`)
-  const refusal = refusalFor(directory, top)
+  // The walk up needs an absolute path: `dirname('.')` is `.`, so a relative
+  // path would stop it after one step.
+  const start = resolve(directory)
+  const top = enclosingTop(start)
+  if (top === null) return refuse(context, `no git repository at or above ${start}`)
+  const refusal = refusalFor(start, top)
   return refusal === null ? ok(top) : refuse(context, refusal)
 }

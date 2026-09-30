@@ -9,16 +9,19 @@
 // other. A read-then-append from both could write the line twice, or write a
 // part of it (issue #35). `.git/info/exclude` has no lock of its own. So the
 // orchestrator calls this command before it starts any agent for a repository.
-// The command is also safe when several run at once: the read, the change and
-// the write run under a `mkdir` lock, and the file is published with one
-// rename. So no run leaves a torn file, and the line is there once.
+// Several runs at once are also safe. The read, the change and the write run
+// under a `mkdir` lock, and one rename publishes the file. So no run leaves a
+// torn file, and the line is there once.
 //
 // The path comes from `git rev-parse --git-common-dir`, and not from
 // `<repo_root>/.git`. `.git/info/exclude` covers the whole repository, and the
 // gitdir of a linked worktree is not the shared git directory.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from node
-// beyond `fs`.
+// beyond `fs`, `path` and `crypto`.
+
+// The file is read and written as `latin1`. This maps each byte to one
+// character and back, so a byte that is not UTF-8 in a user's rule survives.
 
 import { randomBytes } from 'node:crypto'
 import {
@@ -74,9 +77,18 @@ const statOrNull = (path: string): Stats | null => {
 /** Whether the exclude file at `path` has the line as a whole line. */
 const hasLine = (path: string): boolean => {
   try {
-    return readFileSync(path, 'utf8').split('\n').includes(LINE)
+    return readFileSync(path, 'latin1').split('\n').includes(LINE)
   } catch {
     return false
+  }
+}
+
+/** Remove the lock directory. A failure is ignored: the lock then goes stale. */
+const removeLock = (lock: string): void => {
+  try {
+    rmSync(lock, { recursive: true, force: true })
+  } catch {
+    // The next run removes a stale lock, or reports that it cannot get the lock.
   }
 }
 
@@ -100,7 +112,7 @@ const acquire = async (lock: string, timing: LockTiming): Promise<boolean> => {
   for (let attempt = 0; attempt < timing.attempts; attempt += 1) {
     const held = statOrNull(lock)
     if (held !== null && Date.now() - held.mtimeMs > STALE_LOCK_MS) {
-      rmSync(lock, { recursive: true, force: true })
+      removeLock(lock)
     }
     if (tryLock(lock)) return true
     await wait(timing.waitMs)
@@ -124,7 +136,7 @@ const readExisting = (exclude: string): Envelope<Existing> => {
   const stats = statOrNull(exclude)
   if (stats === null || !stats.isFile()) return ok({ text: '', mode: NEW_FILE_MODE })
   try {
-    return ok({ text: readFileSync(exclude, 'utf8'), mode: stats.mode & 0o777 })
+    return ok({ text: readFileSync(exclude, 'latin1'), mode: stats.mode & 0o777 })
   } catch {
     return failed(`cannot read ${exclude}`)
   }
@@ -142,7 +154,7 @@ const withLine = (text: string): string =>
 const publish = (infoDir: string, exclude: string, existing: Existing): boolean => {
   const temporary = join(infoDir, `.exclude.${randomBytes(4).toString('hex')}`)
   try {
-    writeFileSync(temporary, withLine(existing.text), { flag: 'wx' })
+    writeFileSync(temporary, withLine(existing.text), { flag: 'wx', encoding: 'latin1' })
     // After the write, because the mode of a new file follows the umask.
     chmodSync(temporary, existing.mode)
     renameSync(temporary, exclude)
@@ -191,7 +203,7 @@ export const ensureWorktreeExclude = async (
       ? report('added')
       : failed(`cannot publish ${exclude}`)
   } finally {
-    rmSync(lock, { recursive: true, force: true })
+    removeLock(lock)
   }
 }
 

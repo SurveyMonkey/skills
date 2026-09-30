@@ -4,8 +4,8 @@
 // `parity-ensure-worktree-exclude.test.ts`.
 //
 // The concurrency example starts real processes, because the lock is for
-// processes. Inside one process the change runs without a pause, so two calls
-// never overlap there.
+// processes. Inside one process, the read, the change and the write run without
+// a pause, but two calls can still overlap while they wait for git or the lock.
 import {
   chmodSync,
   existsSync,
@@ -48,10 +48,10 @@ const notRoot = process.getuid?.() !== 0
  * point that a timer cannot promise: a timer can fire before the command
  * has looked at the lock.
  */
-const releasingAfter = (reads: number, release: () => void) => {
+const releasingAfter = (reads: number, release: () => void, attempts = 50) => {
   let count = 0
   const timing: LockTiming = {
-    attempts: 50,
+    attempts,
     get waitMs() {
       count += 1
       if (count === reads) release()
@@ -226,6 +226,67 @@ describe('ensureWorktreeExclude: the lock', () => {
     expect(await ensure(repo, waits.timing)).toEqual(present(repo, exclude))
     expect(readFileSync(exclude, 'utf8')).toBe('.claude/worktrees/\n')
   })
+
+  it('reports already-present without the lock when the line is there', async () => {
+    const { repo, exclude, lock, ensure } = setup()
+    writeFileSync(exclude, '.claude/worktrees/\n')
+    mkdirSync(lock)
+    expect(await ensure(repo, QUICK)).toEqual(present(repo, exclude))
+    expect(existsSync(lock)).toBe(true)
+  })
+
+  it('keeps the bytes of a rule that is not UTF-8', async () => {
+    const { repo, exclude, ensure } = setup()
+    writeFileSync(exclude, Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2f, 0x0a]))
+    await ensure(repo)
+    expect(readFileSync(exclude)).toEqual(
+      Buffer.concat([
+        Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2f, 0x0a]),
+        Buffer.from('.claude/worktrees/\n'),
+      ]),
+    )
+  })
+
+  it('tries the lock once for each attempt, and waits after each failed try', async () => {
+    const { repo, lock, ensure } = setup()
+    mkdirSync(lock)
+    const waits = releasingAfter(1000, () => {}, 4)
+    await ensure(repo, waits.timing)
+    expect(waits.count()).toBe(4)
+  })
+
+  it('leaves a lock that is 30 seconds old, and takes over one that is 90 seconds old', async () => {
+    const { repo, exclude, lock, ensure } = setup()
+    mkdirSync(lock)
+    const thirty = new Date(Date.now() - 30_000)
+    utimesSync(lock, thirty, thirty)
+    expect(await ensure(repo, QUICK)).toEqual({
+      outcome: 'failed',
+      error: `could not acquire ${lock}`,
+    })
+    const ninety = new Date(Date.now() - 90_000)
+    utimesSync(lock, ninety, ninety)
+    expect(await ensure(repo, QUICK)).toEqual(added(repo, exclude))
+  })
+
+  it.skipIf(!notRoot)(
+    'reports a stale lock that it cannot remove, and does not throw',
+    async () => {
+      const { repo, info, lock, ensure } = setup()
+      mkdirSync(lock)
+      const old = new Date(Date.now() - 120_000)
+      utimesSync(lock, old, old)
+      chmodSync(info, 0o555)
+      try {
+        expect(await ensure(repo, QUICK)).toEqual({
+          outcome: 'failed',
+          error: `could not acquire ${lock}`,
+        })
+      } finally {
+        chmodSync(info, 0o755)
+      }
+    },
+  )
 
   it('gives up on a lock that stays held, and leaves that lock alone', async () => {
     const { repo, lock, ensure } = setup()

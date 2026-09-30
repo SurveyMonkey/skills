@@ -5,8 +5,8 @@
 // **Read-only, and the whole command.** It runs `gh pr view` and nothing that
 // changes a pull request. PRs open ready for review (ADR 008), so nothing in this
 // plugin acts on a PR after it is created. The callers print this as
-// information: the closing report of the orchestrator, and the standalone
-// audit-pins command. Interpreting it is the job of the caller.
+// information: the final report of the orchestrator, and the standalone
+// audit-pins command. The caller reads the meaning.
 //
 // Output: `{"prs": [...]}`, one entry per URL, in argument order.
 //
@@ -14,17 +14,17 @@
 //     conflict, checks, check_counts: {total, passed, failed, pending},
 //     failing_checks }
 //
-// A URL that could not be read is `{url, error}` in place of those fields. Either
-// it is not a GitHub pull request URL, or `gh pr view` failed on it, or its
-// answer had a shape that this command cannot read.
+// A URL that could not be read is `{url, error}` in place of those fields. It
+// is not a GitHub pull request URL, or `gh pr view` failed on it, or its answer
+// has a shape that this command cannot read.
 //
 //   - `checks` is `passed`, `failed`, `pending` or `none`, from
 //     `statusCheckRollup`. The rollup mixes two node shapes. A CheckRun has
 //     `status` and `conclusion`. A legacy StatusContext has only `state`. A
 //     command that reads one shape only reports the wrong state for a
-//     repository with the other. An empty rollup is `none`, never `passed`: no
-//     CI at all, or a rollup that is not filled yet, is a fact to show, and not
-//     a green light. This flow observes checks, and never prescribes them (ADR
+//     repository with the other. An empty rollup is `none`, never `passed`. It
+//     means no CI, or a rollup that is not full yet. That is a fact to show, and
+//     not a green light. This flow observes checks, and never prescribes them (ADR
 //     008, carried forward from ADR 002).
 //   - `merge_state` is `mergeStateStatus` as `gh` gave it. UNKNOWN is a real
 //     state just after a push, and the caller must not read it as clean or
