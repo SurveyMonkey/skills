@@ -21,7 +21,7 @@ describe('the verbs that are not built yet', () => {
     const tree = treeOf()
     expect([
       node.parents(tree, 'lodash'),
-      await node.why(tree, 'lodash'),
+      await node.why(tree, 'lodash', { raw: '' }),
       node.declaredRanges(tree, 'lodash', null),
       node.listPins(tree),
     ]).toEqual([

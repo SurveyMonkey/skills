@@ -14,8 +14,12 @@
 // This file ships. It imports nothing outside the plugin.
 
 import type { Envelope } from '../lib/envelope.ts'
+import type { Runner } from '../lib/process.ts'
 
-/** The environment that `detect` reads. The node adapter reads only `PATH`. */
+/**
+ * The environment that `detect` reads, and that `why` gives to the package
+ * manager that it starts. The node `detect` reads only `PATH`.
+ */
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /** A tree that `detect` examined: its root, and the answer that `detect` gave. */
@@ -81,13 +85,127 @@ export type RangeFactsAnswer = {
   readonly majors_ahead: number | null
 }
 
+/** A copy that declares a package, and the version that the lockfile records for it. */
+type ParentCopy = {
+  readonly name: string
+  /** Null when the lockfile records no version for this copy, as for a git target. */
+  readonly version: string | null
+}
+
+/** The `parents` answer. No verb of node.sh writes it. */
+export type ParentsAnswer = {
+  readonly pm: string
+  readonly package: string
+  /** Sorted as text by name and then version. The root is never a parent. */
+  readonly parents: readonly ParentCopy[]
+}
+
+/** The `why` answer. */
+export type WhyAnswer = {
+  readonly pm: string
+  readonly package: string
+  /** `direct` when the root manifest declares the package in any of its four blocks. */
+  readonly relationship: 'direct' | 'transitive'
+  /** The root declares the package in `devDependencies` and not in `dependencies`. */
+  readonly dev_only: boolean
+  /** The names of the parents, unique and sorted as text. */
+  readonly parents: readonly string[]
+  readonly parent_count: number
+  /**
+   * True when no override can move the package: pnpm resolves it only as a
+   * peer (#103). Always false outside a pnpm lockfileVersion 9 lockfile.
+   */
+  readonly peer_only: boolean
+  /** The parents whose snapshot key has the package as a peer: required peers first. */
+  readonly peer_parents: readonly string[]
+  /** The parents in `peer_parents` that reach the package only as an optional peer. */
+  readonly optional_peer_parents: readonly string[]
+  /** The output of the package manager's own `why` command, with no trailing newline. */
+  readonly raw: string
+}
+
+/**
+ * Where `why` gets its `raw` text. `raw` is the output that the package
+ * manager's own `why` command wrote. Without it, the verb runs that command
+ * in the tree with `run`, in the environment `env`.
+ */
+export type WhySource =
+  | { readonly raw: string }
+  | { readonly run: Runner; readonly env: Environment }
+
+/** The `declared_ranges` answer. Each list of parents names each parent once. */
+export type DeclaredRangesAnswer = {
+  readonly pm: string
+  readonly package: string
+  /** The major line that the answer is limited to, or null for all lines. */
+  readonly line: number | null
+  /** Unique and sorted as text. The root range is one of them. */
+  readonly ranges: readonly string[]
+  /** The range that the root manifest declares, or null. */
+  readonly root_range: string | null
+  readonly parents_read: readonly string[]
+  /** Read, but they declare the package in no block. */
+  readonly parents_without_range: readonly string[]
+  /** No declaration could be read. The root copy is never in this list. */
+  readonly parents_unreadable: readonly string[]
+  /** The subset of `parents_unreadable` whose manifest is on disk but does not parse. */
+  readonly parents_malformed: readonly string[]
+  /** On a different line than `line`: `name` or `name@version`, and `__root__` for the root. */
+  readonly parents_other_lines: readonly string[]
+}
+
+/** A value in an override block: any JSON value. */
+export type PinValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly PinValue[]
+  | { readonly [key: string]: PinValue }
+
+/** One constraint in an override block (ADR 001, `list_pins`). */
+export type Pin = {
+  /** The key in the block. For npm, the first key of the path. */
+  readonly key: string
+  /** The parents and then the target, each without splits inside. For npm, every key down to the leaf. */
+  readonly path: readonly string[]
+  /** The target without its version selector. */
+  readonly package: string
+  /** The version selector after the last `@` of the target, or null. */
+  readonly selector: string | null
+  readonly parents: readonly string[]
+  readonly scope: 'bare' | 'scoped'
+  readonly value: PinValue
+  /** Only `range` is a version pin. */
+  readonly kind: 'range' | 'alias' | 'protocol' | 'reference' | 'unparseable'
+  /** The value, when `kind` is `range`. Else null. */
+  readonly range: string | null
+  /** The package that an `npm:` value names, when `kind` is `alias`. Else null. */
+  readonly alias_package: string | null
+  /** The version after the last `@` of an `npm:` value, or null. */
+  readonly alias_range: string | null
+}
+
+/** The `list_pins` answer. */
+export type ListPinsAnswer = {
+  readonly pm: string
+  readonly override_location: string
+  readonly override_file: string
+  /** False when the file has no override block. An empty block is present. */
+  readonly block_present: boolean
+  readonly count: number
+  readonly bare_count: number
+  /**
+   * The keys that `pnpm.overrides` of package.json holds when the override
+   * file is `pnpm-workspace.yaml`. pnpm 11 ignores them. Else empty.
+   */
+  readonly manifest_pnpm_overrides: readonly string[]
+  readonly pins: readonly Pin[]
+}
+
 /**
  * The read verbs of one ecosystem. `Detection` is what that ecosystem's
  * `detect` finds.
- *
- * Four verbs have no answer type yet: `parents`, `why`, `declaredRanges` and
- * `listPins`. They answer `not-implemented` (ADR 001, exit 2) until the
- * second layer of #221 gives each its answer type and its body.
  */
 export interface Adapter<Detection extends { readonly pm: string }> {
   /**
@@ -103,25 +221,28 @@ export interface Adapter<Detection extends { readonly pm: string }> {
   /** Each package in the lockfile, with its versions and the coverage of the parse. */
   readonly resolutionMap: (tree: Tree<Detection>) => Envelope<ResolutionMapAnswer>
   /** The copies that declare `pkg`. */
-  readonly parents: (tree: Tree<Detection>, pkg: string) => Envelope<never>
+  readonly parents: (tree: Tree<Detection>, pkg: string) => Envelope<ParentsAnswer>
   /**
-   * Why `pkg` is in the tree. `raw` is the output of the package manager's
-   * own `why` command. In the second layer of #221, the verb runs that
-   * command when `raw` is absent (#221, round 3 ruling 2).
+   * Why `pkg` is in the tree. The verb reads the lockfile, and gets `raw`
+   * from `source` (#221, round 3 ruling 2).
    */
-  readonly why: (tree: Tree<Detection>, pkg: string, raw?: string) => Promise<Envelope<never>>
+  readonly why: (
+    tree: Tree<Detection>,
+    pkg: string,
+    source: WhySource,
+  ) => Promise<Envelope<WhyAnswer>>
   /** The ranges that the dependents of `pkg` declare, on one major `line` or on all when null. */
   readonly declaredRanges: (
     tree: Tree<Detection>,
     pkg: string,
     line: number | null,
-  ) => Envelope<never>
+  ) => Envelope<DeclaredRangesAnswer>
   /**
    * Each constraint in the override file that `detect` names. When that file
    * is `pnpm-workspace.yaml`, also the keys that the `pnpm.overrides` of
    * package.json still holds.
    */
-  readonly listPins: (tree: Tree<Detection>) => Envelope<never>
+  readonly listPins: (tree: Tree<Detection>) => Envelope<ListPinsAnswer>
   /** How `a` and `b` compare, in this ecosystem's version rules. */
   readonly compareVersions: (a: string, b: string) => Envelope<CompareVersionsAnswer>
   /** What `range` says about `version`, in this ecosystem's range rules. */
