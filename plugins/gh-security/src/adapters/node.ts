@@ -14,13 +14,14 @@ import { listPins } from './node/list-pins.ts'
 import { resolutionMap, resolvedVersions } from './node/lockfiles.ts'
 import { parents } from './node/parents.ts'
 import { compareVersions, rangeFacts } from './node/semver.ts'
+import { why } from './node/why.ts'
 
 export const node: Adapter<NodeDetection> = {
   detect,
   resolvedVersions,
   resolutionMap,
   parents,
-  why: async () => notImplemented('why'),
+  why,
   declaredRanges: () => notImplemented('declared_ranges'),
   listPins,
   compareVersions,

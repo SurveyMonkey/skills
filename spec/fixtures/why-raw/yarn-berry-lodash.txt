@@ -1,0 +1,5 @@
+├─ demo-app@workspace:.
+│  └─ lodash@npm:4.17.21 (via npm:^4.17.21)
+│
+└─ express@npm:4.18.2
+   └─ lodash@npm:4.17.21 (via npm:^4.17.20)

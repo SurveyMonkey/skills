@@ -19,11 +19,7 @@ const treeOf = () => {
 describe('the verbs that are not built yet', () => {
   it('answers not-implemented for each, with its verb named', async () => {
     const tree = treeOf()
-    expect([
-      await node.why(tree, 'lodash', { raw: '' }),
-      node.declaredRanges(tree, 'lodash', null),
-    ]).toEqual([
-      { outcome: 'not-implemented', error: 'why is not implemented' },
+    expect([node.declaredRanges(tree, 'lodash', null)]).toEqual([
       { outcome: 'not-implemented', error: 'declared_ranges is not implemented' },
     ])
   })
