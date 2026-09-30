@@ -2,7 +2,8 @@
 
 Claude Code plugin marketplace. Installation and plugin overview: [README.md](README.md);
 structure: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Plugin conventions and domain rules: [docs/gh-security/GUIDE.md](docs/gh-security/GUIDE.md).
+Plugin conventions and domain rules: the
+[`gh-security-guide` skill](.claude/skills/gh-security-guide/SKILL.md).
 
 ## Releasing a plugin
 

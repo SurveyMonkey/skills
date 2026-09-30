@@ -232,7 +232,7 @@ JSON
     End
 
     # "A field the contract promises arrives present and of the promised type,
-    # or it is a hard error, never a default" (docs/gh-security/GUIDE.md). Read with a
+    # or it is a hard error, never a default" (.claude/skills/gh-security-guide/core.md). Read with a
     # bare `jq -r`, an absent field is the STRING "null": `.peer_only` stops
     # being "true" so the #103 dead-end check silently vanishes, and
     # `.relationship` stores "null" while `classify` still reports ok.
@@ -366,7 +366,7 @@ SH
       The stderr should include 'no manifest change'
     End
 
-    # A failed parse is never an empty result (docs/gh-security/GUIDE.md, "the rule
+    # A failed parse is never an empty result (.claude/skills/gh-security-guide/core.md, "the rule
     # that matters most").
     It 'reports an unreadable lockfile as phase baseline'
       prepare

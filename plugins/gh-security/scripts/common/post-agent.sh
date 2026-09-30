@@ -23,7 +23,7 @@
 # This is `agents/fix-dependency.md`'s Result contract and
 # `skills/resolve-alerts/SKILL.md` phase 6's reap step, collapsed into one
 # script for the same reason `fix-group.sh` collapsed phases 1-5
-# (docs/gh-security/GUIDE.md, "The fix driver owns phases 1 to 5"): every branch here
+# (.claude/skills/gh-security-guide/fix-driver.md, "The fix driver owns phases 1 to 5"): every branch here
 # was an enumerated branch of that prose first, and a prose re-derivation of
 # it in the skill is a bug, not a fallback.
 #
@@ -51,7 +51,7 @@
 # leaves an interposed `fix-dependabot-@scope/` directory behind forever
 # while the reap still reports a clean sweep, because the leaf it was handed
 # was never the directory the fix agent actually created
-# (issue #161, docs/gh-security/GUIDE.md).
+# (issue #161, .claude/skills/gh-security-guide/git.md).
 #
 # Exit: 1 only for a usage or internal error — a required argument missing,
 # or a repo_root/package/major_line/branch this script cannot resolve from
@@ -70,7 +70,7 @@
 # ------------------------------------
 # `pr-status.sh` reads a pull request through `gh`, which needs the identity
 # this repo's environment resolves — the same reason every other repo-facing
-# `gh`/`git` call in this plugin takes the prefix (docs/gh-security/GUIDE.md,
+# `gh`/`git` call in this plugin takes the prefix (.claude/skills/gh-security-guide/env-prefix.md,
 # "env_prefix is an opaque, optional seam"). `reap-agent-artifacts.sh` reaches
 # no remote and no service at all: it removes one local worktree directory
 # and deletes one local branch ref, entirely inside the path and the
@@ -246,7 +246,7 @@ else
     case "$STATUS" in
       success)
         # A promised field arriving absent, null, or empty is the same hard
-        # error as it being missing entirely (docs/gh-security/GUIDE.md) — never
+        # error as it being missing entirely (.claude/skills/gh-security-guide/core.md) — never
         # defaulted, and never treated as a usable branch or PR to check.
         if printf '%s' "$RESULT_JSON" | jq -e '
               has("branch") and has("pr_url") and has("package") and has("major_line")
@@ -471,7 +471,7 @@ EOF
     # removed nothing), or something was printed that is not the promised
     # report shape. Either way nothing here is trusted as a clean sweep —
     # exactly the false "found nothing, so all clear" this plugin's scripts
-    # refuse elsewhere (docs/gh-security/GUIDE.md, "The rule that matters most").
+    # refuse elsewhere (.claude/skills/gh-security-guide/core.md, "The rule that matters most").
     if [ -z "$REAP_STDOUT" ]; then
       REASON="reap-agent-artifacts.sh exited without printing a report; nothing was removed"
     else

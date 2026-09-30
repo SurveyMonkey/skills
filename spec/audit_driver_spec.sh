@@ -273,7 +273,7 @@ JSON
     End
 
     # "A field the contract promises arrives present and of the promised type,
-    # or it is a hard error, never a default" (docs/gh-security/GUIDE.md).
+    # or it is a hard error, never a default" (.claude/skills/gh-security-guide/core.md).
     Describe 'a promised list_pins field that is absent is a hard error'
       Parameters
         count

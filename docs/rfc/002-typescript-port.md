@@ -101,10 +101,10 @@ ported immediately after.
   Neither is in the fix path, and neither carries the data layer this port exists to replace.
 - **The #193 commands are not ported.** They do not exist yet. They are built in TypeScript inside
   Phase 3, against the contracts agreed in their own issues.
-- **No change to the domain rules.** Where the port disagrees with
-  `docs/gh-security/GUIDE.md`, the document wins and the port is wrong, except for the
-  bash-and-jq mechanism sections, which #216 rewrites because they describe a substrate that is
-  going away.
+- **No change to the domain rules.** Where the port disagrees with the `gh-security-guide` skill
+  (`.claude/skills/gh-security-guide/`, split from the GUIDE in #279), the skill wins and the port
+  is wrong, except for the bash-and-jq mechanism sections, which #216 rewrites because they
+  describe a substrate that is going away.
 - **No published npm package, no build step, and no bundler.** The plugin ships `.ts` files that
   Node executes.
 - **Not a rewrite of the agent prompts or the skill.** #237 changes the calls they make; it does
@@ -240,9 +240,10 @@ genuinely need one.
   middle of this milestone, on top of shellspec and ShellCheck, and CI runs both suites. This is
   bounded: #240 narrows the shellspec job and #241 deletes the parity runner.
 - **A type system is not a domain check.** Nothing about TypeScript catches an adapter that reads
-  a Yarn `resolution:` entry's `dependencies` block and forgets its peers. The domain rules in
-  `docs/gh-security/GUIDE.md` remain the requirements document, and the fixture that
-  covers each one remains the enforcement.
+  a Yarn `resolution:` entry's `dependencies` block and forgets its peers. The domain rules in the
+  `gh-security-guide` skill (`.claude/skills/gh-security-guide/`, split from the GUIDE in #279)
+  remain the requirements document, and the fixture that covers each one remains the
+  enforcement.
 - **The in-process adapter loses one property the process boundary gave for free**: an adapter
   crash used to be an exit code the caller handled, and in process it is an exception that can
   unwind through a caller that did not expect it. The envelope and error types in #217 are where
@@ -265,7 +266,7 @@ issues carry. Each phase leaves the plugin working.
 | P0-1 | [#212](https://github.com/SurveyMonkey/skills/issues/212) | This RFC |
 | P0-2 | [#213](https://github.com/SurveyMonkey/skills/issues/213) | ADR 012, superseding ADR 010; amendments to ADR 001 and ADR 005 |
 | P0-3 | [#214](https://github.com/SurveyMonkey/skills/issues/214) | `tsconfig.json`, pinned `typescript` and `@types/node`, the `types` gate, the Node floor preamble |
-| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/GUIDE.md` (since moved to `docs/gh-security/GUIDE.md` in #273) and rewritten; the `testing` skill's bash-specific parts amended |
+| P0-4 | [#216](https://github.com/SurveyMonkey/skills/issues/216) | The plugin guide moved to `plugins/gh-security/docs/GUIDE.md` (since moved to `docs/gh-security/GUIDE.md` in #273, then split into the `gh-security-guide` skill in #279) and rewritten; the `testing` skill's bash-specific parts amended |
 | P0-5 | [#215](https://github.com/SurveyMonkey/skills/issues/215) | TypeScript language server on for every session on this checkout |
 
 **Phase 1: foundations.**
@@ -389,7 +390,8 @@ To be spawned as this RFC executes:
 
 - [Milestone 6: TypeScript port, v1.0](https://github.com/SurveyMonkey/skills/milestone/6) and
   [milestone 5: CI cost](https://github.com/SurveyMonkey/skills/milestone/5)
-- Requirements: `docs/gh-security/GUIDE.md`, `spec/fixtures/`, `spec/PINS.md`
+- Requirements: the `gh-security-guide` skill (split from the GUIDE in #279), `spec/fixtures/`,
+  `spec/PINS.md`
 - [RFC 001: Orchestrated multi-agent security alert resolution](001-alert-orchestration.md)
 - [ADR 001: Ecosystem adapter contract](../adr/001-ecosystem-adapter-contract.md)
 - [ADR 005: Quality gate venues and automation](../adr/005-quality-gate-venues.md)

@@ -10,5 +10,4 @@ okf_version: "0.2"
 | [adr/](adr/index.md) | Architecture Decision Records, one per decision. |
 | [rfc/](rfc/index.md) | Requests for Comments driving longer-running initiatives. |
 | [flows/](flows/index.md) | One flow diagram directory for each skill: control flow, decisions and every terminal outcome. |
-| [gh-security/GUIDE.md](gh-security/GUIDE.md) | The gh-security plugin's conventions, domain rules, adapter contract, layout and testing policy; the requirements document for the TypeScript port. |
 | [rulesets/](rulesets/README.md) | Point-in-time export of the protect-default branch ruleset and how it relates to the gates workflow. |

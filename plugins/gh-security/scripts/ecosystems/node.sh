@@ -1031,7 +1031,7 @@ yarn_versions() {
 # version.
 #
 # Two failures, both of which used to pass. Zero entries is a parser that
-# matched nothing (v0.1.0's yarn regex, docs/gh-security/GUIDE.md). A collapsed ratio is
+# matched nothing (v0.1.0's yarn regex, .claude/skills/gh-security-guide/core.md). A collapsed ratio is
 # the subtler one: `resolution_map` reported `{"lockfile_entries":3,
 # "package_count":0,"resolutions":{}}` and exit 0, because the count came from a
 # `grep` the rows never had to survive. Two empty maps compare equal, so the
@@ -1310,7 +1310,7 @@ npm_declaration_rows() {
 # remainder of the file is parsed as shell.
 #
 # It breaks only under bash 3.2 — the default macOS `/bin/bash`, and the floor
-# docs/gh-security/GUIDE.md sets — and NOT where the suite would notice on its own:
+# .claude/skills/gh-security-guide/bash.md sets — and NOT where the suite would notice on its own:
 # `.shellspec` runs the examples under `--shell sh`, and the adapter runs under
 # whatever `bash` leads PATH, which on a development machine is Homebrew's 5.x.
 # A reintroduced unpaired quote would therefore go green everywhere modern bash
@@ -2377,7 +2377,7 @@ verb_apply_constraint() {
   # yarn stays unqualified: a version-range resolutions key parses and then
   # silently never matches, and the exact-locator form that could express
   # the separation is unimplemented here (see "An override's key is scoped"
-  # in docs/gh-security/GUIDE.md).
+  # in .claude/skills/gh-security-guide/override-scoping.md).
   # An override-placed parent: one a pre-existing override rule names as a
   # CHILD key of another rule (`{"A": {"B": "<range>"}}`). npm scopes such a
   # node to the rule that placed it — once an edge matches a rule, the
@@ -3376,7 +3376,7 @@ verb_apply_constraint() {
 # lockfile and node_modules) and `shim` (creates a directory and an executable,
 # and absolutizes a vendored runner from the cwd). Each calls the guard as its
 # first statement; a verb that starts writing must be added here and to the list
-# in docs/gh-security/GUIDE.md. A mutating verb that runs anywhere else (a cwd mistake
+# in .claude/skills/gh-security-guide/git.md. A mutating verb that runs anywhere else (a cwd mistake
 # before worktree setup) silently edits the user's tree, observed live in Phase
 # 2 testing. The classification lives in
 # common/require-linked-worktree.sh; it already emits the adapter's JSON error
@@ -3548,7 +3548,7 @@ resolved_major_for_parent() {
 # and minimatch@10.2.5 -> brace-expansion@^5.0.5
 # ([#85](https://github.com/SurveyMonkey/skills/issues/85)).
 #
-# The lockfile has all of it per copy, and it is the source docs/gh-security/GUIDE.md
+# The lockfile has all of it per copy, and it is the source .claude/skills/gh-security-guide/lockfile.md
 # already names for what a parent declares. These rows carry the parent's own
 # resolved version, the range that copy declares, and the version of the
 # package *that copy* resolves to — which is what `--line` has to filter on.
@@ -4154,7 +4154,7 @@ verb_list_pins() {
   # to `{}` emitted `count: 0` — byte-identical to a manifest that genuinely
   # pins nothing, which the audit reads as "this repository pins nothing, stop".
   # A corrupted manifest auditing clean is the v0.1.0 failure class exactly
-  # (docs/gh-security/GUIDE.md), so it fails loudly here instead.
+  # (.claude/skills/gh-security-guide/core.md), so it fails loudly here instead.
   block_type=$(jq -r --arg loc "$loc" "$SEMVER_JQ$PINS_JQ"'
     override_block($loc)
     | if . == "__invalid__" then "unreadable" else type end' "$msrc") \
@@ -4174,7 +4174,7 @@ verb_list_pins() {
   # either way the audit needs to see them named, because they are otherwise
   # reported by nothing while staying visible to anyone reading package.json
   # (#159 review). Always emitted, `[]` when not applicable, per the
-  # every-key contract in docs/gh-security/GUIDE.md.
+  # every-key contract in .claude/skills/gh-security-guide/core.md.
   manifest_ov_keys='[]'
   if [ "$ofile" = "pnpm-workspace.yaml" ]; then
     manifest_ov_keys=$(jq -c '(.pnpm.overrides // {}) | keys' package.json) \
