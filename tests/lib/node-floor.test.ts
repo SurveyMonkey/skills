@@ -25,13 +25,31 @@ import {
 // The bare spelling is here too, because a version read from anywhere else
 // does not carry the prefix. If one spelling passed and the other were
 // refused, that would be a launch-time failure on a supported runtime.
-const AT_OR_ABOVE = ['v22.18.0', '22.18.0', 'v22.18.1', 'v22.22.2', 'v24.15.0', 'v26.0.0']
+const AT_OR_ABOVE = [
+  'v22.18.0',
+  '22.18.0',
+  'v22.18.1',
+  'v22.22.2',
+  'v24.15.0',
+  'v24.18.0',
+  'v26.0.0',
+]
 const BELOW = ['v22.17.1', 'v22.17.0', 'v22.16.0', 'v20.19.0', 'v18.20.8', 'v21.7.3']
 // A version string the check cannot read is not proof that the floor is
 // met. An unparsable value is the "found nothing counts as a pass" shape
 // every gate in this repository refuses. Here it arrives inside the
 // runtime check.
-const UNREADABLE = ['banana', '', 'v22', '22.18', 'v22.18.x', 'v22.18.0.1']
+const UNREADABLE = [
+  'banana',
+  '',
+  'v22',
+  '22.18',
+  'v22.18.x',
+  'v22.18.0.1',
+  'xv22.18.0',
+  ' v22.18.0',
+  'vv22.18.0',
+]
 
 it('states the floor ADR 012 decided', () => {
   expect(NODE_FLOOR).toBe('22.18.0')
@@ -88,9 +106,9 @@ describe('assertNodeFloor', () => {
   })
 
   it('names both the required and the running version', () => {
-    // This message is what a user reads at launch, instead of a plugin that
-    // works (ADR 012, Consequences). So it must say what version is
-    // required and what version they actually run. A message that names
+    // A user reads this message at launch, instead of a plugin that works
+    // (ADR 012, Consequences). So it must say what version is required and
+    // what version they actually run. A message that names
     // only one of the two would leave them unsure which one to change.
     let thrown: unknown
     try {
@@ -102,10 +120,8 @@ describe('assertNodeFloor', () => {
     const error = thrown as NodeFloorError
     expect(error.message).toContain('22.18.0')
     expect(error.message).toContain('22.17.1')
-    // The message must also say what to do about it. ADR 012's Consequences
-    // make the remedy the reason this message exists at all. A message that
-    // named only the two versions would leave a user stuck, with no idea
-    // what to change.
+    // The message must also say what to do about it. A message that names
+    // only the two versions leaves a user with no idea what to change.
     expect(error.message).toContain('Upgrade node')
     // This name is set explicitly, not inherited. A refusal reported as a
     // plain `Error` would tell a reader nothing about which guard refused.
@@ -120,9 +136,9 @@ describe('assertNodeFloor', () => {
 })
 
 describe('belowFloorMessage', () => {
-  // This is the shape a `SessionStart` hook needs (#245): a line for
+  // This is the shape a `SessionStart` hook needs: a line for
   // `systemMessage`. It names the running version and the floor it must
-  // meet. Unlike `assertNodeFloor`, this never throws: the hook must not
+  // meet. Unlike `assertNodeFloor`, this never throws: the hook does not
   // read the below-floor case as an exception to catch.
   it('names the running version and the floor, both quoted the same way', () => {
     expect(belowFloorMessage('v22.17.1')).toBe(

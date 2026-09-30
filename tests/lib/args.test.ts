@@ -39,6 +39,9 @@ const THEME: ParsedTheme = 'forest'
 // @ts-expect-error `--route` parses to the choices it declared. A route it
 // never declared is not one of them.
 const NOT_A_ROUTE: ParsedRoute = 'ink-pdf'
+type ParsedHelp = Options<typeof SPEC>['help']
+// @ts-expect-error `--help` parses to a boolean, not to text.
+const NOT_A_BOOLEAN: ParsedHelp = 'yes'
 
 describe('parseArguments', () => {
   it('answers with every declared option, even on an empty command line', () => {
@@ -67,12 +70,11 @@ describe('parseArguments', () => {
   })
 
   it('passes a value through unrestricted when the option declares no choices', () => {
-    // `--theme` is deliberately open. Mermaid accepts custom theme names
-    // beside its built-in set. A typo then renders with the wrong theme,
-    // rather than fail. That is what the script does today.
-    expect(parseArguments(['--theme', 'whatever'], SPEC)).toMatchObject({
+    // `--theme` is deliberately open: it declares no `choices`, so any
+    // text is a valid value.
+    expect(parseArguments(['--theme', 'whatever'], SPEC)).toEqual({
       outcome: 'ok',
-      value: { theme: 'whatever' },
+      value: { route: 'view', theme: 'whatever', help: false },
     })
   })
 
@@ -107,9 +109,9 @@ describe('parseArguments', () => {
   })
 
   it("leaves the caller's argv untouched", () => {
-    // `parseArgs` takes a mutable array, so the copy here is not
-    // incidental. A caller that passes `process.argv.slice(2)` twice must
-    // get the same answer.
+    // `parseArgs` types its input as a mutable array, so the parser passes
+    // a copy. A caller that passes the same array twice must get the same
+    // answer.
     const argv = ['--route', 'edit']
     parseArguments(argv, SPEC)
     expect(argv).toEqual(['--route', 'edit'])
@@ -123,6 +125,7 @@ describe('parseArguments', () => {
     expect(ROUTE).toBe('ink-svg')
     expect(THEME).toBe('forest')
     expect(NOT_A_ROUTE).toBe('ink-pdf')
+    expect(NOT_A_BOOLEAN).toBe('yes')
   })
 
   it('refuses a spec that arrives with its literal types already widened', () => {
@@ -259,5 +262,8 @@ it('parseArguments still refuses a positional now that parseCommandLine exists b
   // The split is `allowPositionals` alone. A caller of the narrower
   // function must still receive the narrower refusal. It must not silently
   // widen because the shared core learned to allow a positional.
-  expect(parseArguments(['138'], SPEC)).toMatchObject({ outcome: 'error' })
+  expect(parseArguments(['138'], SPEC)).toEqual({
+    outcome: 'error',
+    error: expect.stringContaining('138'),
+  })
 })
