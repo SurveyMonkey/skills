@@ -13,7 +13,7 @@ export type Coverage = {
   readonly entries: number
   /** The entries the reader must read: `entries_expected`. */
   readonly expected: number
-  /** The entries the reader did read, kept or deliberately excluded: `entries_read`. */
+  /** The entries the reader read, out of those it must read: `entries_read`. */
   readonly read: number
 }
 
@@ -26,7 +26,7 @@ export type ResolvedCopy = {
 
 export type ResolvedVersions = {
   readonly coverage: Coverage
-  /** Unique, and sorted by version and then path. */
+  /** Unique. Sorted as text by version joined to path, not in semver order. */
   readonly copies: readonly ResolvedCopy[]
 }
 
@@ -98,7 +98,7 @@ export const groupResolutions = (
   )
 }
 
-/** One entry per parent copy, sorted by name and then version. */
+/** One entry per parent copy. Sorted as text by name and version, not in semver order. */
 export const uniqueParents = (found: readonly Parent[]): readonly Parent[] =>
   [...new Map(found.map((parent) => [JSON.stringify([parent.name, parent.version]), parent]))]
     .sort(([a], [b]) => byText(a, b))

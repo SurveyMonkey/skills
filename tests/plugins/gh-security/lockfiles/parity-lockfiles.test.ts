@@ -8,7 +8,7 @@
 // names each with its reason.
 //
 // `parents` is not here. node.sh has no verb for it: `why` is the only path to
-// it (node.sh lines 4259-4271), and `why` is #221. The unit tests prove it.
+// it (the `case "$VERB"` dispatch at the end of node.sh), and `why` is #221. The unit tests prove it.
 //
 // The TypeScript side adds the fields the verb adds around the parser, the
 // way the semver parity run adds the arguments `compare_versions` echoes:

@@ -38,11 +38,11 @@ type Reading =
 const LOCAL: Reading = { kind: 'local', version: null }
 const UNREADABLE: Reading = { kind: 'unreadable', version: null }
 
-// Local or generated code, whose version is not a published release.
+// A protocol whose target is not a published release.
 const LOCAL_PROTOCOL =
   /^(workspace|portal|exec|link|file|git|git[+]ssh|git[+]http|git[+]https|http|https|ssh|github|gitlab|bitbucket):$/
 
-// A full semver, not a leading digit: anything else is a misread locator.
+// A full semver, not just a first digit: anything else is a misread locator.
 const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$/
 
 // The first `resolution: "` of a line, to the next quote.
@@ -60,9 +60,8 @@ const splitName = (locator: string): [string, string] => {
 }
 
 /**
- * One level of percent decoding. Berry encodes the locator a `patch:` wraps
- * once per level of nesting, so `%25` is decoded last: first would open two
- * levels in one pass.
+ * Decode one level. Berry encodes a wrapped locator once per level. Decode
+ * `%25` last, or one pass opens two levels.
  */
 const decoded = (text: string): string =>
   text

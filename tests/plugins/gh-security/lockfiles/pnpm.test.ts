@@ -50,8 +50,8 @@ describe('resolutionMap', () => {
     })
   })
 
-  // A pin, not a fix: node.sh keeps the leading `/` of a lockfileVersion 6
-  // key, and the parity run holds the module to node.sh.
+  // A pin, not a fix: node.sh keeps the first `/` of a lockfileVersion 6
+  // key. The parity run holds the module to node.sh.
   it('reads a lockfileVersion 6 key through the split on its last @', () => {
     expect(resolutionMap(lockfile('pnpm-v6'))).toEqual({
       coverage: { entries: 3, expected: 3, read: 3 },

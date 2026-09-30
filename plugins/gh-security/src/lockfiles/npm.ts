@@ -70,8 +70,8 @@ const entriesOf = (text: string): Entry[] => {
 
 const installed = (entry: Entry): boolean => entry.key.includes(NODE_MODULES)
 
-// A workspace link has no version of its own, so the map and the guard both
-// leave it out: it is read and deliberately excluded (#48).
+// A workspace link has no version of its own. The map and the guard both
+// skip it (#48).
 const rowEntries = (entries: readonly Entry[]): Entry[] =>
   entries.filter((entry) => installed(entry) && entry.value.link !== true)
 
