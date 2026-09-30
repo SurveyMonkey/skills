@@ -5,7 +5,14 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { EXIT_CODES, type ExitCode, exitCodeFor, failure, renderEnvelope } from '../lib/envelope.ts'
+import {
+  EXIT_CODES,
+  type ExitCode,
+  exitCodeFor,
+  failed,
+  type Rendered,
+  renderJson,
+} from '../lib/envelope.ts'
 import type { CommandResult, Io } from './command.ts'
 import { COMMANDS, commandNames } from './registry.ts'
 
@@ -41,13 +48,6 @@ const splitArgv = (
   return { kind: 'command', command, args }
 }
 
-/** What the process writes and exits with. */
-interface Rendered {
-  readonly stdout: string
-  readonly stderr: string
-  readonly exitCode: ExitCode
-}
-
 /**
  * Write whichever halves have something to say, each with the trailing
  * newline the renderer deliberately leaves off, and answer with the exit
@@ -80,7 +80,7 @@ export const runCli = async (
   // an Object.prototype member and crash here instead of being refused.
   const entry = Object.hasOwn(COMMANDS, parsed.command) ? COMMANDS[parsed.command] : undefined
   if (entry === undefined) {
-    const envelope = failure(
+    const envelope = failed(
       `unknown command "${parsed.command}". Run gh-security --help for the list of commands.`,
     )
     // A dispatch failure is not a command's result, so the JSON goes to
@@ -88,7 +88,7 @@ export const runCli = async (
     // contract must never read "there is no such command" as a payload.
     return emit(io, {
       stdout: '',
-      stderr: renderEnvelope(envelope).stdout,
+      stderr: renderJson(envelope).stdout,
       exitCode: exitCodeFor(envelope),
     })
   }
@@ -100,5 +100,5 @@ export const runCli = async (
     commandNames,
   })
   if (result === undefined) return EXIT_CODES.ok
-  return emit(io, renderEnvelope(result))
+  return emit(io, renderJson(result))
 }

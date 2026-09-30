@@ -16,7 +16,7 @@
 import { realpathSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { type EnvPrefix, NO_ENV_PREFIX, withEnvPrefix } from './env-prefix.ts'
-import { type Envelope, failure, ok } from './envelope.ts'
+import { type Envelope, failed, ok } from './envelope.ts'
 import { describeRun, type RunResult, run, type Spawn } from './process-runner.ts'
 
 export interface GitOptions {
@@ -111,7 +111,7 @@ export const gitRun = (
   options: GitOptions = {},
 ): Envelope<RunResult> => {
   if (dir === '') {
-    return failure(
+    return failed(
       `refusing to run 'git ${args.join(' ')}' with an empty directory: ` +
         "git -C '' operates on the current directory, which is how a " +
         "repo-targeted write lands in the user's checkout (#18).",
@@ -136,7 +136,7 @@ export const git = (
 ): Envelope<RunResult> => {
   const ran = gitRun(dir, args, options)
   if (ran.outcome !== 'ok') return ran
-  return ran.value.status === 0 ? ran : failure(describeRun(ran.value))
+  return ran.value.status === 0 ? ran : failed(describeRun(ran.value))
 }
 
 /**
@@ -147,7 +147,7 @@ export const git = (
 const oneLine = (envelope: Envelope<RunResult>, what: string): Envelope<string> => {
   if (envelope.outcome !== 'ok') return envelope
   const line = envelope.value.stdout.trim()
-  return line === '' ? failure(`git ${what} answered nothing`) : ok(line)
+  return line === '' ? failed(`git ${what} answered nothing`) : ok(line)
 }
 
 /** Whether the directory is inside a git repository at all. */
@@ -190,7 +190,7 @@ export const readRef = (
   if (ran.outcome !== 'ok') return ran
   const result = ran.value
   if (result.status === 0) return oneLine(ok(result), `rev-parse --verify ${ref}`)
-  return result.stderr.trim() === '' ? ok(null) : failure(describeRun(result))
+  return result.stderr.trim() === '' ? ok(null) : failed(describeRun(result))
 }
 
 /** Every worktree registered against this repository, main checkout included. */
@@ -207,7 +207,7 @@ export const listWorktrees = (
   // `worktree list` always reports at least the checkout it was asked about,
   // so an empty list is a parse that found nothing rather than a repository
   // with no worktrees.
-  return paths.length === 0 ? failure('git worktree list answered nothing') : ok(paths)
+  return paths.length === 0 ? failed('git worktree list answered nothing') : ok(paths)
 }
 
 /**
@@ -239,8 +239,8 @@ export const validateBranchName = (
   options: GitOptions = {},
 ): Envelope<string> => {
   if (name.startsWith('-')) {
-    return failure(`branch name must not begin with a dash: ${name}`)
+    return failed(`branch name must not begin with a dash: ${name}`)
   }
   const envelope = git(dir, ['check-ref-format', `refs/heads/${name}`], options)
-  return envelope.outcome === 'ok' ? ok(name) : failure(`not a valid branch name: ${name}`)
+  return envelope.outcome === 'ok' ? ok(name) : failed(`not a valid branch name: ${name}`)
 }

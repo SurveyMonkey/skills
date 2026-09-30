@@ -23,7 +23,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { type EnvPrefix, NO_ENV_PREFIX, withEnvPrefix } from './env-prefix.ts'
-import { type Envelope, failure, type JsonValue, ok } from './envelope.ts'
+import { type Envelope, failed, type JsonValue, ok } from './envelope.ts'
 import { describeRun, type RunResult, run, type Spawn } from './process-runner.ts'
 
 export interface GhClientOptions {
@@ -86,7 +86,7 @@ const parseJson = (text: string, what: string): Envelope<JsonValue> => {
   try {
     return ok(JSON.parse(text) as JsonValue)
   } catch {
-    return failure(`Invalid JSON response for ${what}`)
+    return failed(`Invalid JSON response for ${what}`)
   }
 }
 
@@ -118,12 +118,12 @@ const flattenPages = (text: string, what: string): Envelope<readonly JsonValue[]
   if (parsed.outcome !== 'ok') return parsed
   const body = parsed.value
   if (!Array.isArray(body)) {
-    return failure(`Unexpected API response for ${what}: ${apiMessage(body)}`)
+    return failed(`Unexpected API response for ${what}: ${apiMessage(body)}`)
   }
   const items: JsonValue[] = []
   for (const page of body) {
     if (!Array.isArray(page)) {
-      return failure(`Unexpected API response for ${what}: a page is not an array of results`)
+      return failed(`Unexpected API response for ${what}: a page is not an array of results`)
     }
     items.push(...page)
   }
@@ -133,7 +133,7 @@ const flattenPages = (text: string, what: string): Envelope<readonly JsonValue[]
 const asObject = (value: JsonValue, what: string): Envelope<{ [key: string]: JsonValue }> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? ok(value)
-    : failure(`${what} did not answer with a JSON object`)
+    : failed(`${what} did not answer with a JSON object`)
 
 export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   const prefix = options.envPrefix ?? NO_ENV_PREFIX
@@ -143,7 +143,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   // is what a caller classifies.
   const gh = (args: readonly string[]): Envelope<RunResult> => {
     const result = run(withEnvPrefix(prefix, { command: 'gh', args }), options.spawn)
-    return result.status === 0 ? ok(result) : failure(describeRun(result))
+    return result.status === 0 ? ok(result) : failed(describeRun(result))
   }
 
   const paginated = (path: string, what: string): Envelope<readonly JsonValue[]> => {
@@ -187,7 +187,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       const parsed = parseJson(answered.value.stdout, what)
       if (parsed.outcome !== 'ok') return parsed
       if (!Array.isArray(parsed.value)) {
-        return failure(`Unexpected API response for ${what}: ${apiMessage(parsed.value)}`)
+        return failed(`Unexpected API response for ${what}: ${apiMessage(parsed.value)}`)
       }
       const [first] = parsed.value
       // No match is `null`, which is an answer. It is never confused with a
@@ -200,7 +200,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       const url = entry.value.url
       return typeof url === 'string' && url !== ''
         ? ok(url)
-        : failure(`${what} answered a result carrying no url`)
+        : failed(`${what} answered a result carrying no url`)
     },
 
     viewPullRequest: (input) => {
@@ -241,7 +241,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
         !(mergeStateStatus === null || typeof mergeStateStatus === 'string') ||
         !Array.isArray(statusCheckRollup)
       ) {
-        return failure(`${what} answered a pull request this client cannot read`)
+        return failed(`${what} answered a pull request this client cannot read`)
       }
       return ok({
         number,
@@ -280,7 +280,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       )
       if (result.status === 0) return ok({ created: true })
       if (result.stderr.includes('already exists')) return ok({ created: false })
-      return failure(describeRun(result))
+      return failed(describeRun(result))
     },
 
     createPullRequest: (input) => {
@@ -305,7 +305,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       const urls = answered.value.stdout.match(/https:\/\/github\.com\/\S+/g)
       const url = urls?.at(-1)
       return url === undefined
-        ? failure(`gh pr create produced no PR URL. Output: ${answered.value.stdout.trim()}`)
+        ? failed(`gh pr create produced no PR URL. Output: ${answered.value.stdout.trim()}`)
         : ok({ url })
     },
   }

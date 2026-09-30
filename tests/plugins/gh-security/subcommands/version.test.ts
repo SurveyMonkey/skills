@@ -24,7 +24,7 @@ describe('versionFrom', () => {
     ],
     ['a non-string version', '{"version":13}', 'the plugin manifest version is not a string'],
   ])('reports %s as an error rather than an empty answer', (_case, manifest, error) => {
-    expect(versionFrom(manifest)).toEqual({ outcome: 'error', error })
+    expect(versionFrom(manifest)).toEqual({ outcome: 'failed', error })
   })
 })
 

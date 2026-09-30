@@ -26,12 +26,14 @@ export type JsonValue =
 export type JsonObject = { [key: string]: JsonValue }
 
 /**
- * The four ADR 001 outcomes. `error` carries the message the twelve bash
+ * The four ADR 001 outcomes. `failed` carries the message the twelve bash
  * `die` definitions used to print; `unsupported` additionally names the
  * toolchain, which is the field `node.sh` emits beside its exit 3 today.
+ * The target stack names exit 1 `failed` and has no exit 3, so this type
+ * matches it except for the two extra arms.
  */
 export type Failure =
-  | { readonly outcome: 'error'; readonly error: string }
+  | { readonly outcome: 'failed'; readonly error: string }
   | { readonly outcome: 'not-implemented'; readonly error: string }
   | { readonly outcome: 'unsupported'; readonly error: string; readonly unsupported: string }
 
@@ -50,12 +52,12 @@ export type ExitCode = 0 | 1 | 2 | 3
  */
 export const EXIT_CODES: {
   readonly ok: 0
-  readonly error: 1
+  readonly failed: 1
   readonly 'not-implemented': 2
   readonly unsupported: 3
 } = {
   ok: 0,
-  error: 1,
+  failed: 1,
   'not-implemented': 2,
   unsupported: 3,
 }
@@ -65,8 +67,9 @@ const CONTRIBUTING = '.github/CONTRIBUTING.md'
 
 export const ok = <T>(value: T): Envelope<T> => ({ outcome: 'ok', value })
 
-export const failure = (message: string): Failure => ({
-  outcome: 'error',
+/** Exit 1: this code went wrong. */
+export const failed = (message: string): Failure => ({
+  outcome: 'failed',
   error: message,
 })
 
@@ -91,29 +94,69 @@ export const isOk = <T>(envelope: Envelope<T>): envelope is { outcome: 'ok'; val
 
 export const exitCodeFor = (envelope: Envelope<unknown>): ExitCode => EXIT_CODES[envelope.outcome]
 
+/** What the process writes and exits with. */
+export interface Rendered {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: ExitCode
+}
+
 /**
- * The stdout contract, unchanged from the scripts: JSON on stdout, human
- * readable detail on stderr (ADR 001). A success payload is the value itself
- * at the top level, and every failure is `{"error": ...}`, which is what the
- * bash `die` definitions emit and what every consuming agent prompt reads.
+ * A failure keeps its ADR 001 shape: `{"error": ...}` on stdout, and the same
+ * message on stderr. The target stack writes nothing to stdout here. This
+ * plugin cannot: every consuming agent prompt reads stdout as JSON, and the
+ * bash `die` definitions print both halves. An `unsupported` failure adds
+ * the toolchain field that `node.sh` emits beside its exit 3.
  *
- * Neither string carries a trailing newline: the entry point writes one, and
- * a renderer that embedded it would double-space the output of a caller that
+ * Neither string carries a trailing newline. The entry point writes one. A
+ * renderer that embedded it would double-space the output of a caller that
  * writes through `console.log`.
  */
-export const renderEnvelope = (
-  envelope: Envelope<JsonValue>,
-): { stdout: string; stderr: string; exitCode: ExitCode } => {
-  const exitCode = exitCodeFor(envelope)
-  if (envelope.outcome === 'ok') {
-    return { stdout: JSON.stringify(envelope.value), stderr: '', exitCode }
-  }
+const renderFailure = (failure: Failure): Rendered => {
   const body: JsonObject =
-    envelope.outcome === 'unsupported'
-      ? { error: envelope.error, unsupported: envelope.unsupported }
-      : { error: envelope.error }
-  return { stdout: JSON.stringify(body), stderr: envelope.error, exitCode }
+    failure.outcome === 'unsupported'
+      ? { error: failure.error, unsupported: failure.unsupported }
+      : { error: failure.error }
+  return {
+    stdout: JSON.stringify(body),
+    stderr: failure.error,
+    exitCode: EXIT_CODES[failure.outcome],
+  }
 }
+
+/** A payload rendered as the one line of JSON on stdout that a caller parses. */
+export const renderJson = (envelope: Envelope<JsonValue>): Rendered =>
+  envelope.outcome === 'ok'
+    ? { stdout: JSON.stringify(envelope.value), stderr: '', exitCode: EXIT_CODES.ok }
+    : renderFailure(envelope)
+
+/** A payload that is already the text to print, written verbatim. */
+export const renderText = (envelope: Envelope<string>): Rendered =>
+  envelope.outcome === 'ok'
+    ? { stdout: envelope.value, stderr: '', exitCode: EXIT_CODES.ok }
+    : renderFailure(envelope)
+
+/**
+ * The status for a command that threw, in place of node's own crash.
+ *
+ * A command answers with an envelope for every outcome it decides. A throw
+ * that reaches the entry point is a defect. Without this guard, node writes
+ * a stack trace to stderr and exits with a status the contract never chose.
+ * This guard writes one line, `<label>: <message>`, and answers
+ * {@link EXIT_CODES}`.failed`. Any status the command settled on, or `null`,
+ * passes through unchanged.
+ *
+ * The writer is structural, so this file still imports nothing.
+ */
+export const failedOnThrow = async <T>(
+  pending: Promise<T>,
+  label: string,
+  err: { write(text: string): unknown },
+): Promise<T | typeof EXIT_CODES.failed> =>
+  pending.catch((error: unknown) => {
+    err.write(`${label}: ${error instanceof Error ? error.message : String(error)}\n`)
+    return EXIT_CODES.failed
+  })
 
 /** Thrown by {@link unwrap}. Carries the envelope so a boundary can render it. */
 export class EnvelopeError extends Error {
@@ -140,11 +183,3 @@ export const unwrap = <T>(envelope: Envelope<T>): T => {
   if (envelope.outcome === 'ok') return envelope.value
   throw new EnvelopeError(envelope)
 }
-
-/**
- * Apply a function to a success value, passing every failure through
- * untouched. A failure keeps its outcome, so a `not-implemented` verb does
- * not arrive at the entry point as a generic error.
- */
-export const mapOk = <A, B>(envelope: Envelope<A>, f: (value: A) => B): Envelope<B> =>
-  envelope.outcome === 'ok' ? ok(f(envelope.value)) : envelope

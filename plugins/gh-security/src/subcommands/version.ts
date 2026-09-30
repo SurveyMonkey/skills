@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs'
 
 import type { CommandResult } from '../cli/command.ts'
-import { type Envelope, failure, type JsonValue, ok } from '../lib/envelope.ts'
+import { type Envelope, failed, type JsonValue, ok } from '../lib/envelope.ts'
 
 /** The plugin manifest, relative to this file rather than to a caller's cwd. */
 export const MANIFEST = new URL('../../.claude-plugin/plugin.json', import.meta.url)
@@ -25,13 +25,13 @@ export const versionFrom = (manifest: string): Envelope<JsonValue> => {
   try {
     parsed = JSON.parse(manifest)
   } catch {
-    return failure('the plugin manifest is not JSON')
+    return failed('the plugin manifest is not JSON')
   }
   if (typeof parsed !== 'object' || parsed === null || !('version' in parsed)) {
-    return failure('the plugin manifest carries no version')
+    return failed('the plugin manifest carries no version')
   }
   const { version } = parsed
-  if (typeof version !== 'string') return failure('the plugin manifest version is not a string')
+  if (typeof version !== 'string') return failed('the plugin manifest version is not a string')
   return ok({ version })
 }
 

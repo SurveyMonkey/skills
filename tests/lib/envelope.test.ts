@@ -10,23 +10,23 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  type Envelope,
   EnvelopeError,
   EXIT_CODES,
   exitCodeFor,
-  failure,
+  failed,
+  failedOnThrow,
   isOk,
-  mapOk,
   notImplemented,
   ok,
-  renderEnvelope,
+  renderJson,
+  renderText,
   unsupported,
   unwrap,
 } from '#gh-security/lib/envelope.ts'
 
-describe('renderEnvelope', () => {
+describe('renderJson', () => {
   it('writes a success value as JSON on stdout and exits 0', () => {
-    expect(renderEnvelope(ok({ actionable: [], skipped: [] }))).toEqual({
+    expect(renderJson(ok({ actionable: [], skipped: [] }))).toEqual({
       stdout: '{"actionable":[],"skipped":[]}',
       stderr: '',
       exitCode: 0,
@@ -38,7 +38,7 @@ describe('renderEnvelope', () => {
   // `die` definitions print both, and a port that dropped the stdout half
   // would leave a caller parsing an empty string.
   it('writes an error as {"error": ...} on stdout and the message on stderr', () => {
-    expect(renderEnvelope(failure('no state file at /w/state.json; run setup first'))).toEqual({
+    expect(renderJson(failed('no state file at /w/state.json; run setup first'))).toEqual({
       stdout: '{"error":"no state file at /w/state.json; run setup first"}',
       stderr: 'no state file at /w/state.json; run setup first',
       exitCode: 1,
@@ -46,7 +46,7 @@ describe('renderEnvelope', () => {
   })
 
   it('names the verb that is not built yet, and exits 2', () => {
-    expect(renderEnvelope(notImplemented('declared_ranges'))).toEqual({
+    expect(renderJson(notImplemented('declared_ranges'))).toEqual({
       stdout: '{"error":"declared_ranges is not implemented"}',
       stderr: 'declared_ranges is not implemented',
       exitCode: 2,
@@ -57,9 +57,7 @@ describe('renderEnvelope', () => {
   // message pointing at CONTRIBUTING, and a separate `unsupported` field
   // naming the toolchain so a caller can report it without parsing prose.
   it('carries the toolchain beside the message, and exits 3', () => {
-    expect(
-      renderEnvelope(unsupported('yarn-classic', 'Yarn Classic (v1) is not supported.')),
-    ).toEqual({
+    expect(renderJson(unsupported('yarn-classic', 'Yarn Classic (v1) is not supported.'))).toEqual({
       stdout:
         '{"error":"Yarn Classic (v1) is not supported. See .github/CONTRIBUTING.md to request support.","unsupported":"yarn-classic"}',
       stderr: 'Yarn Classic (v1) is not supported. See .github/CONTRIBUTING.md to request support.',
@@ -70,7 +68,7 @@ describe('renderEnvelope', () => {
   // Neither string carries a line ending. The entry point writes one; a
   // renderer that embedded it would double-space a `console.log` caller.
   it('emits no trailing newline on either channel', () => {
-    const rendered = renderEnvelope(failure('boom'))
+    const rendered = renderJson(failed('boom'))
     expect(rendered.stdout.endsWith('\n')).toBe(false)
     expect(rendered.stderr.endsWith('\n')).toBe(false)
   })
@@ -80,7 +78,7 @@ describe('exitCodeFor', () => {
   // ADR 001's table, one row per outcome, hand-copied from the ADR.
   it.each([
     ['ok', ok(null), 0],
-    ['error', failure('boom'), 1],
+    ['failed', failed('boom'), 1],
     ['not-implemented', notImplemented('install'), 2],
     ['unsupported', unsupported('bun', 'bun is not a supported package manager.'), 3],
   ] as const)('maps %s onto exit %i', (_name, envelope, expected) => {
@@ -88,14 +86,14 @@ describe('exitCodeFor', () => {
   })
 
   it('states the same four codes as a table', () => {
-    expect(EXIT_CODES).toEqual({ ok: 0, error: 1, 'not-implemented': 2, unsupported: 3 })
+    expect(EXIT_CODES).toEqual({ ok: 0, failed: 1, 'not-implemented': 2, unsupported: 3 })
   })
 })
 
 describe('isOk', () => {
   it('is true for a success and false for every failure', () => {
     expect(isOk(ok(1))).toBe(true)
-    expect(isOk(failure('boom'))).toBe(false)
+    expect(isOk(failed('boom'))).toBe(false)
     expect(isOk(notImplemented('install'))).toBe(false)
     expect(isOk(unsupported('bun', 'bun is not supported.'))).toBe(false)
   })
@@ -136,18 +134,71 @@ describe('unwrap', () => {
   })
 })
 
-describe('mapOk', () => {
-  it('applies the function to a success value', () => {
-    expect(mapOk(ok(2), (n) => n * 3)).toEqual({ outcome: 'ok', value: 6 })
+describe('renderText', () => {
+  // A payload that is already text is written as it is. `renderJson` would
+  // quote it, which is a different contract with the same exit code.
+  it('writes a success payload verbatim and exits 0', () => {
+    const url = 'https://example.test/view#abc'
+    expect(renderText(ok(url))).toEqual({ stdout: url, stderr: '', exitCode: 0 })
+    expect(renderJson(ok(url)).stdout).toBe(`"${url}"`)
   })
 
-  // The mutant this exists for: a `mapOk` that rebuilt every failure as a
-  // plain error would send an unsupported toolchain to the caller as exit 1,
-  // which ADR 001 separates precisely because the responses differ.
-  it('passes a failure through with its outcome and fields intact', () => {
-    const bun: Envelope<number> = unsupported('bun', 'bun is not a supported package manager.')
-    const mapped = mapOk(bun, (n: number) => n * 3)
-    expect(mapped).toBe(bun)
-    expect(exitCodeFor(mapped)).toBe(3)
+  it.each([
+    ['failed', failed('boom'), { stdout: '{"error":"boom"}', stderr: 'boom', exitCode: 1 }],
+    [
+      'not-implemented',
+      notImplemented('install'),
+      {
+        stdout: '{"error":"install is not implemented"}',
+        stderr: 'install is not implemented',
+        exitCode: 2,
+      },
+    ],
+    [
+      'unsupported',
+      unsupported('bun', 'bun is not supported.'),
+      {
+        stdout:
+          '{"error":"bun is not supported. See .github/CONTRIBUTING.md to request support.","unsupported":"bun"}',
+        stderr: 'bun is not supported. See .github/CONTRIBUTING.md to request support.',
+        exitCode: 3,
+      },
+    ],
+  ] as const)('renders %s as renderJson does', (_name, envelope, expected) => {
+    expect(renderText(envelope)).toEqual(expected)
+    expect(renderJson(envelope)).toEqual(expected)
+  })
+})
+
+describe('failedOnThrow', () => {
+  const recorder = (): { text: string[]; write: (line: string) => boolean } => {
+    const text: string[] = []
+    return { text, write: (line) => text.push(line) > 0 }
+  }
+
+  it('passes a settled status through and writes nothing', async () => {
+    const err = recorder()
+    await expect(failedOnThrow(Promise.resolve(2), 'gh-security', err)).resolves.toBe(2)
+    expect(err.text).toEqual([])
+  })
+
+  it('passes a null answer through', async () => {
+    const err = recorder()
+    await expect(failedOnThrow(Promise.resolve(null), 'gh-security', err)).resolves.toBeNull()
+    expect(err.text).toEqual([])
+  })
+
+  it('turns a thrown Error into one stderr line and exit 1', async () => {
+    const err = recorder()
+    await expect(
+      failedOnThrow(Promise.reject(new Error('boom')), 'gh-security', err),
+    ).resolves.toBe(1)
+    expect(err.text).toEqual(['gh-security: boom\n'])
+  })
+
+  it('writes a thrown value that is not an Error as text', async () => {
+    const err = recorder()
+    await expect(failedOnThrow(Promise.reject('bare'), 'gh-security', err)).resolves.toBe(1)
+    expect(err.text).toEqual(['gh-security: bare\n'])
   })
 })

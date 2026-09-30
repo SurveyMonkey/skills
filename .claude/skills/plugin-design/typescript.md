@@ -11,7 +11,7 @@ Parsed arguments, the environment and an injected io in, an envelope out. Everyt
 decides is then reachable in-process, with nothing spawned and no stub binary on `PATH`.
 
 `lib/envelope.ts` has the four outcomes of ADR 001, and they are the exit statuses: `ok` is 0,
-`error` is 1, `not-implemented` is 2, and `unsupported` is 3. The adapter contract needs an
+`failed` is 1, `not-implemented` is 2, and `unsupported` is 3. The adapter contract needs an
 unsupported toolchain as its own outcome. A success is JSON on stdout. A failure is
 `{"error": ...}` on stdout, with the same message in prose on stderr. A handler can also answer
 with silence: exit 0, and nothing written.

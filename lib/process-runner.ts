@@ -27,7 +27,7 @@
 import { spawnSync } from 'node:child_process'
 import { constants } from 'node:os'
 
-import { type Envelope, failure, ok } from './envelope.ts'
+import { type Envelope, failed, ok } from './envelope.ts'
 
 export interface RunRequest {
   readonly command: string
@@ -123,5 +123,5 @@ export const describeRun = (result: RunResult): string => {
  */
 export const runOk = (request: RunRequest, spawn: Spawn = nodeSpawn): Envelope<RunResult> => {
   const result = run(request, spawn)
-  return result.status === 0 ? ok(result) : failure(describeRun(result))
+  return result.status === 0 ? ok(result) : failed(describeRun(result))
 }

@@ -23,7 +23,7 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { type Envelope, failure, type JsonObject, type JsonValue, ok } from './lib/envelope.ts'
+import { type Envelope, failed, type JsonObject, type JsonValue, ok } from './lib/envelope.ts'
 
 export interface StateFile {
   /** Where it was read from, quoted in every failure this module produces. */
@@ -47,7 +47,7 @@ const writeObject = (path: string, data: JsonObject): Envelope<StateFile> => {
     writeFileSync(temporary, `${JSON.stringify(data, null, 2)}\n`)
     renameSync(temporary, path)
   } catch (error) {
-    return failure(`cannot write the state file at ${path}: ${String(error)}`)
+    return failed(`cannot write the state file at ${path}: ${String(error)}`)
   }
   return ok({ path, data })
 }
@@ -75,19 +75,19 @@ export const loadState = (workDir: string): Envelope<StateFile> => {
     // it could not read separately, so folding the two into "run 'setup'
     // first" would send a reader after a file that is already there and
     // unreadable for some other reason.
-    return failure(`no readable state file at ${path}: ${String(error)}. Run 'setup' first.`)
+    return failed(`no readable state file at ${path}: ${String(error)}. Run 'setup' first.`)
   }
   let parsed: JsonValue
   try {
     parsed = JSON.parse(text) as JsonValue
   } catch {
-    return failure(
+    return failed(
       `the state file at ${path} could not be read: it is unparseable or truncated. ` +
         'Nothing was removed or deleted on its say-so.',
     )
   }
   if (!isObject(parsed)) {
-    return failure(
+    return failed(
       `the state file at ${path} is not a JSON object. A crashed 'setup' can leave a ` +
         'zero-byte one; inspect the work directory by hand rather than rerunning, because ' +
         'nothing here can tell an interrupted run from a foreign directory.',
@@ -121,7 +121,7 @@ const at = (data: JsonObject, path: string): JsonValue | undefined => {
 export const readValue = (state: StateFile, path: string): Envelope<JsonValue> => {
   const value = at(state.data, path)
   if (value === undefined || value === null) {
-    return failure(
+    return failed(
       `the state file at ${state.path} has no usable value for '${path}'. ` +
         'Run the earlier steps first; an absent or empty value is never read as a ' +
         'legitimate answer here.',
@@ -143,7 +143,7 @@ export const readString = (state: StateFile, path: string): Envelope<string> => 
   const value = readValue(state, path)
   if (value.outcome !== 'ok') return value
   if (typeof value.value !== 'string' || value.value === '') {
-    return failure(
+    return failed(
       `the state file at ${state.path} has no usable value for '${path}': ` +
         `expected a non-empty string, found ${JSON.stringify(value.value)}.`,
     )

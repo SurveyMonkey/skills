@@ -81,7 +81,7 @@ describe('gitRun', () => {
     const { spawn, seen } = recordingSpawn()
     const envelope = gitRun('', ['branch', '-D', 'fix/lodash-4'], { spawn })
     expect(envelope).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error:
         "refusing to run 'git branch -D fix/lodash-4' with an empty directory: " +
         "git -C '' operates on the current directory, which is how a " +
@@ -117,7 +117,7 @@ describe('gitRun', () => {
 describe('git', () => {
   it('carries the empty-directory refusal through, so no caller can miss it', () => {
     const { spawn, seen } = recordingSpawn()
-    expect(git('', ['worktree', 'remove', '--force', '/w/fix'], { spawn }).outcome).toBe('error')
+    expect(git('', ['worktree', 'remove', '--force', '/w/fix'], { spawn }).outcome).toBe('failed')
     expect(seen).toEqual([])
   })
 
@@ -127,8 +127,8 @@ describe('git', () => {
   it('is a failure quoting git when the command exits non-zero', () => {
     const root = repository()
     const envelope = git(root, ['rev-parse', '--verify', 'refs/heads/nope'])
-    expect(envelope.outcome).toBe('error')
-    const error = envelope.outcome === 'error' && envelope.error
+    expect(envelope.outcome).toBe('failed')
+    const error = envelope.outcome === 'failed' && envelope.error
     expect(error).toContain('git -C')
     expect(error).toContain('failed (exit 128): fatal: Needed a single revision')
   })
@@ -149,7 +149,7 @@ describe('topLevel', () => {
   })
 
   it('is a failure outside a repository', () => {
-    expect(topLevel(scratch()).outcome).toBe('error')
+    expect(topLevel(scratch()).outcome).toBe('failed')
   })
 })
 
@@ -172,7 +172,7 @@ describe('gitCommonDir', () => {
   })
 
   it('is a failure outside a repository', () => {
-    expect(gitCommonDir(scratch()).outcome).toBe('error')
+    expect(gitCommonDir(scratch()).outcome).toBe('failed')
   })
 })
 
@@ -195,14 +195,14 @@ describe('readRef', () => {
 
   it('carries the empty-directory refusal rather than answering null', () => {
     const { spawn, seen } = recordingSpawn()
-    expect(readRef('', 'refs/heads/main', { spawn }).outcome).toBe('error')
+    expect(readRef('', 'refs/heads/main', { spawn }).outcome).toBe('failed')
     expect(seen).toEqual([])
   })
 
   it('is a failure, not a null, when the read itself failed', () => {
     const envelope = readRef(scratch(), 'refs/heads/main')
-    expect(envelope.outcome).toBe('error')
-    expect(envelope.outcome === 'error' && envelope.error).toContain('not a git repository')
+    expect(envelope.outcome).toBe('failed')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('not a git repository')
   })
 })
 
@@ -215,7 +215,7 @@ describe('listWorktrees', () => {
   })
 
   it('is a failure outside a repository', () => {
-    expect(listWorktrees(scratch()).outcome).toBe('error')
+    expect(listWorktrees(scratch()).outcome).toBe('failed')
   })
 })
 
@@ -236,7 +236,7 @@ describe('isWorktreeRegistered', () => {
   })
 
   it('is a failure outside a repository', () => {
-    expect(isWorktreeRegistered(scratch(), '/w/fix').outcome).toBe('error')
+    expect(isWorktreeRegistered(scratch(), '/w/fix').outcome).toBe('failed')
   })
 })
 
@@ -251,7 +251,7 @@ describe('validateBranchName', () => {
   it('refuses a leading dash, which check-ref-format accepts', () => {
     const root = repository()
     expect(validateBranchName('-D', root)).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'branch name must not begin with a dash: -D',
     })
     expect(unwrap(git(root, ['check-ref-format', 'refs/heads/-D'])).status).toBe(0)
@@ -261,7 +261,7 @@ describe('validateBranchName', () => {
     'refuses %s, which git rejects',
     (name) => {
       expect(validateBranchName(name, repository())).toEqual({
-        outcome: 'error',
+        outcome: 'failed',
         error: `not a valid branch name: ${name}`,
       })
     },
@@ -284,17 +284,17 @@ describe('a git that answers nothing', () => {
 
   it('is a failure from topLevel rather than an empty repository root', () => {
     expect(topLevel('/src/app', { spawn: silentGit })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'git rev-parse --show-toplevel answered nothing',
     })
   })
 
   it('is a failure from gitCommonDir rather than a path resolved from nothing', () => {
-    expect(gitCommonDir('/src/app', { spawn: silentGit }).outcome).toBe('error')
+    expect(gitCommonDir('/src/app', { spawn: silentGit }).outcome).toBe('failed')
   })
 
   it('is a failure from readRef rather than a tip of the empty string', () => {
-    expect(readRef('/src/app', 'HEAD', { spawn: silentGit }).outcome).toBe('error')
+    expect(readRef('/src/app', 'HEAD', { spawn: silentGit }).outcome).toBe('failed')
   })
 
   // `worktree list` always reports at least the checkout it was asked about,
@@ -303,7 +303,7 @@ describe('a git that answers nothing', () => {
   // `<git-common-dir>/worktrees/` survives the delete that follows.
   it('is a failure from listWorktrees rather than a repository with none', () => {
     expect(listWorktrees('/src/app', { spawn: silentGit })).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: 'git worktree list answered nothing',
     })
   })

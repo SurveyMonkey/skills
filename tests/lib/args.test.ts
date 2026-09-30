@@ -1,6 +1,6 @@
 // Tests for the parser in this file. Every expected value is written by
 // hand from the contract in the header of `lib/args.ts`: a bad command line
-// is a `failure` (exit 1), and node's own wording is kept.
+// is a `failed` (exit 1), and node's own wording is kept.
 import { describe, expect, it } from 'vitest'
 
 import { type ArgSpec, type Options, parseArguments, parseCommandLine } from '#lib/args.ts'
@@ -81,7 +81,7 @@ describe('parseArguments', () => {
   it('refuses a value outside the declared choices, naming them', () => {
     const parsed = parseArguments(['--route', 'ink-pdf'], SPEC)
     expect(parsed).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: '--route must be one of edit, ink-img, ink-svg, view, not "ink-pdf"',
     })
   })
@@ -90,13 +90,13 @@ describe('parseArguments', () => {
     // node names the token that is wrong, which is the part a user acts
     // on. The message is not rewritten.
     const parsed = parseArguments(['--rout', 'edit'], SPEC)
-    expect(parsed.outcome).toBe('error')
+    expect(parsed.outcome).toBe('failed')
     expect(parsed).toMatchObject({ error: expect.stringContaining('--rout') })
   })
 
   it('refuses a value flag with no value', () => {
     const parsed = parseArguments(['--route'], SPEC)
-    expect(parsed.outcome).toBe('error')
+    expect(parsed.outcome).toBe('failed')
     expect(parsed).toMatchObject({ error: expect.stringContaining('route') })
   })
 
@@ -104,7 +104,7 @@ describe('parseArguments', () => {
     // Nothing in front of this takes a positional. A stray word on the
     // command line is far more often a quoting mistake than a request.
     const parsed = parseArguments(['diagram.mmd'], SPEC)
-    expect(parsed.outcome).toBe('error')
+    expect(parsed.outcome).toBe('failed')
     expect(parsed).toMatchObject({ error: expect.stringContaining('diagram.mmd') })
   })
 
@@ -149,7 +149,7 @@ describe('parseArguments', () => {
         route: { type: 'string', default: 'ink-pdf', choices: ['edit', 'view'] },
       }),
     ).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: '--route declares a default of "ink-pdf", which is not one of edit, view',
     })
   })
@@ -166,7 +166,7 @@ describe('parseArguments', () => {
     // verdict they cannot act on themselves.
     const BAD = { type: 'string', default: 'ink-pdf', choices: ['edit', 'view'] } as const
     const badDefault = {
-      outcome: 'error',
+      outcome: 'failed',
       error: '--route declares a default of "ink-pdf", which is not one of edit, view',
     }
     expect(parseArguments(['--route', 'edit'], { route: BAD })).toEqual(badDefault)
@@ -199,13 +199,13 @@ describe('parseArguments', () => {
 
   it('still refuses a short flag nobody declared', () => {
     const parsed = parseArguments(['-x'], { help: { type: 'boolean', short: 'h' } })
-    expect(parsed.outcome).toBe('error')
+    expect(parsed.outcome).toBe('failed')
     expect(parsed).toMatchObject({ error: expect.stringContaining('-x') })
   })
 
   it('leaves a boolean with no short flag reachable only by its long name', () => {
     const parsed = parseArguments(['-q'], { quiet: { type: 'boolean' } })
-    expect(parsed.outcome).toBe('error')
+    expect(parsed.outcome).toBe('failed')
     expect(parsed).toMatchObject({ error: expect.stringContaining('-q') })
   })
 
@@ -252,7 +252,7 @@ describe('parseCommandLine', () => {
     // The core is shared. Only `allowPositionals` differs, so a bad flag
     // or a bad choice is refused before positionals ever enter it.
     expect(parseCommandLine(['--route', 'ink-pdf'], SPEC)).toEqual({
-      outcome: 'error',
+      outcome: 'failed',
       error: '--route must be one of edit, ink-img, ink-svg, view, not "ink-pdf"',
     })
   })
@@ -263,7 +263,7 @@ it('parseArguments still refuses a positional now that parseCommandLine exists b
   // function must still receive the narrower refusal. It must not silently
   // widen because the shared core learned to allow a positional.
   expect(parseArguments(['138'], SPEC)).toEqual({
-    outcome: 'error',
+    outcome: 'failed',
     error: expect.stringContaining('138'),
   })
 })
