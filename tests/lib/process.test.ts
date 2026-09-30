@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, expect, it } from 'vitest'
+import { afterAll, expect, it, vi } from 'vitest'
 import { killGroup, run } from '#gh-security/lib/process.ts'
 
 const scratches: string[] = []
@@ -33,6 +33,9 @@ const ECHO_ARGV = 'process.stdout.write(JSON.stringify(process.argv.slice(1)))'
 const WHERE = 'process.stdout.write(process.cwd() + "\\n" + process.env.HOME + "\\n")'
 const ECHO_STDIN = 'process.stdout.write(require("node:fs").readFileSync(0))'
 const EXIT_NOW = 'process.exit(0)'
+/** Writes "a" to stderr, then "b" to stdout 50 ms later. */
+const STDERR_THEN_STDOUT =
+  'process.stderr.write("a\\n");setTimeout(() => process.stdout.write("b\\n"), 50)'
 const SLEEP = 'setTimeout(() => process.stdout.write("finished\\n"), Number(process.argv[1]))'
 const PGID =
   'process.stdout.write(require("node:child_process").execFileSync("ps", ' +
@@ -58,6 +61,9 @@ const TINY_MS = 250
  *  120 ms when idle). It must fire before the grandchild's own 5 s write.
  *  A change here needs a change to the 5 s in GRANDCHILD too. */
 const GROUP_MS = 4_000
+/** A bound that a child which exits at once never reaches, and that a test
+ *  can still wait out. */
+const CLEARED_MS = 2_000
 /** Past the grandchild's own 5 s write, so "it did not survive" is a real
  *  observation. */
 const SURVIVAL_WINDOW_MS = 6_000
@@ -86,7 +92,16 @@ it('answers with both streams together, for a caller that wants one transcript',
 
   expect(result.combined).toContain('partial\n')
   expect(result.combined).toContain('boom\n')
-  expect(result.combined.length).toBe(result.stdout.length + result.stderr.length)
+  // "partial\n" is 8 characters and "boom\n" is 5.
+  expect(result.combined.length).toBe(13)
+})
+
+// Mutant: all of stdout, then all of stderr. The transcript keeps the order
+// in which the child wrote, over both pipes.
+it('keeps the order of the writes in the transcript', async () => {
+  const result = await node(STDERR_THEN_STDOUT)
+
+  expect(result.combined).toBe('a\nb\n')
 })
 
 it('hands the child its arguments unchanged, with no shell between', async () => {
@@ -198,6 +213,25 @@ it('leaves a child that finishes inside its bound alone', async () => {
   expect(result.status).toBe(0)
   expect(result.stdout).toBe('finished\n')
 })
+
+// Mutant: a bound that is not cleared when the child ends. It fires later,
+// and signals a process group whose pid the kernel can give to another.
+it(
+  'clears the bound of a child that ended inside it',
+  async () => {
+    const kill = vi.spyOn(process, 'kill')
+    try {
+      const result = await node(EXIT_NOW, [], { timeoutMs: CLEARED_MS })
+      await new Promise((resolve) => setTimeout(resolve, CLEARED_MS + 500))
+
+      expect(result.timedOut).toBe(false)
+      expect(kill).not.toHaveBeenCalled()
+    } finally {
+      kill.mockRestore()
+    }
+  },
+  GROUP_TEST_BUDGET_MS,
+)
 
 it('kills a child that outlives its bound and says the bound fired', async () => {
   const result = await node(SLEEP, ['600000'], { timeoutMs: TINY_MS })

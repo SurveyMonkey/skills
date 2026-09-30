@@ -1,11 +1,14 @@
-// The real `gh` client. Nothing here spawns anything: the client takes the
+// The real `gh` client. Nothing here starts `gh`: the client takes the
 // runner as its documented `run` option, so a stand-in drives the one thing
 // that would start `gh` (the testing skill's mocking.md, "The injected
-// collaborator"). The runner itself is tested against real children in
-// `process.test.ts`.
+// collaborator"). One test gives the real runner a PATH with no `gh` on it.
+// The runner itself is tested against real children in `process.test.ts`.
 //
 // Every expected argv and message is written by hand, never derived from the
 // client, so a change to the client can make a test disagree.
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { createGhClient, type GhClientOptions, GhError } from '#gh-security/lib/gh.ts'
@@ -131,6 +134,24 @@ describe('the client options', () => {
     // Built, not called: a call would start the real `gh`.
     expect(Object.keys(createGhClient())).toEqual(['viewPullRequest'])
   })
+
+  // Mutant: a default runner other than `process.ts`'s. A PATH with no `gh`
+  // on it lets the real runner start nothing, so no `gh` on the machine runs.
+  it("runs gh through process.ts's runner when no run is given", async () => {
+    const empty = realpathSync(mkdtempSync(join(tmpdir(), 'gh-security-gh-')))
+    try {
+      const error = await createGhClient({ env: { PATH: empty } })
+        .viewPullRequest({ pullRequest: 7 })
+        .catch((thrown: unknown) => thrown)
+      expect(error).toBeInstanceOf(GhError)
+      expect({ detail: (error as GhError).detail, status: (error as GhError).status }).toEqual({
+        detail: 'cannot run gh: spawn gh ENOENT',
+        status: 127,
+      })
+    } finally {
+      rmSync(empty, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('the answer', () => {
@@ -204,6 +225,13 @@ describe('a refusal', () => {
     expect(error.detail).toBe('gh exited 2')
   })
 
+  // Mutant: the signal before stderr. gh's own words say more than the
+  // signal that ended it.
+  it("quotes gh's stderr, over the signal, when something killed gh", async () => {
+    const error = await refusal({ status: null, signal: 'SIGTERM', stderr: 'gh: interrupted\n' })
+    expect(error.detail).toBe('gh: interrupted')
+  })
+
   it('names the signal when something killed gh', async () => {
     const error = await refusal({ status: null, signal: 'SIGKILL' })
     expect({ detail: error.detail, status: error.status }).toEqual({
@@ -262,6 +290,17 @@ describe('a refusal', () => {
       detail: "gh's output could not be read: EIO, read EIO",
       status: 0,
     })
+  })
+
+  // Mutant: the last pipe failure. The first one is where the output broke.
+  it('names the first pipe that failed, when more than one failed', async () => {
+    const error = await refusal({
+      streamErrors: [
+        { code: 'EIO', message: 'read EIO' },
+        { code: 'ENOSPC', message: 'write ENOSPC' },
+      ],
+    })
+    expect(error.detail).toBe("gh's output could not be read: EIO, read EIO")
   })
 
   it('throws when gh answered with something that is not JSON, with the run as cause', async () => {

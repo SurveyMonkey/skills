@@ -30,6 +30,8 @@ describe('an operation the example did not declare', () => {
   it('rejects with a plain error, not a GhError', async () => {
     const mock = createGhMock()
     const error = await mock.client.viewPullRequest({ pullRequest: 7 }).catch((thrown) => thrown)
+    // Both halves: a call that resolved would also not be a `GhError`.
+    expect(error).toBeInstanceOf(Error)
     expect(error).not.toBeInstanceOf(GhError)
   })
 })
