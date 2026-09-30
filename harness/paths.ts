@@ -1,18 +1,16 @@
-// The repository paths a test needs as a file on disk rather than as an
-// import: the entry point it spawns, a bash script a parity run compares
-// against, a plugin file it reads. Each one is resolved from this file's own
-// location, so no test counts `../` from wherever it happens to sit.
-
-import { join, resolve } from 'node:path'
+// Paths into the plugins, for a test that runs a plugin's script or hook as
+// its own process. The tests live under `tests/`, outside every plugin
+// (`.claude/rules/path-plugins.md`), so a test reaches a plugin file through
+// this module and not through `..` steps from its own directory. An import
+// goes through the `#<plugin>/*` aliases in the root `package.json` instead.
+import path from 'node:path'
 
 /** The repository root. */
-export const REPO_ROOT: string = resolve(import.meta.dirname, '..')
+export const ROOT = path.resolve(import.meta.dirname, '..')
 
-/** The gh-security plugin root, the directory `${CLAUDE_PLUGIN_ROOT}` names once installed. */
-export const GH_SECURITY_ROOT: string = join(REPO_ROOT, 'plugins', 'gh-security')
-
-/** The gh-security CLI entry point. */
-export const GH_SECURITY_ENTRY: string = join(GH_SECURITY_ROOT, 'scripts', 'gh-security.ts')
+/** A file inside `plugins/<plugin>/`, such as `scripts/gh-security.ts`. */
+export const pluginFile = (plugin: string, ...parts: string[]): string =>
+  path.join(ROOT, 'plugins', plugin, ...parts)
 
 /** The placeholder Claude Code expands to the plugin root, in hooks.json and SKILL.md. */
-export const PLUGIN_ROOT_PLACEHOLDER: string = ['$', '{CLAUDE_PLUGIN_ROOT}'].join('')
+export const PLUGIN_ROOT_PLACEHOLDER = ['$', '{CLAUDE_PLUGIN_ROOT}'].join('')

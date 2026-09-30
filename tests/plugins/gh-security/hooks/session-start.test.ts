@@ -10,7 +10,9 @@ import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { run } from '#gh-security/lib/process.ts'
-import { GH_SECURITY_ROOT } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const ENTRY = join(GH_SECURITY_ROOT, 'hooks', 'session-start.ts')
 const TOOLS = ['git', 'gh', 'bash', 'jq'] as const

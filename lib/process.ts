@@ -14,8 +14,8 @@
 // name or a package name with shell metacharacters is one argument, and no
 // shell reads it again.
 //
-// **Asynchronous.** `harness/parity.ts` is still synchronous, so it keeps a
-// local runner until it converges.
+// **Asynchronous.** `harness/parity.ts` is synchronous, so it keeps a local
+// runner.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `child_process`. It stays inside the erasable subset.

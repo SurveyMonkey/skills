@@ -6,7 +6,7 @@
 // command that calls it, in the shape the target stack gives it (#274).
 //
 // A command gets a client as an argument, and never builds one itself. The
-// test double is `harness/gh-mock.ts`.
+// test double is `harness/gh.ts`.
 //
 // **Failure is a thrown `GhError`, not an envelope.** An envelope would make
 // each answer a union that every caller must narrow. `gh` runs as a child,

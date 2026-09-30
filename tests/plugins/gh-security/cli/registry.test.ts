@@ -8,7 +8,9 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { GH_SECURITY_ROOT } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const source = readFileSync(join(GH_SECURITY_ROOT, 'src', 'cli', 'registry.ts'), 'utf8')
 

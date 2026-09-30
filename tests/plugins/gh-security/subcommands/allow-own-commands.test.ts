@@ -17,7 +17,9 @@ import {
   ENTRY_PATH,
   UNSAFE_ARGUMENT,
 } from '#gh-security/subcommands/allow-own-commands.ts'
-import { GH_SECURITY_ENTRY } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 
 // A fictitious installed location, for the rows about what the validator
 // accepts and refuses. The real one is `ENTRY`, asserted on its own below.

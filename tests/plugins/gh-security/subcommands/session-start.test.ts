@@ -18,7 +18,9 @@ import {
   sessionStartCommand,
   sessionStartOutput,
 } from '#gh-security/subcommands/session-start.ts'
-import { GH_SECURITY_ROOT } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const TABLE = [
   { tool: 'git', label: 'git' },

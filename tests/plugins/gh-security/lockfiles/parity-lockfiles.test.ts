@@ -26,7 +26,9 @@ import type { ResolutionMap, ResolvedVersions } from '#gh-security/lockfiles/sha
 import * as yarn from '#gh-security/lockfiles/yarn.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 import { checkParity, type ParitySubject, runBash } from '#harness/parity.ts'
-import { GH_SECURITY_ROOT } from '#harness/paths.ts'
+import { pluginFile } from '#harness/paths.ts'
+
+const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const ADAPTER = join(GH_SECURITY_ROOT, 'scripts', 'ecosystems', 'node.sh')
 
