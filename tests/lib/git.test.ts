@@ -415,11 +415,10 @@ describe('the containment guard over a real worktree', () => {
 })
 
 // The local runner, at the real boundary: no substituted spawn. These
-// examples came from the deleted `process-runner.test.ts`, with the child
-// reached through `env_prefix`, because a prefix is the one way a caller
-// runs a command other than git. Each expected value is what a shell
-// reports: 127 for a command it cannot find, 128 plus the signal number for
-// a signal death.
+// examples moved here with the runner. The child is reached through
+// `env_prefix`, because a prefix is the one way a caller runs a command
+// other than git. Each expected value is what a shell reports: 127 for a
+// command it cannot find, 128 plus the signal number for a signal death.
 describe('the local runner, with no spawn argument', () => {
   const run = (prefix: string[]) => gitRun('/src/app', ['status'], { envPrefix: prefix })
 
