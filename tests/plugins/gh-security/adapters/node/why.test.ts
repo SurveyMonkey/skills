@@ -257,6 +257,43 @@ describe('why, with the raw text given', () => {
     })
   })
 
+  // `react@18.2.0` is only in the peer suffix of the react-dom snapshot key.
+  // It has no edge and no importer. node.sh answers peer_only here.
+  it('answers peer_only for a package that only a peer suffix reaches, with no edge', async () => {
+    const answer = await node.why(tree('pnpm-v9'), 'react', { raw: '' })
+    expect(
+      answer.outcome === 'ok' && {
+        parents: answer.value.parents,
+        peer_only: answer.value.peer_only,
+        peer_parents: answer.value.peer_parents,
+        optional_peer_parents: answer.value.optional_peer_parents,
+      },
+    ).toEqual({
+      parents: [],
+      peer_only: true,
+      peer_parents: ['react-dom'],
+      optional_peer_parents: [],
+    })
+  })
+
+  // jq's `// {}` reads false as no block.
+  it('reads a block that is false as no block', async () => {
+    const root = copyOf('npm-v3')
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as object
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ ...manifest, optionalDependencies: false }),
+    )
+    const answer = await node.why(treeAt(root), 'lodash', { raw: '' })
+    expect(answer.outcome === 'ok' && answer.value.relationship).toBe('direct')
+  })
+
+  // jq's `has` reads own keys only. `constructor` is a key of every object prototype.
+  it('does not read a key of the object prototype as a declaration', async () => {
+    const answer = await node.why(tree('npm-v3'), 'constructor', { raw: '' })
+    expect(answer.outcome === 'ok' && answer.value.relationship).toBe('transitive')
+  })
+
   // #50: bash names this parent `debug@git+ssh://git`.
   it('names a pnpm git parent by the name before its first @', async () => {
     const answer = await node.why(tree('pnpm-git-parent'), 'ms', { raw: '' })
@@ -319,6 +356,21 @@ describe('why, with no raw text', () => {
     expect(answer.outcome === 'ok' && answer.value.raw).toBe(
       `${realpathSync(root)},given,explain,express`,
     )
+  })
+
+  // node.sh runs `$why_cmd "$pkg" > file 2>&1 || true`: raw holds both
+  // streams, and an exit that is not zero is no failure. The two pipes can
+  // come in either order.
+  it('answers stdout and stderr both as raw, when the command exits with an error', async () => {
+    const root = copyOf('npm-v3')
+    const { detection } = treeAt(root)
+    const script = "process.stdout.write('OUT'),process.stderr.write('ERR'),process.exit(3)"
+    const answer = await node.why(
+      { root, detection: { ...detection, why_cmd: `node -e ${script}` } },
+      'express',
+      { run, env: { PATH: process.env.PATH } },
+    )
+    expect(['OUTERR', 'ERROUT']).toContain(answer.outcome === 'ok' && answer.value.raw)
   })
 
   it('answers the start failure as raw when the package manager is not on PATH', async () => {
