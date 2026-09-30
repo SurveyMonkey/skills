@@ -2,16 +2,26 @@
 // what this asserts is that the pair the builder hands back is a real origin
 // and a real clone of it: the remote is the temp origin, and a push arrives
 // there.
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { unwrap } from '#gh-security/lib/envelope.ts'
-import { git } from '#gh-security/lib/git.ts'
 import { commitFile, createGitRepo, DEFAULT_BRANCH } from '#harness/git-repo.ts'
 
-const revision = (dir: string, ref: string): string =>
-  unwrap(git(dir, ['rev-parse', ref])).stdout.trim()
+/** Real git, run in `dir`. The harness under test is never used to check
+ *  itself, so this is a second, separate call. */
+const git = (dir: string, args: readonly string[]) =>
+  spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
+
+/** git's stdout, trimmed. Throws when git failed. */
+const out = (dir: string, args: readonly string[]): string => {
+  const result = git(dir, args)
+  if (result.status !== 0) throw new Error(result.stderr)
+  return result.stdout.trim()
+}
+
+const revision = (dir: string, ref: string): string => out(dir, ['rev-parse', ref])
 
 describe('createGitRepo', () => {
   // Mutant: a builder that hands back a clone whose remote is the machine's
@@ -21,9 +31,7 @@ describe('createGitRepo', () => {
   it('clones from the temp origin it made', () => {
     const repo = createGitRepo()
     try {
-      expect(unwrap(git(repo.clone, ['remote', 'get-url', 'origin'])).stdout.trim()).toBe(
-        repo.origin,
-      )
+      expect(out(repo.clone, ['remote', 'get-url', 'origin'])).toBe(repo.origin)
     } finally {
       repo.cleanup()
     }
@@ -45,7 +53,7 @@ describe('createGitRepo', () => {
     const repo = createGitRepo()
     try {
       commitFile(repo.clone, 'fixed.txt', 'fixed\n', 'fix: something')
-      unwrap(git(repo.clone, ['push', '-q', 'origin', DEFAULT_BRANCH]))
+      out(repo.clone, ['push', '-q', 'origin', DEFAULT_BRANCH])
       expect(revision(repo.origin, DEFAULT_BRANCH)).toBe(revision(repo.clone, 'HEAD'))
     } finally {
       repo.cleanup()
@@ -55,9 +63,7 @@ describe('createGitRepo', () => {
   it('takes a branch name when the example needs one', () => {
     const repo = createGitRepo({ branch: 'trunk' })
     try {
-      expect(unwrap(git(repo.clone, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()).toBe(
-        'trunk',
-      )
+      expect(out(repo.clone, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('trunk')
       expect(revision(repo.origin, 'trunk')).toBe(revision(repo.clone, 'HEAD'))
     } finally {
       repo.cleanup()
@@ -67,7 +73,7 @@ describe('createGitRepo', () => {
   it('removes both repositories on cleanup', () => {
     const repo = createGitRepo()
     repo.cleanup()
-    expect(git(repo.clone, ['rev-parse', 'HEAD']).outcome).toBe('failed')
+    expect(git(repo.clone, ['rev-parse', 'HEAD']).status).not.toBe(0)
   })
 
   it('tolerates a second cleanup', () => {
@@ -83,12 +89,10 @@ describe('commitFile', () => {
     try {
       commitFile(repo.clone, 'nested/deep.txt', 'contents\n', 'chore: nested')
       expect(readFileSync(join(repo.clone, 'nested', 'deep.txt'), 'utf8')).toBe('contents\n')
-      expect(unwrap(git(repo.clone, ['log', '-1', '--format=%s'])).stdout.trim()).toBe(
-        'chore: nested',
-      )
+      expect(out(repo.clone, ['log', '-1', '--format=%s'])).toBe('chore: nested')
       // Nothing left behind: a builder that staged without committing would
       // leave every later example running against a dirty tree.
-      expect(unwrap(git(repo.clone, ['status', '--porcelain'])).stdout).toBe('')
+      expect(git(repo.clone, ['status', '--porcelain']).stdout).toBe('')
     } finally {
       repo.cleanup()
     }

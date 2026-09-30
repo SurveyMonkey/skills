@@ -1,314 +1,300 @@
-// The git helpers, built on a local runner. Two things live here:
+// This file holds the git calls the ported scripts make more than once, and
+// the two calls that need care. This file is not a git SDK. RFC 001 decision
+// 3 gives the reason. It names "typed functions written before anything
+// calls them" as the argument against a full SDK.
 //
-//   * the path-containment helpers copied today between `fix-group.sh` and
-//     `reap-agent-artifacts.sh`, which both run `rm -rf` on the same
-//     directory from opposite sides;
-//   * the git queries those scripts share, each of which distinguishes an
-//     answer from a failure rather than folding the two together.
+// Each export below names the Python call site that is its first user. A
+// command that needs a git subcommand no other command uses calls
+// {@link gitOut} with that subcommand. It does not add a new function here.
 //
-// git is a process seam (ADR 001 as amended by ADR 012), so every query goes
-// through the runner and every one of them carries `-C`: nothing here ever
-// depends on the current directory.
+// git is never mocked (ADR 001, RFC 001 "The testing seam"). This file's own
+// test suite runs real git against repositories it makes in scratch
+// directories.
 //
-// This file ships. It imports nothing outside the plugin, and nothing from
-// node beyond `child_process`, `fs`, `os` and `path`.
+// This file is part of what ships to users. It imports nothing outside the
+// root `lib` directory, and it stays inside the erasable subset (ADR 001).
 
-import { spawnSync } from 'node:child_process'
-import { realpathSync, statSync } from 'node:fs'
-import { constants } from 'node:os'
-import { join, resolve, sep } from 'node:path'
-import { type EnvPrefix, NO_ENV_PREFIX, withEnvPrefix } from './env-prefix.ts'
-import { type Envelope, failed, ok } from './envelope.ts'
-
-// ---------------------------------------------------------------------------
-// The runner
-// ---------------------------------------------------------------------------
-//
-// This file and its callers (`harness/git-repo.ts`) are synchronous, and the
-// runner of `process.ts` is not. So the synchronous runner that `process.ts`
-// replaced stays here, local, until git.ts converges with the target stack
-// (#274). Nothing outside this file and its test may use it.
-
-/** One git invocation, after the `env_prefix` wrap. */
-export interface GitRequest {
-  readonly command: string
-  readonly args: readonly string[]
-}
-
-export interface GitResult {
-  readonly command: string
-  readonly args: readonly string[]
-  readonly status: number
-  readonly stdout: string
-  readonly stderr: string
-}
-
-export type GitSpawn = (request: GitRequest) => GitResult
-
-/** The status of a command that never started: a shell's 127. */
-const SPAWN_FAILED = 127
-
-/** A shell reports a signal death as 128 plus the signal number. */
-const SIGNAL_EXIT_BASE = 128
-
-/** 64 MiB. node's own default is 1 MiB, and a short answer read as a whole
- *  one is the defect this plugin refuses. */
-const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-
-/** The boundary: a real child process, with no shell. */
-const nodeSpawn: GitSpawn = (request) => {
-  const result = spawnSync(request.command, [...request.args], {
-    encoding: 'utf8',
-    maxBuffer: MAX_OUTPUT_BYTES,
-    shell: false,
-  })
-  const base = { command: request.command, args: request.args }
-  const stdout = result.stdout ?? ''
-  const stderr = result.stderr ?? ''
-  if (result.error !== undefined) {
-    // The command never ran, or its output went past MAX_OUTPUT_BYTES.
-    // node's message is kept as it is ("spawnSync git ENOENT").
-    return { ...base, status: SPAWN_FAILED, stdout, stderr: result.error.message }
-  }
-  if (result.status !== null) {
-    return { ...base, status: result.status, stdout, stderr }
-  }
-  // `spawnSync` leaves `status` null exactly when a signal killed the child,
-  // and sets `signal` then, so there is no third state.
-  const signal = result.signal as NodeJS.Signals
-  return { ...base, status: SIGNAL_EXIT_BASE + constants.signals[signal], stdout, stderr }
-}
-
-/** What went wrong, in one line, for the `error` field of an envelope. */
-const describeRun = (result: GitResult): string => {
-  const detail = result.stderr.trim() || result.stdout.trim() || 'no output'
-  const invocation = [result.command, ...result.args].join(' ')
-  return `${invocation} failed (exit ${result.status}): ${detail}`
-}
+// **The Python code this file ports was deleted at #127.**
+// `plugins/gh/scripts/*.py`, its `lib/`, and `plugins/gh/hooks/hook-io.py`
+// are gone from the tree. The file and line references below point to what
+// they held at commit `cd0d515`. Each reference stays because it shows where
+// a rule came from. The deletion did not change anything in this file.
+import { type RunResult, run } from './process.ts'
 
 export interface GitOptions {
-  /** The spawn seam. When absent, a real child process. */
-  readonly spawn?: GitSpawn
-  readonly envPrefix?: EnvPrefix
-}
-
-/** Where this plugin's agent worktrees live, under a repository's own root. */
-export const AGENT_WORKTREE_SEGMENT = join('.claude', 'worktrees')
-
-// ---------------------------------------------------------------------------
-// Path containment, for the operations that delete
-// ---------------------------------------------------------------------------
-
-const isDirectory = (path: string): boolean => {
-  try {
-    return statSync(path).isDirectory()
-  } catch {
-    return false
-  }
+  /** The repository to run the git command in. This is the port of both
+   *  `git -C <dir> ...` and the `chdir` call. `gh-sync-repo.py:195` makes
+   *  that call before its own git calls. */
+  readonly cwd?: string
+  /** The whole environment for the child process, for a caller that must
+   *  pin one. The test suite passes an environment of its own. This keeps
+   *  a developer's own git configuration out of a fixture. */
+  readonly env?: NodeJS.ProcessEnv
+  /** A time limit, in milliseconds. A caller that runs git over the
+   *  network sets one, because the whole check has a deadline. */
+  readonly timeoutMs?: number
 }
 
 /**
- * The physical path, resolved as far as it exists.
+ * Runs git, and returns everything the child process did.
  *
- * A path under test may already be gone, which is the idempotent success case
- * for a reap, so the walk goes up to the deepest ancestor that does exist,
- * resolves that physically, and re-appends the rest. Resolving only the
- * immediate parent would fail the containment guard on a second run that
- * finds `.claude/worktrees/` itself already gone.
+ * The first user is `gh-sync-repo.py:65` to `86`. Its preflight check is the
+ * one caller that needs more than "git said no". Every other part of the
+ * port should use {@link gitOut} or {@link gitOk} instead.
  *
- * Resolution can only ever make containment stricter. A component that cannot
- * be entered, or a link pointing out of the tree, resolves to something the
- * prefix test then rejects; there is no arrangement of links that resolves a
- * path INTO the worktree root it did not already name.
+ * The preflight check must report three separate facts, each in its own
+ * sentence. The first is "git is not on PATH". Its code is `ENOENT`, on the
+ * {@link RunResult.startFailure} field. The second is "git is on PATH and
+ * still did not run". The third is "this is not a git repository". There the
+ * child process ran, then exited with a non-zero status.
+ *
+ * The second fact, "git is on PATH and still did not run", applies only to a
+ * libuv error number. A code that starts with `ERR_` means node refused the
+ * argument list this process built. Git was never asked to run in that case.
+ * The wrong sentence there would send the reader to check an install. The
+ * real fault is in this code's own call, not git. {@link StartFailure.code}
+ * lists both sets of codes.
  */
-export const resolveExistingAncestor = (target: string): string => {
-  const segments = resolve(target).split(sep)
-  // Splitting an absolute path leaves an empty first segment, so the root is
-  // the empty join and is spelled here rather than branched on at each use.
-  const headAt = (depth: number): string => segments.slice(0, depth).join(sep) || sep
-  // The root is segment 0 and always exists, so the walk terminates by
-  // running out of segments rather than by a test no machine can take.
-  let index = segments.length
-  while (index > 1 && !isDirectory(headAt(index))) index -= 1
-  return join(realpathSync(headAt(index)), ...segments.slice(index))
-}
+export const runGit = (args: readonly string[], options: GitOptions = {}): Promise<RunResult> =>
+  run('git', args, { cwd: options.cwd, env: options.env, timeoutMs: options.timeoutMs })
 
 /**
- * Whether any segment of the path is `..`.
+ * Returns git's output on stdout, with trailing newlines removed. Returns
+ * `null` when git failed.
  *
- * Wider than the two shell patterns it replaces, which between them could
- * not see a leading `..` segment.
- */
-export const containsDotDot = (path: string): boolean => path.split(/[\\/]/).includes('..')
-
-/**
- * Whether a path names something strictly under this repository's agent
- * worktree root. Both arguments are physical paths, resolved by the caller
- * through {@link resolveExistingAncestor}, so a symlink cannot smuggle a
- * path past the prefix test.
+ * This is the port of `git_out` (`gh-sync-repo.py:88`). It is the workhorse
+ * function: fifteen call sites there use it, plus `hook-io.py:159` and
+ * `lib/discover.py:50`.
  *
- * The root itself is never accepted, only a directory under it: that is what
- * the trailing wildcard of the shell pattern this replaces bought, and it is
- * what keeps a caller from deleting every agent's worktree at once.
- */
-export const withinAgentWorktrees = (repoRoot: string, candidate: string): boolean => {
-  if (containsDotDot(repoRoot) || containsDotDot(candidate)) return false
-  const root = join(repoRoot, AGENT_WORKTREE_SEGMENT) + sep
-  return candidate.startsWith(root) && candidate.length > root.length
-}
-
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
-
-/**
- * Run git against a directory, answering with the result whatever its exit
- * status: the caller decides what a non-zero status means.
+ * `null` and `""` are different answers on purpose, and both occur.
+ * `show-ref --verify --quiet` succeeds with no output at all, so only `null`
+ * can mean "the ref is not there". `git status --porcelain` answers `""`
+ * when the whole tree is clean. `null` there means the probe could not run
+ * at all (`gh-sync-repo.py:231`). If code reads the second case as the
+ * first, a corrupt index can pass a cleanliness check.
  *
- * The empty-directory guard is the first thing it does, and it refuses rather
- * than running: `git -C ""` is neither an error nor a no-op, git silently
- * operates on the CURRENT directory, so one empty path puts a repo-targeted
- * write in the user's own checkout (issue #18). In bash that guard could only
- * be defence in depth, because its `die` inside a command substitution ended
- * the subshell and the caller carried on; returning a failure the caller
- * cannot discard is what the port makes of it.
+ * Only trailing newlines are stripped. Leading space is never stripped.
+ * `status --porcelain` encodes the staged and unstaged columns in the first
+ * two characters. " M file" and "?? file" differ only in a leading blank,
+ * and a full trim would remove it.
+ *
+ * git's stderr is dropped here, the way the Python drops it. Every caller
+ * below already reports "git said no" in its own words. The one caller that
+ * needs git's own message uses {@link runGit} instead.
+ *
+ * `null` here does not separate several different cases. A time limit may
+ * have fired. git may not be on PATH. git may be on PATH and still not run.
+ * A pipe may have failed part way through ({@link RunResult.streamErrors}).
+ *
+ * Most of these cases arrive here as `null`. The exception is a pipe that
+ * failed after an otherwise successful run. There, `null` becomes the short
+ * text that came through before the failure.
+ *
+ * `lib/gh.ts` can tell these cases apart, because it takes its runner as a
+ * parameter. This file calls {@link run} directly, so a branch here could
+ * only be reached by a real pipe that fails. The coverage rule refuses a
+ * branch that no test can reach, rather than excuse it. A caller that needs
+ * the distinction uses {@link runGit}, which returns the whole result.
  */
-export const gitRun = (
-  dir: string,
+export const gitOut = async (
   args: readonly string[],
   options: GitOptions = {},
-): Envelope<GitResult> => {
-  if (dir === '') {
-    return failed(
-      `refusing to run 'git ${args.join(' ')}' with an empty directory: ` +
-        "git -C '' operates on the current directory, which is how a " +
-        "repo-targeted write lands in the user's checkout (#18).",
-    )
-  }
-  const request = withEnvPrefix(options.envPrefix ?? NO_ENV_PREFIX, {
-    command: 'git',
-    args: ['-C', dir, ...args],
-  })
-  return ok((options.spawn ?? nodeSpawn)(request))
+): Promise<string | null> => {
+  const result = await runGit(args, options)
+  if (result.status !== 0) return null
+  return result.stdout.replace(/\n+$/, '')
 }
 
-/**
- * Run git and read a non-zero status as a failure. This is what every caller
- * wants except the ones that have to tell "git said no" from "git failed",
- * which reach for {@link gitRun} instead.
- */
-export const git = (
-  dir: string,
+/** Whether git succeeded. This is the port of `git_ok` (`gh-sync-repo.py:95`).
+ *  That script uses it to attempt every write: checkout, merge --ff-only,
+ *  branch -D, and worktree remove. */
+export const gitOk = async (args: readonly string[], options: GitOptions = {}): Promise<boolean> =>
+  (await runGit(args, options)).status === 0
+
+/** Returns git's stdout as a list of its non-empty lines. Returns `null`
+ *  when git failed. This is the port of `git_lines` (`gh-sync-repo.py:98`).
+ *  It has two callers: the merged branch list and the local branch list.
+ *  Both callers must tell "no branches" apart from "the list could not be
+ *  read". */
+export const gitLines = async (
   args: readonly string[],
   options: GitOptions = {},
-): Envelope<GitResult> => {
-  const ran = gitRun(dir, args, options)
-  if (ran.outcome !== 'ok') return ran
-  return ran.value.status === 0 ? ran : failed(describeRun(ran.value))
+): Promise<string[] | null> => {
+  const out = await gitOut(args, options)
+  if (out === null) return null
+  return out.split('\n').filter((line) => line !== '')
 }
 
 /**
- * One line of output, refusing an empty answer. A git command that exits 0
- * having printed nothing has answered nothing, and reading that as a value is
- * the found-nothing-is-a-pass shape this plugin refuses everywhere.
- */
-const oneLine = (envelope: Envelope<GitResult>, what: string): Envelope<string> => {
-  if (envelope.outcome !== 'ok') return envelope
-  const line = envelope.value.stdout.trim()
-  return line === '' ? failed(`git ${what} answered nothing`) : ok(line)
-}
-
-/** Whether the directory is inside a git repository at all. */
-export const isGitRepository = (dir: string, options: GitOptions = {}): boolean =>
-  git(dir, ['rev-parse', '--git-dir'], options).outcome === 'ok'
-
-/** The repository top for a directory. */
-export const topLevel = (dir: string, options: GitOptions = {}): Envelope<string> =>
-  oneLine(git(dir, ['rev-parse', '--show-toplevel'], options), 'rev-parse --show-toplevel')
-
-/**
- * The common git directory, absolute. git answers relatively for a primary
- * checkout (`.git`) and absolutely for a linked worktree, and the scripts
- * that read it re-anchor the relative answer themselves; doing it here means
- * one place rather than two.
- */
-export const gitCommonDir = (dir: string, options: GitOptions = {}): Envelope<string> => {
-  const answer = oneLine(
-    git(dir, ['rev-parse', '--git-common-dir'], options),
-    'rev-parse --git-common-dir',
-  )
-  return answer.outcome === 'ok' ? ok(resolve(dir, answer.value)) : answer
-}
-
-/**
- * The tip a ref names, or `null` when there is no such ref.
+ * These are the options every question below takes. Each one names one
+ * repository, and the environment to ask it in.
  *
- * `rev-parse --verify --quiet` answers a missing ref with empty stdout, exit
- * 1 and no stderr; a real failure writes stderr. The two are distinguishable
- * only by that stderr, and folding them together reports a branch as absent
- * on a transient failure, which is how a stale-branch guard passes on a
- * repository it never managed to read.
- */
-export const readRef = (
-  dir: string,
-  ref: string,
-  options: GitOptions = {},
-): Envelope<string | null> => {
-  const ran = gitRun(dir, ['rev-parse', '--verify', '--quiet', ref], options)
-  if (ran.outcome !== 'ok') return ran
-  const result = ran.value
-  if (result.status === 0) return oneLine(ok(result), `rev-parse --verify ${ref}`)
-  return result.stderr.trim() === '' ? ok(null) : failed(describeRun(result))
-}
-
-/** Every worktree registered against this repository, main checkout included. */
-export const listWorktrees = (
-  dir: string,
-  options: GitOptions = {},
-): Envelope<readonly string[]> => {
-  const envelope = git(dir, ['worktree', 'list', '--porcelain'], options)
-  if (envelope.outcome !== 'ok') return envelope
-  const paths = envelope.value.stdout
-    .split('\n')
-    .filter((line) => line.startsWith('worktree '))
-    .map((line) => line.slice('worktree '.length))
-  // `worktree list` always reports at least the checkout it was asked about,
-  // so an empty list is a parse that found nothing rather than a repository
-  // with no worktrees.
-  return paths.length === 0 ? failed('git worktree list answered nothing') : ok(paths)
-}
-
-/**
- * Whether a path is a live worktree registration. A checked-out worktree is
- * what `worktree remove` has to take off; a plain leftover directory is not,
- * and the difference decides whether a delete is safe.
- */
-export const isWorktreeRegistered = (
-  dir: string,
-  worktree: string,
-  options: GitOptions = {},
-): Envelope<boolean> => {
-  const listed = listWorktrees(dir, options)
-  return listed.outcome === 'ok' ? ok(listed.value.includes(worktree)) : listed
-}
-
-/**
- * The branch name, or a failure saying why git would refuse it. A name git
- * would reject is a caller bug, not something to discover halfway through a
- * delete.
+ * {@link GitOptions} leaves both `cwd` and `env` optional. Here, and in the
+ * default `gitOut` uses, the whole object is required. Each question below
+ * asks about ONE repository. Neither `cwd` alone nor `env` alone says which
+ * one.
  *
- * The leading-dash test is separate because `check-ref-format` accepts
- * `refs/heads/-D` happily, and that name reaches `git branch -D <name>` as an
- * option rather than as a ref.
+ * `cwd` is the obvious half. A call that names no directory would ask about
+ * wherever the process happens to sit.
+ *
+ * `env` is the half that actually matters, and it is required, not
+ * optional. `GIT_DIR` outranks both `cwd` and `git -C` for everything the
+ * git directory holds. With `GIT_DIR` set, {@link currentBranch} reads the
+ * named repository's HEAD. {@link defaultBranch} reads its `origin/HEAD`.
+ * {@link hasRef} reads its refs. Each does this whatever directory the call
+ * gave.
+ *
+ * {@link toplevel} is the one exception, and it deserves a closer look.
+ * `GIT_DIR` with no `GIT_WORK_TREE` set makes the current directory the top
+ * of the work tree. So `rev-parse --show-toplevel` still answers about
+ * `cwd`. `GIT_WORK_TREE` is the variable that changes this, and git
+ * exports it into a hook's children too.
+ *
+ * git exports `GIT_DIR` and `GIT_INDEX_FILE` into every child of a hook. A
+ * pre-commit hook is one place this test suite runs (`lefthook.yml`). An
+ * optional `env` here would be a rule stated in a comment, but never
+ * checked. The caller that most needs to pin `env` is the one most likely
+ * to leave it out.
+ *
+ * **This requirement names the environment; it does not scrub it.** `env:
+ * process.env` satisfies this type. Inside the hook described above, it
+ * still carries `GIT_DIR` at full strength. Nothing in this file strips
+ * anything from the environment.
+ *
+ * Nothing here can. This file calls {@link run} directly, so it has no
+ * seam for that. A caller who chose an environment is entitled to the one
+ * it chose.
+ *
+ * What the required field does is put the environment at the call site.
+ * There a reader sees which environment is in use, and a reviewer can ask
+ * whether it is the right one. Read this as "say which environment", never
+ * as "git is safe from `GIT_DIR`".
+ *
+ * The port's own answer, for a caller with nothing to pin, is
+ * `process.env`. Every ported call site inherits it today (`grep GIT_DIR
+ * plugins/gh/` finds nothing). If a caller passed `{}` instead, it would
+ * drop `HOME` and `PATH` too. Global config discovery and credential
+ * helpers would then behave differently. This default is named here so
+ * that later layers do not each invent a different one.
+ *
+ * The four helpers above keep `env` optional on purpose. They are the
+ * general escape hatch, and the preflight check that reports on git
+ * itself. For those, the ambient environment is sometimes the very thing
+ * that callers ask about (`gh-sync-repo.py:65` to `86`). To silently
+ * rewrite an environment that a caller chose would be its own defect.
  */
-export const validateBranchName = (
-  name: string,
-  dir: string,
-  options: GitOptions = {},
-): Envelope<string> => {
-  if (name.startsWith('-')) {
-    return failed(`branch name must not begin with a dash: ${name}`)
-  }
-  const envelope = git(dir, ['check-ref-format', `refs/heads/${name}`], options)
-  return envelope.outcome === 'ok' ? ok(name) : failed(`not a valid branch name: ${name}`)
+export interface RepoOptions extends GitOptions {
+  readonly cwd: string
+  readonly env: NodeJS.ProcessEnv
 }
+
+/**
+ * Reads an empty answer as no answer at all. Three questions below can
+ * never have the empty string as a real answer. This helper folds their
+ * empty case into `null`.
+ *
+ * A checkout root, and the branch HEAD is on, are each a name, or
+ * nothing. So is the ref `origin/HEAD` points at. So `""` there means git
+ * said nothing, not that git gave an answer.
+ *
+ * The Python code read all three that way. `lib/discover.py` used `return
+ * top or None`. `gh-sync-repo.py:210`, `:241`, and `:349` used `not top`,
+ * `not ref`, and `or "HEAD"`. Every caller of these three questions
+ * repeated that same fold by hand.
+ *
+ * {@link gitOut}, {@link gitOk}, {@link gitLines}, {@link hasRef}, and
+ * {@link runGit} do NOT use this fold. The difference between `null` and
+ * `""` matters there. `git status --porcelain` answers `""` for a clean
+ * tree, but `null` means the probe could not run at all. `show-ref
+ * --verify --quiet` succeeds with no output at all, which is a third case
+ * these functions must tell apart.
+ */
+const answered = (out: string | null): string | null => (out === '' ? null : out)
+
+/**
+ * Returns the checkout root that contains `options.cwd`, or `null` when
+ * there is none.
+ *
+ * This is the port of `toplevel` (`lib/discover.py:50`). `gh-sync-repo.py:203`,
+ * `gh-shepherd-status.py:144`, and `gh-shepherd-pr.py:1014` ask the same
+ * question. A missing git gives the same answer as a directory outside any
+ * checkout: no root. The callers do not care about that distinction. If
+ * this function raised an error here, it would turn a degraded environment
+ * into a crash.
+ *
+ * The Python code reads an empty answer as no root too, and so does this
+ * function, through {@link answered}. An earlier comment here said that
+ * case could not happen. It reasoned that git 2.54 refuses `rev-parse
+ * --show-toplevel` in a bare repository with status 128. It does not
+ * answer empty.
+ *
+ * That claim is true of real git. It is false of the git a caller put on
+ * PATH. That is the only git this function has. CI on #159 reached that
+ * case, and each caller folded the empty answer by hand.
+ *
+ * The path git prints has its symlinks resolved. That is why `discover.py`
+ * compares it against `os.path.realpath`. To resolve the caller's own path
+ * is the caller's job, not this function's.
+ */
+export const toplevel = async (options: RepoOptions): Promise<string | null> =>
+  answered(await gitOut(['rev-parse', '--show-toplevel'], options))
+
+/**
+ * Returns the branch HEAD is on. Returns `"HEAD"` when HEAD is detached.
+ * Returns `null` when git could not answer.
+ *
+ * This is the port of `gh-sync-repo.py:349` and `hook-io.py:210`. Both read
+ * `"HEAD"` as "there is no branch to talk about." It is git's own word for
+ * that case. So this function passes it through.
+ *
+ * It does not fold `"HEAD"` into `null`, because `null` means something
+ * else here. An empty answer IS folded, through {@link answered}. When
+ * git names no branch at all, that is not the same as when git names one.
+ */
+export const currentBranch = async (options: RepoOptions): Promise<string | null> =>
+  answered(await gitOut(['rev-parse', '--abbrev-ref', 'HEAD'], options))
+
+const ORIGIN_HEAD = 'refs/remotes/origin/HEAD'
+const ORIGIN_PREFIX = 'refs/remotes/origin/'
+
+/**
+ * Returns the default branch, as the cached `origin/HEAD` records it, or
+ * `null`.
+ *
+ * This is the port of half of `default_branch` (`hook-io.py:184`). It is
+ * also half of `resolve_default_branch` (`gh-sync-repo.py:239`). Only the
+ * half both callers share is here: it reads the ref, with no network round
+ * trip and no write. A ref read as the empty string counts as no ref,
+ * through {@link answered}. A default branch of `""` is the one answer
+ * neither caller can use, so both fall back to `null`.
+ *
+ * The rest is left to the callers on purpose, because they disagree about
+ * it. `gh-sync-repo.py` repairs a missing `origin/HEAD` with `git remote
+ * set-head --auto`. That is a write, and it skips the write under
+ * `--dry-run`. It then falls back to gh, and to
+ * `refs/remotes/origin/{main,master}`.
+ *
+ * `hook-io.py` must never write, so it falls back to
+ * `refs/heads/{main,master}` instead. A single "default branch" function
+ * here would have to take both fallbacks as arguments. That would just be
+ * the caller's own code with an extra layer in front of it.
+ */
+export const defaultBranch = async (options: RepoOptions): Promise<string | null> => {
+  const ref = answered(await gitOut(['symbolic-ref', '--quiet', ORIGIN_HEAD], options))
+  if (ref === null) return null
+  // `hook-io.py:196` passes through a ref that does not carry the prefix.
+  // It does not change the ref by mistake. This function does the same.
+  return ref.startsWith(ORIGIN_PREFIX) ? ref.slice(ORIGIN_PREFIX.length) : ref
+}
+
+/**
+ * Whether `ref` exists. Name it in full: `refs/heads/main`, or
+ * `refs/remotes/origin/main`.
+ *
+ * This is the port of the `show-ref --verify --quiet` calls at
+ * `hook-io.py:199`, `gh-sync-repo.py:369`, and `gh-sync-repo.py:262`. Use
+ * full ref names, not short forms. `--verify` needs a full name, and the
+ * three call sites ask about two different namespaces.
+ */
+export const hasRef = (ref: string, options: RepoOptions): Promise<boolean> =>
+  gitOk(['show-ref', '--verify', '--quiet', ref], options)

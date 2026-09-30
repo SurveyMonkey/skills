@@ -15,7 +15,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `lib/process.ts` | Runs one child with no shell and an optional time limit; never rejects |
 | `lib/streams.ts` | stdout and stderr writers that go quiet on a broken pipe |
 | `lib/env-prefix.ts` | The `env_prefix` seam |
-| `lib/git.ts` | Path containment, worktree queries, refs |
+| `lib/git.ts` | Git calls: `runGit`, `gitOut`, `gitOk`, `gitLines`, and repository queries |
 | `lib/gh.ts` | The typed `gh` client |
 | `src/state.ts` | The fix driver's state file, typed |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
@@ -89,8 +89,8 @@ process boundary gave for free: a crash the caller could see as an exit code (RF
 
 **`lib/process.ts` runs a child process, and never rejects.** A child that fails, is killed at
 its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `startFailure`,
-`streamErrors`), not a throw. It is asynchronous. `lib/git.ts` and `harness/parity.ts` are still
-synchronous, so each keeps a local runner until it converges.
+`streamErrors`), not a throw. It is asynchronous. `lib/git.ts` runs git through it. `harness/parity.ts` is still
+synchronous, so it keeps a local runner until it converges.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
 into handlers and mocked one method at a time. Its API is the target stack's. It has one method,

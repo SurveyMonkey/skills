@@ -1,6 +1,6 @@
 // The git repo builder: a temp origin and a clone of it, both real
-// repositories driven through the #217 git helpers, which run real `git`
-// through the local runner of `lib/git.ts`.
+// repositories driven through a small local `spawnSync` helper, until #274
+// converges this harness with the target stack.
 //
 // Git is never mocked (mocking.md): `spec/discover_repos_spec.sh` builds real
 // `git init` repositories in scratch directories, including the shapes that
@@ -14,11 +14,10 @@
 // This is test infrastructure: it is not under `src/` and not in the coverage
 // include.
 
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-
-import { git } from '#lib/git.ts'
 
 /** The branch both repositories start on unless an example names another. */
 export const DEFAULT_BRANCH = 'main'
@@ -39,18 +38,19 @@ export interface GitRepo {
 }
 
 /**
- * Run git, or throw with the envelope's own message.
+ * Run git in a directory, or throw with git's own words.
  *
  * A failure here is the harness failing, not the code under test, and it has
  * to say so loudly: a builder that swallowed one would hand back a repository
  * missing the very shape the example is about.
  */
 const must = (dir: string, args: readonly string[]): string => {
-  const envelope = git(dir, args)
-  // `outcome` rather than `isOk`: the helper's predicate narrows the success
-  // arm, and it is the failure arm this needs the message from.
-  if (envelope.outcome !== 'ok') throw new Error(`git repo builder: ${envelope.error}`)
-  return envelope.value.stdout
+  const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    const why = result.error?.message ?? result.stderr.trim()
+    throw new Error(`git repo builder: git ${args.join(' ')} failed: ${why}`)
+  }
+  return result.stdout
 }
 
 /** Write a file, stage it and commit it, creating parent directories. */

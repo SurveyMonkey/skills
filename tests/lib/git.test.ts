@@ -1,39 +1,33 @@
 // The git helpers. Git is never mocked (the testing skill's mocking.md), so
-// every query example below runs real `git` through the default spawn against
-// real repositories built with `git init` in scratch directories, exactly as
-// `spec/discover_repos_spec.sh` does.
+// every example runs real `git` against real repositories made with
+// `git init` in scratch directories. The one exception is a stand-in `git`
+// script put first on PATH, for the answers a real git does not give: an
+// empty answer with status 0, a hang past the time limit, and output whose
+// exact bytes the example must control.
 //
-// Two things a real repository cannot show are covered through the runner's
-// documented spawn parameter instead: that the empty-directory guard runs
-// NOTHING, and that a configured `env_prefix` reaches the argv. Both are
-// claims about the invocation rather than about git's answer.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+// Every call names its environment. `cleanEnv` drops each `GIT_*` variable,
+// because git exports `GIT_DIR` and `GIT_INDEX_FILE` into a hook's children
+// and the pre-commit hook runs this suite. It also points git at no global
+// or system configuration, so a developer's own settings stay out.
+import { spawnSync } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { parseEnvPrefix } from '#gh-security/lib/env-prefix.ts'
-import { isOk, unwrap } from '#gh-security/lib/envelope.ts'
+
 import {
-  AGENT_WORKTREE_SEGMENT,
-  containsDotDot,
-  type GitRequest,
-  git,
-  gitCommonDir,
-  gitRun,
-  isGitRepository,
-  isWorktreeRegistered,
-  listWorktrees,
-  readRef,
-  resolveExistingAncestor,
-  topLevel,
-  validateBranchName,
-  withinAgentWorktrees,
+  currentBranch,
+  defaultBranch,
+  gitLines,
+  gitOk,
+  gitOut,
+  hasRef,
+  runGit,
+  toplevel,
 } from '#gh-security/lib/git.ts'
 
 // Scratch roots are resolved physically on creation: on macOS `/var` really
-// is `/private/var`, and a fixture that compared the unresolved spelling
-// would pass on Linux and fail here for a reason that has nothing to do with
-// the code.
+// is `/private/var`, and git prints the physical path.
 const scratches: string[] = []
 const scratch = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'gh-security-git-')))
@@ -45,428 +39,375 @@ afterAll(() => {
   for (const dir of scratches) rmSync(dir, { recursive: true, force: true })
 })
 
-// A real repository with one commit. The identity and the default branch are
-// set per invocation rather than read from the machine, so the examples do
-// not depend on whoever is running them.
-const repository = (): string => {
+const cleanEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('GIT_')) env[key] = value
+  }
+  return { ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', ...extra }
+}
+
+/** Real git, the setup path. It is a separate call from the code under test. */
+const setup = (dir: string, ...args: string[]): string => {
+  const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: cleanEnv() })
+  if (result.status !== 0) throw new Error(`setup: git ${args.join(' ')}: ${result.stderr}`)
+  return result.stdout
+}
+
+interface Repository {
+  readonly work: string
+  readonly origin: string
+  readonly env: NodeJS.ProcessEnv
+}
+
+/** A checkout on `main` with one commit, and a bare origin that has it. */
+const repository = (): Repository => {
   const root = scratch()
-  const gitArgs = [
-    ['-c', 'init.defaultBranch=main', 'init', '-q'],
-    ['config', 'user.email', 'suite@example.test'],
-    ['config', 'user.name', 'Suite'],
-    ['commit', '-q', '--allow-empty', '-m', 'root'],
-  ]
-  for (const args of gitArgs) {
-    const envelope = git(root, args)
-    if (!isOk(envelope)) throw new Error(JSON.stringify(envelope))
-  }
-  return root
+  const work = join(root, 'work')
+  const origin = join(root, 'origin')
+  mkdirSync(work)
+  setup(root, 'init', '-q', '--bare', origin)
+  setup(work, 'init', '-q', '-b', 'main')
+  setup(work, 'config', 'user.email', 'suite@example.test')
+  setup(work, 'config', 'user.name', 'Suite')
+  setup(work, 'commit', '-q', '--allow-empty', '-m', 'root')
+  setup(work, 'remote', 'add', 'origin', origin)
+  setup(work, 'push', '-q', 'origin', 'main')
+  return { work, origin, env: cleanEnv() }
 }
 
-const recordingSpawn = () => {
-  const seen: GitRequest[] = []
-  const spawn = (request: GitRequest) => {
-    seen.push(request)
-    return { command: request.command, args: request.args, status: 0, stdout: 'ok\n', stderr: '' }
-  }
-  return { spawn, seen }
+/** A directory that is not inside any repository. */
+const plainDirectory = (): string => scratch()
+
+/** An environment whose first `git` is a script with this body. */
+const stubGit = (body: string): NodeJS.ProcessEnv => {
+  const bin = scratch()
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\n${body}\n`)
+  chmodSync(join(bin, 'git'), 0o755)
+  return cleanEnv({ PATH: `${bin}${delimiter}${process.env.PATH ?? ''}` })
 }
 
-describe('gitRun', () => {
-  // `git -C ""` is not an error and it is not a no-op: git silently operates
-  // on the current directory, so one empty path would put a
-  // `worktree remove --force` or a `branch -D` in the user's own checkout
-  // (issue #18). The assertion is that nothing ran at all.
-  it('refuses an empty directory without running anything', () => {
-    const { spawn, seen } = recordingSpawn()
-    const envelope = gitRun('', ['branch', '-D', 'fix/lodash-4'], { spawn })
-    expect(envelope).toEqual({
-      outcome: 'failed',
-      error:
-        "refusing to run 'git branch -D fix/lodash-4' with an empty directory: " +
-        "git -C '' operates on the current directory, which is how a " +
-        "repo-targeted write lands in the user's checkout (#18).",
-    })
-    expect(seen).toEqual([])
+describe('runGit', () => {
+  it('answers a successful run with its whole result', async () => {
+    const { work, env } = repository()
+
+    const result = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work, env })
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('main\n')
+    expect(result.timedOut).toBe(false)
+    expect(result.startFailure).toBeNull()
   })
 
-  it('answers with the result whatever the exit status', () => {
-    const root = repository()
-    const envelope = gitRun(root, ['rev-parse', '--verify', '--quiet', 'refs/heads/nope'])
-    expect(isOk(envelope)).toBe(true)
-    expect(unwrap(envelope).status).toBe(1)
+  it('runs git in the directory it is given', async () => {
+    const { work, env } = repository()
+    const inside = join(work, 'nested')
+    mkdirSync(inside)
+
+    const result = await runGit(['rev-parse', '--show-prefix'], { cwd: inside, env })
+
+    expect(result.stdout).toBe('nested/\n')
   })
 
-  // The prefix reaches the argv, composed after git's own `-C` locator: it
-  // injects environment, it does not chdir.
-  it('runs git under a configured env_prefix', () => {
-    const { spawn, seen } = recordingSpawn()
-    gitRun('/w/fix', ['status', '--porcelain'], {
-      spawn,
-      envPrefix: parseEnvPrefix('run-in exec /src/app'),
-    })
-    expect(seen).toEqual([
-      {
-        command: 'run-in',
-        args: ['exec', '/src/app', 'git', '-C', '/w/fix', 'status', '--porcelain'],
-      },
-    ])
-  })
-})
+  it('gives git the environment it is given, and no other', async () => {
+    const env = stubGit('printf "%s" "$MARKER"')
 
-describe('git', () => {
-  it('carries the empty-directory refusal through, so no caller can miss it', () => {
-    const { spawn, seen } = recordingSpawn()
-    expect(git('', ['worktree', 'remove', '--force', '/w/fix'], { spawn }).outcome).toBe('failed')
-    expect(seen).toEqual([])
+    const result = await runGit(['anything'], { env: { ...env, MARKER: 'from-the-caller' } })
+
+    expect(result.stdout).toBe('from-the-caller')
   })
 
-  // Quoting git means git's own words, not only the frame around them: a
-  // `describeRun` that always rendered `no output` would still carry
-  // `failed (exit`, so the assertion reaches for what git wrote.
-  it('is a failure quoting git when the command exits non-zero', () => {
-    const root = repository()
-    const envelope = git(root, ['rev-parse', '--verify', 'refs/heads/nope'])
-    expect(envelope.outcome).toBe('failed')
-    const error = envelope.outcome === 'failed' && envelope.error
-    expect(error).toContain('git -C')
-    expect(error).toContain('failed (exit 128): fatal: Needed a single revision')
-  })
-})
+  it('runs git in this checkout, with this environment, when it is given no options', async () => {
+    const result = await runGit(['--version'])
 
-describe('isGitRepository', () => {
-  it('is true inside a repository and false outside one', () => {
-    expect(isGitRepository(repository())).toBe(true)
-    expect(isGitRepository(scratch())).toBe(false)
-  })
-})
-
-describe('topLevel', () => {
-  it('answers the repository root from a subdirectory of it', () => {
-    const root = repository()
-    mkdirSync(join(root, 'packages', 'app'), { recursive: true })
-    expect(unwrap(topLevel(join(root, 'packages', 'app')))).toBe(root)
+    expect(result.status).toBe(0)
+    expect(result.stdout).toMatch(/^git version /)
   })
 
-  it('is a failure outside a repository', () => {
-    expect(topLevel(scratch()).outcome).toBe('failed')
+  // The preflight check reports three facts apart: git is not there, git ran
+  // and said no, and git was killed. Each is a field, never a throw.
+  it('reports a git that is not on PATH as a start failure', async () => {
+    const result = await runGit(['--version'], { env: cleanEnv({ PATH: scratch() }) })
+
+    expect(result.startFailure?.code).toBe('ENOENT')
+    expect(result.status).toBe(127)
+  })
+
+  it('reports a git that ran and said no as a non-zero status', async () => {
+    const { env } = repository()
+
+    const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: plainDirectory(), env })
+
+    expect(result.startFailure).toBeNull()
+    expect(result.status).toBe(128)
+    expect(result.stderr).toContain('not a git repository')
+  })
+
+  it('kills git at the time limit and reports it', async () => {
+    const env = stubGit('exec sleep 30')
+
+    const result = await runGit(['fetch'], { env, timeoutMs: 100 })
+
+    expect(result.timedOut).toBe(true)
+    expect(result.signal).toBe('SIGKILL')
+    expect(result.elapsedMs).toBeLessThan(10_000)
+  })
+
+  it('waits for git when it sets no time limit', async () => {
+    const env = stubGit('sleep 0.2; printf done')
+
+    const result = await runGit(['fetch'], { env })
+
+    expect(result.timedOut).toBe(false)
+    expect(result.stdout).toBe('done')
   })
 })
 
-describe('gitCommonDir', () => {
-  // git answers `.git` for a primary checkout and an absolute path for a
-  // linked worktree. The scripts that read it re-anchor the relative answer
-  // themselves; a caller that forgot to would look for
-  // `<cwd>/.git/worktrees/` and find nothing, which reads as no worktree
-  // registered rather than as a path it never checked.
-  it('is absolute for a primary checkout, where git answers relatively', () => {
-    const root = repository()
-    expect(unwrap(gitCommonDir(root))).toBe(join(root, '.git'))
+describe('gitOut', () => {
+  it('strips every trailing newline, not only the last', async () => {
+    const env = stubGit('printf "line\\n\\n\\n"')
+
+    await expect(gitOut(['x'], { env })).resolves.toBe('line')
   })
 
-  it('is the same directory seen from a linked worktree', () => {
-    const root = repository()
-    const worktree = join(root, AGENT_WORKTREE_SEGMENT, 'fix')
-    unwrap(git(root, ['worktree', 'add', '-q', '-b', 'fix/lodash-4', worktree]))
-    expect(unwrap(gitCommonDir(worktree))).toBe(join(root, '.git'))
+  it('keeps leading space, which status --porcelain encodes', async () => {
+    const { work, env } = repository()
+    writeFileSync(join(work, 'file.txt'), 'one\n')
+    setup(work, 'add', 'file.txt')
+    setup(work, 'commit', '-q', '-m', 'add file')
+    writeFileSync(join(work, 'file.txt'), 'two\n')
+
+    await expect(
+      gitOut(['status', '--porcelain', '--untracked-files=no'], { cwd: work, env }),
+    ).resolves.toBe(' M file.txt')
   })
 
-  it('is a failure outside a repository', () => {
-    expect(gitCommonDir(scratch()).outcome).toBe('failed')
-  })
-})
+  it('keeps a newline inside the answer', async () => {
+    const env = stubGit('printf "a\\nb\\n"')
 
-describe('readRef', () => {
-  it('answers the tip of a ref that exists', () => {
-    const root = repository()
-    const head = unwrap(readRef(root, 'refs/heads/main'))
-    expect(head).toMatch(/^[0-9a-f]{40}$/)
-    expect(head).toBe(unwrap(readRef(root, 'HEAD')))
+    await expect(gitOut(['x'], { env })).resolves.toBe('a\nb')
   })
 
-  // The distinction this helper exists for. `rev-parse --verify --quiet`
-  // answers a missing ref with empty stdout, exit 1 and no stderr; a real
-  // failure writes stderr. Folding them together reports a branch as absent
-  // on a repository the read never managed to reach, which is how a
-  // stale-branch guard passes on a repository it never read.
-  it('answers null for a ref that does not exist', () => {
-    expect(unwrap(readRef(repository(), 'refs/heads/never-created'))).toBeNull()
+  // `null` and `""` are different facts: "the probe could not run" against
+  // "the tree is clean".
+  it('answers the empty string when git succeeded and said nothing', async () => {
+    const { work, env } = repository()
+
+    await expect(gitOut(['status', '--porcelain'], { cwd: work, env })).resolves.toBe('')
   })
 
-  it('carries the empty-directory refusal rather than answering null', () => {
-    const { spawn, seen } = recordingSpawn()
-    expect(readRef('', 'refs/heads/main', { spawn }).outcome).toBe('failed')
-    expect(seen).toEqual([])
+  it('answers a falsy but real payload as itself', async () => {
+    const env = stubGit('printf 0')
+
+    await expect(gitOut(['x'], { env })).resolves.toBe('0')
   })
 
-  it('is a failure, not a null, when the read itself failed', () => {
-    const envelope = readRef(scratch(), 'refs/heads/main')
-    expect(envelope.outcome).toBe('failed')
-    expect(envelope.outcome === 'failed' && envelope.error).toContain('not a git repository')
-  })
-})
+  it('answers null when git said no', async () => {
+    const { env } = repository()
 
-describe('listWorktrees', () => {
-  it('lists the checkout itself and every linked worktree', () => {
-    const root = repository()
-    const worktree = join(root, AGENT_WORKTREE_SEGMENT, 'fix')
-    unwrap(git(root, ['worktree', 'add', '-q', '-b', 'fix/lodash-4', worktree]))
-    expect(unwrap(listWorktrees(root))).toEqual([root, worktree])
+    await expect(
+      gitOut(['rev-parse', '--show-toplevel'], { cwd: plainDirectory(), env }),
+    ).resolves.toBeNull()
   })
 
-  it('is a failure outside a repository', () => {
-    expect(listWorktrees(scratch()).outcome).toBe('failed')
-  })
-})
+  it('answers null, with the output dropped, when git said no after it printed', async () => {
+    const env = stubGit('printf out; exit 3')
 
-describe('isWorktreeRegistered', () => {
-  // A live registration must come off through git; a plain leftover
-  // directory is a `rm -rf`. Reading a leftover directory as a registration,
-  // or the reverse, leaves the registration under
-  // `<git-common-dir>/worktrees/` behind, which blocks a later
-  // `worktree add` and `branch -D`.
-  it('tells a live registration from a directory of the same name', () => {
-    const root = repository()
-    const live = join(root, AGENT_WORKTREE_SEGMENT, 'fix')
-    const leftover = join(root, AGENT_WORKTREE_SEGMENT, 'stale')
-    unwrap(git(root, ['worktree', 'add', '-q', '-b', 'fix/lodash-4', live]))
-    mkdirSync(leftover, { recursive: true })
-    expect(unwrap(isWorktreeRegistered(root, live))).toBe(true)
-    expect(unwrap(isWorktreeRegistered(root, leftover))).toBe(false)
+    await expect(gitOut(['x'], { env })).resolves.toBeNull()
   })
 
-  it('is a failure outside a repository', () => {
-    expect(isWorktreeRegistered(scratch(), '/w/fix').outcome).toBe('failed')
+  it('answers null when git is not on PATH', async () => {
+    await expect(gitOut(['--version'], { env: cleanEnv({ PATH: scratch() }) })).resolves.toBeNull()
+  })
+
+  it('answers null rather than rejecting when node refuses the argument list', async () => {
+    const { work, env } = repository()
+
+    await expect(gitOut(['rev-parse\u0000--show-toplevel'], { cwd: work, env })).resolves.toBeNull()
+  })
+
+  it('runs git in this checkout when it is given no options', async () => {
+    await expect(gitOut(['--version'])).resolves.toMatch(/^git version /)
   })
 })
 
-describe('validateBranchName', () => {
-  it('returns the name git would accept', () => {
-    expect(unwrap(validateBranchName('fix/lodash-4', repository()))).toBe('fix/lodash-4')
+describe('gitOk', () => {
+  it('is true for status 0, whatever git printed', async () => {
+    const { work, env } = repository()
+
+    await expect(gitOk(['status', '--porcelain'], { cwd: work, env })).resolves.toBe(true)
   })
 
-  // Separate from the format check because `check-ref-format` accepts
-  // `refs/heads/-D` happily, and that name reaches `git branch -D <name>` as
-  // an option rather than as a ref.
-  it('refuses a leading dash, which check-ref-format accepts', () => {
-    const root = repository()
-    expect(validateBranchName('-D', root)).toEqual({
-      outcome: 'failed',
-      error: 'branch name must not begin with a dash: -D',
-    })
-    expect(unwrap(git(root, ['check-ref-format', 'refs/heads/-D'])).status).toBe(0)
+  it('is false for a non-zero status', async () => {
+    const { work, env } = repository()
+
+    await expect(
+      gitOk(['show-ref', '--verify', '--quiet', 'refs/heads/absent'], { cwd: work, env }),
+    ).resolves.toBe(false)
   })
 
-  it.each([['fix/'], ['fix..4'], ['fix branch'], ['fix~1']])(
-    'refuses %s, which git rejects',
-    (name) => {
-      expect(validateBranchName(name, repository())).toEqual({
-        outcome: 'failed',
-        error: `not a valid branch name: ${name}`,
-      })
-    },
-  )
-})
-
-// A git that exits 0 having printed nothing has answered nothing, and reading
-// that as a value is the found-nothing-is-a-pass shape this repository refuses
-// everywhere (ADR 001). No real git produces it, so the only way to reach the
-// guard is through the runner's documented spawn parameter, which is what
-// stands in for the process boundary here.
-describe('a git that answers nothing', () => {
-  const silentGit = (request: GitRequest) => ({
-    command: request.command,
-    args: request.args,
-    status: 0,
-    stdout: '\n',
-    stderr: '',
+  it('is false when git did not start', async () => {
+    await expect(gitOk(['--version'], { env: cleanEnv({ PATH: scratch() }) })).resolves.toBe(false)
   })
 
-  it('is a failure from topLevel rather than an empty repository root', () => {
-    expect(topLevel('/src/app', { spawn: silentGit })).toEqual({
-      outcome: 'failed',
-      error: 'git rev-parse --show-toplevel answered nothing',
-    })
-  })
-
-  it('is a failure from gitCommonDir rather than a path resolved from nothing', () => {
-    expect(gitCommonDir('/src/app', { spawn: silentGit }).outcome).toBe('failed')
-  })
-
-  it('is a failure from readRef rather than a tip of the empty string', () => {
-    expect(readRef('/src/app', 'HEAD', { spawn: silentGit }).outcome).toBe('failed')
-  })
-
-  // `worktree list` always reports at least the checkout it was asked about,
-  // so an empty list is a parse that found nothing. Read as an answer, it
-  // says no worktree is registered, and the registration under
-  // `<git-common-dir>/worktrees/` survives the delete that follows.
-  it('is a failure from listWorktrees rather than a repository with none', () => {
-    expect(listWorktrees('/src/app', { spawn: silentGit })).toEqual({
-      outcome: 'failed',
-      error: 'git worktree list answered nothing',
-    })
+  it('runs git in this checkout when it is given no options', async () => {
+    await expect(gitOk(['--version'])).resolves.toBe(true)
   })
 })
 
-describe('resolveExistingAncestor', () => {
-  it('resolves a path that exists', () => {
-    const root = scratch()
-    mkdirSync(join(root, 'a', 'b'), { recursive: true })
-    expect(resolveExistingAncestor(join(root, 'a', 'b'))).toBe(join(root, 'a', 'b'))
+describe('gitLines', () => {
+  it('answers the non-empty lines of a listing', async () => {
+    const { work, env } = repository()
+    setup(work, 'branch', 'feature')
+
+    await expect(
+      gitLines(['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { cwd: work, env }),
+    ).resolves.toEqual(['feature', 'main'])
   })
 
-  // The idempotent case: a reap that runs twice finds the worktree gone, and
-  // resolving only the immediate parent would fail the containment guard on
-  // the second run because `.claude/worktrees/` is gone too.
-  it('resolves the deepest ancestor that exists and re-appends the rest', () => {
-    const root = scratch()
-    expect(resolveExistingAncestor(join(root, AGENT_WORKTREE_SEGMENT, 'fix'))).toBe(
-      join(root, AGENT_WORKTREE_SEGMENT, 'fix'),
-    )
+  it('drops blank lines inside the listing', async () => {
+    const env = stubGit('printf "a\\n\\nb\\n\\n"')
+
+    await expect(gitLines(['x'], { env })).resolves.toEqual(['a', 'b'])
   })
 
-  // The load-bearing case: a link is followed before the prefix test sees the
-  // path, so a worktree path that really lives elsewhere cannot be smuggled
-  // past containment. The link points at a directory OUTSIDE the repository,
-  // because a link into the repository would resolve to a path the guard
-  // accepts anyway and the example would prove nothing.
-  it('follows a symlink out of the tree, so containment sees where it lands', () => {
-    const root = scratch()
-    const elsewhere = scratch()
-    mkdirSync(join(root, AGENT_WORKTREE_SEGMENT), { recursive: true })
-    symlinkSync(elsewhere, join(root, AGENT_WORKTREE_SEGMENT, 'fix'))
-    const resolved = resolveExistingAncestor(join(root, AGENT_WORKTREE_SEGMENT, 'fix', 'pkg'))
-    expect(resolved).toBe(join(elsewhere, 'pkg'))
-    expect(withinAgentWorktrees(root, resolved)).toBe(false)
+  it('keeps a line that is falsy but not empty', async () => {
+    const env = stubGit('printf "0\\n"')
+
+    await expect(gitLines(['x'], { env })).resolves.toEqual(['0'])
   })
 
-  it('resolves a path with no existing ancestor below the root', () => {
-    expect(resolveExistingAncestor('/gh-security-no-such-top/fix')).toBe(
-      '/gh-security-no-such-top/fix',
-    )
-  })
-})
+  // "No branches" and "the list could not be read" must differ.
+  it('answers an empty list for a listing with no lines', async () => {
+    const { work, env } = repository()
 
-describe('containsDotDot', () => {
-  it.each([['/a/../b'], ['/a/..'], ['../a'], ['..']])('is true for %s', (path) => {
-    expect(containsDotDot(path)).toBe(true)
+    await expect(gitLines(['status', '--porcelain'], { cwd: work, env })).resolves.toEqual([])
   })
 
-  // A segment that merely starts with dots is not a traversal. Refusing
-  // `..hidden` would refuse a legitimate directory name.
-  it.each([['/a/..b'], ['/a/b..'], ['/a/...'], ['/a/b']])('is false for %s', (path) => {
-    expect(containsDotDot(path)).toBe(false)
+  it('answers null for a listing that could not be read', async () => {
+    const { env } = repository()
+
+    await expect(gitLines(['for-each-ref'], { cwd: plainDirectory(), env })).resolves.toBeNull()
+  })
+
+  it('runs git in this checkout when it is given no options', async () => {
+    await expect(gitLines(['--version'])).resolves.toHaveLength(1)
   })
 })
 
-describe('withinAgentWorktrees', () => {
-  const root = '/src/app'
-  const worktrees = `${root}/${AGENT_WORKTREE_SEGMENT}`
+describe('toplevel', () => {
+  it('finds the checkout root from inside it', async () => {
+    const { work, env } = repository()
+    const inside = join(work, 'nested')
+    mkdirSync(inside)
 
-  it('accepts a directory under this repository agent worktree root', () => {
-    expect(withinAgentWorktrees(root, `${worktrees}/fix`)).toBe(true)
-    expect(withinAgentWorktrees(root, `${worktrees}/fix/packages/app`)).toBe(true)
+    await expect(toplevel({ cwd: inside, env })).resolves.toBe(work)
   })
 
-  // The root itself is never accepted: the operation behind this guard is
-  // `rm -rf`, and accepting the root deletes every agent's worktree at once.
-  it('refuses the worktree root itself', () => {
-    expect(withinAgentWorktrees(root, worktrees)).toBe(false)
-    expect(withinAgentWorktrees(root, `${worktrees}/`)).toBe(false)
+  it('answers null outside a checkout', async () => {
+    const { env } = repository()
+
+    await expect(toplevel({ cwd: plainDirectory(), env })).resolves.toBeNull()
   })
 
-  it.each([
-    ['/src/app/packages/app'],
-    ['/src/other/.claude/worktrees/fix'],
-    ['/src'],
-    ['/src/app-other/.claude/worktrees/fix'],
-  ])('refuses %s, which is outside it', (candidate) => {
-    expect(withinAgentWorktrees(root, candidate)).toBe(false)
-  })
-
-  it.each([
-    [root, `${worktrees}/fix/../../../etc`],
-    ['/src/app/..', `${worktrees}/fix`],
-  ])('refuses a path carrying a .. segment', (repoRoot, candidate) => {
-    expect(withinAgentWorktrees(repoRoot, candidate)).toBe(false)
+  it('reads an empty answer as no answer', async () => {
+    await expect(toplevel({ cwd: plainDirectory(), env: stubGit('exit 0') })).resolves.toBeNull()
   })
 })
 
-// One end-to-end shape, because the guard and the resolver are only ever
-// correct together: the reap's own question, asked of a real repository.
-describe('the containment guard over a real worktree', () => {
-  it('accepts this repository own worktree and refuses a link out of it', () => {
-    const root = repository()
-    const worktree = join(root, AGENT_WORKTREE_SEGMENT, 'fix')
-    unwrap(git(root, ['worktree', 'add', '-q', '-b', 'fix/lodash-4', worktree]))
-    writeFileSync(join(worktree, 'note.txt'), 'x')
-    expect(withinAgentWorktrees(root, resolveExistingAncestor(worktree))).toBe(true)
+describe('currentBranch', () => {
+  it('names the branch HEAD is on', async () => {
+    const { work, env } = repository()
 
-    const elsewhere = scratch()
-    symlinkSync(elsewhere, join(root, AGENT_WORKTREE_SEGMENT, 'smuggled'))
-    expect(
-      withinAgentWorktrees(
-        root,
-        resolveExistingAncestor(join(root, AGENT_WORKTREE_SEGMENT, 'smuggled')),
-      ),
-    ).toBe(false)
+    await expect(currentBranch({ cwd: work, env })).resolves.toBe('main')
+  })
+
+  it('says HEAD when HEAD is detached', async () => {
+    const { work, env } = repository()
+    setup(work, 'checkout', '-q', '--detach')
+
+    await expect(currentBranch({ cwd: work, env })).resolves.toBe('HEAD')
+  })
+
+  it('answers null outside a repository', async () => {
+    const { env } = repository()
+
+    await expect(currentBranch({ cwd: plainDirectory(), env })).resolves.toBeNull()
+  })
+
+  it('reads an empty answer as no answer', async () => {
+    await expect(
+      currentBranch({ cwd: plainDirectory(), env: stubGit('exit 0') }),
+    ).resolves.toBeNull()
   })
 })
 
-// The local runner, at the real boundary: no substituted spawn. These
-// examples moved here with the runner. The child is reached through
-// `env_prefix`, because a prefix is the one way a caller runs a command
-// other than git. Each expected value is what a shell reports: 127 for a
-// command it cannot find, 128 plus the signal number for a signal death.
-describe('the local runner, with no spawn argument', () => {
-  const run = (prefix: string[]) => gitRun('/src/app', ['status'], { envPrefix: prefix })
+describe('defaultBranch', () => {
+  it('reads the default branch from the cached origin/HEAD', async () => {
+    const { work, env } = repository()
+    setup(work, 'remote', 'set-head', 'origin', 'main')
 
-  it('captures stdout, stderr and the exit status of a real process', () => {
-    const program = 'process.stdout.write("out");process.stderr.write("err");process.exit(4)'
-    expect(unwrap(run([process.execPath, '-e', program]))).toEqual({
-      command: process.execPath,
-      args: ['-e', program, 'git', '-C', '/src/app', 'status'],
-      status: 4,
-      stdout: 'out',
-      stderr: 'err',
-    })
+    await expect(defaultBranch({ cwd: work, env })).resolves.toBe('main')
   })
 
-  // A command that never started is 127 with node's own message, not an
-  // exception that goes up through a caller that did not expect one.
-  it('reports a command that is not on PATH as 127, quoting the spawn error', () => {
-    const result = unwrap(run(['gh-security-no-such-command']))
-    expect({ status: result.status, stdout: result.stdout }).toEqual({ status: 127, stdout: '' })
-    expect(result.stderr).toContain('ENOENT')
+  it('keeps a slash inside the branch name', async () => {
+    const { work, env } = repository()
+    setup(work, 'branch', 'release/1')
+    setup(work, 'push', '-q', 'origin', 'release/1')
+    setup(work, 'remote', 'set-head', 'origin', 'release/1')
+
+    await expect(defaultBranch({ cwd: work, env })).resolves.toBe('release/1')
   })
 
-  // A signal death has no exit code. 0 would read as success, and 1 would
-  // look like an ordinary failure.
-  it('reports a signal death as 128 plus the signal number', () => {
-    expect(unwrap(run(['/bin/sh', '-c', 'kill -9 $$'])).status).toBe(137)
+  it('answers null when no origin/HEAD is cached', async () => {
+    const { work, env } = repository()
+
+    await expect(defaultBranch({ cwd: work, env })).resolves.toBeNull()
   })
 
-  it('allows an answer far larger than the 1 MiB node defaults to', () => {
-    const result = unwrap(
-      run([process.execPath, '-e', 'process.stdout.write("x".repeat(4194304))']),
-    )
-    expect({ status: result.status, length: result.stdout.length }).toEqual({
-      status: 0,
-      length: 4 * 1024 * 1024,
-    })
+  it('passes a ref that does not carry the origin prefix through unchanged', async () => {
+    const { work, env } = repository()
+    setup(work, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+    setup(work, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/heads/main')
+
+    await expect(defaultBranch({ cwd: work, env })).resolves.toBe('refs/heads/main')
   })
 
-  // `git` reads a non-zero status as a failure, and says what the command
-  // said: stderr first, then stdout, then that there was nothing.
-  it.each([
-    ['stderr', 'echo out; echo err >&2; exit 3', 'err'],
-    ['stdout, when stderr is empty', 'echo out; exit 3', 'out'],
-    ['that there was no output', 'exit 3', 'no output'],
-  ])('describes a failure by %s', (_case, script, detail) => {
-    expect(git('/src/app', ['status'], { envPrefix: ['/bin/sh', '-c', script] })).toEqual({
-      outcome: 'failed',
-      error: `/bin/sh -c ${script} git -C /src/app status failed (exit 3): ${detail}`,
-    })
+  it('reads an empty answer as no answer', async () => {
+    await expect(
+      defaultBranch({ cwd: plainDirectory(), env: stubGit('exit 0') }),
+    ).resolves.toBeNull()
+  })
+})
+
+describe('hasRef', () => {
+  it('says whether a ref exists, in either namespace', async () => {
+    const { work, env } = repository()
+
+    await expect(hasRef('refs/heads/main', { cwd: work, env })).resolves.toBe(true)
+    await expect(hasRef('refs/remotes/origin/main', { cwd: work, env })).resolves.toBe(true)
+    await expect(hasRef('refs/heads/never-created', { cwd: work, env })).resolves.toBe(false)
+  })
+
+  it('does not take a short name for a full one', async () => {
+    const { work, env } = repository()
+
+    await expect(hasRef('main', { cwd: work, env })).resolves.toBe(false)
+  })
+
+  // `GIT_DIR` outranks `cwd` and `git -C`, which is why `RepoOptions`
+  // requires `env`. Two real checkouts differ only in the environment.
+  it('reads the refs of the repository GIT_DIR names, not the one the call named', async () => {
+    const { work, env } = repository()
+    const other = repository()
+    setup(other.work, 'branch', 'only-over-there')
+
+    await expect(hasRef('refs/heads/only-over-there', { cwd: work, env })).resolves.toBe(false)
+    await expect(
+      hasRef('refs/heads/only-over-there', {
+        cwd: work,
+        env: { ...env, GIT_DIR: join(other.work, '.git') },
+      }),
+    ).resolves.toBe(true)
   })
 })
