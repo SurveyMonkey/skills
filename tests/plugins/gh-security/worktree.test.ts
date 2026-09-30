@@ -2,6 +2,7 @@
 // real repository built by `harness/git.ts`, and the expected verdict is written
 // by hand from that header. A pointer that git never writes is a hand-made
 // `.git` file. The bash script is compared in `parity-worktree.test.ts`.
+import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   mkdirSync,
@@ -237,6 +238,42 @@ describe('requireLinkedWorktree: a relative directory', () => {
     mkdirSync(join(worktree, 'sub'))
     const relative = join(relative_(process.cwd(), worktree), 'sub')
     expect(requireLinkedWorktree(relative)).toEqual({ outcome: 'ok', value: worktree })
+  })
+
+  // A vitest worker cannot change its cwd, so `.` needs a process of its own.
+  const WORKTREE_MODULE = new URL('../../../plugins/gh-security/src/worktree.ts', import.meta.url)
+  const guardFrom = (cwd: string, directory: string): unknown =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { requireLinkedWorktree } from ${JSON.stringify(WORKTREE_MODULE.href)}
+console.log(JSON.stringify(requireLinkedWorktree(${JSON.stringify(directory)})))`,
+        ],
+        { cwd, encoding: 'utf8' },
+      ),
+    )
+
+  it('walks up from the dot of a subdirectory of a linked worktree', () => {
+    const built = scene()
+    const { worktree } = linkedWorktree(built)
+    mkdirSync(join(worktree, 'sub'))
+    expect(guardFrom(join(worktree, 'sub'), '.')).toEqual({ outcome: 'ok', value: worktree })
+  })
+
+  it('names the primary checkout, and not a subdirectory, for the dot of its root', () => {
+    const built = scene()
+    const { main } = linkedWorktree(built)
+    expect(guardFrom(main, '.')).toEqual(
+      refusal(`this is a primary checkout (${join(main, '.git')} is a directory)`),
+    )
+  })
+
+  it('names the absolute path in the refusal for a relative path with no repository', () => {
+    const { root } = scene()
+    expect(guardFrom(root, '.')).toEqual(refusal(`no git repository at or above ${root}`))
   })
 })
 
