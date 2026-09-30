@@ -124,10 +124,10 @@ const parentOf = (key: string): Parent => {
  * Only `snapshots:` is read: a lockfileVersion 6 lockfile has none, and its
  * `packages:` keys are no parents (#103).
  */
-export const parents = (text: string, pkg: string): Parent[] => {
+export const parents = (text: string, pkg: string): readonly Parent[] => {
   const found: Parent[] = []
   let inSnapshots = false
-  let parent: Parent = { name: '', version: null }
+  let parent: Parent | null = null
   let inEdges = false
   for (const line of lines(text)) {
     if (line.startsWith('snapshots:')) {
@@ -141,7 +141,8 @@ export const parents = (text: string, pkg: string): Parent[] => {
         .slice(2)
         .replace(/:[ \t\n\v\f\r]*(\{\})?[ \t\n\v\f\r]*$/, '')
         .replaceAll("'", '')
-      parent = parentOf(before(key, '('))
+      const named = parentOf(before(key, '('))
+      parent = named.name === '' ? null : named
       inEdges = false
       continue
     }
@@ -150,8 +151,9 @@ export const parents = (text: string, pkg: string): Parent[] => {
       continue
     }
     if (/^ {4}[a-zA-Z]/.test(line)) inEdges = false
-    if (inEdges && /^ {6}/.test(line) && before(line.slice(6), ':').replaceAll("'", '') === pkg) {
-      found.push(parent)
+    if (parent !== null && inEdges && /^ {6}/.test(line)) {
+      const edge = line.slice(6)
+      if (edge.includes(':') && before(edge, ':').replaceAll("'", '') === pkg) found.push(parent)
     }
   }
   return uniqueParents(found)

@@ -155,7 +155,7 @@ const DECLARATIONS = /^ {2}(dependencies|peerDependencies|optionalDependencies):
  * `peerDependencies`, by the name or through an `npm:` alias of it (#47, #49).
  * The colon must follow the block name, so `peerDependenciesMeta` is not read.
  */
-export const parents = (text: string, pkg: string): Parent[] => {
+export const parents = (text: string, pkg: string): readonly Parent[] => {
   const found: Parent[] = []
   let parent: Parent | null = null
   let inDeclarations = false
@@ -174,7 +174,7 @@ export const parents = (text: string, pkg: string): Parent[] => {
       continue
     }
     if (/^ {2}[a-zA-Z]/.test(line)) inDeclarations = false
-    if (parent !== null && inDeclarations && /^ {4}/.test(line)) {
+    if (parent !== null && inDeclarations && /^ {4}/.test(line) && line.includes(':')) {
       const declaration = line.slice(4)
       const declared = before(declaration, ':')
       const name = declared.replaceAll('"', '')

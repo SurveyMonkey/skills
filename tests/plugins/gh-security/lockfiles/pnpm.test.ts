@@ -113,4 +113,71 @@ describe('parents', () => {
   it('reads no edge from the peerDependencies of a packages entry', () => {
     expect(parents(lockfile('pnpm-git-parent'), 'supports-color')).toEqual([])
   })
+
+  it('names a parent once when two peer variants of it declare the package', () => {
+    expect(parents(lockfile('pnpm-peer-variant'), 'react')).toEqual([
+      { name: 'react-redux', version: '8.1.3' },
+    ])
+  })
+
+  it('reads a quoted scoped child', () => {
+    expect(parents(lockfile('pnpm-workspace-peer'), '@babel/core')).toEqual([
+      { name: '@vitejs/plugin-react', version: '4.3.4' },
+    ])
+  })
+
+  it('reads no edge from a line without a colon', () => {
+    const text = 'snapshots:\n\n  a@1.0.0:\n    dependencies:\n      lodash\n'
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+
+  it('names no parent for a key that has no name', () => {
+    const text = "snapshots:\n\n  '(react@1.0.0)':\n    dependencies:\n      lodash: 4.17.21\n"
+    expect(parents(text, 'lodash')).toEqual([])
+  })
+})
+
+describe('key readings', () => {
+  const keyed = (key: string): string => `packages:\n\n  ${key}:\n    resolution: {}\n`
+  const other = 'ok@1.0.0'
+
+  // One key in two is read; the other is not. Exactly half passes the guard.
+  it.each([
+    'link:../a',
+    'file:../a',
+    'workspace:*',
+    'portal:../a',
+    'catalog:',
+    'exec:./a',
+    'git:x',
+    'git+ssh://x',
+    'git+http://x',
+    'git+https://x',
+    'http://x',
+    'https://x',
+    'ssh://x',
+    'github:x/y',
+    'gitlab:x/y',
+    'bitbucket:x/y',
+  ])('reads a %s target and keeps it out of the map', (target) => {
+    const text = `${keyed(`pkg@${target}`)}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text)).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      resolutions: { ok: ['1.0.0'] },
+    })
+  })
+
+  it('counts a key it cannot read against the guard', () => {
+    const text = `${keyed('pkg@unknown:x')}\n  ${other}:\n    resolution: {}\n`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 2, expected: 2, read: 1 })
+  })
+
+  it('refuses a lockfile it reads less than half of', () => {
+    const text = `${keyed('a@unknown:x')}\n  b@unknown:y:\n    resolution: {}\n\n  ${other}:\n`
+    expect(() => resolutionMap(text)).toThrow(
+      new LockfileError(
+        "Read 1 of 3 lockfile entries for pm 'pnpm'. The parser understands too little of this lockfile to describe the tree; refusing to report a mostly-unparsed lockfile as a clean result.",
+      ),
+    )
+  })
 })

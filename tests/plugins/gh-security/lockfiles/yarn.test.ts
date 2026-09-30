@@ -148,4 +148,57 @@ describe('parents', () => {
   it('never names a workspace', () => {
     expect(parents(lockfile('yarn-alias'), 'lodash')).toEqual([])
   })
+
+  const entry = (name: string, declarations: string): string =>
+    `"${name}@npm:1.0.0":\n  version: 1.0.0\n  resolution: "${name}@npm:1.0.0"\n${declarations}\n`
+
+  it('reads a quoted scoped declaration', () => {
+    const text = entry('a', '  dependencies:\n    "@scope/x": "npm:^1.0.0"\n')
+    expect(parents(text, '@scope/x')).toEqual([{ name: 'a', version: '1.0.0' }])
+  })
+
+  it('reads no declaration from a block that follows the declarations', () => {
+    const text = entry('a', '  dependencies:\n    y: "npm:^1"\n  bin:\n    x: ./x.js\n')
+    expect(parents(text, 'x')).toEqual([])
+  })
+
+  it('reads no declaration from a line without a colon', () => {
+    const text = entry('a', '  dependencies:\n    x\n')
+    expect(parents(text, 'x')).toEqual([])
+  })
+})
+
+describe('locator readings', () => {
+  const entry = (locator: string): string =>
+    `"${locator}":\n  version: 1.0.0\n  resolution: "${locator}"\n`
+  const ok = entry('ok@npm:1.0.0')
+
+  it.each([
+    'link:../a',
+    'file:../a',
+    'git://x',
+    'git+ssh://x',
+    'git+http://x',
+    'git+https://x',
+    'http://x',
+    'https://x',
+    'ssh://x',
+    'github:x/y',
+    'gitlab:x/y',
+    'bitbucket:x/y',
+  ])('reads a %s target and keeps it out of the map', (target) => {
+    expect(resolutionMap(`${entry(`pkg@${target}`)}\n${ok}`)).toEqual({
+      coverage: { entries: 2, expected: 2, read: 2 },
+      resolutions: { ok: ['1.0.0'] },
+    })
+  })
+
+  it.each(['1.0.0-rc.1', '1.0.0+build.5', '1.0.0-rc.1+build.5'])('reads the version %s', (v) => {
+    expect(resolutionMap(entry(`pkg@npm:${v}`)).resolutions).toEqual({ pkg: [v] })
+  })
+
+  it('allows a lockfile it reads exactly half of', () => {
+    const text = `${entry('a@npm:1.0.0')}\n${entry('b@npm:2.0.0')}\n${entry('c@npm:x')}\n${entry('d@npm:y')}`
+    expect(resolutionMap(text).coverage).toEqual({ entries: 4, expected: 4, read: 2 })
+  })
 })

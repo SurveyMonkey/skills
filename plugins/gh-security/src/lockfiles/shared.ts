@@ -51,8 +51,8 @@ export type Parent = {
 
 /** The lockfile is one this module refuses to describe. */
 export class LockfileError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'LockfileError'
   }
 }
@@ -99,7 +99,7 @@ export const groupResolutions = (
 }
 
 /** One entry per parent copy, sorted by name and then version. */
-export const uniqueParents = (found: readonly Parent[]): Parent[] =>
+export const uniqueParents = (found: readonly Parent[]): readonly Parent[] =>
   [...new Map(found.map((parent) => [JSON.stringify([parent.name, parent.version]), parent]))]
     .sort(([a], [b]) => byText(a, b))
     .map(([, parent]) => parent)

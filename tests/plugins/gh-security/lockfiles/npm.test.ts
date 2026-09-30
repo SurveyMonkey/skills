@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/npm.ts'
-import { LockfileError } from '#gh-security/lockfiles/shared.ts'
+import { aliasTarget, LockfileError } from '#gh-security/lockfiles/shared.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
 const lockfile = (fixture: string): string =>
@@ -140,5 +140,70 @@ describe('parents', () => {
 
   it('never names the root', () => {
     expect(parents(lockfile('npm-stale-nested'), 'nx')).toEqual([])
+  })
+
+  it('names a parent that declares the package as optional', () => {
+    expect(parents(lockfile('npm-v3'), 'sha.js')).toEqual([
+      { name: 'express', version: '4.18.2' },
+      { name: 'serve-static', version: '1.15.0' },
+    ])
+  })
+})
+
+describe('malformed input', () => {
+  it('refuses text that is not JSON with a LockfileError that keeps the cause', () => {
+    const attempt = () => resolutionMap('{"packages":')
+    expect(attempt).toThrow(LockfileError)
+    expect(attempt).toThrow(/^package-lock\.json is not valid JSON: /)
+  })
+
+  it('reads only the entries installed under node_modules', () => {
+    expect(resolvedVersions(lockfile('npm-scoped-parents'), 'tool').copies).toEqual([])
+  })
+
+  // 2 of 4 is exactly half, which the guard allows.
+  it('allows a lockfile it reads exactly half of', () => {
+    const text = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'root' },
+        'node_modules/a': { version: '1.0.0' },
+        'node_modules/b': { version: '2.0.0' },
+        'node_modules/c': { version: 'v3' },
+        'node_modules/d': { version: 'v4' },
+      },
+    })
+    expect(resolutionMap(text)).toEqual({
+      coverage: { entries: 4, expected: 4, read: 2 },
+      resolutions: { a: ['1.0.0'], b: ['2.0.0'] },
+    })
+  })
+
+  it('refuses a lockfile it reads less than half of', () => {
+    const text = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        'node_modules/a': { version: '1.0.0' },
+        'node_modules/b': { version: 'v2' },
+        'node_modules/c': { version: 'v3' },
+      },
+    })
+    expect(() => resolutionMap(text)).toThrow(
+      new LockfileError(
+        "Read 1 of 3 lockfile entries for pm 'npm'. The parser understands too little of this lockfile to describe the tree; refusing to report a mostly-unparsed lockfile as a clean result.",
+      ),
+    )
+  })
+})
+
+describe('aliasTarget', () => {
+  it.each([
+    ['npm:lodash@^4.18.0', 'lodash'],
+    ['npm:@scope/pkg@1.0.0', '@scope/pkg'],
+    ['npm:lodash', 'lodash'],
+    ['npm:@scope/pkg', '@scope/pkg'],
+    ['^4.0.0', null],
+  ])('reads %s as %s', (specifier, expected) => {
+    expect(aliasTarget(specifier)).toBe(expected)
   })
 })

@@ -47,8 +47,19 @@ const installedName = (key: string): string => key.replace(/^.*node_modules\//s,
 /** npm's own name for the copy: `.name` for an alias, else the installed name. */
 const packageName = ({ key, value }: Entry): string => textOf(value.name) ?? installedName(key)
 
+const parse = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    throw new LockfileError(
+      `package-lock.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    )
+  }
+}
+
 const entriesOf = (text: string): Entry[] => {
-  const packages = recordOf(JSON.parse(text)).packages
+  const packages = recordOf(parse(text)).packages
   if (!isRecord(packages)) {
     throw new LockfileError(
       'package-lock.json has no .packages object (lockfileVersion 1 is unsupported)',
@@ -106,7 +117,7 @@ export const resolutionMap = (text: string): ResolutionMap => {
  * declaration is why the copy is in the tree at all (#49). The root is not a
  * parent: an override cannot be scoped to it.
  */
-export const parents = (text: string, pkg: string): Parent[] =>
+export const parents = (text: string, pkg: string): readonly Parent[] =>
   uniqueParents(
     entriesOf(text)
       .filter(({ key }) => key !== '')
