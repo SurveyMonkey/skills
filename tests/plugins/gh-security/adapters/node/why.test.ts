@@ -207,6 +207,56 @@ describe('why, with the raw text given', () => {
     })
   })
 
+  // The snapshot of `@vitest/mocker` below reaches vite as an optional peer.
+  // Each row changes the copy of pnpm-peer-only, as node.sh saw it.
+  const MOCKER =
+    "  '@vitest/mocker@3.0.5(vite@6.4.3)':\n    dependencies:\n      '@vitest/spy': 3.0.5"
+  const PLUGIN = "  '@vitejs/plugin-react@4.3.4(vite@6.4.3)':"
+
+  const peersAfter = async (change: (text: string) => string) => {
+    const root = copyOf('pnpm-peer-only')
+    const path = join(root, 'pnpm-lock.yaml')
+    writeFileSync(path, change(readFileSync(path, 'utf8')))
+    const answer = await node.why(treeAt(root), 'vite', { raw: '' })
+    if (answer.outcome !== 'ok') throw new Error(answer.error)
+    const { peer_only, peer_parents, optional_peer_parents } = answer.value
+    return { peer_only, peer_parents, optional_peer_parents }
+  }
+
+  it('names no optional peer that a suffixed snapshot also requires', async () => {
+    expect(
+      await peersAfter((text) => text.replace(MOCKER, `${MOCKER}\n      vite: 6.4.3`)),
+    ).toEqual({
+      peer_only: true,
+      peer_parents: ['@vitejs/plugin-react', '@vitest/mocker'],
+      optional_peer_parents: [],
+    })
+  })
+
+  it('reads a required edge from a snapshot with no peer suffix as no peer edge', async () => {
+    const plain = "  '@vitest/mocker@3.0.5':\n    dependencies:\n      vite: 6.4.3\n\n"
+    expect(await peersAfter((text) => text.replace(MOCKER, `${plain}${MOCKER}`))).toEqual({
+      peer_only: false,
+      peer_parents: ['@vitejs/plugin-react', '@vitest/mocker'],
+      optional_peer_parents: ['@vitest/mocker'],
+    })
+  })
+
+  it('puts the required peers first, whatever the order of the file', async () => {
+    const moved = (text: string) => {
+      const start = text.indexOf(MOCKER)
+      const end = text.indexOf('  next@15.1.6(', start)
+      const rest = text.slice(0, start) + text.slice(end)
+      const at = rest.indexOf(PLUGIN)
+      return rest.slice(0, at) + text.slice(start, end) + rest.slice(at)
+    }
+    expect(await peersAfter(moved)).toEqual({
+      peer_only: true,
+      peer_parents: ['@vitejs/plugin-react', '@vitest/mocker'],
+      optional_peer_parents: ['@vitest/mocker'],
+    })
+  })
+
   // #50: bash names this parent `debug@git+ssh://git`.
   it('names a pnpm git parent by the name before its first @', async () => {
     const answer = await node.why(tree('pnpm-git-parent'), 'ms', { raw: '' })

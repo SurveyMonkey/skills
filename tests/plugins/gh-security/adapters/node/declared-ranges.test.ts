@@ -230,7 +230,82 @@ describe('declared_ranges of an installed manifest', () => {
     expect(body(node.declaredRanges({ root, detection }, 'lodash', null))).toMatchObject({
       parents_read: ['dupe-parent'],
       parents_unreadable: ['alias-parent'],
+      parents_malformed: [],
     })
+  })
+})
+
+describe('declared_ranges of lockfile rows', () => {
+  const lockfile = 'package-lock.json'
+  type Lock = { packages: Record<string, Record<string, unknown>> }
+
+  // npm writes a bare `""` specifier as it is. It is no range.
+  it('reads a copy that declares an empty range as unreadable', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, lockfile, (json) => {
+      const { packages } = json as unknown as Lock
+      ;(packages['node_modules/test-exclude']?.dependencies as Record<string, string>).lodash = ''
+      return json
+    })
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', null))).toMatchObject({
+      ranges: ['^4.17.20', '^4.17.21'],
+      parents_read: ['express'],
+      parents_unreadable: ['test-exclude'],
+    })
+  })
+
+  it('names a parent read when one copy has a range and one has none', () => {
+    const { root, detection } = copyOf('npm-scoped-parents')
+    edit(root, lockfile, (json) => {
+      const { packages } = json as unknown as Lock
+      ;(packages['node_modules/minimatch']?.dependencies as Record<string, string>)[
+        'brace-expansion'
+      ] = ''
+      return json
+    })
+    expect(body(node.declaredRanges({ root, detection }, 'brace-expansion', null))).toMatchObject({
+      ranges: ['^2.0.2', '^5.0.5'],
+      parents_read: ['minimatch', 'packages/tool'],
+      parents_unreadable: [],
+    })
+  })
+
+  // A parent at two versions answers from the lockfile, even with a manifest on disk (#85).
+  it('reads each copy of a parent at two versions, and not its installed manifest', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, lockfile, (json) => {
+      const { packages } = json as unknown as Lock
+      packages['node_modules/test-exclude/node_modules/express'] = {
+        version: '4.17.0',
+        dependencies: { lodash: '^4.0.0' },
+      }
+      return json
+    })
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', null))).toMatchObject({
+      ranges: ['^3.0.0', '^4.0.0', '^4.17.20', '^4.17.21'],
+      parents_read: ['express', 'test-exclude'],
+    })
+  })
+
+  it('drops an empty range of a manifest that also declares a range', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, 'node_modules/express/package.json', (json) => ({
+      ...json,
+      dependencies: { lodash: '' },
+      peerDependencies: { lodash: '^4.1.0' },
+    }))
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', null))).toMatchObject({
+      ranges: ['^3.0.0', '^4.1.0', '^4.17.21'],
+      parents_without_range: [],
+    })
+  })
+
+  it('reads a root block of false as no block', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, 'package.json', (json) => ({ ...json, optionalDependencies: false }))
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', null)).root_range).toBe(
+      '^4.17.21',
+    )
   })
 })
 
@@ -277,24 +352,33 @@ describe('declared_ranges on one line', () => {
 
   const nested = 'node_modules/vercel/node_modules/undici/package.json'
 
+  // On line 5, the hoisted copy (6.x) files vercel on another line. A search
+  // that stopped at the nested manifest would keep vercel as unknown.
+  const ALL_OFF = {
+    ranges: [],
+    parents_read: [],
+    parents_other_lines: [
+      '@sentry/cli',
+      '@vercel/blob',
+      '@vercel/node',
+      '@vercel/sandbox',
+      'vercel',
+    ],
+  }
+
   it.each([
     ['no version', (json: Record<string, unknown>) => ({ ...json, version: undefined })],
     ['a version that is a number', (json: Record<string, unknown>) => ({ ...json, version: 7 })],
   ])('goes on to the hoisted copy past a nested manifest with %s', (_shape, change) => {
     const { root, detection } = copyOf('yarn-line-scoped')
     edit(root, nested, change)
-    expect(body(node.declaredRanges({ root, detection }, 'undici', 6))).toMatchObject({
-      parents_read: ['@sentry/cli', '@vercel/blob', '@vercel/node', 'vercel'],
-      parents_other_lines: ['@vercel/sandbox'],
-    })
+    expect(body(node.declaredRanges({ root, detection }, 'undici', 5))).toMatchObject(ALL_OFF)
   })
 
   it.each([['{'], ['[1]']])('goes on to the hoisted copy past a nested manifest of %j', (text) => {
     const { root, detection } = copyOf('yarn-line-scoped')
     writeFileSync(join(root, nested), text)
-    expect(body(node.declaredRanges({ root, detection }, 'undici', 6))).toMatchObject({
-      parents_other_lines: ['@vercel/sandbox'],
-    })
+    expect(body(node.declaredRanges({ root, detection }, 'undici', 5))).toMatchObject(ALL_OFF)
   })
 
   it('reads a nested version with a leading v', () => {
@@ -398,6 +482,20 @@ describe('declared_ranges of an installed pnpm parent', () => {
     [3, { ranges: [], parents_read: [], parents_other_lines: ['express'] }],
   ])('reads the manifest, and files it by its edges, on line %i', (line, lists) => {
     expect(body(node.declaredRanges(installed(), 'lodash', line))).toMatchObject(lists)
+  })
+
+  // Two peer variants of one release: the first edge is off the line, the second is on it.
+  it('keeps a parent when any of its edges is on the line', () => {
+    const detected = installed()
+    const path = join(detected.root, 'pnpm-lock.yaml')
+    const snapshot = '  express@4.18.2:\n    dependencies:\n      lodash: 4.17.21'
+    const variant = '  express@4.18.2(react@18.2.0):\n    dependencies:\n      lodash: 3.10.1\n\n'
+    writeFileSync(path, readFileSync(path, 'utf8').replace(snapshot, `${variant}${snapshot}`))
+    expect(body(node.declaredRanges(detected, 'lodash', 4))).toMatchObject({
+      ranges: ['^4.17.20'],
+      parents_read: ['express'],
+      parents_other_lines: [],
+    })
   })
 
   it('keeps a parent whose edges have no registry version', () => {
