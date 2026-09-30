@@ -282,6 +282,17 @@ describe('copies', () => {
     expect(copies(text, 'x')).toEqual([])
   })
 
+  it('reads the version line of each entry, without its quotes, and none for an entry with none', () => {
+    const text =
+      '"a@npm:^1.0.0":\n  version: "1.0.0"\n  resolution: "a@npm:1.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n\n"b@npm:^2.0.0":\n  resolution: "b@npm:2.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n'
+    expect(copies(text, 'x').map(({ parent, parent_version }) => [parent, parent_version])).toEqual(
+      [
+        ['a', '1.0.0'],
+        ['b', ''],
+      ],
+    )
+  })
+
   it('reads no descriptor from a key line that does not end with a colon', () => {
     const text =
       '"x@npm:^1.0.0"\n  version: 1.0.0\n\n"a@npm:^1.0.0":\n  version: 1.0.0\n  resolution: "a@npm:1.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n'

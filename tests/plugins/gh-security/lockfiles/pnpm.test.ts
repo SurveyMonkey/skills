@@ -326,6 +326,16 @@ describe('scan', () => {
     expect(scan(text, 'lodash').importers.map(({ kind }) => kind)).toEqual(kinds)
   })
 
+  it('reads no dependency line of an importer that has no block yet', () => {
+    const text = 'importers:\n  a:\n    dependencies:\n      x: 1.0.0\n  b:\n      lodash: 1.0.0\n'
+    expect(scan(text, 'lodash').importers).toEqual([])
+  })
+
+  it('reads no importer line that only starts with the name', () => {
+    const text = 'importers:\n  .:\n    dependencies:\n      lodash-es: 1.0.0\n'
+    expect(scan(text, 'lodash').importers).toEqual([])
+  })
+
   it('reads no importer after the section that follows importers', () => {
     const text = 'importers:\n  .: {}\nother:\n  x:\n    dependencies:\n      lodash: 1.0.0\n'
     expect(scan(text, 'lodash')).toEqual({ importers: [], suffixes: [], edges: [] })
@@ -334,6 +344,12 @@ describe('scan', () => {
   it('reads a peer suffix without an edge, and no suffix for a key with no name', () => {
     const text = "snapshots:\n\n  a@1.0.0(lodash@4.17.21): {}\n  '(lodash@4.17.21)': {}\n"
     expect(scan(text, 'lodash').suffixes).toEqual([{ name: 'a', version: '1.0.0' }])
+  })
+
+  // The suffix names the package, and an `@` follows the name.
+  it('reads no peer suffix of a package whose name only starts with the name', () => {
+    const text = 'snapshots:\n\n  a@1.0.0(lodash-es@4.17.21): {}\n'
+    expect(scan(text, 'lodash').suffixes).toEqual([])
   })
 
   it('takes the version of an edge without quotes, space or peer suffix', () => {
@@ -386,6 +402,19 @@ describe('rootVersion', () => {
   ])('reads %s', (_shape, block, version) => {
     const text = `importers:\n\n  .:\n${block}\npackages:\n`
     expect(rootVersion(text, 'lodash')).toBe(version)
+  })
+
+  // `dependenciesMeta:` is not a dependency block, so it ends the one before it.
+  it('reads no version from a block after the dependency blocks', () => {
+    const text =
+      'importers:\n  .:\n    dependencies:\n      a:\n        version: 1.0.0\n    dependenciesMeta:\n      lodash:\n        version: 2.0.0\n'
+    expect(rootVersion(text, 'lodash')).toBeNull()
+  })
+
+  it('reads the version of the declaration of the package, not of the one before it', () => {
+    const text =
+      'importers:\n  .:\n    dependencies:\n      a:\n        version: 1.0.0\n      lodash:\n        version: 2.0.0(b@1.0.0)\n'
+    expect(rootVersion(text, 'lodash')).toBe('2.0.0')
   })
 
   it('reads no version from an importer that is not the root', () => {

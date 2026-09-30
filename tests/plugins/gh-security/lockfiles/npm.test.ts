@@ -330,6 +330,20 @@ describe('copies', () => {
     expect(row?.resolved).toBe(resolved)
   })
 
+  // #121: the walk up takes a scoped name as one step, and reaches the root.
+  it('walks up from a copy nested under a scoped package to the root', () => {
+    const text = JSON.stringify({
+      packages: {
+        'node_modules/@s/p': { version: '1.0.0' },
+        'node_modules/@s/p/node_modules/c': { version: '1.0.0', dependencies: { x: '^1' } },
+        'node_modules/x': { version: '1.2.3' },
+      },
+    })
+    expect(copies(text, 'x')).toEqual([
+      { parent: 'c', parent_version: '1.0.0', range: '^1', resolved: '1.2.3' },
+    ])
+  })
+
   it('reads no declaration that is not a string, of another package, or of the root', () => {
     const text = JSON.stringify({
       packages: {
