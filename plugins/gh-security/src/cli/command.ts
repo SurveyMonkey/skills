@@ -3,7 +3,7 @@
 // A command is an exported, typed handler returning the envelope (issue
 // #216's decision comment); the registry is a map from a name to a loader
 // for one of those plus the line `--help` prints for it. The io is a
-// parameter for the same reason the process runner's spawn is one: it is the
+// parameter for the same reason the `gh` client's `run` is one: it is the
 // boundary, so an example substitutes it rather than reading the real process
 // streams.
 //
@@ -61,10 +61,9 @@ export interface CommandEntry {
 export const STDIN_FD = 0
 
 /**
- * Read a descriptor to the end, synchronously, the way every other process
- * seam in this plugin is synchronous. The descriptor is a parameter so the
- * read itself is exercised against a real file rather than against the
- * suite's own stdin.
+ * Read a descriptor to the end, synchronously. The descriptor is a parameter
+ * so the read itself is exercised against a real file rather than against
+ * the suite's own stdin.
  */
 export const readAll = (fd: number): string => readFileSync(fd, 'utf8')
 
