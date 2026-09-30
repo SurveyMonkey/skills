@@ -1,7 +1,8 @@
 // `env_prefix`, in one place. The four per-script `set_env_prefix`/`run_env`
 // pairs (`fix-group.sh`, `audit-pins-driver.sh`, `post-agent.sh`,
-// `render-pr.sh`) become this module, which the `gh` client and the git
-// helpers both compose through.
+// `render-pr.sh`) become this module, which the git helpers compose through.
+// The `gh` client takes no prefix: a caller wraps it through the client's
+// `run` option.
 //
 // **The prefix is opaque, and that is the contract** (the plugin guide,
 // "`env_prefix` is an opaque, optional seam"). It is a command prefix the
@@ -20,7 +21,12 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import type { RunRequest } from './process-runner.ts'
+/** The part of a request that the prefix changes: the command and its
+ *  arguments. A request can carry more, such as `cwd`, and keeps it. */
+export interface CommandLine {
+  readonly command: string
+  readonly args: readonly string[]
+}
 
 /** An argv prefix: the command to run, then its own arguments. */
 export type EnvPrefix = readonly string[]
@@ -49,7 +55,10 @@ export const parseEnvPrefix = (raw: string | null | undefined): EnvPrefix => {
  * untouched, which is the bare invocation every environment that needs
  * nothing gets.
  */
-export const withEnvPrefix = (prefix: EnvPrefix, request: RunRequest): RunRequest => {
+export const withEnvPrefix = <Request extends CommandLine>(
+  prefix: EnvPrefix,
+  request: Request,
+): Request => {
   if (prefix.length === 0) return request
   const [command, ...prefixArgs] = prefix
   return {

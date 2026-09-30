@@ -1,4 +1,4 @@
-// The git helpers, built on the process runner. Two things live here:
+// The git helpers, built on a local runner. Two things live here:
 //
 //   * the path-containment helpers copied today between `fix-group.sh` and
 //     `reap-agent-artifacts.sh`, which both run `rm -rf` on the same
@@ -11,16 +11,84 @@
 // depends on the current directory.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
-// node beyond `fs` and `path`.
+// node beyond `child_process`, `fs`, `os` and `path`.
 
+import { spawnSync } from 'node:child_process'
 import { realpathSync, statSync } from 'node:fs'
+import { constants } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { type EnvPrefix, NO_ENV_PREFIX, withEnvPrefix } from './env-prefix.ts'
 import { type Envelope, failed, ok } from './envelope.ts'
-import { describeRun, type RunResult, run, type Spawn } from './process-runner.ts'
+
+// ---------------------------------------------------------------------------
+// The runner
+// ---------------------------------------------------------------------------
+//
+// This file and its callers (`harness/git-repo.ts`) are synchronous, and the
+// runner of `process.ts` is not. So the synchronous runner that `process.ts`
+// replaced stays here, local, until git.ts converges with the target stack
+// (#274). Nothing outside this file and its test may use it.
+
+/** One git invocation, after the `env_prefix` wrap. */
+export interface GitRequest {
+  readonly command: string
+  readonly args: readonly string[]
+}
+
+export interface GitResult {
+  readonly command: string
+  readonly args: readonly string[]
+  readonly status: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+export type GitSpawn = (request: GitRequest) => GitResult
+
+/** The status of a command that never started: a shell's 127. */
+const SPAWN_FAILED = 127
+
+/** A shell reports a signal death as 128 plus the signal number. */
+const SIGNAL_EXIT_BASE = 128
+
+/** 64 MiB. node's own default is 1 MiB, and a short answer read as a whole
+ *  one is the defect this plugin refuses. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+
+/** The boundary: a real child process, with no shell. */
+const nodeSpawn: GitSpawn = (request) => {
+  const result = spawnSync(request.command, [...request.args], {
+    encoding: 'utf8',
+    maxBuffer: MAX_OUTPUT_BYTES,
+    shell: false,
+  })
+  const base = { command: request.command, args: request.args }
+  const stdout = result.stdout ?? ''
+  const stderr = result.stderr ?? ''
+  if (result.error !== undefined) {
+    // The command never ran, or its output went past MAX_OUTPUT_BYTES.
+    // node's message is kept as it is ("spawnSync git ENOENT").
+    return { ...base, status: SPAWN_FAILED, stdout, stderr: result.error.message }
+  }
+  if (result.status !== null) {
+    return { ...base, status: result.status, stdout, stderr }
+  }
+  // `spawnSync` leaves `status` null exactly when a signal killed the child,
+  // and sets `signal` then, so there is no third state.
+  const signal = result.signal as NodeJS.Signals
+  return { ...base, status: SIGNAL_EXIT_BASE + constants.signals[signal], stdout, stderr }
+}
+
+/** What went wrong, in one line, for the `error` field of an envelope. */
+const describeRun = (result: GitResult): string => {
+  const detail = result.stderr.trim() || result.stdout.trim() || 'no output'
+  const invocation = [result.command, ...result.args].join(' ')
+  return `${invocation} failed (exit ${result.status}): ${detail}`
+}
 
 export interface GitOptions {
-  readonly spawn?: Spawn
+  /** The spawn seam. When absent, a real child process. */
+  readonly spawn?: GitSpawn
   readonly envPrefix?: EnvPrefix
 }
 
@@ -109,7 +177,7 @@ export const gitRun = (
   dir: string,
   args: readonly string[],
   options: GitOptions = {},
-): Envelope<RunResult> => {
+): Envelope<GitResult> => {
   if (dir === '') {
     return failed(
       `refusing to run 'git ${args.join(' ')}' with an empty directory: ` +
@@ -121,7 +189,7 @@ export const gitRun = (
     command: 'git',
     args: ['-C', dir, ...args],
   })
-  return ok(run(request, options.spawn))
+  return ok((options.spawn ?? nodeSpawn)(request))
 }
 
 /**
@@ -133,7 +201,7 @@ export const git = (
   dir: string,
   args: readonly string[],
   options: GitOptions = {},
-): Envelope<RunResult> => {
+): Envelope<GitResult> => {
   const ran = gitRun(dir, args, options)
   if (ran.outcome !== 'ok') return ran
   return ran.value.status === 0 ? ran : failed(describeRun(ran.value))
@@ -144,7 +212,7 @@ export const git = (
  * having printed nothing has answered nothing, and reading that as a value is
  * the found-nothing-is-a-pass shape this plugin refuses everywhere.
  */
-const oneLine = (envelope: Envelope<RunResult>, what: string): Envelope<string> => {
+const oneLine = (envelope: Envelope<GitResult>, what: string): Envelope<string> => {
   if (envelope.outcome !== 'ok') return envelope
   const line = envelope.value.stdout.trim()
   return line === '' ? failed(`git ${what} answered nothing`) : ok(line)
