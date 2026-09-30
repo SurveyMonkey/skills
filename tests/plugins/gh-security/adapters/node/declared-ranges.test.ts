@@ -239,12 +239,14 @@ describe('declared_ranges of lockfile rows', () => {
   const lockfile = 'package-lock.json'
   type Lock = { packages: Record<string, Record<string, unknown>> }
 
-  // npm writes a bare `""` specifier as it is. It is no range.
-  it('reads a copy that declares an empty range as unreadable', () => {
+  // npm writes a bare `""` specifier as it is. It is no range. node.sh
+  // writes `-` for no range in its rows, so a `-` range is none too.
+  it.each([[''], ['-']])('reads a copy that declares the range %j as unreadable', (range) => {
     const { root, detection } = copyOf('npm-v3')
     edit(root, lockfile, (json) => {
       const { packages } = json as unknown as Lock
-      ;(packages['node_modules/test-exclude']?.dependencies as Record<string, string>).lodash = ''
+      ;(packages['node_modules/test-exclude']?.dependencies as Record<string, string>).lodash =
+        range
       return json
     })
     expect(body(node.declaredRanges({ root, detection }, 'lodash', null))).toMatchObject({
@@ -298,6 +300,21 @@ describe('declared_ranges of lockfile rows', () => {
       ranges: ['^3.0.0', '^4.1.0', '^4.17.21'],
       parents_without_range: [],
     })
+  })
+
+  // node.sh reads the ranges of a manifest as lines of text.
+  it('reads a manifest range that holds a newline as two ranges', () => {
+    const { root, detection } = copyOf('npm-v3')
+    edit(root, 'node_modules/express/package.json', (json) => ({
+      ...json,
+      dependencies: { lodash: '^4.17.20\n^4.0.0' },
+    }))
+    expect(body(node.declaredRanges({ root, detection }, 'lodash', null)).ranges).toEqual([
+      '^3.0.0',
+      '^4.0.0',
+      '^4.17.20',
+      '^4.17.21',
+    ])
   })
 
   it('reads a root block of false as no block', () => {

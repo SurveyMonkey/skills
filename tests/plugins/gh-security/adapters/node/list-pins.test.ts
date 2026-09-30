@@ -502,6 +502,12 @@ describe('list_pins through pnpm-workspace.yaml', () => {
       2,
     ],
     [
+      'a quote with no key after it',
+      "overrides:\n  ': 1\n",
+      'an entry whose quoted key never closes',
+      2,
+    ],
+    [
       'a backslash in a key',
       'overrides:\n  "a\\\\b": 1\n',
       'a double-quoted scalar with backslash escapes',
@@ -546,6 +552,7 @@ describe('list_pins through pnpm-workspace.yaml', () => {
     ['a tag', 'overrides:\n  a: !!str 1\n', 'an anchor, alias, tag or flow-style value', 2],
     ['a block scalar', 'overrides:\n  a: |\n', 'a block-scalar value', 2],
     ['a folded block scalar', 'overrides:\n  a: >-\n', 'a block-scalar value', 2],
+    ['a kept block scalar', 'overrides:\n  a: |+\n', 'a block-scalar value', 2],
     ['an empty key', 'overrides:\n  : 1\n', 'an entry with an empty key', 2],
     ['an empty quoted key', "overrides:\n  '': 1\n", 'an entry with an empty key', 2],
     [
