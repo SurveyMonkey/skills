@@ -1,312 +1,220 @@
-// The typed `gh` client: one method per operation this plugin performs,
-// injected into command handlers and mocked one method at a time (issue
-// #216's decision comment, and the testing skill's mocking.md).
+// The `gh` client: the interface that a command is written against, and the
+// real implementation of it. The exported names and signatures are the
+// target stack's `lib/gh.ts`. This file has only one endpoint of the
+// target's, `viewPullRequest`, because it is the one endpoint that a
+// planned caller (`pr-status`, #226) uses. A new endpoint comes with the
+// command that calls it, in the shape the target stack gives it (#274).
 //
-// The method list is not a design: it is every `gh` call site in the shipped
-// scripts, and it is meant to stay that way. Adding a call means adding a
-// method here, which is what keeps the endpoints a handler touches legible
-// from its substitution list rather than buried in an argv somewhere.
+// A command gets a client as an argument, and never builds one itself. The
+// test double is `harness/gh-mock.ts`.
 //
-// **Octokit is not the client.** Nothing shipped imports anything outside the
-// plugin (ADR 012), so the per-endpoint method shape is the model rather than
-// the library, and `gh` stays the transport: it already carries the user's
-// authentication, and `env_prefix` already wraps it where a session needs
-// one. Each method is a thin call through the runner, so the only logic here
-// is the request it builds and what it makes of the reply.
+// **Failure is a thrown `GhError`, not an envelope.** An envelope would make
+// each answer a union that every caller must narrow. `gh` runs as a child,
+// where a non-zero exit with stderr is an exception. A command turns what it
+// catches into an `envelope.ts` outcome, which is where the exit code comes
+// from.
 //
-// **A process seam is where untrusted input arrives** (the plugin guide), so
-// every reply is validated where it enters: parsed, asserted to be the shape
-// the endpoint promises, and never defaulted. `gh api --paginate --slurp`
-// answers one array per response page; collapsing that nesting is this
-// client's job, because a caller that forgot would read a page as a record.
+// **The transport is `process.ts`,** through the `run` option. So this
+// file's suite drives each failure in-process, with no `gh` on the machine.
 //
-// This file ships. It imports nothing outside the plugin.
+// This file ships. It imports nothing outside the plugin, and stays inside
+// the erasable subset.
+import { type Runner, type RunResult, run } from './process.ts'
 
-import { type EnvPrefix, NO_ENV_PREFIX, withEnvPrefix } from './env-prefix.ts'
-import { type Envelope, failed, type JsonValue, ok } from './envelope.ts'
-import { describeRun, type RunResult, run, type Spawn } from './process-runner.ts'
+/** What each endpoint answers with. */
+export interface GhResults {
+  /** One pull request's own fields. */
+  viewPullRequest: Record<string, unknown>
+}
+
+export type GhEndpoint = keyof GhResults
+
+/** The operations that a command asks `gh` for. `createGhClient`, below,
+ *  implements it, and so does `createGhMock` in the harness. */
+export interface GhClient {
+  viewPullRequest(pull: { pullRequest: number }): Promise<GhResults['viewPullRequest']>
+}
+
+/**
+ * What every endpoint here throws.
+ *
+ * `status` is gh's own exit status, or the shell's 127 and 126 when gh could
+ * not start (`process.ts`). `cause` is the whole {@link RunResult}, so a
+ * caller that needs stderr, the signal, or the time has them.
+ *
+ * Every member is public. `tsc` sees a class from `lib/` under two
+ * identities, its real path and `plugins/<p>/src/lib/gh.ts` through the
+ * symlink. A `private` member would make the two identities different
+ * types. `cause` is `Error`'s own public property, set through `super`.
+ */
+export class GhError extends Error {
+  /** gh's exit status, or `null` when a signal ended it. `0` is a real
+   *  case: gh succeeded, and its answer was not JSON, or not the shape that
+   *  the endpoint promises. So `status !== 0` does not mean "gh failed".
+   *  Branch on whether the error comes at all, and use `status` only to
+   *  say which failure it was. */
+  readonly status: number | null
+
+  /**
+   * The account of the failure WITHOUT the `gh <argv> failed: ` prefix that
+   * the message has. A caller that prints a one-line reason reads this
+   * field, not `message`, so a report quotes gh and not forty characters of
+   * `--json` fields.
+   *
+   * It is {@link accountOf} for a gh that exited non-zero or could not
+   * start. It is the message itself where the message is already gh's
+   * account (an answer that is not JSON, or not the promised shape).
+   */
+  readonly detail: string
+
+  constructor(message: string, status: number | null, options: { cause: unknown; detail: string }) {
+    super(message, { cause: options.cause })
+    // Set here, not inherited. Without this line, a caught failure reports
+    // as a plain `Error`.
+    this.name = 'GhError'
+    this.status = status
+    this.detail = options.detail
+  }
+}
 
 export interface GhClientOptions {
-  readonly spawn?: Spawn
-  readonly envPrefix?: EnvPrefix
-}
-
-/** The `gh pr view` projection `pr-status` reads, and nothing beyond it. */
-export interface PullRequestView {
-  readonly number: number
-  readonly state: string
-  readonly isDraft: boolean
-  readonly headRefName: string
-  readonly baseRefName: string
-  readonly mergeStateStatus: string | null
-  readonly statusCheckRollup: readonly JsonValue[]
-}
-
-/** The fields the view above is built from, in the order `gh` is asked for them. */
-export const PR_VIEW_FIELDS: readonly string[] = [
-  'number',
-  'state',
-  'isDraft',
-  'headRefName',
-  'baseRefName',
-  'mergeStateStatus',
-  'statusCheckRollup',
-]
-
-export interface GhClient {
-  /** Every open Dependabot alert for a repository, pages collapsed. */
-  readonly listDependabotAlerts: (input: { repo: string }) => Envelope<readonly JsonValue[]>
-  /** Every published advisory affecting a package in one ecosystem. */
-  readonly listAdvisories: (input: {
-    package: string
-    ecosystem: string
-  }) => Envelope<readonly JsonValue[]>
-  /** The URL of an open PR headed from a branch, or `null` when there is none. */
-  readonly findOpenPullRequest: (input: { repo: string; head: string }) => Envelope<string | null>
-  /** One pull request's state, checks included. */
-  readonly viewPullRequest: (input: { url: string }) => Envelope<PullRequestView>
-  /** Create a label, tolerating one that is already there. */
-  readonly createLabel: (input: {
-    repo: string
-    name: string
-    color: string
-    description: string
-  }) => Envelope<{ created: boolean }>
-  /** Open a pull request, answering with its URL. */
-  readonly createPullRequest: (input: {
-    repo: string
-    head: string
-    title: string
-    bodyFile: string
-    labels: readonly string[]
-  }) => Envelope<{ url: string }>
-}
-
-const parseJson = (text: string, what: string): Envelope<JsonValue> => {
-  try {
-    return ok(JSON.parse(text) as JsonValue)
-  } catch {
-    return failed(`Invalid JSON response for ${what}`)
-  }
+  /** Where `gh` runs. When no call names a repository, `gh` finds it from
+   *  the working directory. */
+  readonly cwd?: string
+  /** `owner/name`, given to every call as `--repo`. A caller that does not
+   *  run in the checkout names the repository here. */
+  readonly repository?: string
+  /**
+   * The child's whole environment. When absent, `gh` gets this process's
+   * environment.
+   *
+   * `GH_REPO` changes the repository that `gh` reads, as `GIT_DIR` does for
+   * git (`gh help environment`). `GH_HOST`, `GH_TOKEN` and `GH_CONFIG_DIR`
+   * are of the same class. A caller that got a `GH_REPO` it did not choose
+   * gives an environment without it.
+   *
+   * The target stack has no `env_prefix` here. A caller that must wrap `gh`
+   * in a prefix gives a `run` that does it.
+   */
+  readonly env?: NodeJS.ProcessEnv
+  /** The spawn seam. When absent, the runner of `process.ts`. The runner is
+   *  tested against real children (`tests/lib/process.test.ts`). */
+  readonly run?: Runner
+  /**
+   * The time limit, in milliseconds, for every call this client makes. When
+   * absent, a call waits for `gh` with no limit. When it fires, `process.ts`
+   * kills the child's whole process group, and the call fails with a
+   * {@link GhError} that says so.
+   */
+  readonly boundMs?: number
 }
 
 /**
- * The API's own `.message` when the body is a JSON object carrying one. A
- * non-JSON-object body has none to read, so the two cases report differently
- * rather than one of them reporting nothing.
+ * The `--json` field list for `gh pr view`, the same list as the target
+ * stack's.
  */
-const apiMessage = (body: JsonValue): string => {
-  if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
-    const message = body.message
-    if (typeof message === 'string') return message
-  }
-  return 'response is not a JSON array'
-}
+const PULL_REQUEST_FIELDS =
+  'number,title,author,isDraft,labels,autoMergeRequest,mergeStateStatus,mergeable,' +
+  'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision'
+
+/** An optional filter, as the two argv words gh wants or as nothing at all. */
+const filter = (name: string, value: string | number | undefined): string[] =>
+  value === undefined ? [] : [`--${name}`, String(value)]
 
 /**
- * Collapse the page nesting `--paginate --slurp` produces.
+ * What to say about a failure. The first case that applies wins:
  *
- * The load-bearing assumption, inherited from the scripts and stated here
- * because it is what makes a short answer impossible: `--paginate --slurp`
- * either emits the whole collection or exits non-zero, never a truncated
- * collection at status 0. Slurping requires `gh` to hold every page before it
- * can emit the enclosing array, so a mid-pagination failure has nothing
- * partial to print.
+ *   1. A child that never started. That is node's failure, not gh's, so
+ *      node's message comes first.
+ *   2. A child that this process killed at the time limit. A line it wrote
+ *      before the kill is not why the call has no answer. `boundMs` is the
+ *      limit the caller asked for, not the measured time, so the words are
+ *      the same on each call.
+ *   3. A child whose pipes failed. The words that came through can be half
+ *      of what gh wrote.
+ *   4. gh's own stderr, because a caller cannot tell an expired token from a
+ *      missing repository without it.
+ *   5. The signal, or the status, when stderr is empty.
  */
-const flattenPages = (text: string, what: string): Envelope<readonly JsonValue[]> => {
-  const parsed = parseJson(text, what)
-  if (parsed.outcome !== 'ok') return parsed
-  const body = parsed.value
-  if (!Array.isArray(body)) {
-    return failed(`Unexpected API response for ${what}: ${apiMessage(body)}`)
-  }
-  const items: JsonValue[] = []
-  for (const page of body) {
-    if (!Array.isArray(page)) {
-      return failed(`Unexpected API response for ${what}: a page is not an array of results`)
-    }
-    items.push(...page)
-  }
-  return ok(items)
+const accountOf = (result: RunResult, boundMs?: number): string => {
+  if (result.startFailure !== null) return `cannot run gh: ${result.startFailure.message}`
+  if (result.timedOut) return `gh did not answer in ${boundMs ?? result.elapsedMs} ms`
+  const broke = result.streamErrors[0]
+  if (broke !== undefined) return `gh's output could not be read: ${broke.code}, ${broke.message}`
+  const said = result.stderr.trim()
+  if (said !== '') return said
+  if (result.status === null) return `gh was killed by ${result.signal}`
+  return `gh exited ${result.status}`
 }
 
-const asObject = (value: JsonValue, what: string): Envelope<{ [key: string]: JsonValue }> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? ok(value)
-    : failed(`${what} did not answer with a JSON object`)
-
-export const createGhClient = (options: GhClientOptions = {}): GhClient => {
-  const prefix = options.envPrefix ?? NO_ENV_PREFIX
-
-  // Every method goes through here, so `env_prefix` is applied once and the
-  // failure of a `gh` that exits non-zero carries `gh`'s own wording, which
-  // is what a caller classifies.
-  const gh = (args: readonly string[]): Envelope<RunResult> => {
-    const result = run(withEnvPrefix(prefix, { command: 'gh', args }), options.spawn)
-    return result.status === 0 ? ok(result) : failed(describeRun(result))
+/**
+ * A process seam is where untrusted input comes in. So each answer is
+ * parsed and checked against the shape that the endpoint promises, and
+ * never given a default.
+ *
+ * The {@link GhError} thrown here has the whole {@link RunResult} as its
+ * `cause`, the same as one thrown for a non-zero exit. So `cause.stderr`
+ * means the same thing at each throw site. The parse error goes into the
+ * message, where a reader sees it.
+ */
+const parse = (result: RunResult, what: string): unknown => {
+  try {
+    return JSON.parse(result.stdout)
+  } catch (error) {
+    const said = `gh answered ${what} with something that is not JSON: ${(error as Error).message}`
+    throw new GhError(said, result.status, { cause: result, detail: said })
   }
+}
 
-  const paginated = (path: string, what: string): Envelope<readonly JsonValue[]> => {
-    const answered = gh(['api', path, '--paginate', '--slurp'])
-    return answered.outcome === 'ok' ? flattenPages(answered.value.stdout, what) : answered
+const record = (result: RunResult, what: string): Record<string, unknown> => {
+  const value = parse(result, what)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    const said = `gh answered ${what} with something that is not an object: ${JSON.stringify(value)}`
+    throw new GhError(said, result.status, { cause: result, detail: said })
+  }
+  return value as Record<string, unknown>
+}
+
+/** A `GhClient` that runs the real `gh`. */
+export const createGhClient = (options: GhClientOptions = {}): GhClient => {
+  const spawn = options.run ?? run
+  const repository = filter('repo', options.repository)
+
+  /** Run gh, and answer with all that the child did. In the target stack,
+   *  a call can give its own limit as a second argument. No endpoint here
+   *  does, so this has no second parameter. */
+  const invoke = (args: readonly string[]): Promise<RunResult> =>
+    spawn('gh', args, { cwd: options.cwd, env: options.env, timeoutMs: options.boundMs })
+
+  /** What gh did, after this function has found that gh succeeded. A
+   *  non-zero exit, a gh that never started, or a pipe that failed becomes
+   *  a {@link GhError} with the status and gh's own words. */
+  const succeeded = async (args: readonly string[]): Promise<RunResult> => {
+    const result = await invoke(args)
+    // A pipe error is a failure even on status 0. gh exits 0 on the bytes it
+    // wrote, but only some of them came through.
+    if (result.status !== 0 || result.streamErrors.length !== 0) {
+      const detail = accountOf(result, options.boundMs)
+      throw new GhError(`gh ${args.join(' ')} failed: ${detail}`, result.status, {
+        cause: result,
+        detail,
+      })
+    }
+    return result
   }
 
   return {
-    listDependabotAlerts: (input) =>
-      paginated(
-        `repos/${input.repo}/dependabot/alerts?state=open&per_page=100`,
-        `alerts for ${input.repo}`,
+    viewPullRequest: async (pull) =>
+      record(
+        await succeeded([
+          'pr',
+          'view',
+          String(pull.pullRequest),
+          ...repository,
+          '--json',
+          PULL_REQUEST_FIELDS,
+        ]),
+        'gh pr view',
       ),
-
-    // `affects` matches the package name; the ecosystem narrows it, since the
-    // same name exists in more than one registry. The query is built by
-    // interpolation rather than by an encoder, which is what the script this
-    // replaces does and what the field runs are evidence for: a registry
-    // package name carries no character that would end the value early.
-    listAdvisories: (input) =>
-      paginated(
-        `advisories?affects=${input.package}&ecosystem=${input.ecosystem}&per_page=100`,
-        `advisories for ${input.package} (${input.ecosystem})`,
-      ),
-
-    findOpenPullRequest: (input) => {
-      const answered = gh([
-        'pr',
-        'list',
-        '--repo',
-        input.repo,
-        '--search',
-        `head:${input.head}`,
-        '--state',
-        'open',
-        '--json',
-        'url',
-      ])
-      if (answered.outcome !== 'ok') return answered
-      const what = `the open-PR search for ${input.head}`
-      const parsed = parseJson(answered.value.stdout, what)
-      if (parsed.outcome !== 'ok') return parsed
-      if (!Array.isArray(parsed.value)) {
-        return failed(`Unexpected API response for ${what}: ${apiMessage(parsed.value)}`)
-      }
-      const [first] = parsed.value
-      // No match is `null`, which is an answer. It is never confused with a
-      // failure: a search that could not run is the failure above, and this
-      // plugin dispatching a group whose PR is open is what folding the two
-      // together produces.
-      if (first === undefined) return ok(null)
-      const entry = asObject(first, what)
-      if (entry.outcome !== 'ok') return entry
-      const url = entry.value.url
-      return typeof url === 'string' && url !== ''
-        ? ok(url)
-        : failed(`${what} answered a result carrying no url`)
-    },
-
-    viewPullRequest: (input) => {
-      const answered = gh(['pr', 'view', input.url, '--json', PR_VIEW_FIELDS.join(',')])
-      if (answered.outcome !== 'ok') return answered
-      const what = `gh pr view ${input.url}`
-      const parsed = parseJson(answered.value.stdout, what)
-      if (parsed.outcome !== 'ok') return parsed
-      const view = asObject(parsed.value, what)
-      if (view.outcome !== 'ok') return view
-      const fields = view.value
-      // Present and of the promised type, or a hard error, never a default
-      // (ADR 001). A field read straight out of an absent key takes a branch
-      // of its own downstream: a missing `isDraft` reads as "ready", and a
-      // missing `state` reads as neither open nor merged.
-      //
-      // Two fields are the documented exception, because GitHub itself
-      // answers them null: `mergeStateStatus` while mergeability is still
-      // being computed, and `statusCheckRollup` on a head commit that has no
-      // checks. `pr-status.sh` reads the same two that way today
-      // (`(.statusCheckRollup // []) as $roll`, and `.mergeStateStatus`
-      // straight), so `??` here is the port of that and not a default papering
-      // over an absent key. Every other field is checked below with no
-      // fallback at all.
-      const number = fields.number
-      const state = fields.state
-      const isDraft = fields.isDraft
-      const headRefName = fields.headRefName
-      const baseRefName = fields.baseRefName
-      const mergeStateStatus = fields.mergeStateStatus ?? null
-      const statusCheckRollup = fields.statusCheckRollup ?? []
-      if (
-        typeof number !== 'number' ||
-        typeof state !== 'string' ||
-        typeof isDraft !== 'boolean' ||
-        typeof headRefName !== 'string' ||
-        typeof baseRefName !== 'string' ||
-        !(mergeStateStatus === null || typeof mergeStateStatus === 'string') ||
-        !Array.isArray(statusCheckRollup)
-      ) {
-        return failed(`${what} answered a pull request this client cannot read`)
-      }
-      return ok({
-        number,
-        state,
-        isDraft,
-        headRefName,
-        baseRefName,
-        mergeStateStatus,
-        statusCheckRollup,
-      })
-    },
-
-    // Sibling agents fixing other packages in the same batch race to create
-    // the same band label, and the loser's failure means the label is there,
-    // which is what it wanted. The match runs against stderr ALONE, never
-    // against a combined stream: `gh`'s own error text is what carries the
-    // phrase, and matching the combination let any failure whose stdout
-    // happened to contain it read as success.
-    createLabel: (input) => {
-      const result = run(
-        withEnvPrefix(prefix, {
-          command: 'gh',
-          args: [
-            'label',
-            'create',
-            input.name,
-            '--repo',
-            input.repo,
-            '--color',
-            input.color,
-            '--description',
-            input.description,
-          ],
-        }),
-        options.spawn,
-      )
-      if (result.status === 0) return ok({ created: true })
-      if (result.stderr.includes('already exists')) return ok({ created: false })
-      return failed(describeRun(result))
-    },
-
-    createPullRequest: (input) => {
-      const labelArgs = input.labels.flatMap((label) => ['--label', label])
-      const answered = gh([
-        'pr',
-        'create',
-        '--repo',
-        input.repo,
-        '--head',
-        input.head,
-        ...labelArgs,
-        '--title',
-        input.title,
-        '--body-file',
-        input.bodyFile,
-      ])
-      if (answered.outcome !== 'ok') return answered
-      // `gh` prints the URL of the pull request it made, and that is the only
-      // thing that proves one was made. An exit 0 with no URL in the output
-      // is a success claim backed by nothing.
-      const urls = answered.value.stdout.match(/https:\/\/github\.com\/\S+/g)
-      const url = urls?.at(-1)
-      return url === undefined
-        ? failed(`gh pr create produced no PR URL. Output: ${answered.value.stdout.trim()}`)
-        : ok({ url })
-    },
   }
 }

@@ -1,4 +1,4 @@
-// The in-process `gh` mock: a `GhClient` (the interface in src/lib/gh.ts)
+// The in-process `gh` mock: a `GhClient` (the interface in lib/gh.ts)
 // whose answers an example registers one method at a time. `gh` is the one
 // thing an example cannot run for real, because it is the network and someone
 // else's state, and it is the only boundary this harness stands in for
@@ -12,11 +12,12 @@
 // Four semantics carry over from the shellspec helper this is the twin of
 // (mocking.md, "How gh is mocked"; issue #196), each earned by a defect:
 //
-//   * An operation the example did not declare throws. Registration IS the
+//   * An operation the example did not declare rejects. Registration IS the
 //     declaration, and an unregistered call is a failure outright rather than
 //     an empty answer that reads downstream as "no alerts".
-//   * The failure switch is per method and carries the real wording. `gh api`
-//     writes `gh: Not Found (HTTP 404)`; a subcommand writes
+//   * The failure switch is per method and carries the real wording, as the
+//     `detail` of the `GhError` it rejects with. `gh api` writes
+//     `gh: Not Found (HTTP 404)`; a subcommand writes
 //     `HTTP 422: Validation Failed: name already exists` with no `gh:`
 //     prefix. Classification of that text is what the code under test does
 //     with it, so a tidied error tests nothing.
@@ -38,17 +39,13 @@
 // This is test infrastructure: it is not under `src/` and not in the coverage
 // include.
 
-import { type Envelope, failed, ok } from '#lib/envelope.ts'
-import type { GhClient } from '#lib/gh.ts'
+import { type GhClient, type GhEndpoint, GhError, type GhResults } from '#lib/gh.ts'
 
 /** The operations the client performs, named by the interface itself. */
-export type GhMethod = keyof GhClient
+export type GhMethod = GhEndpoint
 
-/** What a success from one method carries, read off that method's envelope. */
-export type GhAnswer<M extends GhMethod> = Extract<
-  ReturnType<GhClient[M]>,
-  { outcome: 'ok' }
->['value']
+/** What a success from one method carries. */
+export type GhAnswer<M extends GhMethod> = GhResults[M]
 
 /** One recorded call: the operation, and the input it was called with. */
 export interface GhRequest {
@@ -57,7 +54,7 @@ export interface GhRequest {
 }
 
 export interface GhMock {
-  /** The client to inject. Every method throws until it is registered. */
+  /** The client to inject. Every method rejects until it is registered. */
   readonly client: GhClient
   /** Register the success one operation answers with. */
   readonly reply: <M extends GhMethod>(method: M, value: GhAnswer<M>) => void
@@ -74,13 +71,21 @@ type Registration =
   | { readonly kind: 'reply'; readonly value: unknown }
   | { readonly kind: 'fail'; readonly message: string }
 
+/**
+ * The exit status a registered failure reports. `gh` exits 1 for a failure
+ * it reports itself.
+ */
+const FAILED_STATUS = 1
+
 export const createGhMock = (): GhMock => {
   const registered = new Map<GhMethod, Registration>()
   const log: GhRequest[] = []
 
   // The one place an answer is decided, so every method below is the same
   // three words and there is no per-endpoint logic anywhere in this file.
-  const answer = <M extends GhMethod>(method: M, input: unknown): Envelope<GhAnswer<M>> => {
+  // An async function runs up to its first `await` at once, so the call is
+  // in the log before the promise settles.
+  const answer = async <M extends GhMethod>(method: M, input: unknown): Promise<GhAnswer<M>> => {
     log.push({ method, input })
     const registration = registered.get(method)
     if (registration === undefined) {
@@ -90,20 +95,17 @@ export const createGhMock = (): GhMock => {
           'every operation the example expects, and nothing else.',
       )
     }
-    return registration.kind === 'reply'
-      ? ok(registration.value as GhAnswer<M>)
-      : failed(registration.message)
+    if (registration.kind === 'reply') return registration.value as GhAnswer<M>
+    throw new GhError(registration.message, FAILED_STATUS, {
+      cause: null,
+      detail: registration.message,
+    })
   }
 
   // Spelled out method by method rather than generated, which is what makes a
   // new method on `GhClient` a compile error here.
   const client: GhClient = {
-    listDependabotAlerts: (input) => answer('listDependabotAlerts', input),
-    listAdvisories: (input) => answer('listAdvisories', input),
-    findOpenPullRequest: (input) => answer('findOpenPullRequest', input),
     viewPullRequest: (input) => answer('viewPullRequest', input),
-    createLabel: (input) => answer('createLabel', input),
-    createPullRequest: (input) => answer('createPullRequest', input),
   }
 
   return {
