@@ -41,6 +41,26 @@ const QUICK: LockTiming = { attempts: 3, waitMs: 1 }
 
 const notRoot = process.getuid?.() !== 0
 
+/**
+ * A timing whose `waitMs` runs `release` on its Nth read. The command reads
+ * `waitMs` once for each wait, and only after a try to take the lock has
+ * failed. So `release` runs while the command is inside its wait loop, at a
+ * point that a timer cannot promise: a timer can fire before the command
+ * has looked at the lock.
+ */
+const releasingAfter = (reads: number, release: () => void) => {
+  let count = 0
+  const timing: LockTiming = {
+    attempts: 50,
+    get waitMs() {
+      count += 1
+      if (count === reads) release()
+      return 1
+    },
+  }
+  return { timing, count: () => count }
+}
+
 const setup = () => {
   const sandbox = createSandbox()
   const fixtures = createGitFixtures(sandbox)
@@ -190,21 +210,21 @@ describe('ensureWorktreeExclude: the lock', () => {
   it('waits for a lock that another run holds, then writes the line', async () => {
     const { repo, exclude, lock, ensure } = setup()
     mkdirSync(lock)
-    const pending = ensure(repo, { attempts: 200, waitMs: 5 })
-    setTimeout(() => rmSync(lock, { recursive: true }), 40)
-    expect(await pending).toEqual(added(repo, exclude))
+    const waits = releasingAfter(3, () => rmSync(lock, { recursive: true }))
+    expect(await ensure(repo, waits.timing)).toEqual(added(repo, exclude))
+    expect(waits.count()).toBeGreaterThanOrEqual(3)
     expect(existsSync(lock)).toBe(false)
   })
 
   it('reports already-present when the holder wrote the line first', async () => {
     const { repo, exclude, lock, ensure } = setup()
     mkdirSync(lock)
-    const pending = ensure(repo, { attempts: 200, waitMs: 5 })
-    setTimeout(() => {
+    const waits = releasingAfter(1, () => {
       writeFileSync(exclude, '.claude/worktrees/\n')
       rmSync(lock, { recursive: true })
-    }, 40)
-    expect(await pending).toEqual(present(repo, exclude))
+    })
+    expect(await ensure(repo, waits.timing)).toEqual(present(repo, exclude))
+    expect(readFileSync(exclude, 'utf8')).toBe('.claude/worktrees/\n')
   })
 
   it('gives up on a lock that stays held, and leaves that lock alone', async () => {

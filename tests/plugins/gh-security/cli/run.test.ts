@@ -7,6 +7,9 @@
 // Expected values are hand-written from the contract on #224: the usage
 // line, one line per command, the error envelope on stderr with stdout left
 // empty, and ADR 001's exit codes.
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -175,5 +178,24 @@ describe('runCli', () => {
     const { io, written } = capturing()
     expect(await runCli(['version'], {}, io)).toBe(1)
     expect(written()).toEqual({ stdout: '{"error":"no"}\n', stderr: 'no\n' })
+  })
+
+  it('loads pr-status through the registry, and renders its report with exit 1', async () => {
+    const { io, written } = capturing()
+    expect(await runCli(['pr-status', 'not-a-url'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"prs":[{"url":"not-a-url","error":"not a GitHub pull request URL"}]}\n',
+      stderr: '1 of 1 pull request URLs could not be read\n',
+    })
+  })
+
+  it('loads ensure-worktree-exclude through the registry, and renders its refusal', async () => {
+    const gone = join(tmpdir(), 'gh-security-run-test-no-such-directory')
+    const { io, written } = capturing()
+    expect(await runCli(['ensure-worktree-exclude', gone], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: `{"error":"repo_root does not exist: ${gone}"}\n`,
+      stderr: `repo_root does not exist: ${gone}\n`,
+    })
   })
 })
