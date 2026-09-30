@@ -7,9 +7,9 @@
 // Expected values are hand-written from the contract on #224: the usage
 // line, one line per command, the error envelope on stderr with stdout left
 // empty, and ADR 001's exit codes.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Io } from '#gh-security/cli/command.ts'
+import type { CommandContext, CommandEntry, Io } from '#gh-security/cli/command.ts'
 import { COMMANDS, commandNames } from '#gh-security/cli/registry.ts'
 import { helpText, runCli, USAGE } from '#gh-security/cli/run.ts'
 
@@ -42,6 +42,10 @@ describe('helpText', () => {
 })
 
 describe('runCli', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it.each([[['--help']], [['-h']], [[]]])(
     'prints the command list for %j and exits 0',
     async (argv) => {
@@ -52,6 +56,41 @@ describe('runCli', () => {
       expect(stderr).toBe('')
     },
   )
+
+  it('inspects only the first token, so a help flag after it is not a help request', async () => {
+    // A command's own flags belong to that command. Intercepting a later
+    // `--help` would make a per-command usage message unreachable.
+    const { io, written } = capturing()
+    expect(await runCli(['version', '--help'], {}, io)).toBe(0)
+    expect(JSON.parse(written().stdout)).toEqual({ version: expect.any(String) })
+  })
+
+  it('hands every token after the command to the command as its arguments', async () => {
+    // Substituting the handler is the only way to see the arguments: no
+    // registered command reads them yet.
+    const seen: CommandContext[] = []
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue((context) => {
+      seen.push(context)
+      return undefined
+    })
+    const { io } = capturing()
+    expect(await runCli(['version', '--repo', 'octo/app'], {}, io)).toBe(0)
+    expect(seen.map((context) => context.args)).toEqual([['--repo', 'octo/app']])
+  })
+
+  it('reads a first token that starts with a dash, but is no help flag, as a command name', async () => {
+    const { io, written } = capturing()
+    expect(await runCli(['--nope'], {}, io)).toBe(1)
+    expect(JSON.parse(written().stderr)).toEqual({
+      error: 'unknown command "--nope". Run gh-security --help for the list of commands.',
+    })
+  })
+
+  it('reads a help flag in the first place as a help request, whatever follows', async () => {
+    const { io, written } = capturing()
+    expect(await runCli(['--help', 'version'], {}, io)).toBe(0)
+    expect(written().stdout).toBe(`${helpText()}\n`)
+  })
 
   it('reports an unknown command as an error envelope on stderr, with stdout empty', async () => {
     // stdout is this CLI's JSON contract. A dispatch failure written there
