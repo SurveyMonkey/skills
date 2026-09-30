@@ -81,3 +81,14 @@ it('throws and names the endpoint when nothing is registered for it', async () =
     'gh mock: no reply registered for viewPullRequest',
   )
 })
+
+it('fails an unregistered endpoint with a plain Error, never a GhError', async () => {
+  // A command's `instanceof GhError` branch must not read a missing
+  // registration as a failure of gh itself.
+  const client = createGhMock()
+
+  const thrown = await client.viewPullRequest(PULL).catch((error: unknown) => error)
+
+  expect(thrown).toBeInstanceOf(Error)
+  expect(thrown).not.toBeInstanceOf(GhError)
+})

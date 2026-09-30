@@ -235,7 +235,8 @@ export function createGitFixtures(sandbox: Sandbox, options: GitFixturesOptions 
     // `stdout` and `stderr` undefined, not empty. Reading them first would
     // turn a missing git on PATH into a TypeError that names neither git nor
     // the PATH. This check also runs through `tryGit`, whose whole contract
-    // is to hand back a result, not to throw. `spawn.ts` guards the same way.
+    // is to hand back a result, not to throw. `lib/process.ts` reports a start
+    // failure as data for the same reason.
     if (result.error) {
       throw result.error
     }

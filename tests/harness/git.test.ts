@@ -620,6 +620,66 @@ it('forwards to a real git whose path holds shell and replacement metacharacters
   })
   expect(forwarded.stderr).toBe('')
   expect(forwarded.stdout).toBe('forwarded\n')
+
+  // The shim, not the fake git behind it, answered this one.
+  const refused = spawnSync('git', ['fetch'], {
+    env: {
+      ...sandbox.env,
+      GIT_STUB_FAIL: shim.failing,
+      PATH: `${shim.directory}${path.delimiter}${odd}`,
+    },
+    encoding: 'utf8',
+  })
+  expect(refused.status).toBe(1)
+  expect(refused.stderr).toContain('git stub: refusing fetch')
+})
+
+it('refuses a whole subcommand, not a longer word that starts with it', () => {
+  const { git, work, sandbox } = repository()
+
+  const shim = git.gitShim('stat')
+
+  const forwarded = spawnSync('git', ['-C', work, 'status'], {
+    env: {
+      ...sandbox.env,
+      GIT_STUB_FAIL: shim.failing,
+      PATH: `${shim.directory}${path.delimiter}${sandbox.env.PATH}`,
+    },
+    encoding: 'utf8',
+  })
+  expect(forwarded.stderr).toBe('')
+  expect(forwarded.status).toBe(0)
+})
+
+it('pins identity, signing and hooks against the sandbox global config', () => {
+  // Each `-c` pin outranks the global file. A developer whose file signs
+  // commits, runs hooks or names another author must not change a fixture.
+  const { git, work, sandbox } = repository()
+  const hooks = sandbox.join('hooks')
+  const marker = sandbox.join('hook-ran')
+  mkdirSync(hooks)
+  writeFileSync(path.join(hooks, 'pre-commit'), `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 })
+  writeFileSync(
+    path.join(sandbox.join('home'), '.gitconfig'),
+    `[commit]\n\tgpgsign = true\n[core]\n\thooksPath = ${hooks}\n[user]\n\tname = Dev\n\temail = dev@example.invalid\n`,
+  )
+
+  git.commit(work, 'pinned')
+
+  expect(existsSync(marker)).toBe(false)
+  expect(git.git(work, 'log', '-1', '--format=%an <%ae>')).toBe('Fixture <fixture@example.invalid>')
+})
+
+it('throws when a signal kills git, though no exit status exists', () => {
+  const sandbox = createSandbox()
+  const git = createGitFixtures(sandbox)
+  const killer = sandbox.join('killer')
+  mkdirSync(killer)
+  writeFileSync(path.join(killer, 'git'), '#!/bin/sh\nkill -KILL $$\n', { mode: 0o755 })
+  sandbox.env.PATH = killer
+
+  expect(git.tryGit(sandbox.path, 'status').status).toBeNull()
+  expect(() => git.git(sandbox.path, 'status')).toThrow(/git status failed in/)
 })
 
 it('refuses to build a shim when there is no real git to forward to', () => {
