@@ -122,10 +122,6 @@ describe('unwrap', () => {
     expect(unwrap(ok({ pm: 'pnpm' }))).toEqual({ pm: 'pnpm' })
   })
 
-  // The failure has to survive the throw with its outcome intact: the entry
-  // point renders `envelope`, so an `EnvelopeError` that carried only a
-  // message would turn a `not-implemented` verb into a generic error and
-  // change the exit code a caller responds to.
   it.each([[null], [0], [false], ['']] as const)('returns the falsy success value %j', (value) => {
     expect(unwrap(ok(value))).toBe(value)
   })
@@ -146,6 +142,10 @@ describe('unwrap', () => {
     })
   })
 
+  // The failure has to survive the throw with its outcome intact: the entry
+  // point renders `envelope`, so an `EnvelopeError` that carried only a
+  // message would turn a `not-implemented` verb into a generic error and
+  // change the exit code a caller responds to.
   it('throws an EnvelopeError carrying the whole failure', () => {
     let thrown: unknown
     try {
@@ -166,12 +166,12 @@ describe('unwrap', () => {
 })
 
 describe('renderText', () => {
-  // A payload that is already text is written as it is. `renderJson` would
-  // quote it, which is a different contract with the same exit code.
   it('writes an empty success payload as empty text and exits 0', () => {
     expect(renderText(ok(''))).toEqual({ stdout: '', stderr: '', exitCode: 0 })
   })
 
+  // A payload that is already text is written as it is. `renderJson` would
+  // quote it, which is a different contract with the same exit code.
   it('writes a success payload verbatim and exits 0', () => {
     const url = 'https://example.test/view#abc'
     expect(renderText(ok(url))).toEqual({ stdout: url, stderr: '', exitCode: 0 })
