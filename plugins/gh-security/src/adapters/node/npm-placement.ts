@@ -169,7 +169,8 @@ export const placementsOf = (query: PlacementQuery): ReadonlyMap<string, Placeme
   /** The copies of a subject: the entries of the package, or the parent entries that host it. */
   const copiesOf = (subject: string): SubjectCopy[] =>
     lock.entries.flatMap(([path, entry]): SubjectCopy[] => {
-      if (path === '' || !equal(nameAt(lock, path), subject)) return []
+      // The root has the name '', and a subject is never empty.
+      if (!equal(nameAt(lock, path), subject)) return []
       const pver = or(get(entry, 'version'), null)
       if (tighten) return [{ path, pver, cm: null }]
       return declarationsOf(entry).flatMap(([key, value]): SubjectCopy[] =>

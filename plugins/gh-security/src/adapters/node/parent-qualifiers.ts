@@ -129,10 +129,9 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
     rows.filter(({ cm }) => target !== '' && cm !== null && cm !== target).map(({ pver }) => pver),
   )
   const declared = location === 'overrides' ? rootSpecOf(query.manifest, parent) : null
-  const spec =
-    declared !== null && !declared.startsWith('npm:') && LOOKS_RANGE.test(declared)
-      ? declared
-      : null
+  // node.sh also drops an `npm:` alias spec here. `looks_range` refuses
+  // each one too: it starts with `n`.
+  const spec = declared !== null && LOOKS_RANGE.test(declared) ? declared : null
   const covered = onLine.filter(
     (pver) => spec !== null && !contains(pver, '-') && satisfiesAll(toText(pver), spec),
   )
@@ -141,7 +140,8 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
     covered.length > 0 ? offLine.filter((pver) => satisfiesAll(toText(pver), spec as string)) : []
   return {
     parent,
-    refused: covered.length > 0 && leaks.length > 0,
+    // A leak needs a covered copy, so `leaks` is empty without one.
+    refused: leaks.length > 0,
     root_spec: spec,
     leaks,
     bare:

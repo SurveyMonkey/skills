@@ -32,7 +32,7 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Envelope, Failure } from '../../lib/envelope.ts'
@@ -82,10 +82,6 @@ const orStop = <T>(value: T | Failure): T => {
 
 const isFailure = (value: unknown): value is Failure =>
   isRecord(value) && value.outcome === 'failed' && typeof value.error === 'string'
-
-/** `[ -f path ]`: a regular file, after symlinks. */
-const isFile = (path: string): boolean =>
-  statSync(path, { throwIfNoEntry: false })?.isFile() === true
 
 /** The floor major of the range as `jq -r` writes it, or '' when it has none. */
 const targetOf = (range: string): string => {
@@ -163,10 +159,11 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   const lookup = aliasLookup(detection.pm, pkg, parents, npmLock, () =>
     readFileSync(join(root, 'yarn.lock'), 'utf8'),
   )
-  const lockPath = join(root, 'package-lock.json')
+  // node.sh tests `[ -f package-lock.json ]` before the npm passes. Here
+  // the alias lookup above has read that file already, or refused.
   let placements: ReadonlyMap<string, Placement> = new Map()
   let tightened: readonly (readonly string[])[] = []
-  if (location === 'overrides' && isFile(lockPath) && (tighten || parents.length > 0)) {
+  if (location === 'overrides' && (tighten || parents.length > 0)) {
     const overrides = dieOn(CANNOT_READ_MANIFEST, () => or(get(manifest, 'overrides'), {}))
     placements = dieOn(CANNOT_READ_LOCKFILE, () =>
       placementsOf({
@@ -228,12 +225,15 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   }
   let invalidated: ApplyConstraintAnswer['lockfile_invalidated'] = { performed: false, keys: [] }
   const wroteOverride = pass.written.some(({ path }) => path[0] === 'overrides')
-  if (location === 'overrides' && wroteOverride && isFile(lockPath)) {
+  if (location === 'overrides' && wroteOverride) {
     const current = npmLock()
     const result = dieOn(CANNOT_READ_LOCKFILE, () => invalidationOf(current, pkg, range))
     invalidated = result.invalidated
     if (result.lockfile !== null) {
-      writeFileSync(lockPath, `${render(result.lockfile, indentOf(current.text))}\n`)
+      writeFileSync(
+        join(root, 'package-lock.json'),
+        `${render(result.lockfile, indentOf(current.text))}\n`,
+      )
     }
   }
   return {
