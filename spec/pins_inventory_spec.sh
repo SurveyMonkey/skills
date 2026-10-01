@@ -26,12 +26,12 @@ Describe 'the prose pin inventory (issue #197)'
   SPEC_DIR="$SHELLSPEC_PROJECT_ROOT/spec"
   PINS="$SPEC_DIR/PINS.md"
 
-  # The seven successor scripts issue #193 names. Not a superset from
+  # The successor scripts issue #193 names that have not landed. The other
+  # two, prepare-checkout.sh and merge-envelopes.sh, landed as TypeScript
+  # commands in #227, and their pins went with them. Not a superset from
   # elsewhere in the repo: a marker naming a real script this list omits is
   # exactly the drift this spec exists to catch.
-  SUCCESSORS='prepare-checkout.sh
-merge-envelopes.sh
-preflight-repo.sh
+  SUCCESSORS='preflight-repo.sh
 build-dispatches.sh
 reap-batch.sh
 summarize-run.sh
@@ -57,14 +57,14 @@ pr-status.sh --env-prefix'
     done | sed 's/^pin: mechanical, retired by //'
   }
 
-  # Marker names not found, verbatim, among the seven successors.
+  # Marker names not found, verbatim, among the five successors.
   unrecognized_successors() {
     marker_scripts | while IFS= read -r script; do
       printf '%s\n' "$SUCCESSORS" | grep -qxF "$script" || printf '%s\n' "$script"
     done
   }
 
-  It 'names one of the seven #193 successor scripts on every mechanical marker'
+  It 'names one of the five #193 successor scripts that have not landed on every mechanical marker'
     When call unrecognized_successors
     The output should equal ''
   End

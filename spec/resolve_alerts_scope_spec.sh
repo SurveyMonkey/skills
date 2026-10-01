@@ -15,6 +15,11 @@
 # script (the spec/fix_dependency_branch_spec.sh pattern). A returning clone,
 # a returning "which org?" question, or a returning `mktemp` is exactly the
 # regression the issue is about, and only a prose pin can see it.
+#
+# The mechanical rules of phases 1 and 2 are code since #227. The
+# `prepare-checkout` and `merge-envelopes` commands run them, and their
+# examples are in tests/plugins/gh-security/subcommands/. Their prose pins
+# were removed in the same change.
 
 Describe 'scope is the checkouts on disk, in prose (issue #188)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
@@ -103,29 +108,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       When call phrase_in "$SKILL" 'git itself failed for a reason other than "not a git repository"'
       The status should be success
       The output should equal '1'
-    End
-
-    # nwo has one source now, so the old cross-check has nothing to compare
-    # against and the old carve-out has nothing to override (issue #134).
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'makes origin the only source of nwo'
-      When call phrase_in "$SKILL" 'which is now its only source'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'no longer offers a scope override'
-      When call count_in "$SKILL" 'The user can override this'
-      The status should be success
-      The output should equal '0'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'no longer tiebreaks git_remote against nwo'
-      When call count_in "$SKILL" 'disagrees with .nwo., trust'
-      The status should be success
-      The output should equal '0'
     End
   End
 
@@ -294,55 +276,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The output should equal '1'
     End
 
-    # detect-scope.sh falls back to `git remote show origin`, a network call,
-    # so it has to run under the prefix: the prefix is step 1 and identity is
-    # step 2, and the identity step says why.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'resolves env_prefix before detect-scope.sh'
-      When call rule_in "$SKILL" '^### 1\. .env_prefix.$'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'runs detect-scope.sh under the prefix and says why'
-      When call phrase_in "$SKILL" 'the script falls back to .git remote show origin., a network call'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A pipeline prefixed once runs classification bare, and classify-lines.sh
-    # fetches from origin.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'wraps every stage of the phase 2 pipeline, not only the first'
-      When call phrase_in "$SKILL" 'wraps each of the three commands, not only the first'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'runs the phase 2 pipeline once per checkout'
-      When call phrase_in "$SKILL" 'Once per checkout phase 1 kept'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The probe's verdict belongs to the checkout, never to the batch: phase 1
-    # says so where the probe runs, phase 2 where the flag is applied.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'keeps the branch-style verdict per checkout'
-      When call phrase_in "$SKILL" 'The verdict is per checkout'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'applies the flat flag to the checkout whose probe hit, not to the batch'
-      When call phrase_in "$SKILL" 'belongs to the checkout whose probe hit, not to the batch'
-      The status should be success
-      The output should equal '1'
-    End
-
     # env_prefix is per checkout too; a batch-wide prefix is the regression a
     # multi-checkout run invites.
     It 'resolves env_prefix per checkout, so neighbors can differ'
@@ -360,16 +293,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
 
     It 'presents branch names as final in the phase 4 plan'
       When call phrase_in "$SKILL" 'shows each group.s .branch_name., and it is final'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The re-rank replaced the deleted combine_results and its executable
-    # spec; the key order is what keeps a multi-repo batch stable between
-    # runs, so it is pinned in full.
-    # pin: mechanical, retired by merge-envelopes.sh
-    It 'states the cross-checkout re-rank in the order the deleted script used'
-      When call phrase_in "$SKILL" 're-rank .actionable. by severity, then EPSS descending, then .repo., .package. and .major_line. to break ties'
       The status should be success
       The output should equal '1'
     End
@@ -395,32 +318,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The output should equal '1'
     End
 
-    # Each of the phase 1 facts has its exclusion route; a missing origin
-    # and a missing default branch are the two detect-scope.sh nulls.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'excludes a checkout with no usable origin'
-      When call phrase_in "$SKILL" 'the repository has no usable .origin.; report that and exclude the checkout'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'excludes a checkout whose default branch is null'
-      When call phrase_in "$SKILL" 'could not resolve origin.s default branch; report that and exclude the'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A classify failure blocks that repo alone; the dangerous recovery is
-    # still a re-run without --base-ref, which is pinned by
-    # spec/classify_lines_spec.sh.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'makes a classify failure a stop for the repo, not the run'
-      When call phrase_in "$SKILL" 'is a stop for this repo, not for the run'
-      The status should be success
-      The output should equal '1'
-    End
-
     # Exclusion is loud, in phase 2 and again in phase 7, so a repository
     # silently left out of the batch never happens.
     It 'reports every excluded checkout by name in phase 2'
@@ -432,40 +329,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     # pin: mechanical, retired by summarize-run.sh
     It 're-reports every excluded checkout in the phase 7 summary'
       When call phrase_in "$SKILL" 're-report every checkout phase 1 or phase 2 excluded, by name, and every repo phase 5.s registry preflight excluded'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A failed probe excludes a checkout, not "that repo's groups": no groups
-    # exist before discovery, and a probe failure is reported with its
-    # stderr, never as a guessed "origin unreachable".
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'excludes the checkout on a twice-failed probe, with its stderr'
-      When call phrase_in "$SKILL" 'a second failure excludes the checkout (no groups exist for it yet)'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'never turns a failed probe into an origin-unreachable diagnosis'
-      When call phrase_in "$SKILL" 'report the probe.s stderr, not a guessed cause'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'no longer diagnoses a failed probe as an unreachable origin'
-      When call count_in "$SKILL" 'so .origin. is unreachable'
-      The status should be success
-      The output should equal '0'
-    End
-
-    # Every per-checkout script is an exclusion cause, listed in phase 2 and
-    # again in phase 7, so a discovery failure on one checkout cannot fall
-    # back on the preamble and stop the run.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'lists the discovery and routing scripts among the exclusion causes'
-      When call phrase_in "$SKILL" 'a .discover-alerts.sh., .select-adapter.sh. or .classify-lines.sh. failure'
       The status should be success
       The output should equal '1'
     End
@@ -507,41 +370,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       When call count_in "$SKILL" 'Repo. column at repo scope'
       The status should be success
       The output should equal '0'
-    End
-  End
-
-  Describe 'the tool grants match the phases that remain'
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'grants discover-repos.sh'
-      When call rule_in "$SKILL" 'allowed-tools:.*Bash(\*discover-repos\.sh\*)'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The phase 1 probe's grant, which the clone-era list never carried.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'grants the ls-remote namespace probe'
-      When call rule_in "$SKILL" 'allowed-tools:.*Bash(\*git -C \* ls-remote\*)'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The grants the clone step needed, and the fetch only the clone step
-    # made (classify-lines.sh fetches for itself).
-    Describe 'the clone-era grants are gone'
-      Parameters
-        clone   'Bash(\*gh repo clone\*)'
-        mktemp  'Bash(mktemp'
-        rm-rf   'Bash(rm -rf'
-        fetch   'Bash(\*git -C \* fetch\*)'
-      End
-
-      # pin: mechanical, retired by prepare-checkout.sh
-      It "grants no $1"
-        When call count_in "$SKILL" "$2"
-        The status should be success
-        The output should equal '0'
-      End
     End
   End
 

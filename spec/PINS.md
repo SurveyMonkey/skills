@@ -27,9 +27,10 @@ grammar:
 # pin: mechanical, retired by <script>
 ```
 
-where `<script>` is one of the seven successor scripts named in issue #193:
-`prepare-checkout.sh`, `merge-envelopes.sh`, `preflight-repo.sh`, `build-dispatches.sh`,
-`reap-batch.sh`, `summarize-run.sh`, `pr-status.sh --env-prefix`.
+where `<script>` is one of the five successor scripts named in issue #193 that have not landed:
+`preflight-repo.sh`, `build-dispatches.sh`, `reap-batch.sh`, `summarize-run.sh`,
+`pr-status.sh --env-prefix`. The other two, `prepare-checkout.sh` and `merge-envelopes.sh`, are
+the TypeScript commands `prepare-checkout` and `merge-envelopes` (#227), and their pins are gone.
 
 The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security,
 which took over issue #193; the script name is the mapping key) finds every pin it must delete
@@ -41,114 +42,87 @@ grep -rn 'pin: mechanical, retired by <script>' spec/
 
 `spec/pins_inventory_spec.sh` keeps this file and the markers honest: every
 `phrase_in`/`count_in`/`rule_in`-style example either carries the marker or is listed below as
-`judgment`, and every marker names one of the seven scripts above.
+`judgment`, and every marker names one of the five scripts above.
 
 ## Totals
 
-368 pins across 16 files: 284 `judgment`, 84 `mechanical`.
+338 pins across 16 files: 284 `judgment`, 54 `mechanical`.
 
 Mechanical pins by successor script:
 
 | Successor script | Pins |
 |---|---|
-| `prepare-checkout.sh` | 29 |
 | `reap-batch.sh` | 22 |
 | `summarize-run.sh` | 21 |
 | `build-dispatches.sh` | 5 |
 | `preflight-repo.sh` | 5 |
-| `merge-envelopes.sh` | 1 |
 | `pr-status.sh --env-prefix` | 1 |
 
 Each mechanical pin is retired in the same change that lands its successor, which is now a
 command in the TypeScript port of gh-security rather than a bash script in this repository;
 until then it stays here, marked, as the record of the rule the port must reproduce.
 
-### `spec/resolve_alerts_scope_spec.sh` — 66 pins (42 judgment, 24 mechanical)
+### `spec/resolve_alerts_scope_spec.sh`: 46 pins (42 judgment, 4 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 35 | prescribes running discover-repos.sh | judgment | - |
-| 41 | states the rule as the checkouts on disk and nothing else | judgment | - |
-| 50 | reads a checkout as the whole scope | judgment | - |
-| 56 | reads a plain directory as its immediate checkout roots, non-recursively | judgment | - |
-| 64 | forbids the orchestrator from classifying the directory itself | judgment | - |
-| 70 | still says scope comes from git rather than from directory names | judgment | - |
-| 77 | stops on an empty list with the no-repositories sentence | judgment | - |
-| 85 | stops on a non-zero exit because there is no checkout to exclude | judgment | - |
-| 93 | reads a symlinked entry once, under its resolved root | judgment | - |
-| 102 | treats a git failure as an error rather than an empty scope | judgment | - |
-| 111 | makes origin the only source of nwo | mechanical | prepare-checkout.sh |
-| 118 | no longer offers a scope override | mechanical | prepare-checkout.sh |
-| 125 | no longer tiebreaks git_remote against nwo | mechanical | prepare-checkout.sh |
-| 133 | states the non-goal in phase 1 | judgment | - |
-| 141 | closes every form the convenience could take | judgment | - |
-| 147 | puts cloning on the user | judgment | - |
-| 155 | says a partial set of checkouts is the correct scope | judgment | - |
-| 174 | carries no $1 | judgment | - |
-| 183 | no longer asks what to operate on | judgment | - |
-| 204 | no longer mentions the $1 | judgment | - |
-| 211 | says there is no org, login, or question left | judgment | - |
-| 222 | splits the failure rule by what the script was run for | judgment | - |
-| 228 | stops the run on a run-level script | judgment | - |
-| 234 | excludes the checkout on a per-checkout script | judgment | - |
-| 245 | resolves every checkout before phase 3 | judgment | - |
-| 251 | settles branch names and classification before the question | judgment | - |
-| 257 | no longer hedges that an offered group may be withdrawn | judgment | - |
-| 275 | carries no $1 | judgment | - |
-| 282 | no longer speaks of a clone destination | judgment | - |
-| 291 | instantiates a path-taking prefix against the checkout itself | judgment | - |
-| 301 | resolves env_prefix before detect-scope.sh | mechanical | prepare-checkout.sh |
-| 308 | runs detect-scope.sh under the prefix and says why | mechanical | prepare-checkout.sh |
-| 317 | wraps every stage of the phase 2 pipeline, not only the first | mechanical | prepare-checkout.sh |
-| 324 | runs the phase 2 pipeline once per checkout | mechanical | prepare-checkout.sh |
-| 333 | keeps the branch-style verdict per checkout | mechanical | prepare-checkout.sh |
-| 340 | applies the flat flag to the checkout whose probe hit, not to the batch | mechanical | prepare-checkout.sh |
-| 348 | resolves env_prefix per checkout, so neighbors can differ | judgment | - |
-| 355 | withdraws a doomed group before the question is ever asked | judgment | - |
-| 361 | presents branch names as final in the phase 4 plan | judgment | - |
-| 371 | states the cross-checkout re-rank in the order the deleted script used | mechanical | merge-envelopes.sh |
-| 379 | states the exclusion rule once | judgment | - |
-| 385 | continues with the others and stops only when none survive | judgment | - |
-| 392 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
-| 401 | excludes a checkout with no usable origin | mechanical | prepare-checkout.sh |
-| 408 | excludes a checkout whose default branch is null | mechanical | prepare-checkout.sh |
-| 418 | makes a classify failure a stop for the repo, not the run | mechanical | prepare-checkout.sh |
-| 426 | reports every excluded checkout by name in phase 2 | judgment | - |
-| 433 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
-| 443 | excludes the checkout on a twice-failed probe, with its stderr | mechanical | prepare-checkout.sh |
-| 450 | never turns a failed probe into an origin-unreachable diagnosis | mechanical | prepare-checkout.sh |
-| 457 | no longer diagnoses a failed probe as an unreachable origin | mechanical | prepare-checkout.sh |
-| 467 | lists the discovery and routing scripts among the exclusion causes | mechanical | prepare-checkout.sh |
-| 474 | excludes a repo whose adapter detect fails in phase 5 | mechanical | preflight-repo.sh |
-| 481 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
-| 490 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
-| 500 | omits the column for one checkout and shows it for several | judgment | - |
-| 506 | no longer keys the column on a scope mode | judgment | - |
-| 515 | grants discover-repos.sh | mechanical | prepare-checkout.sh |
-| 523 | grants the ls-remote namespace probe | mechanical | prepare-checkout.sh |
-| 540 | grants no $1 | mechanical | prepare-checkout.sh |
-| 549 | branches on a null scope | judgment | - |
-| 555 | drops the git_remote cross-check it can no longer make | judgment | - |
-| 561 | stops on a null nwo | judgment | - |
-| 571 | re-runs detect-scope against the checkout the user names | judgment | - |
-| 577 | reads the second output rather than the first | judgment | - |
-| 585 | stays repo-scoped in the checkout vocabulary | judgment | - |
+| 40 | prescribes running discover-repos.sh | judgment | - |
+| 46 | states the rule as the checkouts on disk and nothing else | judgment | - |
+| 55 | reads a checkout as the whole scope | judgment | - |
+| 61 | reads a plain directory as its immediate checkout roots, non-recursively | judgment | - |
+| 69 | forbids the orchestrator from classifying the directory itself | judgment | - |
+| 75 | still says scope comes from git rather than from directory names | judgment | - |
+| 82 | stops on an empty list with the no-repositories sentence | judgment | - |
+| 90 | stops on a non-zero exit because there is no checkout to exclude | judgment | - |
+| 98 | reads a symlinked entry once, under its resolved root | judgment | - |
+| 107 | treats a git failure as an error rather than an empty scope | judgment | - |
+| 115 | states the non-goal in phase 1 | judgment | - |
+| 123 | closes every form the convenience could take | judgment | - |
+| 129 | puts cloning on the user | judgment | - |
+| 137 | says a partial set of checkouts is the correct scope | judgment | - |
+| 156 | carries no $1 | judgment | - |
+| 165 | no longer asks what to operate on | judgment | - |
+| 186 | no longer mentions the $1 | judgment | - |
+| 193 | says there is no org, login, or question left | judgment | - |
+| 204 | splits the failure rule by what the script was run for | judgment | - |
+| 210 | stops the run on a run-level script | judgment | - |
+| 216 | excludes the checkout on a per-checkout script | judgment | - |
+| 227 | resolves every checkout before phase 3 | judgment | - |
+| 233 | settles branch names and classification before the question | judgment | - |
+| 239 | no longer hedges that an offered group may be withdrawn | judgment | - |
+| 257 | carries no $1 | judgment | - |
+| 264 | no longer speaks of a clone destination | judgment | - |
+| 273 | instantiates a path-taking prefix against the checkout itself | judgment | - |
+| 281 | resolves env_prefix per checkout, so neighbors can differ | judgment | - |
+| 288 | withdraws a doomed group before the question is ever asked | judgment | - |
+| 294 | presents branch names as final in the phase 4 plan | judgment | - |
+| 302 | states the exclusion rule once | judgment | - |
+| 308 | continues with the others and stops only when none survive | judgment | - |
+| 315 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
+| 323 | reports every excluded checkout by name in phase 2 | judgment | - |
+| 330 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
+| 337 | excludes a repo whose adapter detect fails in phase 5 | mechanical | preflight-repo.sh |
+| 344 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
+| 353 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
+| 363 | omits the column for one checkout and shows it for several | judgment | - |
+| 369 | no longer keys the column on a scope mode | judgment | - |
+| 377 | branches on a null scope | judgment | - |
+| 383 | drops the git_remote cross-check it can no longer make | judgment | - |
+| 389 | stops on a null nwo | judgment | - |
+| 399 | re-runs detect-scope against the checkout the user names | judgment | - |
+| 405 | reads the second output rather than the first | judgment | - |
+| 413 | stays repo-scoped in the checkout vocabulary | judgment | - |
 
-### `spec/resolve_alerts_branch_style_spec.sh` — 9 pins (3 judgment, 6 mechanical)
+### `spec/resolve_alerts_branch_style_spec.sh`: 4 pins (3 judgment, 1 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 34 | prescribes one fully-qualified ls-remote probe at the one resolution point | mechanical | prepare-checkout.sh |
-| 45 | maps a refs/heads/fix hit onto --branch-style flat at every consuming site | mechanical | prepare-checkout.sh |
-| 52 | gives the probe the registry preflight retry | mechanical | prepare-checkout.sh |
-| 63 | excludes a checkout whose probe fails twice, reporting the probe stderr rather than a diagnosis | mechanical | prepare-checkout.sh |
-| 70 | names the unprobed inverse collision instead of claiming coverage | mechanical | prepare-checkout.sh |
-| 77 | reports every flat-scheme repo in the phase 7 summary | mechanical | summarize-run.sh |
-| 85 | consumes either spelling verbatim | judgment | - |
-| 96 | carries the field push-rejection specimen verbatim | judgment | - |
-| 102 | forbids improvising a branch name at push time | judgment | - |
+| 29 | reports every flat-scheme repo in the phase 7 summary | mechanical | summarize-run.sh |
+| 37 | consumes either spelling verbatim | judgment | - |
+| 48 | carries the field push-rejection specimen verbatim | judgment | - |
+| 54 | forbids improvising a branch name at push time | judgment | - |
 
-### `spec/audit_pins_scratch_spec.sh` — 7 pins (7 judgment, 0 mechanical)
+### `spec/audit_pins_scratch_spec.sh`: 7 pins (7 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -160,7 +134,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 70 | gives the slug rule the concrete scoped-package example | judgment | - |
 | 80 | grounds the slug rule in scoring many packages in the same WORK | judgment | - |
 
-### `spec/resolve_alerts_dispatch_spec.sh` — 67 pins (40 judgment, 27 mechanical)
+### `spec/resolve_alerts_dispatch_spec.sh`: 67 pins (40 judgment, 27 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -232,7 +206,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 613 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
 | 619 | forbids the shipped code from importing the workflow file | judgment | - |
 
-### `spec/audit_pins_rules_spec.sh` — 56 pins (53 judgment, 3 mechanical)
+### `spec/audit_pins_rules_spec.sh`: 56 pins (53 judgment, 3 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -293,7 +267,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 664 | is stated in the audit agent | judgment | - |
 | 670 | is stated in the fix agent | judgment | - |
 
-### `spec/reap_agent_artifacts_spec.sh` — 24 pins (8 judgment, 16 mechanical)
+### `spec/reap_agent_artifacts_spec.sh`: 24 pins (8 judgment, 16 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -322,7 +296,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 748 | tells the agent the reap re-checks only the origin tip, a narrower test | judgment | - |
 | 754 | does not promise a deliberately left branch is reaped later | judgment | - |
 
-### `spec/resolve_alerts_defect_reports_spec.sh` — 25 pins (25 judgment, 0 mechanical)
+### `spec/resolve_alerts_defect_reports_spec.sh`: 25 pins (25 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -352,7 +326,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 178 | gives a readable path to resolve-alerts/SKILL.md | judgment | - |
 | 184 | refers to the named Filing a skill-defect report section, not "Phase 7" generally, and says to read it first | judgment | - |
 
-### `spec/merge_risk_labels_spec.sh` — 17 pins (17 judgment, 0 mechanical)
+### `spec/merge_risk_labels_spec.sh`: 17 pins (17 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -374,18 +348,13 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 179 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
 | 185 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
 
-### `spec/classify_lines_spec.sh` — 6 pins (0 judgment, 6 mechanical)
+### `spec/classify_lines_spec.sh`: 1 pin (0 judgment, 1 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 876 | pipes phase 2 discovery through classify-lines.sh at one venue | mechanical | prepare-checkout.sh |
-| 885 | pins classification to origin/<default_branch> | mechanical | prepare-checkout.sh |
-| 895 | names a classify failure a stop, never a cue to drop --base-ref | mechanical | prepare-checkout.sh |
-| 902 | withdraws a requires_major_bump group in phase 2, before the question is asked | mechanical | prepare-checkout.sh |
-| 909 | never offers a requires-major-bump group as a rankable row in phase 3 | mechanical | prepare-checkout.sh |
-| 918 | reports both requires_major_bump senses together in phase 7 | mechanical | summarize-run.sh |
+| 880 | reports both requires_major_bump senses together in phase 7 | mechanical | summarize-run.sh |
 
-### `spec/fix_dependency_result_spec.sh` — 29 pins (29 judgment, 0 mechanical)
+### `spec/fix_dependency_result_spec.sh`: 29 pins (29 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -419,7 +388,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 217 | lists the failure phase enum without a commit member | judgment | - |
 | 223 | routes a phase-6 hook commit failure to push, matching audit-pins | judgment | - |
 
-### `spec/fix_dependency_baseline_spec.sh` — 12 pins (10 judgment, 2 mechanical)
+### `spec/fix_dependency_baseline_spec.sh`: 12 pins (10 judgment, 2 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -436,7 +405,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 101 | recognizes a lockfile-refresh action | mechanical | summarize-run.sh |
 | 111 | routes every ambient baseline failure shape to one repo-level triage label | mechanical | summarize-run.sh |
 
-### `spec/fix_dependency_branch_spec.sh` — 13 pins (13 judgment, 0 mechanical)
+### `spec/fix_dependency_branch_spec.sh`: 13 pins (13 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -454,7 +423,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 138 | retires the base worktree | judgment | - |
 | 144 | says one tree is installed, not two | judgment | - |
 
-### `spec/fix_dependency_scratch_spec.sh` — 10 pins (10 judgment, 0 mechanical)
+### `spec/fix_dependency_scratch_spec.sh`: 10 pins (10 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -469,7 +438,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 113 | has no remaining unqualified why.json literal | judgment | - |
 | 119 | no longer prescribes a why-capture redirect of its own | judgment | - |
 
-### `spec/env_prefix_seam_spec.sh` — 21 pins (21 judgment, 0 mechanical)
+### `spec/env_prefix_seam_spec.sh`: 21 pins (21 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -495,7 +464,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 205 | names a missed context statement as a cause of those symptoms | judgment | - |
 | 211 | sends the reader back to session context on any of them | judgment | - |
 
-### `spec/testing_skill_spec.sh` — 3 pins (3 judgment, 0 mechanical)
+### `spec/testing_skill_spec.sh`: 3 pins (3 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -503,7 +472,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 182 | names the skill it points at | judgment | - |
 | 197 | links from the root CLAUDE.md to the New script section | judgment | - |
 
-### `spec/node_apply_constraint_spec.sh` — 3 pins (3 judgment, 0 mechanical)
+### `spec/node_apply_constraint_spec.sh`: 3 pins (3 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|

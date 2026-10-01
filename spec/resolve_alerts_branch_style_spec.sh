@@ -7,18 +7,16 @@
 # file blocks every `fix/*` ref, and each fix agent finished its entire fix —
 # bump, install, validate ok, local commit — before the push failed with
 #   ! [remote rejected] fix/dependabot-postcss-8x -> fix/dependabot-postcss-8x (directory file conflict)
-# The fix is one probe per repo before dispatch plus a slash-free fallback
-# naming scheme, and both halves live where their kind of logic lives: the
-# probe is orchestrator prose in resolve-alerts SKILL.md, the same venue as
-# the phase 6 registry preflight it is modeled on, while the mechanical scheme
-# selection is scripted and executable-spec'd — discover-alerts.sh
-# --branch-style (spec/discover_alerts_spec.sh, spec/discover_alerts_scope_spec.sh),
-# classify-lines.sh --branch-style (spec/classify_lines_spec.sh), and the
-# notice hook's recognition of flat pushes (spec/notice_scan_spec.sh). No
-# `Mock git` here for the same reason there is none for the registry probe:
-# nothing executable runs `ls-remote`, so these examples pin the sentences
-# the orchestrator acts on, per the spec/fix_dependency_branch_spec.sh
-# pattern.
+# The fix is one probe per checkout before dispatch, and a naming scheme with
+# no slash. Since #227 the probe is code: the `prepare-checkout` command runs
+# it, retries it once, excludes the checkout on a second failure, and passes
+# `--branch-style flat` to discovery after a hit.
+# tests/plugins/gh-security/subcommands/prepare-checkout.test.ts has those
+# examples. The scheme itself is in discover-alerts --branch-style
+# (tests/plugins/gh-security/subcommands/discover-alerts.test.ts) and in the
+# notice hook (spec/notice_scan_spec.sh). This file keeps the prose that is
+# not code: the phase 7 summary, and the fix agent, which uses the branch
+# name as it is.
 
 Describe 'the branch-namespace preflight (issue #123)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
@@ -27,52 +25,6 @@ Describe 'the branch-namespace preflight (issue #123)'
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'the probe in SKILL.md'
-    # Once, in phase 1, per checkout in scope: every checkout exists before
-    # anything is asked (issue #188), so there is one resolution point,
-    # alongside env_prefix and default_branch, and no per-repo repeat later.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'prescribes one fully-qualified ls-remote probe at the one resolution point'
-      When call phrase_in "$SKILL" 'git -C <repo_root> ls-remote --heads origin refs/heads/fix'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The hit flips that checkout's naming, it never excludes the repo: the
-    # semantics that distinguish this preflight from the registry one.
-    # Phase 1 states the mapping and phase 2 applies it to discovery, once
-    # per checkout; there is no later per-repo rewrite any more.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'maps a refs/heads/fix hit onto --branch-style flat at every consuming site'
-      When call phrase_in "$SKILL" '--branch-style flat'
-      The status should be success
-      The output should equal '2'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'gives the probe the registry preflight retry'
-      When call phrase_in "$SKILL" 'exactly like phase 5.s registry probe'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A probe that fails twice takes the exclusion route, mirroring a null
-    # default_branch, not the flip route: the checkout is excluded (no groups
-    # exist for it yet) and the probe's own stderr is the report, never a
-    # guessed cause.
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'excludes a checkout whose probe fails twice, reporting the probe stderr rather than a diagnosis'
-      When call phrase_in "$SKILL" 'a second failure excludes the checkout (no groups exist for it yet), reported in phase 2 and phase 7 with the probe.s stderr verbatim'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by prepare-checkout.sh
-    It 'names the unprobed inverse collision instead of claiming coverage'
-      When call phrase_in "$SKILL" 'inverse collision'
-      The status should be success
-      The output should equal '2'
-    End
-
     # pin: mechanical, retired by summarize-run.sh
     It 'reports every flat-scheme repo in the phase 7 summary'
       When call phrase_in "$SKILL" 'name every repo whose batch ran under the flat branch scheme'
