@@ -564,7 +564,7 @@ describe('the four verdicts', () => {
   // #302 item 4. A `parseable` that is not true or false is malformed, and
   // goes into `adapter_errors` as a bad `satisfied` does (ruling 12). A
   // `parseable` of false is an honest answer, and adds no entry.
-  it.fails.each([
+  it.each([
     ['null', null, 'null'],
     ['the word true', 'true', '"true"'],
     ['the number 1', 1, '1'],

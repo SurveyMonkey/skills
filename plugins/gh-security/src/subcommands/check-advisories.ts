@@ -48,7 +48,9 @@
 // rather than an audit where every pin is inconclusive. An answer with
 // `parseable` true and a `satisfied` that is not true or false is treated the
 // same way (ruling 12 on #225). The script read the text `true` as a match, and
-// read each other value of that kind as no match.
+// read each other value of that kind as no match. A `parseable` that is not
+// true or false is also an `adapter_errors` entry (#302). A `parseable` of
+// false is an answer: the range is unevaluated, with no entry.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner that the `gh` client uses, so `gh` runs as
@@ -70,8 +72,9 @@
 //     unevaluated and goes into `adapter_errors`. The script counted the text
 //     `true` as a match, and each other such value as no match, so a package
 //     could read `safe` (ruling 12).
-//   - A `parseable` that is not the value true is unevaluated, with no entry
-//     in `adapter_errors`. The script also read the text `true` as true.
+//   - A `parseable` that is not true or false is unevaluated, and goes into
+//     `adapter_errors` (#302). The script read the text `true` as true. A
+//     `parseable` of false is unevaluated, with no entry.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
@@ -286,7 +289,16 @@ export const checkAdvisories = async (
             'the contract requires both (ADR 001).',
         )
       }
-      if (facts.parseable !== true) unevaluated.push(range)
+      if (typeof facts.parseable !== 'boolean') {
+        // A range is readable or it is not (ADR 001). Any other value is a
+        // broken answer, and it goes into `adapter_errors` (issue #302).
+        adapterErrors.push({
+          range,
+          status: 1,
+          error: `range_facts gave a parseable that is not true or false (ADR 001): ${JSON.stringify(facts.parseable)}`,
+        })
+        unevaluated.push(range)
+      } else if (!facts.parseable) unevaluated.push(range)
       else if (typeof facts.satisfied !== 'boolean') {
         // A parseable range has a truth value (ADR 001). Without one, the range
         // is not evaluated, and it must never count toward `safe` (ruling 12).
