@@ -2123,3 +2123,55 @@ describe('the writer of the workspace block', () => {
     })
   })
 })
+
+// The chain to the verdict (#222 acceptance). The keys that the call writes
+// are the override state of the `-qualified` specimen, whose installed
+// lockfile keeps the sibling lines and passes `validate --baseline`. The bare
+// key of the old write is the state of the `-collapsed` specimen, which
+// fails closed. The baselines and the expected values are the literals of
+// spec/node_validate_spec.sh.
+describe('the verdict of validate on the tree that the written keys produce', () => {
+  const PNPM_BASELINE =
+    '{"pm":"pnpm","package":"brace-expansion","present":true,"count":3,"versions":[{"version":"1.1.11","path":"brace-expansion@1.1.11"},{"version":"2.0.2","path":"brace-expansion@2.0.2"},{"version":"5.0.5","path":"brace-expansion@5.0.5"}],"lockfile_entries":14}'
+  const NPM_BASELINE =
+    '{"pm":"npm","package":"brace-expansion","present":true,"count":3,"versions":[{"version":"5.0.5","path":"node_modules/brace-expansion"},{"version":"2.0.2","path":"node_modules/filelist/node_modules/brace-expansion"},{"version":"1.1.11","path":"node_modules/glob/node_modules/brace-expansion"}],"lockfile_entries":14}'
+  const VANISHED = [
+    { major: 1, before: ['1.1.11'], after: [], status: 'vanished', class: 'fatal' },
+    { major: 2, before: ['2.0.2'], after: [], status: 'vanished', class: 'fatal' },
+  ]
+  const verdictOn = (specimen: string, baseline: string) => {
+    const result = node.validate(treeAt(join(FIXTURES_ROOT, specimen)), ...BRACE, {
+      line: '5',
+      vulnerable: ['< 5.0.9'],
+      baseline,
+      siblingAlerts: null,
+    })
+    if (result.outcome !== 'ok') throw new Error(result.error)
+    return { ok: result.value.ok, other_line_moves: result.value.other_line_moves }
+  }
+  const blockOf = (manifest: Json, pm: string): unknown =>
+    pm === 'pnpm' ? pnpmOverrides(manifest) : manifest.overrides
+
+  it.each([
+    ['pnpm', 'pnpm-cross-line', PNPM_BASELINE, { 'minimatch>brace-expansion': '>=5.0.9 <6' }],
+    ['npm', 'npm-cross-line', NPM_BASELINE, { minimatch: { 'brace-expansion': '>=5.0.9 <6' } }],
+  ])(
+    'passes for the keys that the %s call writes, and fails for the bare key',
+    (pm, fixture, baseline, bare) => {
+      const written = blockOf(manifestAfter(fixture, [...BRACE, 'minimatch']), pm)
+      const qualified = readJson(join(FIXTURES_ROOT, `${fixture}-qualified`), 'package.json')
+      const collapsed = readJson(join(FIXTURES_ROOT, `${fixture}-collapsed`), 'package.json')
+      expect({
+        written: written,
+        collapsed: blockOf(collapsed, pm),
+        pass: verdictOn(`${fixture}-qualified`, baseline),
+        fail: verdictOn(`${fixture}-collapsed`, baseline),
+      }).toEqual({
+        written: blockOf(qualified, pm),
+        collapsed: bare,
+        pass: { ok: true, other_line_moves: [] },
+        fail: { ok: false, other_line_moves: VANISHED },
+      })
+    },
+  )
+})
