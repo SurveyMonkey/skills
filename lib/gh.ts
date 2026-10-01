@@ -32,6 +32,10 @@ export interface GhResults {
   viewDefaultBranch: { readonly name: string | null }
   /** Every advisory on the page list, flattened to one list. */
   listAdvisories: readonly Record<string, unknown>[]
+  /** Every open Dependabot alert of one repository, flattened to one list. */
+  listDependabotAlerts: readonly Record<string, unknown>[]
+  /** The open pull requests that a `head:` search finds, in the order gh gives. */
+  searchOpenPullRequests: readonly { readonly url: string }[]
 }
 
 export type GhEndpoint = keyof GhResults
@@ -46,6 +50,16 @@ export interface GhClient {
     package: string
     ecosystem: string
   }): Promise<GhResults['listAdvisories']>
+  listDependabotAlerts(query: {
+    host: string
+    owner: string
+    repo: string
+  }): Promise<GhResults['listDependabotAlerts']>
+  /** `repository` is `[HOST/]OWNER/REPO`, as `gh pr list --repo` reads it. */
+  searchOpenPullRequests(query: {
+    repository: string
+    head: string
+  }): Promise<GhResults['searchOpenPullRequests']>
 }
 
 /**
@@ -293,5 +307,11 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
           '--slurp',
         ]),
       ),
+    listDependabotAlerts: async () => {
+      throw new Error('STUB for the parity capture')
+    },
+    searchOpenPullRequests: async () => {
+      throw new Error('STUB for the parity capture')
+    },
   }
 }

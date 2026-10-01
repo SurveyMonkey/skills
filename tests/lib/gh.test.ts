@@ -139,6 +139,8 @@ describe('the client options', () => {
       'viewPullRequest',
       'viewDefaultBranch',
       'listAdvisories',
+      'listDependabotAlerts',
+      'searchOpenPullRequests',
     ])
   })
 
