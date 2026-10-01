@@ -18,6 +18,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/allow-own-commands.ts')).allowOwnCommandsCommand,
   },
+  'check-advisories': {
+    description:
+      'List every published advisory range of a package: check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
+    load: async () => (await import('../subcommands/check-advisories.ts')).checkAdvisoriesCommand,
+  },
   'detect-scope': {
     description:
       'Decide whether a path is in a repository, and say which: detect-scope [--env-prefix <prefix>] [<path>]',
