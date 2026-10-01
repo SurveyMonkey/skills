@@ -48,6 +48,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/ensure-worktree-exclude.ts')).ensureWorktreeExcludeCommand,
   },
+  'merge-envelopes': {
+    description:
+      'Merge the prepare-checkout answers of several checkouts, and rank all their groups: merge-envelopes <envelope.json>...',
+    load: async () => (await import('../subcommands/merge-envelopes.ts')).mergeEnvelopesCommand,
+  },
   'pr-status': {
     description: 'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>...',
     load: async () => (await import('../subcommands/pr-status.ts')).prStatusCommand,
