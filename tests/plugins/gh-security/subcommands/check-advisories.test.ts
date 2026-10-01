@@ -302,10 +302,10 @@ describe('the listing', () => {
         ['lodash'],
         [
           advisory('GHSA-aaaa-1111-bbbb', {
-            vulnerabilities: [vuln('lodash', '>= 2'), vuln('lodash', 'B')],
+            vulnerabilities: [vuln('lodash', 'a'), vuln('lodash', '>= 2')],
           }),
           advisory('GHSA-cccc-2222-dddd', {
-            vulnerabilities: [vuln('lodash', 'a'), vuln('lodash', '>= 2')],
+            vulnerabilities: [vuln('lodash', 'B'), vuln('lodash', 'a')],
           }),
         ],
       ),
