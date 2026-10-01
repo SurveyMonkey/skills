@@ -53,7 +53,7 @@ const satisfiesAll = (version: string, range: string): boolean =>
     .some(Boolean)
 
 // `token_ok` of node.sh: a comparator with a known operator and a version
-// that parses. A wildcard is not accepted here, as it is in `range_facts`.
+// that parses. A wildcard is not accepted here. `range_facts` accepts it.
 const STRICT_TOKEN = /^[v=]*[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
 
 const tokenOk = (token: string): boolean =>
@@ -72,7 +72,10 @@ const rangeOk = (range: string): boolean => {
 /** `major_of` of node.sh: the first core number, or 0. It throws for an empty version. */
 const majorOf = (version: string): number => coreAt(parseVersion(version).core, 0)
 
-/** Unique, and sorted as jq's `unique` sorts. */
+/**
+ * Unique, and sorted as text. jq sorts by code point, so the order differs
+ * only for a character above U+FFFF.
+ */
 const uniqueSorted = (values: readonly string[]): string[] => [...new Set(values)].sort(byText)
 
 // jq reads a byte order mark at the start of its input. `JSON.parse` does not.
@@ -81,9 +84,10 @@ const BYTE_ORDER_MARK = /^﻿/
 /**
  * The one JSON document in `text`, or `undefined`. jq slurps the text, and
  * the verb refuses any count of documents but one. `JSON.parse` refuses
- * every text that is not one document. jq also reads `nan` and a number too
- * large for a double, and `JSON.parse` does not. There the verb refuses
- * where bash answers: a declared divergence, in the safe direction.
+ * every text that is not one document. jq also reads `nan`, a number too
+ * large for a double, and numbers such as `01` and `1.`. `JSON.parse` does
+ * not. There the verb refuses where bash answers: a declared divergence, in
+ * the safe direction.
  */
 const documentOf = (text: string): unknown => {
   try {
@@ -151,7 +155,8 @@ const unreadableRange = (range: string): string =>
 /**
  * The first refusal of the arguments, or null. node.sh refuses an empty flag
  * value when it reads the flags (`${2:?}`). Then it refuses the rest in this
- * order.
+ * order. node.sh tests the empty values in the order of the flags. The
+ * options keep no such order, so this function tests them in a fixed order.
  */
 const argumentRefusal = (pkg: string, range: string, options: ValidateOptions): string | null => {
   const { line, vulnerable, baseline, siblingAlerts } = options

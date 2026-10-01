@@ -6,8 +6,9 @@
 // #221 added the nine read verbs. #222 adds `validate`, which also only
 // reads, and the three verbs that write: `install`, `shim` and
 // `applyConstraint`. Each write verb refuses to run outside a linked
-// worktree. `requireLinkedWorktree` (`src/worktree.ts`) is its first
-// statement (ADR 001, "Invocation").
+// worktree (ADR 001, "Invocation"). `requireLinkedWorktree`
+// (`src/worktree.ts`) is its first statement, as in node.sh. The node
+// `applyConstraint` writes nothing yet, so it has no guard until layer 2.
 //
 // `detect` runs once for each call site. The caller gives its answer to the
 // other verbs in a `Tree`. No verb runs `detect` again.
@@ -255,14 +256,19 @@ type LineMove = {
   /**
    * `benign_dedup` only for the one safe shape of #105. The line keeps one
    * version, and that version was the semver max of its baseline. Sibling
-   * alerts were given, and none of them is on the line. Else `fatal`.
+   * alerts were given, each of their ranges parses, and none of them is on
+   * the line. No sibling range matches a version before or after. Else
+   * `fatal`.
    */
   readonly class: 'fatal' | 'benign_dedup'
 }
 
 /** The `validate` answer. */
 export type ValidateAnswer = {
-  /** The verdict. False when any of the three checks fails. A caller reads it. */
+  /**
+   * The verdict. False when a check fails, or when `line` holds no copy. A
+   * caller reads it.
+   */
   readonly ok: boolean
   readonly package: string
   readonly range: string
@@ -286,8 +292,9 @@ export type ValidateAnswer = {
 }
 
 /**
- * The options of `validate`, one for each flag of `verb_validate`. Each is
- * given, with null for a flag that is absent.
+ * The options of `validate`, one for each flag of `verb_validate`. The caller
+ * gives each. A flag that is absent is null, or an empty list for
+ * `vulnerable`.
  */
 export type ValidateOptions = {
   /**
@@ -303,7 +310,10 @@ export type ValidateOptions = {
   readonly siblingAlerts: string | null
 }
 
-/** How `install` runs `install_cmd`. `env` is the whole environment of that command. */
+/**
+ * How `install` runs `install_cmd`. `env` is the environment of that command.
+ * The verb also sets `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` in it.
+ */
 export type InstallSource = { readonly run: Runner; readonly env: Environment }
 
 /** The `install` answer: what node.sh writes, and the status that it exits with. */
@@ -313,14 +323,17 @@ export type InstallAnswer = {
   /** True only when the command exits 0. A caller reads it. */
   readonly ok: boolean
   /**
-   * The exit status of the command. 127 for a command that does not start,
-   * and 126 for one that cannot run. Null when a signal stops it.
+   * The exit status of the command. 127 for a command that is not found, and
+   * 126 for any other start failure. Null when a signal stops it.
    */
   readonly status: number | null
   /** The signal that stopped the command, or null. */
   readonly signal: string | null
   readonly stdout: string
-  /** `Running: <command>` and a newline, then what the command wrote to stderr. */
+  /**
+   * `Running: <command>` and a newline, then what the command wrote to
+   * stderr. For a command that did not start, the start failure follows.
+   */
   readonly stderr: string
 }
 
@@ -492,8 +505,9 @@ export interface Adapter<Detection extends { readonly pm: string }> {
   ) => Promise<Envelope<InstallAnswer>>
   /**
    * Write an executable file `<dir>/<pm>` that starts the runner of the tree,
-   * unless the package manager is on `PATH`. A write verb. A relative `dir`
-   * is relative to the root of the tree.
+   * or the runner that the options name. With no runner in the options, it
+   * writes nothing when the package manager is on `PATH`. A write verb. A
+   * relative `dir` is relative to the root of the tree.
    */
   readonly shim: (tree: Tree<Detection>, dir: string, options: ShimOptions) => Envelope<ShimAnswer>
   /** Write one constraint into the override file of the tree. A write verb. */

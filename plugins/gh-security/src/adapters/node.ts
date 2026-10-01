@@ -1,7 +1,8 @@
 // The node adapter for GitHub's `npm` advisory ecosystem, behind the
 // interface in `adapter.ts`. It has the nine read verbs of #221 (eight from
-// `node.sh`, and `parents`), and the verbs of #222. Each verb has its own
-// file under `node/`.
+// `node.sh`, and `parents`), and the verbs of #222. Each verb, or group of
+// verbs, has its own file under `node/`. The stub of `applyConstraint` is
+// here.
 //
 // This file ships. It imports nothing outside the plugin.
 

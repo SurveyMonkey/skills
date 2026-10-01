@@ -1,6 +1,6 @@
 // `install` for the node adapter, ported from `verb_install` in node.sh
-// (#222). It is a write verb, so the worktree guard is its first statement
-// (ADR 001, "Invocation").
+// (#222). It is a write verb, so it refuses outside a linked worktree (ADR
+// 001, "Invocation"). As in node.sh, the guard is its first statement.
 //
 // The verb runs the `install_cmd` of the detection in the tree. It uses the
 // runner and the environment that it is given (#221, round 3 ruling 9). The

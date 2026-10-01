@@ -1,12 +1,13 @@
 // `shim` for the node adapter, ported from `verb_shim` in node.sh (#222). It
-// is a write verb, so the worktree guard is its first statement (ADR 001,
-// "Invocation").
+// is a write verb, so it refuses outside a linked worktree (ADR 001,
+// "Invocation"). As in node.sh, the guard is its first statement.
 //
 // Some repository scripts call the bare name of the package manager. That
 // fails when the manager runs through corepack or a vendored release, and no
 // binary is on PATH. So the verb writes `<dir>/<pm>`, a shell script that
 // starts the runner. The caller puts `dir` first on PATH. When the manager
-// is on PATH already, the verb writes nothing.
+// is on PATH already, and the caller names no runner, the verb writes
+// nothing.
 //
 // The runner is the `pm_exec` of the detection, or the runner that the
 // caller names (the test seam of node.sh). A vendored runner, `node
