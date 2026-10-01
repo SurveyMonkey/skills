@@ -93,23 +93,25 @@ const documentOf = (text: string): unknown => {
   }
 }
 
-/** The versions of a baseline that keeps the `resolved_versions` contract for `pkg`, or null. */
+/**
+ * The versions of a baseline that keeps the `resolved_versions` contract for
+ * `pkg`, or null. An absent key reads as `undefined`, which fails each test
+ * here, so jq's `has` needs no test of its own.
+ */
 const baselineVersions = (text: string, pkg: string): readonly string[] | null => {
   const baseline = documentOf(text)
-  if (!isRecord(baseline) || !Object.hasOwn(baseline, 'package') || baseline.package !== pkg) {
+  if (!isRecord(baseline) || baseline.package !== pkg || !Array.isArray(baseline.versions)) {
     return null
   }
-  const versions = Object.hasOwn(baseline, 'versions') ? baseline.versions : undefined
-  if (!Array.isArray(versions)) return null
-  const strings = versions.map((entry: unknown) =>
-    isRecord(entry) && Object.hasOwn(entry, 'version') ? entry.version : undefined,
+  const versions = baseline.versions.map((entry: unknown) =>
+    isRecord(entry) ? entry.version : undefined,
   )
-  return strings.every((version) => typeof version === 'string') ? (strings as string[]) : null
+  return versions.every((version) => typeof version === 'string') ? (versions as string[]) : null
 }
 
 /**
  * A whole number of zero or more, or null. jq accepts `-0` and `2.0` too,
- * and so does this test.
+ * and so does this test. An absent major is `undefined`, which fails.
  */
 const isMajor = (value: unknown): boolean =>
   value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0)
@@ -121,9 +123,7 @@ const siblingsOf = (text: string): readonly Sibling[] | null => {
   const usable = siblings.every(
     (entry: unknown) =>
       isRecord(entry) &&
-      Object.hasOwn(entry, 'major') &&
       isMajor(entry.major) &&
-      Object.hasOwn(entry, 'vulnerable_ranges') &&
       Array.isArray(entry.vulnerable_ranges) &&
       entry.vulnerable_ranges.every((range: unknown) => typeof range === 'string'),
   )
@@ -207,6 +207,12 @@ const inputsOf = (
       vulnerable,
       baseline,
       siblings,
+      // node.sh writes the first unreadable sibling range with `jq -r`, and
+      // tests the text for length. So when that first range is empty, it
+      // finds no unreadable range, and the move can be benign. That breaks
+      // its own rule that an unreadable range never allows benign. Here an
+      // empty range is unreadable, as `range_ok` says: a declared divergence
+      // (#222), in the safe direction.
       siblingsUnreadable: (siblings ?? []).some(({ vulnerable_ranges }) =>
         vulnerable_ranges.some((text) => !rangeOk(text)),
       ),
@@ -220,7 +226,9 @@ const inputsOf = (
  * did not vanish, one version is left, that version was in the baseline and
  * is its semver max, no sibling alert is on this major, and no sibling range
  * matches a version on either side. The first test that fails makes it
- * `fatal`.
+ * `fatal`. A vanished line has no version left, and `semverMax` answers a
+ * version of the baseline. So two tests of node.sh have no line of their
+ * own here: `status` and "in the baseline".
  */
 const classOf = (
   { siblings, siblingsUnreadable }: Inputs,
@@ -228,8 +236,8 @@ const classOf = (
 ): Move['class'] => {
   if (siblingsUnreadable || siblings === null) return 'fatal'
   const [landed, ...more] = move.after
-  if (move.status !== 'moved' || landed === undefined || more.length > 0) return 'fatal'
-  if (!move.before.includes(landed) || landed !== semverMax(move.before)) return 'fatal'
+  if (landed === undefined || more.length > 0) return 'fatal'
+  if (landed !== semverMax(move.before)) return 'fatal'
   if (siblings.some(({ major }) => major === move.major)) return 'fatal'
   const hit = [...move.before, ...move.after].some((version) =>
     siblings.some(({ vulnerable_ranges }) =>

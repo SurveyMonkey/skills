@@ -38,8 +38,11 @@ export const shim = (
   if (guard.outcome !== 'ok') return guard
   if (dir === '') return failed('shim requires a target directory')
   const { pm, pm_exec } = detection
-  // node.sh reads an empty runner as no runner (`${2:-}`).
-  if (given === '' && pm_exec === pm && onPath(pm, root, env)) {
+  // node.sh reads an empty runner as no runner (`${2:-}`). It writes no shim
+  // when its runner is the bare name and that name is on PATH. With one PATH
+  // for `detect` and `shim`, a manager on PATH is its own runner, so the PATH
+  // test is enough.
+  if (given === '' && onPath(pm, root, env)) {
     return ok({ created: false, pm, reason: `${pm} is already on PATH` })
   }
   const named = given === '' ? pm_exec : given
@@ -52,9 +55,7 @@ export const shim = (
   }
   const shimFile = `${dir}/${pm}`
   try {
-    writeFileSync(join(directory, pm), `#!/bin/sh\nexec ${runner} "$@"\n`, { mode: 0o755 })
-    // The mode of `writeFileSync` applies only to a new file, under the
-    // umask. This sets it for each case.
+    writeFileSync(join(directory, pm), `#!/bin/sh\nexec ${runner} "$@"\n`)
     chmodSync(join(directory, pm), 0o755)
   } catch {
     return failed(`cannot write shim: ${shimFile}`)

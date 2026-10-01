@@ -280,6 +280,12 @@ describe('the sibling alerts', () => {
       'fatal',
     ],
     ['an unreadable sibling range', '[{"major":3,"vulnerable_ranges":["foo"]}]', 'fatal'],
+    // node.sh answers benign_dedup here: a declared divergence (validate.ts).
+    [
+      'an empty sibling range, which has no alternative',
+      '[{"major":3,"vulnerable_ranges":[""]}]',
+      'fatal',
+    ],
     [
       'a null major with a range that misses',
       '[{"major":null,"vulnerable_ranges":["<= 1.3.0"]}]',
@@ -334,6 +340,21 @@ describe('the sibling alerts', () => {
     })
   })
 
+  // The first version left is the max of the baseline, so only the count of
+  // the versions left makes this move fatal.
+  it('keeps a move fatal when two versions are left, and the first is the baseline max', () => {
+    const value = answer('pnpm-benign-dedup-two-survivors', 'picomatch', '>=4.0.3 <5', {
+      line: '4',
+      vulnerable: ['< 4.0.3'],
+      baseline: baselineOf('2.3.10', '4.0.1'),
+      siblingAlerts: '[]',
+    })
+    expect({ ok: value.ok, classes: value.other_line_moves?.map((move) => move.class) }).toEqual({
+      ok: false,
+      classes: ['fatal'],
+    })
+  })
+
   it('passes a clean tree with an unreadable sibling range', () => {
     expect(
       dedupMoves('[{"major":2,"vulnerable_ranges":["foo"]}]', baselineOf('2.3.2', '4.0.1')),
@@ -361,6 +382,18 @@ describe('the moves on other lines', () => {
         { major: 2, before: ['2.0.2'], after: [], status: 'vanished', class: 'fatal' },
       ],
     })
+  })
+
+  it('sorts the moves by major, whatever the order of the baseline', () => {
+    const value = answer('pnpm-cross-line-collapsed', 'brace-expansion', '>=5.0.9 <6', {
+      line: '5',
+      vulnerable: ['< 5.0.9'],
+      baseline: JSON.stringify({
+        package: 'brace-expansion',
+        versions: [{ version: '2.0.2' }, { version: '5.0.5' }, { version: '1.1.11' }],
+      }),
+    })
+    expect(value.other_line_moves?.map(({ major }) => major)).toEqual([1, 2])
   })
 
   it('reports no move for an unchanged tree, and no move for a major only the tree holds', () => {
@@ -531,6 +564,7 @@ describe('a constraint where jq stops', () => {
     ['>=1 ||', "validate: the range '>=1 ||' has an alternative with no comparator"],
     ['>=0 || >=', '"" is not a version this adapter can read.'],
     ['>=0 <99 ^', '"" is not a version this adapter can read.'],
+    ['<0.0.1 >=', '"" is not a version this adapter can read.'],
   ])('fails for %j, which matches or not before it stops', (range, error) => {
     expect(refusal(MULTI, 'undici', range, {})).toEqual({ outcome: 'failed', error })
   })
