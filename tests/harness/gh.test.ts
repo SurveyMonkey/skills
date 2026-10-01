@@ -136,3 +136,37 @@ it('throws and names the endpoint when nothing is registered for the new endpoin
     'gh mock: no reply registered for listAdvisories',
   )
 })
+
+// The endpoints of `discover-alerts` (#225) have the same semantics.
+const ALERTS = { host: 'github.com', owner: 'octo', repo: 'app' }
+const SEARCH = { repository: 'github.com/octo/app', head: 'fix/dependabot-lodash-4x' }
+
+it('answers listDependabotAlerts and searchOpenPullRequests with the reply registered for each', async () => {
+  const alerts = [{ number: 1 }]
+  const found = [{ url: 'https://github.com/octo/app/pull/7' }]
+  const client = createGhMock({ listDependabotAlerts: alerts, searchOpenPullRequests: found })
+
+  await expect(client.listDependabotAlerts(ALERTS)).resolves.toBe(alerts)
+  await expect(client.searchOpenPullRequests(SEARCH)).resolves.toBe(found)
+})
+
+it('fails each endpoint of discover-alerts on its own fail switch', async () => {
+  const client = createGhMock({
+    listDependabotAlerts: ghFails('gh: Not Found (HTTP 404)'),
+    searchOpenPullRequests: [],
+  })
+
+  await expect(client.listDependabotAlerts(ALERTS)).rejects.toThrow('gh: Not Found (HTTP 404)')
+  await expect(client.searchOpenPullRequests(SEARCH)).resolves.toEqual([])
+})
+
+it('throws and names each endpoint of discover-alerts when nothing is registered', async () => {
+  const client = createGhMock()
+
+  await expect(client.listDependabotAlerts(ALERTS)).rejects.toThrow(
+    'gh mock: no reply registered for listDependabotAlerts',
+  )
+  await expect(client.searchOpenPullRequests(SEARCH)).rejects.toThrow(
+    'gh mock: no reply registered for searchOpenPullRequests',
+  )
+})

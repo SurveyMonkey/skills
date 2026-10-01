@@ -1,12 +1,13 @@
 // The `gh` client: the interface that a command is written against, and the
 // real implementation of it. The exported names and signatures are the
 // target stack's `lib/gh.ts`, with the differences named in the notes below
-// (`PULL_REQUEST_FIELDS`, `DEFAULT_BRANCH_FIELDS` and `ADVISORY_PAGE_SIZE`).
-// This file has the endpoints of the commands that exist:
-// `viewPullRequest` for `pr-status` (#226), `viewDefaultBranch` for
-// `detect-scope` and `listAdvisories` for `check-advisories` (#225). A new
-// endpoint comes with the command that calls it, in the shape the target
-// stack gives it (#274).
+// (`PULL_REQUEST_FIELDS`, `DEFAULT_BRANCH_FIELDS`, `ADVISORY_PAGE_SIZE`,
+// `ALERT_PAGE_SIZE` and `SEARCH_FIELDS`). This file has the endpoints of the
+// commands that exist: `viewPullRequest` for `pr-status` (#226),
+// `viewDefaultBranch` for `detect-scope`, `listAdvisories` for
+// `check-advisories`, and `listDependabotAlerts` and `searchOpenPullRequests`
+// for `discover-alerts` (#225). A new endpoint comes with the command that
+// calls it, in the shape the target stack gives it (#274).
 //
 // A command gets a client as an argument, and never builds one itself. The
 // test double is `harness/gh.ts`.
@@ -50,6 +51,7 @@ export interface GhClient {
     package: string
     ecosystem: string
   }): Promise<GhResults['listAdvisories']>
+  /** `host` is the GitHub host, such as `github.com`, that `gh api` asks. */
   listDependabotAlerts(query: {
     host: string
     owner: string
@@ -166,6 +168,24 @@ const DEFAULT_BRANCH_FIELDS = 'defaultBranchRef'
  */
 const ADVISORY_PAGE_SIZE = 100
 
+/**
+ * The page size of `listDependabotAlerts`, the largest that the alerts
+ * endpoint allows. `discover-alerts` (#225) reads every open alert of one
+ * repository, so this endpoint is not in the target stack's list, and is a
+ * known divergence from it. It is the call that `discover-alerts.sh` made,
+ * with `--paginate --slurp`. The call also names the host, because a bare
+ * path follows `GH_HOST`.
+ */
+const ALERT_PAGE_SIZE = 100
+
+/**
+ * The `--json` field of `gh pr list` for `searchOpenPullRequests`.
+ * `discover-alerts` (#225) asks, for each branch name, if an open pull
+ * request has that branch as its head. The target stack has no search, so
+ * this endpoint is also a known divergence from it.
+ */
+const SEARCH_FIELDS = 'url'
+
 /** An optional filter, as the two argv words gh wants or as nothing at all. */
 const filter = (name: string, value: string | number | undefined): string[] =>
   value === undefined ? [] : [`--${name}`, String(value)]
@@ -239,17 +259,36 @@ const defaultBranchOf = (result: RunResult): GhResults['viewDefaultBranch'] => {
   throw new GhError(said, result.status, { cause: result, detail: said })
 }
 
-/** What `listAdvisories` promises: pages of advisory objects, flattened. */
-const advisoriesOf = (result: RunResult): GhResults['listAdvisories'] => {
-  const pages = parse(result, 'gh api advisories')
+/** How much of an answer that is not the promised shape goes into the error. */
+const SHOWN_CHARACTERS = 200
+
+/**
+ * What a call with `--paginate --slurp` promises: pages of objects,
+ * flattened. `listAdvisories` and `listDependabotAlerts` both promise it.
+ */
+const pagesOf = (result: RunResult, what: string): readonly Record<string, unknown>[] => {
+  const pages = parse(result, what)
   if (
     !Array.isArray(pages) ||
     !pages.every((page) => Array.isArray(page) && page.every(isRecord))
   ) {
-    const said = `gh answered gh api advisories with something that is not a list of pages of objects: ${JSON.stringify(pages).slice(0, 200)}`
+    const said = `gh answered ${what} with something that is not a list of pages of objects: ${JSON.stringify(pages).slice(0, SHOWN_CHARACTERS)}`
     throw new GhError(said, result.status, { cause: result, detail: said })
   }
   return (pages as Record<string, unknown>[][]).flat()
+}
+
+/** What `searchOpenPullRequests` promises: a list of objects, each with its url as text. */
+const pullRequestsOf = (result: RunResult): GhResults['searchOpenPullRequests'] => {
+  const found = parse(result, 'gh pr list')
+  if (
+    !Array.isArray(found) ||
+    !found.every((entry) => isRecord(entry) && typeof entry.url === 'string')
+  ) {
+    const said = `gh answered gh pr list with something that is not a list of pull requests with a url: ${JSON.stringify(found).slice(0, SHOWN_CHARACTERS)}`
+    throw new GhError(said, result.status, { cause: result, detail: said })
+  }
+  return (found as { url: string }[]).map((entry) => ({ url: entry.url }))
 }
 
 /** A `GhClient` that runs the real `gh`. */
@@ -298,7 +337,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
         await succeeded(['repo', 'view', repo.repository, '--json', DEFAULT_BRANCH_FIELDS]),
       ),
     listAdvisories: async (query) =>
-      advisoriesOf(
+      pagesOf(
         await succeeded([
           'api',
           `advisories?affects=${encodeURIComponent(query.package)}` +
@@ -306,12 +345,35 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
           '--paginate',
           '--slurp',
         ]),
+        'gh api advisories',
       ),
-    listDependabotAlerts: async () => {
-      throw new Error('STUB for the parity capture')
-    },
-    searchOpenPullRequests: async () => {
-      throw new Error('STUB for the parity capture')
-    },
+    listDependabotAlerts: async (query) =>
+      pagesOf(
+        await succeeded([
+          'api',
+          '--hostname',
+          query.host,
+          `repos/${encodeURIComponent(query.owner)}/${encodeURIComponent(query.repo)}` +
+            `/dependabot/alerts?state=open&per_page=${ALERT_PAGE_SIZE}`,
+          '--paginate',
+          '--slurp',
+        ]),
+        'gh api dependabot alerts',
+      ),
+    searchOpenPullRequests: async (query) =>
+      pullRequestsOf(
+        await succeeded([
+          'pr',
+          'list',
+          '--repo',
+          query.repository,
+          '--search',
+          `head:${query.head}`,
+          '--state',
+          'open',
+          '--json',
+          SEARCH_FIELDS,
+        ]),
+      ),
   }
 }
