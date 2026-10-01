@@ -138,8 +138,8 @@ const RANK: Readonly<Record<string, number>> = {
 /**
  * jq's order: null, false, true, numbers, texts, lists, objects. Texts sort
  * by UTF-16 unit here and by code point in jq, so the order differs only
- * for a character above U+FFFF. Two lists, or two objects, have no fixed
- * order here. jq sorts them by their contents.
+ * for a character above U+FFFF. Two lists sort here by their text form, and
+ * two objects have no order. jq sorts both by their contents.
  */
 export const compare = (a: unknown, b: unknown): number => {
   const rank = (RANK[jqType(a)] as number) - (RANK[jqType(b)] as number)

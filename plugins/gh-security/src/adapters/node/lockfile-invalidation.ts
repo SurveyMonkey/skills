@@ -51,9 +51,10 @@ const isStale = (
 
 /**
  * The stale entry pass over the lockfile. It throws where jq stops. It also
- * throws for a lockfile with no document, where bash stops with exit 2. That
- * check comes before the floor: jq writes no result for an empty file, so
- * bash stops for a range with no floor too.
+ * throws for a lockfile with no document. There jq writes no result, and
+ * bash stops later with exit 2 on the empty `--argjson` of its answer. This
+ * check comes before the floor, because bash stops for a range with no floor
+ * too.
  */
 export const invalidationOf = (lock: NpmLock, pkg: string, range: string): Invalidation => {
   if (lock.document === NO_DOCUMENT) throw new Error('package-lock.json holds no document')

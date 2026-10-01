@@ -5,9 +5,10 @@
 // step reads them with the jq rules of `jq-json.ts`. It throws where jq
 // stops.
 //
-// `src/lockfiles/npm.ts` reads the same file for the read verbs. It drops
-// the root entry, and a version that is not a text. These passes keep both,
-// as node.sh does: a parent named `__root__` is the root manifest.
+// `src/lockfiles/npm.ts` reads the same file for the read verbs and
+// `validate`. It drops the root entry, and a version that is not a text.
+// These passes keep both, as node.sh does: a parent named `__root__` is the
+// root manifest.
 //
 // This file ships. It imports nothing outside the plugin.
 
