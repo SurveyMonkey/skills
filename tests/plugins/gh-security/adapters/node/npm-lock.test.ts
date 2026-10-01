@@ -80,6 +80,20 @@ describe('copyRows and declarationRows', () => {
     ])
   })
 
+  // `$pkgs[$c].version // empty` goes on to the next candidate.
+  it('reads the version of the first candidate that has one', () => {
+    const lock = lockOf(
+      JSON.stringify({
+        packages: {
+          'node_modules/a': { dependencies: { b: '^1' } },
+          'node_modules/a/node_modules/b': {},
+          'node_modules/b': { version: '2.0.0' },
+        },
+      }),
+    )
+    expect(copyRows(lock, 'b')).toEqual([{ parent: 'a', parent_version: null, resolved: '2.0.0' }])
+  })
+
   it('writes each row in the text of @tsv', () => {
     expect(declarationRows(lockOf(LOCK))).toEqual([
       { parent: '__root__', key: 'a', value: '^1.0.0' },

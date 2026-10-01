@@ -2175,3 +2175,137 @@ describe('the verdict of validate on the tree that the written keys produce', ()
     },
   )
 })
+
+// Rows that a revert of one guard fails. Each expected value is the answer
+// of node.sh on the same copy, read by hand from its output.
+describe('the guards of the passes', () => {
+  it('keeps the bytes of a manifest that the call does not change', () => {
+    const { dir } = apply('npm-v3', LODASH)
+    expect(textAt(dir, 'package.json')).toBe(textAt(join(FIXTURES_ROOT, 'npm-v3'), 'package.json'))
+  })
+
+  it('marks a qualified bare key that targets the package', () => {
+    const { observations } = answer('pnpm-v9', ['handlebars', '>=4.7.10 <5', 'express'])
+    expect(
+      observations.flatMap((each) =>
+        each.type === 'unscoped_override' && each.targets_this_package ? [each.key] : [],
+      ),
+    ).toEqual(['handlebars@4'])
+  })
+
+  it.each([
+    ['no pnpm.overrides in package.json', undefined],
+    [
+      'a workspace block and no pnpm pin',
+      manifestEdit((manifest) => {
+        delete manifest.packageManager
+      }),
+    ],
+  ])('adds no pnpm observation for %s', (_title, setup) => {
+    expect(
+      answer(PNPM11, [...BRACE, 'minimatch'], setup).observations.map(({ type }) => type),
+    ).toEqual(Array(4).fill('unscoped_override'))
+  })
+
+  it('retargets a root key that aliases the package with no version', () => {
+    const bare = manifestEdit((manifest) => {
+      ;(manifest.dependencies as Json).l = 'npm:lodash'
+    })
+    expect(answer('npm-v3', LODASH, bare).written).toEqual([
+      { parent: null, path: ['dependencies', 'l'], value: 'npm:lodash@>=4.17.21 <5' },
+      { parent: null, path: ['dependencies', 'lodash'], value: '^4.17.21' },
+    ])
+  })
+
+  it('places nothing through a rule whose outer segment is not in the lockfile', () => {
+    expect(
+      manifestAfter(PLACED, nx, rule({ absent: { lerna: { nx: '>=22.7.7 <23' } } })).overrides,
+    ).toEqual({
+      absent: { lerna: { nx: '>=22.7.7 <23' } },
+      nx: { 'brace-expansion': '>=5.0.9 <6' },
+    })
+  })
+
+  it('places a parent that declares the package through an npm: alias', () => {
+    const aliased = lockEdit((packages) => {
+      ;(packages['node_modules/nx'] as Json).dependencies = {
+        'be-alias': 'npm:brace-expansion@^5.0.4',
+      }
+      packages['node_modules/be-alias'] = { name: 'brace-expansion', version: '5.0.5' }
+    })
+    expect(manifestAfter(PLACED, nx, aliased).overrides).toEqual({
+      lerna: {
+        nx: { '.': '>=22.7.7 <23', 'be-alias': 'npm:brace-expansion@>=5.0.9 <6' },
+        chalk: '^6.0.0',
+      },
+      glob: '^13.0.0',
+    })
+  })
+
+  it('refuses no alias rule whose value names another package', () => {
+    const other = both(
+      manifestEdit((manifest) => {
+        ;((manifest.overrides as Json).lerna as Json)['x-tools'] = 'npm:other@1'
+      }),
+      lockEdit((packages) => {
+        packages['node_modules/x-tools'] = { name: 'nx', version: '22.7.9' }
+      }),
+    )
+    expect(((manifestAfter(PLACED, nx, other).overrides as Json).lerna as Json).nx).toEqual(NESTED)
+  })
+
+  it('keeps a normal copy on the line when the range has no floor', () => {
+    expect(manifestAfter(PLACED, [BRACE[0], 'latest', 'nx'], secondNxLine).overrides).toEqual({
+      lerna: { nx: { '.': '>=22.7.7 <23', 'brace-expansion': 'latest' }, chalk: '^6.0.0' },
+      glob: '^13.0.0',
+      'nx@21.5.0': { 'brace-expansion': 'latest' },
+    })
+  })
+
+  it('tightens a version-qualified placing rule, which a tighten does not refuse', () => {
+    const qualified = rule({ lerna: { 'nx@^22.0.0': '>=22.7.7 <23' } })
+    expect(
+      manifestAfter(PLACED, ['--tighten-bare', 'nx', '>=22.7.9 <23'], qualified).overrides,
+    ).toEqual({
+      lerna: { 'nx@^22.0.0': '>=22.7.9 <23' },
+    })
+  })
+
+  it('refuses a dead pair with no floor, for a range with no floor', () => {
+    const dead = manifestEdit((manifest) => {
+      ;(manifest.overrides as Json).nx = { 'brace-expansion': 'latest' }
+    })
+    expect(refusalOf(PLACED, [BRACE[0], 'latest', 'nx'], dead)).toContain(
+      '[{"parent":"nx","key":"overrides.nx.brace-expansion","value":"latest"}]',
+    )
+  })
+
+  it('refuses a bare pair with no floor beside qualified keys, for a range with no floor', () => {
+    const bare = rule({ minimatch: { 'brace-expansion': 'latest' } })
+    expect(refusalOf('npm-cross-line', [BRACE[0], 'latest', 'minimatch'], bare)).toContain(
+      '{"parent":"minimatch","value":"latest","parent_also_override_placed":false}',
+    )
+  })
+
+  it('refuses a tighten for a range with no floor, though the rule pin has none either', () => {
+    const latest = manifestEdit((manifest) => {
+      ;((manifest.overrides as Json).lerna as Json).nx = 'latest'
+    })
+    expect(refusalOf(PLACED, ['--tighten-bare', 'nx', 'latest'], latest)).toContain(
+      "--tighten-bare cannot reach 'nx'",
+    )
+  })
+
+  it('writes the nested key for a refused shared parent whose copies on the line are all placed', () => {
+    const lines = both(
+      secondNxLine,
+      manifestEdit((manifest) => {
+        ;(manifest.dependencies as Json).nx = '>=21.0.0'
+      }),
+    )
+    expect(manifestAfter(PLACED, nx, lines).overrides).toEqual({
+      lerna: { nx: NESTED, chalk: '^6.0.0' },
+      glob: '^13.0.0',
+    })
+  })
+})
