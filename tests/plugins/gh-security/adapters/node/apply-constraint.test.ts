@@ -2422,3 +2422,12 @@ describe('more guards of the passes', () => {
     })
   })
 })
+
+describe('the refusal of the root keys', () => {
+  it('refuses a dependency block that is a text, writing nothing', () => {
+    const text = manifestEdit((manifest) => {
+      manifest.devDependencies = 'x'
+    })
+    expect(refusalOf('npm-v3', LODASH, text)).toBe('apply_constraint: cannot read package.json')
+  })
+})
