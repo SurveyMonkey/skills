@@ -56,7 +56,7 @@ const ROUTES: ReadonlyMap<
   { readonly name: 'node'; readonly adapter: Adapter<NodeDetection> }
 > = new Map([['npm', { name: 'node', adapter: node }]])
 
-/** Route one ecosystem. The name is matched as written, with no case folding. */
+/** Route one ecosystem. The name is matched as written, with no change of case. */
 export const selectAdapter = (ecosystem: string, manifest: string | null = null): AdapterRoute => {
   const route = ROUTES.get(ecosystem)
   if (route === undefined) {
