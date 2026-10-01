@@ -18,6 +18,10 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/allow-own-commands.ts')).allowOwnCommandsCommand,
   },
+  'discover-repos': {
+    description: 'List the repository checkouts a directory holds: discover-repos [<path>]',
+    load: async () => (await import('../subcommands/discover-repos.ts')).discoverReposCommand,
+  },
   'ensure-worktree-exclude': {
     description:
       "Add the agents' worktree directory to .git/info/exclude: ensure-worktree-exclude <repo_root>",

@@ -25,6 +25,7 @@ describe('the registry', () => {
   it('reaches each handler through a dynamic import of its own subcommand module', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
+      "import('../subcommands/discover-repos.ts')",
       "import('../subcommands/ensure-worktree-exclude.ts')",
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/session-start.ts')",
