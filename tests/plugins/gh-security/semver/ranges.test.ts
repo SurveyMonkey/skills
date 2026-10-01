@@ -411,7 +411,7 @@ describe('rangeFloorMajor', () => {
 // `jq -nc '[range(0;65536) | select([.] | implode | test("^[[:space:]]$"))]'`.
 describe('satisfies, where jq stops (#303)', () => {
   // Every row: jq stops with an error, for example "Cannot iterate over null".
-  it.fails.each([
+  it.each([
     ['an empty alternative after a match', '>=0 ||'],
     ['an empty alternative before a match', '|| >=0'],
     ['an empty alternative between two', '>=0 || || >=0'],
@@ -454,7 +454,7 @@ describe('the white space of a range (#303)', () => {
     },
   )
 
-  it.fails.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
     'splits a range at the wide space U+%s',
     (hex) => {
       const space = at(Number.parseInt(hex, 16))
@@ -469,16 +469,16 @@ describe('the white space of a range (#303)', () => {
     expect(satisfies('3.0.0', `>=0.5${character}<2`)).toBe(true)
   })
 
-  it.fails('splits the alternatives and the comparators at the wide spaces together', () => {
+  it('splits the alternatives and the comparators at the wide spaces together', () => {
     expect(rangeAlternatives('>=1 ||　<2\u0085')).toEqual([['>=1'], ['<2']])
   })
 
-  it.fails('drops a wide space after an operator, as jq does', () => {
+  it('drops a wide space after an operator, as jq does', () => {
     expect(rangeAlternatives('>= 1')).toEqual([['>=1']])
     expect(satisfies('0.1.0', '>= 0.5')).toBe(false)
   })
 
-  it.fails('flattens a range with wide spaces into its tokens', () => {
+  it('flattens a range with wide spaces into its tokens', () => {
     expect(rangeTokens('>=1 ||　<2\u0085')).toEqual(['>=1', '<2'])
   })
 })

@@ -17,7 +17,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { type Envelope, failed } from '../../lib/envelope.ts'
-import { evalToken, expandToken, rangeAlternatives } from '../../semver/ranges.ts'
+import { rangeAlternatives, satisfies } from '../../semver/ranges.ts'
 import { coreAt, parseVersion, semverMax } from '../../semver/versions.ts'
 import type { ResolvedVersionsAnswer, Tree, ValidateAnswer, ValidateOptions } from '../adapter.ts'
 import { attempt } from './attempt.ts'
@@ -33,24 +33,12 @@ type Sibling = { readonly major: number | null; readonly vulnerable_ranges: read
 type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
 
 /**
- * jq's `satisfies`, with the two places where jq stops. jq reads each
- * alternative and each comparator. So a comparator that it cannot read stops
- * it, also after a match. An alternative with no comparator also stops it.
- * `satisfies` in `src/semver/ranges.ts` answers in both cases. A constraint
- * like `>=0 ||` would pass there. `applyConstraint` uses this function too.
+ * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
+ * where jq stops (#303): on a comparator it cannot read, also after a match,
+ * and on an alternative with no comparator. `apply_constraint` and the other
+ * node verbs import this name from here.
  */
-export const satisfiesAll = (version: string, range: string): boolean =>
-  rangeAlternatives(range)
-    .map((tokens) => {
-      if (tokens.length === 0) {
-        throw new Error(`validate: the range '${range}' has an alternative with no comparator`)
-      }
-      return tokens
-        .flatMap(expandToken)
-        .map((token) => evalToken(token, version))
-        .every(Boolean)
-    })
-    .some(Boolean)
+export const satisfiesAll = satisfies
 
 // `token_ok` of node.sh: a comparator with a known operator and a version
 // that parses. A wildcard is not accepted here. `range_facts` accepts it.

@@ -598,8 +598,8 @@ describe('a package that the lockfile does not hold', () => {
 
 describe('a constraint where jq stops', () => {
   it.each([
-    [' ', "validate: the range ' ' has an alternative with no comparator"],
-    ['>=1 ||', "validate: the range '>=1 ||' has an alternative with no comparator"],
+    [' ', "the range ' ' has an alternative with no comparator"],
+    ['>=1 ||', "the range '>=1 ||' has an alternative with no comparator"],
     ['>=0 || >=', '"" is not a version this adapter can read.'],
     ['>=0 <99 ^', '"" is not a version this adapter can read.'],
     ['<0.0.1 >=', '"" is not a version this adapter can read.'],
