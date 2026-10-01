@@ -17,6 +17,9 @@
 // fill. A returned envelope has no subshell to be lost in, so there is one
 // reader and there is deliberately no unchecked sibling to reach for.
 //
+// `fix-group` reads the keys that `setup` wrote through `loadDriverState`,
+// the port of `load_state`. Each later phase calls it first.
+//
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs` and `path`.
 
@@ -171,3 +174,79 @@ export const readOptionalString = (state: StateFile, path: string): string | nul
  */
 export const writeKey = (state: StateFile, key: string, value: JsonValue): Envelope<StateFile> =>
   writeObject(state.path, { ...state.data, [key]: value })
+
+/**
+ * A list of strings that the state can carry, `install_signals` being the
+ * one the drivers have. An absent or null key is the empty list, as the
+ * bash read `.install_signals // []` gave it. Any other value is a failure,
+ * because the union that a later step writes from it would be wrong.
+ */
+export const readOptionalStrings = (state: StateFile, path: string): Envelope<string[]> => {
+  const value = readOptionalValue(state, path) ?? []
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+    return failed(
+      `the state file at ${state.path} has no usable value for '${path}': ` +
+        `expected a list of strings, found ${JSON.stringify(value)}.`,
+    )
+  }
+  return ok(value as string[])
+}
+
+/**
+ * The keys that `fix-group setup` writes and that each later phase reads
+ * before it does anything else: the port of `load_state`. The state file
+ * itself comes with them, so that a phase can write to it.
+ */
+export interface DriverState {
+  readonly state: StateFile
+  readonly repoRoot: string
+  readonly defaultBranch: string
+  readonly branchName: string
+  /** The name of the adapter. The route comes from `ecosystem`. */
+  readonly adapter: string
+  /** The advisory ecosystem of the group, which the registry routes. */
+  readonly ecosystem: string
+  readonly scorer: string
+  readonly worktree: string
+  readonly package: string
+  /** The major line, as the text that `setup` wrote. */
+  readonly majorLine: string
+  /** The prefix as `setup` wrote it, or null for no prefix. */
+  readonly envPrefix: string | null
+}
+
+/** The required keys, in the order that `load_state` read them. */
+const DRIVER_KEYS = [
+  ['repo_root', 'repoRoot'],
+  ['default_branch', 'defaultBranch'],
+  ['branch_name', 'branchName'],
+  ['adapter', 'adapter'],
+  ['ecosystem', 'ecosystem'],
+  ['scorer', 'scorer'],
+  ['worktree', 'worktree'],
+  ['package', 'package'],
+  ['major_line', 'majorLine'],
+] as const
+
+/**
+ * Load the state of a work directory, and read each key that every phase
+ * needs. The first key that has no usable value is the failure. So a phase
+ * never starts with an empty path, which `git -C ""` reads as the current
+ * directory (#18).
+ */
+export const loadDriverState = (workDir: string): Envelope<DriverState> => {
+  const loaded = loadState(workDir)
+  if (loaded.outcome !== 'ok') return loaded
+  const state = loaded.value
+  const fields: Record<string, string> = {}
+  for (const [key, field] of DRIVER_KEYS) {
+    const value = readString(state, key)
+    if (value.outcome !== 'ok') return value
+    fields[field] = value.value
+  }
+  return ok({
+    ...(fields as Omit<DriverState, 'state' | 'envPrefix'>),
+    state,
+    envPrefix: readOptionalString(state, 'env_prefix'),
+  })
+}
