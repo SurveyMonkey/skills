@@ -173,6 +173,24 @@ const verdicts = (directory: string, context?: string) => {
   return { bash, typescript }
 }
 
+/**
+ * A submodule whose path starts with `worktrees/`, checked out inside a
+ * linked worktree. Its gitdir ends in `/worktrees/wt/modules/worktrees/foo`,
+ * so the last `/worktrees/` marker is in the path of the submodule
+ * (round 3 ruling 14 on #226).
+ */
+const submoduleUnderWorktreesInWorktree = (built: Scene): string => {
+  const { fixtures, root } = built
+  const source = fixtures.create(join(root, 'main-source'))
+  const main = fixtures.createAt(root, 'main')
+  fixtures.git(main, ...ALLOW_FILE, 'submodule', 'add', '--quiet', source, 'worktrees/foo')
+  fixtures.git(main, 'commit', '--quiet', '-m', 'add the submodule')
+  fixtures.branch(main, 'fix')
+  fixtures.worktree(main, join(root, 'wt'), 'fix')
+  fixtures.git(join(root, 'wt'), ...ALLOW_FILE, 'submodule', 'update', '--init', '--quiet')
+  return join(root, 'wt', 'worktrees', 'foo')
+}
+
 describe('requireLinkedWorktree parity', () => {
   it.each(CASES)('agrees on %s', (_name, build) => {
     const { bash, typescript } = verdicts(build(scene()))
@@ -185,6 +203,18 @@ describe('requireLinkedWorktree parity', () => {
       outcome: 'failed',
       error: (JSON.parse(bash.stderr) as { error: string }).error,
     })
+  })
+
+  it('refuses on both sides a submodule under worktrees/ inside a linked worktree', () => {
+    const { bash, typescript } = verdicts(submoduleUnderWorktreesInWorktree(scene()))
+    expect(bash.status).toBe(1)
+    expect(typescript).toEqual({
+      outcome: 'failed',
+      error: (JSON.parse(bash.stderr) as { error: string }).error,
+    })
+    expect(typescript.outcome === 'failed' && typescript.error).toContain(
+      '/worktrees/wt/modules/worktrees/foo)',
+    )
   })
 
   it('agrees on the message when the caller names a context', () => {
