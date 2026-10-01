@@ -27,7 +27,10 @@ commands bare when the field is absent. It wraps a command, not a shell builtin,
 stand in for a `cd`. `check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
 The ported commands `pr-status` and `check-advisories` take `--env-prefix` and wrap their `gh` calls
 with it. The ported command `detect-scope` takes `--env-prefix` and wraps its `gh` and `git` calls
-with it. The ported command `discover-repos` runs `git` and takes no `--env-prefix`.
+with it. The ported command `discover-repos` runs `git` and takes no `--env-prefix`. The ported
+command `discover-alerts` takes `--env-prefix` and wraps its `gh` calls with it. The ported command
+`classify-lines` takes `--env-prefix` and wraps its `git` calls with it. Its adapter verbs run in
+process and start no child.
 
 The failure class this guards against is manager-agnostic: per-directory environment tools load
 through interactive shell hooks that non-interactive tool shells never run, so a bare `gh`, `git`,
