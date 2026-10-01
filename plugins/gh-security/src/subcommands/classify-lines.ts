@@ -32,8 +32,10 @@
 //     cross_line_collision  resolved, but the lines of the package share a
 //                           parent in a shape that no override key can
 //                           separate (below). `collision_parents` names them.
-//     unknown               an adapter read failed or broke its contract,
-//                           `present` is false, or `major_line` is `none`.
+//     unknown               a `detect`, `resolved_versions` or
+//                           `compare_versions` read failed or broke its
+//                           contract, `present` is false, or `major_line`
+//                           is `none`.
 //
 // `requires_major_bump` groups move into `skipped` with the reason
 // `requires major version bump` (#101), and `cross_line_collision` groups with
@@ -45,20 +47,26 @@
 // more than one major. It reads the override syntax from `detect`, and the
 // eligible parents and `parents_other_lines` of each major from
 // `declared_ranges`. A group moves only when the lines share an eligible
-// parent name, AND no key can say the difference: under Yarn `resolutions` any
-// shared name, and under npm and pnpm a shared name that one copy holds on
-// every line (the entry is in `parents_other_lines` of every major). A broken
-// `detect` or `declared_ranges` read keeps the group actionable, and adds an
-// entry to `classify_errors[]`.
+// parent name, AND no key can say the difference:
+//   - under Yarn `resolutions`, any shared name;
+//   - under npm and pnpm, a shared name that one copy holds on every line.
+//     That entry is in the `parents_other_lines` of every major.
+// A broken `detect` or `declared_ranges` read in this check keeps the group
+// `resolved` and actionable, and adds an entry to `classify_errors[]`.
 //
-// **Contract discipline** (ADR 001). An adapter answer that fails, that has a
-// promised field that is not there or of the wrong type, or that says `present: true`
-// with no versions, is a broken read, never an empty answer. Its group is
-// `unknown`, and `classify_errors[]` names the adapter, the package and the
-// error. Under `--base-ref`, each entry also has `base_ref`. A failure of the
-// command itself, with exit 1, is only for bad input: a bad option, stdin
-// that is not the promised object, or actionable groups of more than one
-// repository, because one `--repo-root` names one lockfile.
+// **Contract discipline** (ADR 001). A broken read is never an empty answer.
+// A read is broken when it fails, or when a promised field is not there or
+// is of the wrong type. `present: true` with no versions is also broken. A
+// broken `detect`, `resolved_versions` or `compare_versions` read makes the
+// group `unknown`. `classify_errors[]` names the adapter, the package and
+// the error. Under `--base-ref`, each entry also has `base_ref`.
+//
+// The command itself fails, with exit 1, for bad input and for a `--base-ref`
+// step that fails. Bad input is a bad option, a `--repo-root` that is not a
+// directory, or stdin that is not the promised object. Actionable groups of
+// more than one repository are also bad input, because one `--repo-root`
+// names one lockfile. The `--base-ref` steps are the checks of the
+// repository, the fetch, the temporary directory and `worktree add`.
 //
 // **Each adapter verb runs in process, once for each key**, where the script
 // started one adapter process for each read: `detect` once for each adapter,
@@ -68,12 +76,17 @@
 //
 // **`--base-ref origin/<branch>`** names the tree that the verbs read (#158).
 // Without it, they read the checkout at `--repo-root` as it is. With it, the
-// command fetches that branch with an explicit refspec, adds a detached
-// worktree at the fetched ref in a temporary directory, reads that tree, and
-// removes the worktree on every exit. `--repo-root` must then be the top
-// level of a repository. When the removal fails, the worktree stays, and a
-// line on stderr says how to remove it: a deleted directory with its entry
-// still in the repository blocks later worktrees (`git.md`). It never runs
+// command does these steps:
+//   1. It fetches that branch with an explicit refspec.
+//   2. It adds a detached worktree at the fetched ref, in a temporary
+//      directory.
+//   3. It reads that tree.
+//   4. It removes the worktree when the handler returns or throws.
+// A signal that stops the process skips step 4, where the script's EXIT trap
+// ran. `--repo-root` must be the top level of a repository. When the removal
+// fails, the worktree and its directory stay. A deleted directory with its
+// entry still in the repository blocks later worktrees (`git.md`). A line on
+// stderr then says how to remove the worktree. It never runs
 // `git worktree prune`.
 //
 // `--branch-style flat` renames each `branch_name` of both lists from
@@ -88,9 +101,11 @@
 //
 // Differences from the pipeline `select-adapter.sh --from-discovery |
 // classify-lines.sh`:
-//   - A group has no `adapter_path`, because the route is in process, and an
-//     `adapter_path` in the input is removed. `classify_errors[].adapter` is
-//     the name of the adapter, where the script gave the path.
+//   - A routed group has no `adapter_path`, because the route is in process.
+//     The route removes an `adapter_path` from each actionable group of the
+//     input. A group in the input `skipped` passes through as it is.
+//     `classify_errors[].adapter` is the name of the adapter, where the
+//     script gave the path.
 //   - `classify_errors[].error` is the message of the failed verb. The script
 //     quoted the first line that its child wrote on stderr, which is empty
 //     for a broken answer on exit 0. Here a broken answer says what broke.
@@ -100,8 +115,8 @@
 //     refused. The pipeline answers it with nothing and exit 0.
 //   - The input is checked before any git call. The script added the
 //     worktree first, and then found that a group list was bad.
-//   - `declared_ranges` must give lists of text. The script stops with no
-//     `{"error": ...}` on another value.
+//   - `declared_ranges` must give lists of text. On another value, the
+//     script can stop with no `{"error": ...}`.
 //   - In process, `resolved_versions` reads the answer of `detect`. So a
 //     `detect` that fails also fails `resolved_versions`, and the group is
 //     `unknown`. In the script, `detect` ran only in the collision check.
@@ -164,6 +179,14 @@ type Resolved =
       readonly majors: readonly string[]
     }
   | { readonly ok: false }
+
+/** The `line_status` of a group (the header). */
+type LineStatus =
+  | 'resolved'
+  | 'requires_major_bump'
+  | 'line_absent'
+  | 'cross_line_collision'
+  | 'unknown'
 
 /** One `declared_ranges` row of the collision check. */
 interface Row {
@@ -299,8 +322,10 @@ export const classifyLines = async (
         return failed(`--base-ref requires --repo-root to be a git repository: ${given}`)
       }
       // Both sides with their links resolved, so `/tmp` and `/private/tmp`
-      // are one path. A linked worktree is its own top level.
-      if (realpathSync(root) !== realpathSync(topLevel)) {
+      // are one path. A linked worktree is its own top level. A top level
+      // that cannot be resolved is not this directory, as `pwd -P` of the
+      // script gave no text for it.
+      if (realpathSync(root) !== realOrEmpty(topLevel)) {
         return failed(
           `--base-ref requires --repo-root to be the repository top level, not a subdirectory: ${given} (top level: ${topLevel})`,
         )
@@ -352,15 +377,36 @@ export const classifyLines = async (
       // `worktree remove` drops this command's own entry and no other. A
       // directory whose removal failed stays, with its entry.
       if ((await git(['worktree', 'remove', '--force', tree])).status === 0) {
-        rmSync(baseDir, { recursive: true, force: true })
+        removeQuietly(baseDir)
       } else if (existsSync(tree)) {
         context.io.stderr(
           `classify-lines: could not remove base-ref worktree ${tree}; remove it with: git -C ${given} worktree remove --force ${tree}\n`,
         )
       } else {
-        rmSync(baseDir, { recursive: true, force: true })
+        removeQuietly(baseDir)
       }
     }
+  }
+}
+
+/** The real path, or no text when the path cannot be resolved. */
+const realOrEmpty = (path: string): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Remove the empty temporary directory. A failure here does not change the
+ * answer, as the script's `rm -rf ... || true` did not.
+ */
+const removeQuietly = (path: string): void => {
+  try {
+    rmSync(path, { recursive: true, force: true })
+  } catch {
+    // The worktree is already gone. Only an empty directory stays.
   }
 }
 
@@ -497,7 +543,7 @@ const classify = (
   const annotated = routed.map(({ group, name, adapter, pkg, line }) => {
     const entry = resolved.get(key(name, pkg)) ?? { ok: false }
     const majors = entry.ok ? entry.majors : []
-    let status = 'unknown'
+    let status: LineStatus = 'unknown'
     if (line !== 'none' && entry.ok && entry.present) {
       if (majors.includes(line)) status = 'resolved'
       else {
@@ -506,7 +552,8 @@ const classify = (
           const answer = adapter.compareVersions(version, `${line}.0.0`)
           const result: unknown =
             answer.outcome === 'ok' && isRecord(answer.value) ? answer.value.result : undefined
-          if (typeof result === 'number') {
+          // A JSON number is finite. An in-process NaN is a broken answer.
+          if (typeof result === 'number' && Number.isFinite(result)) {
             if (result >= 0 && status !== 'unknown') status = 'line_absent'
             continue
           }

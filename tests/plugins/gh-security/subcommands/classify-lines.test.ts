@@ -14,6 +14,7 @@
 // header of the command. The pipeline of bash scripts is compared in
 // `parity-classify-lines.test.ts`.
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -91,6 +92,14 @@ const RESOLVED: Record<string, Envelope<unknown>> = {
   'empty-last': copies('empty-last', ['1.0.0', '']),
   'split-version': copies('split-version', ['1.0.0\n9.0.0']),
   'null-compare': copies('null-compare', ['1.0.0-null']),
+  'nan-compare': copies('nan-compare', ['1.0.0-nan']),
+  'text-compare': copies('text-compare', ['1.0.0-text']),
+  'nothing-compare': copies('nothing-compare', ['1.0.0-nothing']),
+  'zero-compare': copies('zero-compare', ['1.0.0-zero']),
+  'late-broken': copies('late-broken', ['1.1.11', '5.0.5']),
+  'missing-field': copies('missing-field', ['1.1.11', '5.0.5']),
+  'dup-eligible': copies('dup-eligible', ['1.1.11', '5.0.5']),
+  'two-shared': copies('two-shared', ['1.1.11', '5.0.5']),
   'wo-range': copies('wo-range', ['1.5.0', '2.5.0']),
   stray: copies('stray', ['1.1.11', '5.0.5']),
   'scoped-bare': copies('scoped-bare', ['5.1.6', '10.0.3']),
@@ -154,6 +163,20 @@ const DECLARED: Record<string, Envelope<unknown>> = {
   'stray 5': ranges({ parents_read: ['a'], parents_other_lines: ['zz@1.0.0'] }),
   'scoped-bare 5': ranges({ parents_read: ['@npmcli/x'], parents_other_lines: ['@npmcli/x'] }),
   'scoped-bare 10': ranges({ parents_read: ['@npmcli/x'], parents_other_lines: ['@npmcli/x'] }),
+  'late-broken 1': ranges({ parents_read: ['a'] }),
+  'late-broken 5': failed('declared_ranges: parser refused the lockfile'),
+  'missing-field 1': ok({ parents_read: ['a'] }),
+  'missing-field 5': ranges({ parents_read: ['a'] }),
+  'dup-eligible 1': ranges({ parents_read: ['p'], parents_without_range: ['p'] }),
+  'dup-eligible 5': ranges({ parents_read: ['p'] }),
+  'two-shared 1': ranges({
+    parents_read: ['a', 'a-b'],
+    parents_other_lines: ['a-b@1.0.0', 'a@1.0.0'],
+  }),
+  'two-shared 5': ranges({
+    parents_read: ['a', 'a-b'],
+    parents_other_lines: ['a-b@1.0.0', 'a@1.0.0'],
+  }),
 }
 
 interface StandInSpec {
@@ -215,6 +238,10 @@ const standIn = (spec: StandInSpec = {}) => {
       if (a.includes('badcompare')) return failed('compare_versions: unversionable input')
       if (a === '1.0.0-odd') return ok({} as never)
       if (a === '1.0.0-null') return ok(null as never)
+      if (a === '1.0.0-nan') return ok({ result: Number.NaN } as never)
+      if (a === '1.0.0-text') return ok({ result: '1' } as never)
+      if (a === '1.0.0-nothing') return ok({ result: null } as never)
+      if (a === '1.0.0-zero') return ok({ result: 0 } as never)
       return node.compareVersions(a, b)
     },
   }
@@ -385,6 +412,42 @@ describe('the line statuses', () => {
     expect(found.errors.map((entry) => entry.error)).toEqual([
       'compare_versions broke its contract (ADR 001): null',
     ])
+  })
+
+  it.each([
+    ['NaN', 'nan-compare', '{"result":null}'],
+    ['a result that is text', 'text-compare', '{"result":"1"}'],
+    ['a null result', 'nothing-compare', '{"result":null}'],
+  ])('reads a compare_versions result of %s as a broken read', async (_case, pkg, shown) => {
+    const found = await statusOf(pkg, '2')
+    expect(found).toMatchObject({ where: 'actionable', status: 'unknown' })
+    expect(found.errors.map((entry) => entry.error)).toEqual([
+      `compare_versions broke its contract (ADR 001): ${shown}`,
+    ])
+  })
+
+  it('reads a copy that compares equal to the line as at or above it', async () => {
+    expect(await statusOf('zero-compare', '2')).toMatchObject({
+      where: 'actionable',
+      status: 'line_absent',
+      errors: [],
+    })
+  })
+
+  it('reads a false line as none, as jq // does', async () => {
+    expect(await statusOf('lodash', false)).toMatchObject({ status: 'unknown', errors: [] })
+  })
+
+  it('reads a false package as no package, and reads nothing for it', async () => {
+    const { route, calls } = standIn()
+    const result = await classifyLines(
+      context(['--repo-root', SOME_ROOT], envelope([group(false as never, '1')])),
+      run,
+      route,
+      '/',
+    )
+    expect(answerIn(result).actionable.map((entry) => entry.line_status)).toEqual(['unknown'])
+    expect(calls).toEqual([])
   })
 
   it('reads a line with line breaks at the end without them, as the script does', async () => {
@@ -635,6 +698,51 @@ describe('the collision check (#132)', () => {
     })
   })
 
+  it('keeps the group when a later declared_ranges read fails, and judges no partial rows', async () => {
+    expect(await check('late-broken', '5')).toEqual({
+      where: 'actionable',
+      status: 'resolved',
+      parents: undefined,
+      reason: undefined,
+      errors: [
+        {
+          adapter: 'node',
+          package: 'late-broken',
+          error: 'declared_ranges: parser refused the lockfile',
+        },
+      ],
+    })
+  })
+
+  it('keeps the group when declared_ranges has no promised list', async () => {
+    expect(await check('missing-field', '5')).toMatchObject({
+      where: 'actionable',
+      status: 'resolved',
+      errors: [
+        {
+          package: 'missing-field',
+          error: 'declared_ranges --line 1 failed or broke its contract; collision check skipped',
+        },
+      ],
+    })
+  })
+
+  it('names a parent once when two lists of one line hold it', async () => {
+    expect(await check('dup-eligible', '1', { location: 'resolutions' })).toMatchObject({
+      where: 'skipped',
+      status: 'cross_line_collision',
+      parents: ['p'],
+    })
+  })
+
+  it('names the shared parents in jq order', async () => {
+    expect(await check('two-shared', '1')).toMatchObject({
+      where: 'skipped',
+      status: 'cross_line_collision',
+      parents: ['a', 'a-b'],
+    })
+  })
+
   it('never runs for a package with one major', async () => {
     const { route, calls } = standIn()
     await classifyLines(
@@ -820,6 +928,11 @@ describe('the envelope', () => {
         group('express', '4', { repo: 'octo/other' }),
       ]),
       "classify-lines: actionable groups span more than one repo (octo/app, octo/other); pass one repo's groups per invocation",
+    ],
+    [
+      'groups whose repo is empty text and a name, as jq // keeps the empty text',
+      envelope([group('lodash', '4', { repo: '' }), group('express', '4', { repo: 'octo/app' })]),
+      "classify-lines: actionable groups span more than one repo (, octo/app); pass one repo's groups per invocation",
     ],
   ])('refuses %s', async (_case, stdin, said) => {
     expect(await classify(stdin)).toEqual(failed(said))
@@ -1164,6 +1277,47 @@ describe('--base-ref', () => {
       failed(`--base-ref requires --repo-root to be a git repository: ${repo.temp}`),
     )
   })
+
+  it('refuses a top level that does not exist, as a top level that is not this directory', async () => {
+    const repo = repository()
+    const elsewhere: Runner = (command, args = [], options) =>
+      args.includes('--show-toplevel')
+        ? run('echo', ['/nonexistent/top'], options)
+        : run(command, args, options)
+    expect(
+      await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], {
+        runner: elsewhere,
+      }),
+    ).toEqual(
+      failed(
+        `--base-ref requires --repo-root to be the repository top level, not a subdirectory: ${repo.work} (top level: /nonexistent/top)`,
+      ),
+    )
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'keeps its answer when the empty temporary directory cannot be removed',
+    async () => {
+      const repo = repository()
+      // After the worktree is added, the parent of the temporary directory
+      // takes no change. So the removal of that directory fails.
+      const locking: Runner = async (command, args = [], options) => {
+        const result = await run(command, args, options)
+        if (args.slice(2, 4).join(' ') === 'worktree add') chmodSync(repo.temp, 0o555)
+        return result
+      }
+      try {
+        const result = await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], {
+          runner: locking,
+        })
+        expect(statusesOf(result)).toEqual(['requires_major_bump'])
+        expect(repo.worktrees()).toBe(1)
+      } finally {
+        chmodSync(repo.temp, 0o755)
+      }
+      expect(readdirSync(repo.temp)).toHaveLength(1)
+    },
+  )
 
   it('refuses a top level that git gives as empty', async () => {
     const repo = repository()
