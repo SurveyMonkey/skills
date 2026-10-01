@@ -3,9 +3,9 @@
 // the placed qualifiers and `bare_conflict` in `verb_apply_constraint` of
 // node.sh (#222). The jq there is the specification.
 //
-// A bare parent key matches each resolved copy of the parent. A parent that
-// the lockfile resolves at more than one version, each copy with its own
-// major of the child, would have each copy moved onto the line of the
+// A bare parent key matches each resolved copy of the parent. The lockfile
+// can resolve a parent at more than one version, each copy with its own
+// major of the child. A bare key then moves each copy onto the line of the
 // call. So the key carries a qualifier for each copy whose child is on the
 // target line.
 //
@@ -170,8 +170,7 @@ export type Qualifiers = ReadonlyMap<string, readonly string[]>
  * A parent that is refused, or that falls back to the bare key, has none.
  * The refusal of a shared parent (#132) is a failure, unless each copy of
  * that parent on the line is placed (#147). Then the nested write serves
- * it. A
- * qualifier that covers only placed copies is dropped: no placed copy
+ * it. A qualifier that covers only placed copies is dropped: no placed copy
  * matches a top-level key. It throws where jq stops.
  */
 export const qualifiersOf = (

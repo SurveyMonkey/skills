@@ -73,7 +73,7 @@ requires the cwd to sit inside a **linked** worktree, which a primary checkout, 
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
 The TypeScript port of the guard is `requireLinkedWorktree` in `plugins/gh-security/src/worktree.ts`.
-It is a function, not a command. Each write verb of the adapter that is built calls it in
+It is a function, not a command. Each write verb of the adapter calls it in
 process, as its first statement (#222). In the node adapter, these are `install`
 (`src/adapters/node/install.ts`), `shim` (`src/adapters/node/shim.ts`) and `applyConstraint`
 (`src/adapters/node/apply-constraint.ts`). `validate` only reads, so it has no guard.

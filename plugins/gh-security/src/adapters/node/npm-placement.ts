@@ -9,9 +9,9 @@
 // range of the parent.
 //
 // A rule path places a copy only when the lockfile corroborates it. The
-// copy must have the root and each segment of the rule, in order, in its
-// chain of dependents, and each selector of the rule must admit the version
-// of its copy. The walk is one level set for each segment of the rule, so a
+// chain of dependents of the copy must have the root and each segment of
+// the rule, in order. Each selector of the rule must admit the version of
+// its copy. The walk is one level set for each segment of the rule, so a
 // graph with many branches stays cheap, and a cycle ends.
 //
 // Each copy of a parent is placed or normal. A placed copy takes the nested
@@ -160,7 +160,7 @@ export const placementsOf = (query: PlacementQuery): ReadonlyMap<string, Placeme
   const nested = keyPaths(overrides, []).filter(
     ({ path }) => path.length > 1 && path.at(-1) !== '.',
   )
-  /** The major of the child copy at `target`, as `npm_copy_rows` reads it. */
+  /** The major of the child copy at `path`, as `npm_copy_rows` reads it. */
   const childMajor = (path: string | null): string | null => {
     if (path === null) return null
     const head = split(trimStart(or(get(lock.byKey.get(path), 'version'), ''), 'v'), '.')[0] ?? null
@@ -329,8 +329,9 @@ export const placementRefusal = (
 /**
  * The rule paths that a `--tighten-bare` of a placed package moves: each
  * rule that places it and has a pin on the line of `range`. The pin is the
- * value of the rule, or its `"."` key. A placement with no such rule is a
- * refusal: a top-level key never matches a placed copy (#147).
+ * value of the rule, or its `"."` key. A placement whose rules have no pin
+ * on the line is a refusal: a top-level key never matches a placed copy
+ * (#147). A package with no rule path gets no rule pins.
  */
 export const tightenedRules = (
   placement: Placement | undefined,

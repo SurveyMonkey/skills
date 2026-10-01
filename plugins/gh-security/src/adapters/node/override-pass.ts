@@ -7,13 +7,15 @@
 // `tightenRule`. So nothing lands in the manifest without an entry in
 // `written`.
 //
-//   - A direct constraint retargets the declaration of the root, and keeps
-//     its form: an exact pin stays exact, `^` stays `^`, and an `npm:`
-//     alias keeps its protocol and the package that it names. With no
-//     declaration, it writes a bare override.
-//   - A scoped constraint writes one key for each parent: `parent>pkg` for
-//     pnpm, `parent/pkg` for yarn, and a nested object for npm. Each pnpm
-//     and npm key carries the qualifiers of `parent-qualifiers.ts`. An npm
+//   - A direct constraint retargets a declaration of the root in
+//     `dependencies` or `devDependencies`, and keeps its form: an exact pin
+//     stays exact, `^` stays `^`, and an `npm:` alias keeps its protocol and
+//     the package that it names. For a key with no such declaration, it
+//     writes a bare override.
+//   - A scoped constraint writes a key for each declared key of each parent:
+//     `parent>pkg` for pnpm, `parent/pkg` for yarn, and a nested object for
+//     npm. A pnpm or npm parent with qualifiers gets one key for each
+//     qualifier, from `parent-qualifiers.ts`. An npm
 //     parent that a rule places takes the nested write inside each rule
 //     that places it (#147).
 //   - `tightenBare` moves each bare key that covers the major line of the

@@ -3,8 +3,8 @@
 // is the specification.
 //
 // The writer edits lines. It never makes the block again from its entries.
-// An entry whose value changed is written again in its place, and a new
-// entry goes at the end of the block, in the order of the final map. Each
+// The writer puts an entry with a changed value back in its place. It adds
+// each new entry at the end of the block, in the order of the final map. Each
 // other line goes through byte for byte: other entries, comments, and the
 // rest of the file. The writer then reads the block back, and the read must
 // give the final map. So a shape that the writer cannot keep fails, and no

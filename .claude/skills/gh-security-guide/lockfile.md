@@ -15,9 +15,9 @@ Berry a working alias path at all
 `dependencies`, `optionalDependencies` and `peerDependencies` — because a parent that declares the
 package as a peer is why the copy is in the tree at all; Berry read only `dependencies` until
 [#49](https://github.com/SurveyMonkey/skills/issues/49), which hid exactly that parent.
-The TypeScript port has two npm readers. `src/lockfiles/npm.ts` serves `why` and
-`declared_ranges`. `src/adapters/node/npm-lock.ts` serves `applyConstraint`: it keeps the root
-entry and the values of the file, as the jq of `node.sh` does. Both read the same three blocks.
+The TypeScript port has two npm readers. `src/lockfiles/npm.ts` serves the read verbs.
+`src/adapters/node/npm-lock.ts` serves `applyConstraint`: it keeps the root entry and the values
+of the file, as the jq of `node.sh` does. Both read the same three blocks.
 Berry has one reader, `src/lockfiles/yarn.ts`.
 
 Two rules travel with it, both of which the old lookup broke:

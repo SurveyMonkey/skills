@@ -1,6 +1,6 @@
 // The request of `apply_constraint`, read as `verb_apply_constraint` reads
-// its arguments (#222). node.sh refuses an empty or absent package and range
-// with `${1:?}`. It joins the parents with line feeds, splits them again, and
+// its arguments (#222). node.sh refuses an empty or absent package with
+// `${1:?}`, and an empty or absent range with `${2:?}`. It joins the parents with line feeds, splits them again, and
 // drops each empty one. So a parent that holds a line feed is two parents.
 // `--tighten-bare` is a flag of the request, not an argument.
 //

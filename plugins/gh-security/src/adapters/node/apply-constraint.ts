@@ -13,22 +13,30 @@
 //   lockfile-invalidation.ts    the stale npm lockfile entries
 //
 // It is a write verb, so it refuses outside a linked worktree (ADR 001,
-// "Invocation"). As in node.sh, the guard is its first statement. The verb
-// does not run `detect`.
+// "Invocation"). As in node.sh, the guard is its first statement. node.sh
+// then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
-// The passes read package.json, and write it last. So each refusal comes
-// before a write. The three writes are in the order of node.sh:
-// pnpm-workspace.yaml, then package.json, then package-lock.json. A failure
-// after a write keeps that write, as in node.sh. A manifest that is the
-// same document after the pass is not written, so its bytes stay as they
-// are (#159). A written manifest keeps the indent of the file, and ends with
-// a newline.
+// Each refusal of the read passes comes before the first write. The three
+// writes are in the order of node.sh: pnpm-workspace.yaml, then
+// package.json, then package-lock.json. As in node.sh, a later step can
+// fail after a write: for example the read back of pnpm-workspace.yaml, or
+// the stale pass of package-lock.json. A failure keeps the earlier write. A
+// manifest that is the same document after the pass is not written, so its
+// bytes stay as they are (#159). A written manifest keeps the indent of the
+// file, and ends with a newline.
 //
 // Where jq stops in a pass that node.sh gives no message, bash exits 5 with
 // the text of jq. The port answers `failed` with its own text.
 //
-// node.sh writes each file through `mktemp` and `mv`, so a written file has
-// the mode 0600. The port writes in place, and the file keeps its mode.
+// node.sh writes each file to a temporary file, and then moves it into
+// place with `mv`. The port writes in place. This gives three declared
+// divergences:
+//
+//   - A written file keeps its mode. In node.sh it gets the mode 0600.
+//   - A symlink stays, and the port writes the file that it points to.
+//     node.sh puts a regular file in place of the symlink.
+//   - An error of the disk in the write can leave part of the file. In
+//     node.sh, the file stays as it was until the move.
 //
 // This file ships. It imports nothing outside the plugin.
 

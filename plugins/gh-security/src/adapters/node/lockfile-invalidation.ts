@@ -6,8 +6,8 @@
 // copy stays at its locked version, and the override does nothing. So the
 // call removes each stale entry before the install.
 //
-// A stale entry is a copy of the package, by resolved name only, on the
-// major line of the floor of the range, that does not satisfy the range. A
+// A stale entry is a copy of the package, by resolved name only. It is on
+// the major line of the floor of the range, and does not satisfy it. A
 // copy on another line belongs to a sibling group, and a copy that already
 // satisfies the range needs no move. An entry with no version, such as a
 // workspace link, is never stale.
