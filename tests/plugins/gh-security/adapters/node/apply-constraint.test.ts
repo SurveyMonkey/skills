@@ -2309,3 +2309,116 @@ describe('the guards of the passes', () => {
     })
   })
 })
+
+describe('more guards of the passes', () => {
+  it('retargets a root key that aliases a scoped package with no version', () => {
+    const scoped = manifestEdit((manifest) => {
+      ;(manifest.dependencies as Json).b = 'npm:@babel/core'
+    })
+    expect(answer('npm-v3', ['@babel/core', '>=7.25.0 <8'], scoped).written).toEqual([
+      { parent: null, path: ['dependencies', 'b'], value: 'npm:@babel/core@>=7.25.0 <8' },
+    ])
+  })
+
+  it('supersedes no pin inside the rule that already holds the new value', () => {
+    const same = manifestEdit((manifest) => {
+      ;((manifest.overrides as Json).lerna as Json).nx = NESTED
+    })
+    expect(answer(PLACED, nx, same).superseded_keys).toEqual([])
+  })
+
+  it('keeps a top-level pair of a placed parent that does not pin the package', () => {
+    const other = manifestEdit((manifest) => {
+      ;(manifest.overrides as Json).nx = { minimist: '1' }
+    })
+    const { envelope, dir } = apply(PLACED, nx, other)
+    expect({
+      superseded: answerOf(envelope).superseded_keys,
+      pair: (readJson(dir, 'package.json').overrides as Json).nx,
+    }).toEqual({ superseded: [], pair: { minimist: '1' } })
+  })
+
+  it.each([
+    [
+      'a yarn key with a parent',
+      'yarn-major-qualified',
+      manifestEdit((manifest) => {
+        ;(manifest.resolutions as Json)['@grpc/grpc-js@0/foo'] = '^1.0.0'
+      }),
+      ['@grpc/grpc-js', '>=0.5.0 <1'],
+      ['resolutions', '@grpc/grpc-js'],
+    ],
+    [
+      'a key whose name is another package',
+      'npm-major-qualified',
+      rule({ 'protobufjs@x@8': '^8.0.0' }),
+      ['protobufjs', '>=8.6.6 <9'],
+      ['overrides', 'protobufjs'],
+    ],
+    [
+      'a key with no floor, for a range with no floor',
+      'npm-major-qualified',
+      rule({ 'protobufjs@beta': 'beta' }),
+      ['protobufjs', 'latest'],
+      ['overrides', 'protobufjs'],
+    ],
+    [
+      'a key whose value is an object',
+      'npm-major-qualified',
+      rule({ 'glob@9': { minimatch: '1' } }),
+      ['glob', '>=9.3.5 <10'],
+      ['overrides', 'glob'],
+    ],
+  ])(
+    'tightens no bare key that is %s, and writes the plain key',
+    (_title, fixture, setup, args, path) => {
+      expect(
+        answer(fixture, ['--tighten-bare', ...args], setup).written.map((entry) => entry.path),
+      ).toEqual([path])
+    },
+  )
+
+  it('writes no plain key beside a covering key and a rule pin', () => {
+    const mixed = both(
+      lockEdit((packages) => {
+        ;((packages[''] as Json).dependencies as Json).foo = '^1.0.0'
+        packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: '^22.0.0' } }
+        packages['node_modules/foo/node_modules/nx'] = {
+          version: '22.7.5',
+          dependencies: { 'brace-expansion': '^5.0.4' },
+        }
+      }),
+      manifestEdit((manifest) => {
+        ;(manifest.overrides as Json)['nx@22'] = '^22.7.5'
+      }),
+    )
+    expect(answer(PLACED, ['--tighten-bare', 'nx', '>=22.7.9 <23'], mixed).written).toEqual([
+      { parent: null, path: ['overrides', 'nx@22'], value: '>=22.7.9 <23' },
+      { parent: null, path: ['overrides', 'lerna', 'nx'], value: '>=22.7.9 <23' },
+    ])
+  })
+
+  it('leaves a workspace file with no newline at the end as it is when no key changes', () => {
+    const text =
+      "overrides:\n  'minimatch@10.0.3>brace-expansion': '>=5.0.9 <6'\n  'minimatch@10.2.5>brace-expansion': '>=5.0.9 <6'"
+    const { dir } = apply(PNPM11, [...BRACE, 'minimatch'], workspaceFile(text))
+    expect(textAt(dir, 'pnpm-workspace.yaml')).toBe(text)
+  })
+
+  it('quotes a key with a single quote', () => {
+    const { dir } = apply(PNPM11, ["it's", '>=1.0.0 <2'])
+    expect(textAt(dir, 'pnpm-workspace.yaml').split('\n').at(-2)).toBe("  'it''s': '>=1.0.0 <2'")
+  })
+
+  it('counts no entry outside node_modules/ as stale', () => {
+    const workspace = lockEdit((packages) => {
+      packages['packages/axios'] = { name: 'axios', version: '1.0.0' }
+    })
+    expect(
+      answer('npm-stale-nested', ['axios', '>=1.18.0 <2', 'nx'], workspace).lockfile_invalidated,
+    ).toEqual({
+      performed: true,
+      keys: ['node_modules/nx/node_modules/axios'],
+    })
+  })
+})
