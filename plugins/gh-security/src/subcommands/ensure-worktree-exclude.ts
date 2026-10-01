@@ -63,6 +63,9 @@ const STALE_LOCK_MS = 60_000
 /** The mode that git gives a new exclude file. */
 const NEW_FILE_MODE = 0o644
 
+/** The end of the temporary file name. A test replaces it, to meet a name that is taken. */
+const randomSuffix = (): string => randomBytes(4).toString('hex')
+
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** The stats of a path, or `null` when the path cannot be read. */
@@ -154,8 +157,13 @@ const withLine = (text: string): string =>
  * rename is one step, so a reader sees the old file or the new file. The
  * temporary file is removed when a step fails.
  */
-const publish = (infoDir: string, exclude: string, existing: Existing): boolean => {
-  const temporary = join(infoDir, `.exclude.${randomBytes(4).toString('hex')}`)
+const publish = (
+  infoDir: string,
+  exclude: string,
+  existing: Existing,
+  suffix: () => string,
+): boolean => {
+  const temporary = join(infoDir, `.exclude.${suffix()}`)
   try {
     writeFileSync(temporary, withLine(existing.text), { flag: 'wx', encoding: 'latin1' })
     // After the write, because the mode of a new file follows the umask.
@@ -177,6 +185,7 @@ export const ensureWorktreeExclude = async (
   repoRoot: string,
   env: Readonly<Record<string, string | undefined>>,
   timing: LockTiming,
+  suffix: () => string = randomSuffix,
 ): Promise<Envelope<JsonObject>> => {
   if (statOrNull(repoRoot)?.isDirectory() !== true) {
     return failed(`repo_root does not exist: ${repoRoot}`)
@@ -202,7 +211,7 @@ export const ensureWorktreeExclude = async (
     if (hasLine(exclude)) return report('already-present')
     const existing = readExisting(exclude)
     if (existing.outcome !== 'ok') return existing
-    return publish(infoDir, exclude, existing.value)
+    return publish(infoDir, exclude, existing.value, suffix)
       ? report('added')
       : failed(`cannot publish ${exclude}`)
   } finally {
