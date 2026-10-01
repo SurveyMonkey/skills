@@ -20,10 +20,11 @@
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
 // package.json, then package-lock.json. As in node.sh, a later step can
 // fail after a write: for example the read back of pnpm-workspace.yaml, or
-// the stale pass of package-lock.json. A failure keeps the earlier write. A
-// manifest that is the same document after the pass is not written, so its
-// bytes stay as they are (#159). A written manifest keeps the indent of the
-// file, and ends with a newline.
+// the stale pass of package-lock.json. A failure keeps the earlier write.
+//
+// A manifest that is the same document after the pass is not written, so
+// its bytes stay as they are (#159). A written manifest keeps the indent of
+// the file, and ends with a newline.
 //
 // Where jq stops in a pass that node.sh gives no message, bash exits 5 with
 // the text of jq. The port answers `failed` with its own text.

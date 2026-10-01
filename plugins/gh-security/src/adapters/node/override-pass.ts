@@ -15,9 +15,8 @@
 //   - A scoped constraint writes a key for each declared key of each parent:
 //     `parent>pkg` for pnpm, `parent/pkg` for yarn, and a nested object for
 //     npm. A pnpm or npm parent with qualifiers gets one key for each
-//     qualifier, from `parent-qualifiers.ts`. An npm
-//     parent that a rule places takes the nested write inside each rule
-//     that places it (#147).
+//     qualifier, from `parent-qualifiers.ts`. An npm parent that a rule
+//     places takes the nested write inside each rule that places it (#147).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
