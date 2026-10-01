@@ -124,6 +124,7 @@ describe('the baseline', () => {
     ['with no versions', '{"package":"undici"}'],
     ['with versions that are not a list', '{"package":"undici","versions":{}}'],
     ['with an entry that is not an object', '{"package":"undici","versions":["7.27.2"]}'],
+    ['with an entry that is null', '{"package":"undici","versions":[null]}'],
     ['with an entry with no version', '{"package":"undici","versions":[{"path":"x"}]}'],
     ['with a version that is not text', '{"package":"undici","versions":[{"version":7}]}'],
     ['with NaN, which jq reads and JSON does not', '{"package":"undici","versions":[],"x":NaN}'],
@@ -162,6 +163,24 @@ describe('the baseline', () => {
 })
 
 describe('the alert ranges', () => {
+  // Two bad inputs in one call. Each expected refusal is the one that node.sh
+  // writes for the same flags.
+  it.each([
+    ['a baseline before an alert range', { baseline: 'nope' }, 'validate: --baseline is not'],
+    [
+      'an alert range before a sibling list',
+      { baseline: '{"package":"undici","versions":[]}', siblingAlerts: 'nope' },
+      "validate: --vulnerable range 'foo' is not",
+    ],
+  ])('refuses %s', (_name, given, start) => {
+    const envelope = refusal(MULTI, 'undici', '>=7.0.0 <8', {
+      line: '7',
+      vulnerable: ['foo'],
+      ...given,
+    })
+    expect(envelope.outcome === 'failed' && envelope.error.startsWith(start)).toBe(true)
+  })
+
   it('names the first unreadable range in sorted order', () => {
     expect(refusal(MULTI, 'undici', '>=5.0.0', { vulnerable: ['< 1.0.0', 'foo', 'bar'] })).toEqual({
       outcome: 'failed',
@@ -239,6 +258,7 @@ describe('the sibling alerts', () => {
     ['not a list', '{"major":2,"vulnerable_ranges":[]}'],
     ['two documents', '[] []'],
     ['an entry that is not an object', '[2]'],
+    ['an entry that is null', '[null]'],
     ['an entry with no major', '[{"vulnerable_ranges":[]}]'],
     ['a major that is text', '[{"major":"2","vulnerable_ranges":[]}]'],
     ['a major with a fraction', '[{"major":2.5,"vulnerable_ranges":[]}]'],
@@ -474,6 +494,22 @@ describe('the verdicts of the constraint and completeness checks', () => {
     })
   })
 
+  it('fails on an alerted copy above the line, which no major bump clears', () => {
+    const value = answer(MULTI, 'undici', '>=6.0.0 <7', {
+      line: '6',
+      vulnerable: ['>= 7.0.0, < 7.28.0'],
+    })
+    expect({
+      ok: value.ok,
+      unresolved: value.unresolved_alerts,
+      bump: value.requires_major_bump,
+    }).toEqual({
+      ok: false,
+      unresolved: [{ ...copy('7.27.2'), vulnerable_ranges: ['>= 7.0.0, < 7.28.0'] }],
+      bump: [],
+    })
+  })
+
   it('passes with a copy below the line that needs a major bump', () => {
     const value = answer(MULTI, 'undici', '>=6.24.0 <7', { line: '6', vulnerable: ['< 6.24.0'] })
     expect({ ok: value.ok, bump: value.requires_major_bump }).toEqual({
@@ -550,11 +586,12 @@ describe('a package that the lockfile does not hold', () => {
   })
 
   it('gives the refusal of resolved_versions for a lockfile with no entries', () => {
-    const envelope = refusal('empty-npm', 'lodash', '>=1.0.0', {})
-    expect(envelope.outcome).toBe('failed')
-    expect(envelope.outcome === 'failed' && envelope.error).toBe(
-      (node.resolvedVersions(treeOf('empty-npm'), 'lodash') as { error: string }).error,
-    )
+    // node.sh writes this text for the fixture.
+    expect(refusal('empty-npm', 'lodash', '>=1.0.0', {})).toEqual({
+      outcome: 'failed',
+      error:
+        "Parsed 0 entries from the lockfile for pm 'npm'. The parser is broken or the lockfile format is unrecognized; refusing to report this as a clean result.",
+    })
   })
 })
 
