@@ -133,7 +133,7 @@ export const evalToken = (token: string, version: string): boolean => {
  * It stops at the first answer, and it reads an alternative with no
  * comparator as a match. jq reads each comparator, and stops on such an
  * alternative or on a comparator that it cannot read. `validate` needs the
- * jq answer for a range that it did not parse first, so
+ * jq answer for a range that it did not parse first. So
  * `src/adapters/node/validate.ts` does not call this function.
  */
 export const satisfies = (version: string, range: string): boolean =>

@@ -6,8 +6,8 @@
 // runner and the environment that it is given (#221, round 3 ruling 9). The
 // command splits at white space, as the shell splits an unquoted word. The
 // shell also expands a glob in it, and this does not. node.sh exports
-// `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` to each child, so this verb sets it
-// too: a fix run is not an interactive session.
+// `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` to each child, and this verb sets it
+// too. A fix run is not an interactive session.
 //
 // The answer is what node.sh writes, and the status that it exits with. A
 // status that is not 0 is no failure of the verb. Then `ok` is false, and

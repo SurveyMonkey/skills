@@ -39,8 +39,8 @@ export const shim = (
   if (dir === '') return failed('shim requires a target directory')
   const { pm, pm_exec } = detection
   // node.sh reads an empty runner as no runner (`${2:-}`). It writes no shim
-  // when its runner is the bare name and that name is on PATH. With one PATH
-  // for `detect` and `shim`, a manager on PATH is its own runner, so the PATH
+  // when its runner is the bare name and that name is on PATH. When `detect`
+  // and `shim` get one PATH, a manager on PATH is its own runner. So the PATH
   // test is enough.
   if (given === '' && onPath(pm, root, env)) {
     return ok({ created: false, pm, reason: `${pm} is already on PATH` })

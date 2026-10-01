@@ -116,9 +116,9 @@ case "$probe" in
     case "$probe" in
       *.git/modules/*) submodule ;;
     esac
-    # And the same submodule inside a linked worktree: after the last
-    # `/.git/` (or in all of it, when there is none), a `/modules/` after a
-    # `/worktrees/`.
+    # The same submodule inside a linked worktree has a `/modules/` after a
+    # `/worktrees/`. This probe reads the text after the last `/.git/`, or
+    # all of the text when there is no `/.git/`.
     case "/${probe##*/.git/}" in
       */worktrees/*/modules/*) submodule ;;
     esac

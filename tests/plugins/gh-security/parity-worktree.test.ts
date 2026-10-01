@@ -175,9 +175,9 @@ const verdicts = (directory: string, context?: string) => {
 
 /**
  * A submodule whose path starts with `worktrees/`, checked out inside a
- * linked worktree. Its gitdir ends in `/worktrees/wt/modules/worktrees/foo`,
- * so the last `/worktrees/` marker is in the path of the submodule
- * (round 3 ruling 14 on #226).
+ * linked worktree. Its gitdir ends in `/worktrees/wt/modules/worktrees/foo`.
+ * So the last `/worktrees/` marker is in the path of the submodule (round 3
+ * ruling 14 on #226).
  */
 const submoduleUnderWorktreesInWorktree = (built: Scene): string => {
   const { fixtures, root } = built

@@ -33,11 +33,11 @@ type Sibling = { readonly major: number | null; readonly vulnerable_ranges: read
 type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
 
 /**
- * jq's `satisfies`, with the two places where jq stops. jq evaluates each
- * alternative and each comparator, so a comparator that it cannot read
- * stops it, even after another one matches. An alternative with no
- * comparator also stops it. `satisfies` in `src/semver/ranges.ts` answers in
- * both cases, so a constraint like `>=0 ||` would pass there.
+ * jq's `satisfies`, with the two places where jq stops. jq reads each
+ * alternative and each comparator. So a comparator that it cannot read stops
+ * it, also after a match. An alternative with no comparator also stops it.
+ * `satisfies` in `src/semver/ranges.ts` answers in both cases. A constraint
+ * like `>=0 ||` would pass there.
  */
 const satisfiesAll = (version: string, range: string): boolean =>
   rangeAlternatives(range)
@@ -95,8 +95,8 @@ const documentOf = (text: string): unknown => {
 
 /**
  * The versions of a baseline that keeps the `resolved_versions` contract for
- * `pkg`, or null. An absent key reads as `undefined`, which fails each test
- * here, so jq's `has` needs no test of its own.
+ * `pkg`, or null. An absent key reads as `undefined`, and that fails each
+ * test here. So jq's `has` needs no test of its own.
  */
 const baselineVersions = (text: string, pkg: string): readonly string[] | null => {
   const baseline = documentOf(text)
@@ -150,7 +150,8 @@ const unreadableRange = (range: string): string =>
 
 /**
  * The first refusal of the arguments, or null. node.sh refuses an empty flag
- * value while it reads the flags (`${2:?}`), and then the rest in this order.
+ * value when it reads the flags (`${2:?}`). Then it refuses the rest in this
+ * order.
  */
 const argumentRefusal = (pkg: string, range: string, options: ValidateOptions): string | null => {
   const { line, vulnerable, baseline, siblingAlerts } = options
@@ -211,8 +212,8 @@ const inputsOf = (
       // tests the text for length. So when that first range is empty, it
       // finds no unreadable range, and the move can be benign. That breaks
       // its own rule that an unreadable range never allows benign. Here an
-      // empty range is unreadable, as `range_ok` says: a declared divergence
-      // (#222), in the safe direction.
+      // empty range is unreadable, as `range_ok` says. That is a declared
+      // divergence (#222), in the safe direction.
       siblingsUnreadable: (siblings ?? []).some(({ vulnerable_ranges }) =>
         vulnerable_ranges.some((text) => !rangeOk(text)),
       ),
@@ -221,14 +222,17 @@ const inputsOf = (
 }
 
 /**
- * The class of one move (#105). `benign_dedup` only when each test holds:
- * every sibling range parses, sibling alerts were given, the line moved and
- * did not vanish, one version is left, that version was in the baseline and
- * is its semver max, no sibling alert is on this major, and no sibling range
- * matches a version on either side. The first test that fails makes it
- * `fatal`. A vanished line has no version left, and `semverMax` answers a
- * version of the baseline. So the test of the max also does two tests of
- * node.sh: `status` and "in the baseline".
+ * The class of one move (#105). The move is `benign_dedup` only when all of
+ * these are true. Else it is `fatal`.
+ *
+ * - Sibling alerts were given, and each sibling range parses.
+ * - The line keeps one version, and it is the semver max of the baseline.
+ * - No sibling alert is on the major of the move.
+ * - No sibling range matches a version on either side.
+ *
+ * A vanished line keeps no version, and `semverMax` answers a version of
+ * the baseline. So the test of the max also does two tests of node.sh: the
+ * `status` test and the "in the baseline" test.
  */
 const classOf = (
   { siblings, siblingsUnreadable }: Inputs,

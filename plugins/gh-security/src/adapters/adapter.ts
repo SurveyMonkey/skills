@@ -23,9 +23,9 @@ import type { Envelope } from '../lib/envelope.ts'
 import type { Runner } from '../lib/process.ts'
 
 /**
- * The environment that `detect` and `shim` read, and that `why` and
- * `install` give to the package manager that they start. The node `detect`
- * and `shim` read only `PATH`.
+ * The environment that `detect` and `shim` read. `why` and `install` give it
+ * to the package manager that they start. The node `detect` and `shim` read
+ * only `PATH`.
  */
 export type Environment = Readonly<Record<string, string | undefined>>
 
@@ -253,9 +253,9 @@ type LineMove = {
   readonly after: readonly string[]
   readonly status: 'moved' | 'vanished'
   /**
-   * `benign_dedup` only for the one shape that #105 shows to be safe: a
-   * line that keeps one version, which was the semver max of its baseline,
-   * with sibling alerts given and no sibling alert on it. Else `fatal`.
+   * `benign_dedup` only for the one safe shape of #105. The line keeps one
+   * version, and that version was the semver max of its baseline. Sibling
+   * alerts were given, and none of them is on the line. Else `fatal`.
    */
   readonly class: 'fatal' | 'benign_dedup'
 }

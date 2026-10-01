@@ -3,10 +3,9 @@
 // that it names. The parity run holds the agreement with node.sh.
 //
 // The PATH is the parameter that `shim` takes. Each example gives a
-// directory that holds an empty file for each tool that it puts on PATH, as
-// detect.test.ts does. `shim` only looks for the name, and never runs it.
-// One example runs a shim that it wrote, with `/bin/sh`, to show that the
-// shim starts its runner with the arguments it gets.
+// directory with an empty file for each tool on PATH, as detect.test.ts does.
+// `shim` only looks for the name, and never runs it. One example runs a shim
+// with `/bin/sh`. It shows that the shim gives its arguments to its runner.
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
@@ -110,7 +109,7 @@ describe('a shim that the verb writes', () => {
     expect(fileAt(join(root, 'shim-bin', 'pnpm')).text).toBe('#!/bin/sh\nexec corepack pnpm "$@"\n')
   })
 
-  // node.sh writes this shim too. Its runner is the bare name, and the shim
+  // node.sh writes this shim too. Its runner is the bare name. The shim
   // directory comes first on PATH, so the shim starts itself.
   it('starts the bare name when nothing else can run the manager, as node.sh does', () => {
     const root = copyOf('npm-v3')

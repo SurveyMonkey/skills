@@ -6,10 +6,10 @@
 // No example runs an install (`mocking.md`, "Not the package managers").
 // The runner is the parameter that `install` takes, so an example gives it
 // through that parameter ("The injected collaborator"). The recorder below
-// stands in for `lib/process.ts`: it gives the real `RunResult` shape, and
-// it writes a file in its cwd, as an install writes `node_modules/`. So a
-// refusal can show that nothing was written. Two examples use the real runner: one with a
-// command that is not on PATH, and one with `node` as the command.
+// stands in for `lib/process.ts`, with the real `RunResult` shape. It writes
+// a file in its cwd, as an install writes `node_modules/`. So a refusal can
+// show that nothing was written. Two examples use the real runner. One
+// starts a command that is not on PATH, and one starts `node`.
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'

@@ -152,9 +152,9 @@ describe('requireLinkedWorktree: real repositories', () => {
     expect(gitdirOfPointer(join(worktree, 'sub'))).toContain('/worktrees/wt/modules/sub')
   })
 
-  // Round 3 ruling 14 on #226: the gitdir ends in
-  // `/worktrees/wt/modules/worktrees/foo`, so the last `/worktrees/` marker
-  // is in the path of the submodule, and has no `/modules/` after it.
+  // Round 3 ruling 14 on #226. The gitdir ends in
+  // `/worktrees/wt/modules/worktrees/foo`. So the last `/worktrees/` marker
+  // is in the path of the submodule, with no `/modules/` after it.
   it('refuses a submodule under worktrees/ checked out inside a linked worktree', () => {
     const built = scene()
     const source = built.fixtures.create(join(built.root, 'source'))

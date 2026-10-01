@@ -1,12 +1,12 @@
 // `validate` of the node adapter (#222). The seam is `node.validate`. Each
-// expected value is written by hand from the fixture that it names, from
-// `verb_validate` in node.sh, and from the examples of
+// expected value is written by hand from the fixture that it names. The
+// sources are `verb_validate` in node.sh and the examples of
 // spec/node_validate_spec.sh. The parity run holds the agreement with
 // node.sh.
 //
-// Each refusal message is the text that node.sh writes. A test that names a
-// verdict asserts `ok` beside the field that decides it (the testing skill,
-// "Assert the verdict, not the parse").
+// Each refusal message is the text that node.sh writes. A test of a verdict
+// asserts `ok` beside the field that decides it. The testing skill says why
+// ("Assert the verdict, not the parse").
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'
@@ -340,7 +340,7 @@ describe('the sibling alerts', () => {
     })
   })
 
-  // The first version left is the max of the baseline, so only the count of
+  // The first version left is the max of the baseline. So only the count of
   // the versions left makes this move fatal.
   it('keeps a move fatal when two versions are left, and the first is the baseline max', () => {
     const value = answer('pnpm-benign-dedup-two-survivors', 'picomatch', '>=4.0.3 <5', {
@@ -525,9 +525,9 @@ describe('the verdicts of the constraint and completeness checks', () => {
   })
 })
 
-// The acceptance of #222: a package that the lockfile holds is validated,
-// and a package it does not hold is refused. `present: false` never reads as
-// a pass, so it never reaches `removable` through `validate`.
+// The acceptance of #222. The verb validates a package that the lockfile
+// holds, and refuses a package that it does not hold. So `present: false`
+// never reads as a pass, and never reaches `removable` through `validate`.
 describe('a package that the lockfile does not hold', () => {
   it('validates a package that only nested patch locators reach', () => {
     const value = answer('yarn-patch-nested', 'typescript', '>=5.1.6 <6', {
