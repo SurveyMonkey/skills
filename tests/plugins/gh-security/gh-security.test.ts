@@ -11,7 +11,9 @@
 //
 // Every expected value below is hand-written from the contract on #224,
 // never read back out of the code under test.
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { closeSync, openSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { run } from '#gh-security/lib/process.ts'
 import { pluginFile } from '#harness/paths.ts'
@@ -61,6 +63,31 @@ describe("a command's result", () => {
     const result = await entry(['version'])
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(JSON.parse(result.stdout)).toEqual({ version: expect.any(String) })
+  })
+})
+
+describe('a command that throws', () => {
+  // #302 item 1. `classify-lines` reads stdin with `readFileSync`, and a
+  // directory on fd 0 makes that read throw EISDIR. No command throws on any
+  // argument, so the input is the stdin. `run` cannot hand the child a
+  // directory, so this spawns the child itself.
+  it.fails('writes the failed envelope to stdout, the message to stderr, and exits 1', () => {
+    const directory = openSync(tmpdir(), 'r')
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [ENTRY, 'classify-lines', '--repo-root', tmpdir()],
+        { stdio: [directory, 'pipe', 'pipe'], encoding: 'utf8' },
+      )
+      expect({ status: result.status, stdout: JSON.parse(result.stdout) }).toEqual({
+        status: 1,
+        stdout: { error: expect.stringMatching(/^classify-lines: EISDIR/) },
+      })
+      expect(result.stderr).toMatch(/^classify-lines: EISDIR/)
+      expect(result.stderr).not.toContain('    at ')
+    } finally {
+      closeSync(directory)
+    }
   })
 })
 
