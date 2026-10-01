@@ -174,14 +174,24 @@ const declarationOf = (line: string): { name: string; specifier: string } => {
 /** The start of an entry, or of the file header: a line that is not indented and not a comment. */
 const ENTRY_START = /^[^ \t\n\v\f\r#]/
 
+/** One declaration in a block of an entry, with the parent that the entry is. */
+export type Declaration = {
+  readonly parent: Parent
+  /** The declared name, without quotes. */
+  readonly name: string
+  /** The declared specifier, trimmed and without quotes. */
+  readonly specifier: string
+}
+
 /**
- * Each entry that declares `pkg` in `dependencies`, `optionalDependencies` or
- * `peerDependencies`, by the name or through an `npm:` alias of it. See #47
- * and #49. The colon must follow the block name, so `peerDependenciesMeta` is
- * not read.
+ * `yarn_declaration_rows`: each declaration in `dependencies`,
+ * `optionalDependencies` or `peerDependencies` of each entry that is not a
+ * workspace, in file order. See #47 and #49. The colon must follow the block
+ * name, so `peerDependenciesMeta` is not read. `apply_constraint` reads the
+ * declared keys from these rows.
  */
-export const parents = (text: string, pkg: string): readonly Parent[] => {
-  const found: Parent[] = []
+export const declarations = (text: string): readonly Declaration[] => {
+  const found: Declaration[] = []
   let parent: Parent | null = null
   let inDeclarations = false
   for (const line of lines(text)) {
@@ -200,12 +210,22 @@ export const parents = (text: string, pkg: string): readonly Parent[] => {
     }
     if (/^ {2}[a-zA-Z]/.test(line)) inDeclarations = false
     if (parent !== null && inDeclarations && /^ {4}/.test(line) && line.includes(':')) {
-      const { name, specifier } = declarationOf(line)
-      if (name === pkg || aliasTarget(specifier) === pkg) found.push(parent)
+      found.push({ parent, ...declarationOf(line) })
     }
   }
-  return uniqueParents(found)
+  return found
 }
+
+/**
+ * Each entry that declares `pkg` in one of the three blocks, by the name or
+ * through an `npm:` alias of it.
+ */
+export const parents = (text: string, pkg: string): readonly Parent[] =>
+  uniqueParents(
+    declarations(text)
+      .filter(({ name, specifier }) => name === pkg || aliasTarget(specifier) === pkg)
+      .map(({ parent }) => parent),
+  )
 
 /**
  * `yarn_copy_rows`: one row for each declaration of `pkg`, by the name or by

@@ -37,9 +37,9 @@ type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
  * alternative and each comparator. So a comparator that it cannot read stops
  * it, also after a match. An alternative with no comparator also stops it.
  * `satisfies` in `src/semver/ranges.ts` answers in both cases. A constraint
- * like `>=0 ||` would pass there.
+ * like `>=0 ||` would pass there. `applyConstraint` uses this function too.
  */
-const satisfiesAll = (version: string, range: string): boolean =>
+export const satisfiesAll = (version: string, range: string): boolean =>
   rangeAlternatives(range)
     .map((tokens) => {
       if (tokens.length === 0) {

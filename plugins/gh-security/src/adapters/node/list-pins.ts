@@ -26,13 +26,16 @@ import { byText } from './parents.ts'
 import { workspaceOverrides } from './workspace-overrides.ts'
 
 /** What {@link blockOf} answers where jq stops, for the `try` of `override_block`. */
-const INVALID = Symbol('invalid')
+export const INVALID = Symbol('invalid')
 
 /**
  * `override_block`: the block, null when there is none, or {@link INVALID}.
  * A file that holds no document stays {@link NO_DOCUMENT}.
  */
-const blockOf = (manifest: unknown, location: NodeDetection['override_location']): unknown => {
+export const blockOf = (
+  manifest: unknown,
+  location: NodeDetection['override_location'],
+): unknown => {
   if (manifest === NO_DOCUMENT) return manifest
   try {
     const block =
@@ -47,13 +50,13 @@ const blockOf = (manifest: unknown, location: NodeDetection['override_location']
 }
 
 /** jq's `type`. No document has no type: jq writes nothing for it. */
-const typeOf = (value: unknown): string => {
+export const typeOf = (value: unknown): string => {
   if (value === NO_DOCUMENT) return ''
   if (Array.isArray(value)) return 'array'
   return typeof value
 }
 
-const MERGE_FAILED =
+export const MERGE_FAILED =
   "workspace_manifest_view: cannot merge the pnpm-workspace.yaml overrides into package.json's view (is package.json valid JSON?)"
 
 /**
@@ -62,7 +65,7 @@ const MERGE_FAILED =
  * drops `pnpm.overrides` of package.json instead: pnpm 11 does not read it.
  * The view keeps no document as no document. It throws where jq stops.
  */
-const workspaceView = (
+export const workspaceView = (
   root: string,
   manifest: unknown,
   block: Readonly<Record<string, string>>,
@@ -121,7 +124,7 @@ const manifestOverrideKeys = (root: string): readonly string[] => {
 }
 
 /** `strip_selector`: a version selector follows the last `@`, when that `@` is not the first character. */
-const stripSelector = (target: string): { name: string; selector: string | null } => {
+export const stripSelector = (target: string): { name: string; selector: string | null } => {
   const at = target.lastIndexOf('@')
   return at <= 0
     ? { name: target, selector: null }
@@ -138,7 +141,7 @@ const facts = (kind: Pin['kind'], range: string | null = null): Facts => ({
 })
 
 /** `value_facts`: what the value is. Only `range` is a version pin. */
-const factsOf = (value: PinValue): Facts => {
+export const factsOf = (value: PinValue): Facts => {
   if (typeof value !== 'string') return facts('unparseable')
   if (value.startsWith('$')) return facts('reference')
   if (value.startsWith('npm:')) {
@@ -187,7 +190,7 @@ const pnpmKey = (key: string): { parents: string[]; target: string } => {
 }
 
 /** `yarn_key`: `/` scopes. The parent is one segment, or two for a scoped name. */
-const yarnKey = (key: string): { parents: string[]; target: string } => {
+export const yarnKey = (key: string): { parents: string[]; target: string } => {
   const segments = split(key, '/')
   const head = key.startsWith('@') ? 2 : 1
   return segments.length <= head

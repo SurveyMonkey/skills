@@ -7,7 +7,13 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { LockfileError } from '#gh-security/lockfiles/shared.ts'
-import { copies, parents, resolutionMap, resolvedVersions } from '#gh-security/lockfiles/yarn.ts'
+import {
+  copies,
+  declarations,
+  parents,
+  resolutionMap,
+  resolvedVersions,
+} from '#gh-security/lockfiles/yarn.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 
 const lockfile = (fixture: string): string =>
@@ -320,6 +326,19 @@ describe('copies', () => {
       '"x@npm:^1.0.0"\n  version: 1.0.0\n\n"a@npm:^1.0.0":\n  version: 1.0.0\n  resolution: "a@npm:1.0.0"\n  dependencies:\n    x: "npm:^1.0.0"\n'
     expect(copies(text, 'x')).toEqual([
       { parent: 'a', parent_version: '1.0.0', range: '^1.0.0', resolved: null },
+    ])
+  })
+})
+
+// `apply_constraint` reads the declared keys from these rows (#222, layer 2).
+describe('declarations', () => {
+  it('reads each declaration of an entry, and none of a workspace', () => {
+    expect(declarations(lockfile('yarn-berry-alias-parent'))).toEqual([
+      {
+        parent: { name: 'express', version: '4.18.2' },
+        name: 'lodash-alias',
+        specifier: 'npm:lodash@^4.18.0',
+      },
     ])
   })
 })

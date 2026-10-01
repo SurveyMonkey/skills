@@ -44,9 +44,11 @@ const scalarOf = (text: string): string => {
 
 /**
  * `parse_entry`: the key and the value of one line of the block. A quoted key
- * ends at the quote that ends it, when a colon and a space follow it.
+ * ends at the quote that ends it, when a colon and a space follow it. It
+ * throws for a line that it refuses. The writer of `apply_constraint` reads
+ * each line of the block with it too, as `workspace_overrides_write` does.
  */
-const entryOf = (line: string): WorkspaceOverride => {
+export const entryOf = (line: string): WorkspaceOverride => {
   const rest = line.slice(2)
   let key: string
   let raw: string
