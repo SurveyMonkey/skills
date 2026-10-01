@@ -9,10 +9,10 @@
 // In node.sh it gets the mode 0600 of `mktemp`. A new file gets the mode
 // from the umask. The owner and the group are not kept.
 //
-// The `mktemp` file of node.sh is in `$TMPDIR`, so there each write that can
-// fail in the directory of the file fails at the `mv`. Here such a write
-// fails at the temporary file. Each failure gives the one text of the caller:
-// the `mv` text of node.sh.
+// The `mktemp` file of node.sh is in `$TMPDIR`. So in node.sh, a write that
+// fails in the directory of the file fails at the `mv`. Here it fails at the
+// temporary file. Each failure gives the one text of the caller, which is the
+// `mv` text of node.sh.
 //
 // This file ships. It imports nothing outside the plugin.
 

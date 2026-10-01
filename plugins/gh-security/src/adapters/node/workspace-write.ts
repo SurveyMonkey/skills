@@ -12,9 +12,9 @@
 // refuses after the write is a failure with the words of the reader.
 //
 // The writer makes the new text in memory. Then it puts the text in place
-// through a temporary file and a rename (`replace-file.ts`). For a file
-// with no block, node.sh first adds the `overrides:` line in place, and
-// then moves the rewrite over the file. This gives four declared
+// through a temporary file and a rename (`replace-file.ts`). For no file,
+// or a file with no block, node.sh first writes the `overrides:` line in
+// place. Then it moves the rewrite over the file. This gives four declared
 // differences:
 //
 //   - node.sh changes the file that a symlink points to. For a dangling
