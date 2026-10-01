@@ -9,10 +9,12 @@ import { notImplemented } from '../lib/envelope.ts'
 import type { Adapter } from './adapter.ts'
 import { declaredRanges } from './node/declared-ranges.ts'
 import { detect, type NodeDetection } from './node/detect.ts'
+import { install } from './node/install.ts'
 import { listPins } from './node/list-pins.ts'
 import { resolutionMap, resolvedVersions } from './node/lockfiles.ts'
 import { parents } from './node/parents.ts'
 import { compareVersions, rangeFacts } from './node/semver.ts'
+import { shim } from './node/shim.ts'
 import { validate } from './node/validate.ts'
 import { why } from './node/why.ts'
 
@@ -27,7 +29,10 @@ export const node: Adapter<NodeDetection> = {
   compareVersions,
   rangeFacts,
   validate,
-  install: async () => notImplemented('install'),
-  shim: () => notImplemented('shim'),
+  install,
+  shim,
+  // Layer 2 of #222 ports `apply_constraint`. Until then the verb answers
+  // `not-implemented`, the outcome of ADR 001 for a verb of the contract
+  // that is not built yet (exit 2).
   applyConstraint: () => notImplemented('apply_constraint'),
 }
