@@ -352,6 +352,19 @@ describe('ensureWorktreeExclude: the refusals', () => {
     expect(readdirSync(info).filter((name) => name.startsWith('.exclude'))).toEqual([])
   })
 
+  // #302 item 2. The open of the temporary file uses `wx`, so a file at that
+  // name stays and the open fails. The cleanup must then leave that file.
+  it.fails('leaves a file that already has the temporary name, and refuses', async () => {
+    const { sandbox, repo, info, exclude } = setup()
+    const taken = join(info, '.exclude.taken')
+    writeFileSync(taken, 'not ours\n')
+    expect(await ensureWorktreeExclude(repo, sandbox.env, LOCK_TIMING, () => 'taken')).toEqual({
+      outcome: 'failed',
+      error: `cannot publish ${exclude}`,
+    })
+    expect(readFileSync(taken, 'utf8')).toBe('not ours\n')
+  })
+
   it.skipIf(!notRoot)(
     'refuses an exclude file that cannot be read, and does not overwrite it',
     async () => {
