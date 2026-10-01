@@ -28,28 +28,31 @@ import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
 const ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 
 describe('the nwo of a remote', () => {
-  // One row for each branch of the parse. The pair is `[owner, repo]`.
+  // One row for each branch of the parse. The triple is `[owner, repo, host]`.
   it.each([
-    ['https://github.com/example-org/example-repo.git', ['example-org', 'example-repo']],
-    ['https://github.com/example-org/example-repo', ['example-org', 'example-repo']],
-    ['git@github.com:octo/app.git', ['octo', 'app']],
-    ['ssh://git@github.com/octo/app.git', ['octo', 'app']],
-    ['ssh://git@github.com:2222/octo/app.git', ['octo', 'app']],
-    ['https://user:pass@github.com/octo/app.git', ['octo', 'app']],
-    ['gh-alias:octo/app.git', ['octo', 'app']],
-    ['https://github.com/Owner/My.Repo.git', ['Owner', 'My.Repo']],
-    ['https://github.com/octo/app/', ['octo', 'app']],
-    ['https://github.com/octo/app.git/', ['octo', 'app']],
-    ['https://github.com/octo/app/.git', ['octo', 'app']],
-    ['https://github.example.com/octo/app', ['octo', 'app']],
-    ['github.com:octo/app', ['octo', 'app']],
+    [
+      'https://github.com/example-org/example-repo.git',
+      ['example-org', 'example-repo', 'github.com'],
+    ],
+    ['https://github.com/example-org/example-repo', ['example-org', 'example-repo', 'github.com']],
+    ['git@github.com:octo/app.git', ['octo', 'app', 'github.com']],
+    ['ssh://git@github.com/octo/app.git', ['octo', 'app', 'github.com']],
+    ['ssh://git@github.com:2222/octo/app.git', ['octo', 'app', 'github.com']],
+    ['https://user:pass@github.com/octo/app.git', ['octo', 'app', 'github.com']],
+    ['gh-alias:octo/app.git', ['octo', 'app', 'gh-alias']],
+    ['https://github.com/Owner/My.Repo.git', ['Owner', 'My.Repo', 'github.com']],
+    ['https://github.com/octo/app/', ['octo', 'app', 'github.com']],
+    ['https://github.com/octo/app.git/', ['octo', 'app', 'github.com']],
+    ['https://github.com/octo/app/.git', ['octo', 'app', 'github.com']],
+    ['https://github.example.com/octo/app', ['octo', 'app', 'github.example.com']],
+    ['github.com:octo/app', ['octo', 'app', 'github.com']],
     // The colon in the path is not a host separator once the host has a slash,
     // but a colon after a plain host is.
-    ['host:a:b/c', ['a:b', 'c']],
+    ['host:a:b/c', ['a:b', 'c', 'host']],
     // The last `@` ends the credentials.
-    ['https://a@b@github.com/octo/app', ['octo', 'app']],
+    ['https://a@b@github.com/octo/app', ['octo', 'app', 'github.com']],
   ])('reads %s as %j', (remote, pair) => {
-    expect(parseRemote(remote)).toEqual({ owner: pair[0], repo: pair[1] })
+    expect(parseRemote(remote)).toEqual({ owner: pair[0], repo: pair[1], host: pair[2] })
   })
 
   it.each([
@@ -180,6 +183,51 @@ describe('the answer for a repository with a GitHub remote', () => {
     })
     await detectScope(context(w, [dir]), factory, run, '/nowhere')
     expect(asked).toEqual(['Owner/My.Repo'])
+  })
+
+  it.each([
+    'https://github.com/octo/app.git',
+    'git@github.com:octo/app.git',
+    'ssh://git@github.com/octo/app.git',
+    'ssh://git@github.com:2222/octo/app.git',
+    'https://user:pass@github.com/octo/app.git',
+    'github.com:octo/app',
+    'https://GitHub.com/octo/app',
+  ])('asks GitHub for the remote %s', async (remote) => {
+    const w = world()
+    const dir = repoWith(w, remote)
+    const asked: string[] = []
+    const factory: ClientFactory = () => ({
+      ...createGhMock(),
+      viewDefaultBranch: async (repo) => {
+        asked.push(repo.repository)
+        return { name: 'develop' }
+      },
+    })
+    const answer = value(await detectScope(context(w, [dir]), factory, run, '/nowhere'))
+    expect(asked).toEqual(['octo/app'])
+    expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'develop' })
+  })
+
+  // No reply is registered for `gh`, so a call to it throws: a pass proves
+  // that the command asked GitHub nothing, and read the symref (ruling 11).
+  it.each([
+    'https://gitlab.example.com/octo/app.git',
+    'git@gitlab.example.com:octo/app.git',
+    'ssh://git@gitlab.example.com:2222/octo/app.git',
+    'https://github.example.com/octo/app',
+    'https://notgithub.com/octo/app',
+    'https://github.com.example.org/octo/app',
+    'gh-alias:octo/app',
+  ])('reads the symref, and asks GitHub nothing, for the remote %s', async (remote) => {
+    const w = world()
+    const dir = repoWith(w, remote, 'trunk')
+    expect(value(await detect(w, [dir]))).toMatchObject({
+      scope: 'repo',
+      nwo: 'octo/app',
+      git_remote: remote,
+      default_branch: 'trunk',
+    })
   })
 
   it('answers a null default branch for a repository that GitHub says has none', async () => {

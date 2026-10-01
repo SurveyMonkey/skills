@@ -17,28 +17,30 @@
 // not a GitHub repository. Each of those answers null, because a made-up
 // `src/other-repo` reads downstream as a real repository.
 //
-// **`default_branch` comes from GitHub when the remote gives an nwo** (#167,
-// ruling 5 on #225). The local `origin/HEAD` symref is written once, at clone
+// **`default_branch` comes from GitHub when the remote host is `github.com`**
+// (#167, rulings 5 and 11 on #225). The `nwo` field does not depend on the host. The local `origin/HEAD` symref is written once, at clone
 // time, and `git fetch` never refreshes it. A branch that is renamed on GitHub
 // then stays wrong in each older checkout, with no sign. A failed read from
 // GitHub is an error. It is never a fall back to the symref, because the
 // symref is the value that cannot be trusted. A repository with no default
 // branch on GitHub gives a null `default_branch`.
 //
-// With no nwo, there is no repository to ask. The command then reads the
-// `origin/HEAD` symref. When there is an `origin`, it then runs
-// `git remote show origin`, as the script does. It never writes: `git remote set-head` is a write. The value is null
-// when both fail, and a caller that needs the branch must stop.
+// With no nwo, or with a host that is not `github.com`, there is no GitHub
+// repository to ask. A name on another host can also exist on `github.com`,
+// where it is a different repository. The command then reads the `origin/HEAD`
+// symref. When there is an `origin`, it then runs `git remote show origin`, as
+// the script does. It never writes: `git remote set-head` is a write. The value
+// is null when both fail, and a caller that needs the branch must stop.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner for `git` and for `gh`, so each runs as
 // `<prefix> git ...` and `<prefix> gh ...`. Only `git remote show origin` and
-// the GitHub call reach the network, and they need an identity. Nothing here names a tool, or looks
-// for one.
+// the GitHub call reach the network, and they need an identity. Nothing here
+// names a tool, or looks for one.
 //
 // Differences from the script:
-//   - The default branch comes from GitHub, as above. This is the main
-//     difference in the answers of a working checkout.
+//   - The default branch comes from GitHub for a `github.com` remote, as
+//     above. This is the main difference in the answers of a working checkout.
 //   - `HEAD branch: (unknown)`, which git writes for a remote with no HEAD,
 //     gives a null `default_branch`. The script answers the text `(unknown)`.
 //   - `git remote show` runs with `LC_ALL=C`, so git writes `HEAD branch` in
@@ -71,7 +73,9 @@ const chomp = (text: string): string => text.replace(/\n+$/, '')
  * segments, because the last two of a deeper path make a wrong, plausible
  * pair.
  */
-export const parseRemote = (remote: string): { owner: string; repo: string } | null => {
+export const parseRemote = (
+  remote: string,
+): { host: string; owner: string; repo: string } | null => {
   let url = remote
   if (url.endsWith('/')) url = url.slice(0, -1)
   if (url.endsWith('.git')) url = url.slice(0, -'.git'.length)
@@ -104,7 +108,7 @@ export const parseRemote = (remote: string): { owner: string; repo: string } | n
   const cut = path.indexOf('/')
   const owner = path.slice(0, cut)
   const repo = path.slice(cut + 1)
-  return host === '' || owner === '' || repo === '' ? null : { owner, repo }
+  return host === '' || owner === '' || repo === '' ? null : { host, owner, repo }
 }
 
 const ORIGIN_PREFIX = 'refs/remotes/origin/'
@@ -112,6 +116,9 @@ const HEAD_BRANCH = 'HEAD branch: '
 
 /** The name that `remote show` gives to a remote that has no HEAD. */
 const UNKNOWN_HEAD = '(unknown)'
+
+/** The one host that the GitHub read serves. The match ignores case, as DNS does. */
+const GITHUB_HOST = 'github.com'
 
 /**
  * The handler. The `gh` client factory, the process runner and the working
@@ -159,10 +166,10 @@ export const detectScope = async (
   const nwo = pair === null ? null : `${pair.owner}/${pair.repo}`
 
   let defaultBranch = ''
-  if (nwo !== null) {
+  if (pair !== null && pair.host.toLowerCase() === GITHUB_HOST) {
     try {
       const view = await makeClient({ env: context.env, run: prefixed }).viewDefaultBranch({
-        repository: nwo,
+        repository: `${pair.owner}/${pair.repo}`,
       })
       defaultBranch = view.name ?? ''
     } catch (error) {
