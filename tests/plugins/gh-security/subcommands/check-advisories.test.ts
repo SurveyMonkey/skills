@@ -561,6 +561,40 @@ describe('the four verdicts', () => {
     })
   })
 
+  // #302 item 4. A `parseable` that is not true or false is malformed, and
+  // goes into `adapter_errors` as a bad `satisfied` does (ruling 12). A
+  // `parseable` of false is an honest answer, and adds no entry.
+  it.fails.each([
+    ['null', null, 'null'],
+    ['the word true', 'true', '"true"'],
+    ['the number 1', 1, '1'],
+  ])(
+    'records a parseable of %s in adapter_errors, and never reads the range as safe',
+    async (_name, parseable, shown) => {
+      const route = withFacts((range, version) => facts(range, version, { parseable }))
+      const answer = value(await check(['--version', '1.0.0', 'lodash'], LODASH, route))
+      expect(answer).toMatchObject({
+        verdict: 'unknown',
+        matched_ranges: [],
+        unevaluated_ranges: ['< 4.17.12', '< 4.17.21', '>= 3.0.0, < 4.17.19'],
+      })
+      expect(answer.adapter_errors).toEqual(
+        ['< 4.17.12', '< 4.17.21', '>= 3.0.0, < 4.17.19'].map((range) => ({
+          range,
+          status: 1,
+          error: `range_facts gave a parseable that is not true or false (ADR 001): ${shown}`,
+        })),
+      )
+    },
+  )
+
+  it('adds no adapter_errors entry for a parseable of false', async () => {
+    const route = withFacts((range, version) => facts(range, version, { parseable: false }))
+    expect(
+      value(await check(['--version', '1.0.0', 'lodash'], LODASH, route)).adapter_errors,
+    ).toEqual([])
+  })
+
   it('reads the word true in a string as not parseable', async () => {
     const route = withFacts((range, version) => facts(range, version, { parseable: 'true' }))
     expect(value(await check(['--version', '1.0.0', 'lodash'], LODASH, route))).toMatchObject({
