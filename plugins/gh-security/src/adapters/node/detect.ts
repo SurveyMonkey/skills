@@ -89,8 +89,9 @@ const linesOf = (path: string): readonly string[] => {
  *
  * An absent PATH has no entries here. bash uses its own default PATH for it.
  * That difference is a declared divergence (#221, mid-round ruling 13).
+ * `shim` also reads it, for its own `command -v` (#222).
  */
-const onPath = (tool: string, root: string, env: Environment): boolean =>
+export const onPath = (tool: string, root: string, env: Environment): boolean =>
   env.PATH === undefined
     ? false
     : env.PATH.split(delimiter).some((entry) => {

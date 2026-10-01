@@ -27,7 +27,16 @@
 // decides: a submodule inside a linked worktree carries both, and it is a
 // submodule. The `.git/modules/`
 // probe covers a submodule whose path starts with `worktrees/`, where the last
-// marker is wrong. When the pointer is unclear, the guard refuses.
+// marker is wrong. Inside a linked worktree, such a submodule has the gitdir
+// `<common>/worktrees/wt/modules/worktrees/foo`, with no `.git/modules/`. So a
+// third probe reads the text after the last `/.git/`. A `/modules/` after a
+// `/worktrees/` there is a submodule inside a worktree (#226, round 3 ruling
+// 14). A common dir under a `worktrees/` directory is before that `/.git/`,
+// so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
+// its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
+// The probes do not find a submodule whose superproject git dir has no
+// `/.git/` in its path (`--separate-git-dir`). When the probes see an unclear
+// pointer, the guard refuses.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from node
 // beyond `fs` and `path`.
@@ -70,6 +79,13 @@ const gitdirOf = (dotGit: string): string => {
 /** What a gitdir is: a linked worktree, a submodule, or neither. */
 type Kind = 'worktree' | 'submodule' | 'other'
 
+/**
+ * A `/modules/` after a `worktrees/` directory: a submodule inside a worktree.
+ * The `s` flag lets `.` match a line separator, as the `*` of the bash glob
+ * does. git keeps such a character in the name of a worktree.
+ */
+const NESTED_SUBMODULE = /(^|\/)worktrees\/.*\/modules\//s
+
 const classify = (gitdir: string): Kind => {
   // A trailing `/`, so that the last segment can be tested as a marker too. A
   // worktree or a submodule with the name `modules` is then no marker.
@@ -79,7 +95,12 @@ const classify = (gitdir: string): Kind => {
   // The text after the last `/worktrees/`. A `/modules/` in it is a submodule
   // inside this worktree.
   const afterWorktrees = probe.slice(probe.lastIndexOf('/worktrees/') + '/worktrees/'.length)
-  return afterWorktrees.includes('/modules/') || isSubmodule ? 'submodule' : 'worktree'
+  // The text from the `.git/` of the last `/.git/`, or all of it when there
+  // is none. The `(^|\/)` of the pattern reads both.
+  const afterGitDir = probe.slice(probe.lastIndexOf('/.git/') + 1)
+  return afterWorktrees.includes('/modules/') || isSubmodule || NESTED_SUBMODULE.test(afterGitDir)
+    ? 'submodule'
+    : 'worktree'
 }
 
 /** The one reason the guard refuses at `top`, or `null` when `top` is a linked worktree. */

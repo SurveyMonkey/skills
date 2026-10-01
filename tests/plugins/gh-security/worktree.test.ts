@@ -152,6 +152,26 @@ describe('requireLinkedWorktree: real repositories', () => {
     expect(gitdirOfPointer(join(worktree, 'sub'))).toContain('/worktrees/wt/modules/sub')
   })
 
+  // Round 3 ruling 14 on #226. The gitdir ends in
+  // `/worktrees/wt/modules/worktrees/foo`. So the last `/worktrees/` marker
+  // is in the path of the submodule, with no `/modules/` after it.
+  it('refuses a submodule under worktrees/ checked out inside a linked worktree', () => {
+    const built = scene()
+    const source = built.fixtures.create(join(built.root, 'source'))
+    const main = built.fixtures.createAt(built.root, 'main')
+    built.fixtures.git(main, ...ALLOW_FILE, 'submodule', 'add', '--quiet', source, 'worktrees/foo')
+    built.fixtures.git(main, 'commit', '--quiet', '-m', 'add the submodule')
+    built.fixtures.branch(main, 'fix')
+    const worktree = join(built.root, 'wt')
+    built.fixtures.worktree(main, worktree, 'fix')
+    built.fixtures.git(worktree, ...ALLOW_FILE, 'submodule', 'update', '--init', '--quiet')
+    const submodule = join(worktree, 'worktrees', 'foo')
+    expect(gitdirOfPointer(submodule)).toContain('/worktrees/wt/modules/worktrees/foo')
+    expect(requireLinkedWorktree(submodule)).toEqual(
+      refusal(`this is a git submodule (its gitdir is ${gitdirOfPointer(submodule)})`),
+    )
+  })
+
   it('refuses a directory that is not in a repository, and names it', () => {
     const { root } = scene()
     mkdirSync(join(root, 'plain'))
@@ -174,6 +194,22 @@ describe('requireLinkedWorktree: pointers that are written by hand', () => {
     ['gitdir: /abs/main/.git/worktrees/wt\nsecond line', null],
     ['gitdir: /abs/main/.git/worktrees/x/modules/app', 'this is a git submodule'],
     ['gitdir: /abs/worktrees/x/modules/app/.git/worktrees/fix', null],
+    ['gitdir: /abs/main/.git/worktrees/wt/modules/worktrees/foo', 'this is a git submodule'],
+    ['gitdir: ../../../main/.git/worktrees/wt/modules/worktrees/foo', 'this is a git submodule'],
+    ['gitdir: /abs/bare.git/worktrees/wt/modules/worktrees/foo', 'this is a git submodule'],
+    ['gitdir: worktrees/wt/modules/worktrees/foo', 'this is a git submodule'],
+    [
+      'gitdir: /abs/worktrees/x/modules/app/.git/worktrees/wt/modules/worktrees/foo',
+      'this is a git submodule',
+    ],
+    ['gitdir: /abs/worktrees/wt/x/modules/app/.git/worktrees/fix', null],
+    ['gitdir: /abs/.git/worktrees/x/modules/app/.git/worktrees/fix', null],
+    ['gitdir: /abs/main/.git/worktrees/wt x/modules/worktrees/foo', 'this is a git submodule'],
+    ['gitdir: /abs/main/.git/worktrees/wt\rx/modules/worktrees/foo', 'this is a git submodule'],
+    // A bare common dir has no `/.git/`, so the probe reads all of the text.
+    // A worktree of it under `worktrees/<x>/modules/` is refused. That is the
+    // safe direction.
+    ['gitdir: /abs/worktrees/x/modules/repo.git/worktrees/fix', 'this is a git submodule'],
   ])('reads %j', (content, refusedAs) => {
     const built = scene()
     const directory = pointerAt(built, content)

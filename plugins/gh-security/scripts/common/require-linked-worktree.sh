@@ -42,8 +42,17 @@
 # on which one comes LAST, since a submodule inside a linked worktree carries
 # both and is still a submodule. The extra `.git/modules/` probe covers the
 # reverse pathology, a submodule whose path begins with `worktrees/`
-# (`../.git/modules/worktrees/foo`), where the last marker lies. Ambiguity only
-# ever resolves toward refusing.
+# (`../.git/modules/worktrees/foo`), where the last marker lies. Inside a
+# linked worktree, that submodule has the gitdir
+# `<common>/worktrees/wt/modules/worktrees/foo`, with no `.git/modules/`. So a
+# third probe reads the text after the last `/.git/`. A `/modules/` after a
+# `/worktrees/` there is a submodule inside a worktree (#226, round 3 ruling
+# 14). A common dir under a `worktrees/` directory is before that `/.git/`,
+# so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
+# its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
+# The probes do not find a submodule whose superproject git dir has no
+# `/.git/` in its path (`--separate-git-dir`). Each ambiguity that the probes
+# see resolves toward refusing.
 #
 # The walk is plain file inspection rather than `git rev-parse` so the
 # guard keeps working when git is missing or the cwd is a scratch directory,
@@ -110,6 +119,12 @@ case "$probe" in
     # in the wrong place; its gitdir is still anchored at `.git/modules/`.
     case "$probe" in
       *.git/modules/*) submodule ;;
+    esac
+    # The same submodule inside a linked worktree has a `/modules/` after a
+    # `/worktrees/`. This probe reads the text after the last `/.git/`, or
+    # all of the text when there is no `/.git/`.
+    case "/${probe##*/.git/}" in
+      */worktrees/*/modules/*) submodule ;;
     esac
     exit 0
     ;;

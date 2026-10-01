@@ -129,6 +129,12 @@ export const evalToken = (token: string, version: string): boolean => {
  * This covers every range the adapter emits (`>=X <Y`), the common forms
  * already present in real manifests, and GitHub advisory syntax
  * (`>= 7.0.0, < 7.29.0`).
+ *
+ * It stops at the first answer, and it reads an alternative with no
+ * comparator as a match. jq reads each comparator, and stops on such an
+ * alternative or on a comparator that it cannot read. `validate` needs the
+ * jq answer for a range that it did not parse first. So
+ * `src/adapters/node/validate.ts` does not call this function.
  */
 export const satisfies = (version: string, range: string): boolean =>
   splitLiteral(tightenOperators(range), '||').some((alternative) =>

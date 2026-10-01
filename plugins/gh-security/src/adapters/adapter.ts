@@ -1,7 +1,14 @@
 // The adapter contract of ADR 001, as ADR 012 amends it: one in-process
-// interface for the nine read verbs of #221. Each verb is a function, and
+// interface for the verbs of each ecosystem. Each verb is a function, and
 // each answer is an envelope from `lib/envelope.ts`. The four outcomes are
 // the four exit codes of ADR 001.
+//
+// #221 added the nine read verbs. #222 adds `validate`, which also only
+// reads, and the three verbs that write: `install`, `shim` and
+// `applyConstraint`. Each write verb refuses to run outside a linked
+// worktree (ADR 001, "Invocation"). `requireLinkedWorktree`
+// (`src/worktree.ts`) is its first statement, as in node.sh. The node
+// `applyConstraint` writes nothing yet, so it has no guard until layer 2.
 //
 // `detect` runs once for each call site. The caller gives its answer to the
 // other verbs in a `Tree`. No verb runs `detect` again.
@@ -17,8 +24,9 @@ import type { Envelope } from '../lib/envelope.ts'
 import type { Runner } from '../lib/process.ts'
 
 /**
- * The environment that `detect` reads, and that `why` gives to the package
- * manager that it starts. The node `detect` reads only `PATH`.
+ * The environment that `detect` and `shim` read. `why` and `install` give it
+ * to the package manager that they start. The node `detect` and `shim` read
+ * only `PATH`.
  */
 export type Environment = Readonly<Record<string, string | undefined>>
 
@@ -231,9 +239,213 @@ export type ListPinsAnswer = {
   readonly pins: readonly Pin[]
 }
 
+/** A copy that still matches one or more advisory ranges. */
+type AlertedCopy = ResolvedVersion & {
+  /** The `--vulnerable` ranges that the copy satisfies, unique and sorted as text. */
+  readonly vulnerable_ranges: readonly string[]
+}
+
+/** A major line outside `line` whose set of versions changed after the baseline (#83). */
+type LineMove = {
+  readonly major: number
+  /** Unique and sorted as text. */
+  readonly before: readonly string[]
+  /** Unique and sorted as text. Empty when the line vanished. */
+  readonly after: readonly string[]
+  readonly status: 'moved' | 'vanished'
+  /**
+   * `benign_dedup` only for the one safe shape of #105. The line keeps one
+   * version, and that version was the semver max of its baseline. Sibling
+   * alerts were given, each of their ranges parses, and none of them is on
+   * the line. No sibling range matches a version before or after. Else
+   * `fatal`.
+   */
+  readonly class: 'fatal' | 'benign_dedup'
+}
+
+/** The `validate` answer. */
+export type ValidateAnswer = {
+  /**
+   * The verdict. False when a check fails, or when `line` holds no copy. A
+   * caller reads it.
+   */
+  readonly ok: boolean
+  readonly package: string
+  readonly range: string
+  /** The `line` option, as its text, or null. */
+  readonly line: string | null
+  /** False only for a `line` that holds no copy. */
+  readonly line_present: boolean
+  /** The copies on `line`, or all copies when there is no `line`. */
+  readonly checked: number
+  readonly resolved_count: number
+  /** The checked copies that do not satisfy `range`. */
+  readonly violations: readonly ResolvedVersion[]
+  /** The copies on or above `line` that still match a vulnerable range. */
+  readonly unresolved_alerts: readonly AlertedCopy[]
+  /** The copies below `line` that still match a vulnerable range. */
+  readonly requires_major_bump: readonly AlertedCopy[]
+  /** Null when no baseline was given, and an array when one was. */
+  readonly other_line_moves: readonly LineMove[] | null
+  /** The versions of all copies, unique and sorted as text. */
+  readonly resolved_versions: readonly string[]
+}
+
 /**
- * The read verbs of one ecosystem. `Detection` is what that ecosystem's
- * `detect` finds.
+ * The options of `validate`, one for each flag of `verb_validate`. The caller
+ * gives each. A flag that is absent is null, or an empty list for
+ * `vulnerable`.
+ */
+export type ValidateOptions = {
+  /**
+   * `--line`: the major line of the group, as the text of the flag, or null
+   * for all lines. The answer echoes this text.
+   */
+  readonly line: string | null
+  /** Each `--vulnerable` range, in the order of the flags. */
+  readonly vulnerable: readonly string[]
+  /** `--baseline`: the JSON text of the `resolved_versions` answer before the fix. */
+  readonly baseline: string | null
+  /** `--sibling-alerts`: the JSON text of one array of `{major, vulnerable_ranges}`. */
+  readonly siblingAlerts: string | null
+}
+
+/**
+ * How `install` runs `install_cmd`. `env` is the environment of that command.
+ * The verb also sets `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` in it.
+ */
+export type InstallSource = { readonly run: Runner; readonly env: Environment }
+
+/** The `install` answer: what node.sh writes, and the status that it exits with. */
+export type InstallAnswer = {
+  /** The `install_cmd` of the detection. */
+  readonly command: string
+  /** True only when the command exits 0. A caller reads it. */
+  readonly ok: boolean
+  /**
+   * The exit status of the command. 127 for a command that is not found, and
+   * 126 for any other start failure. Null when a signal stops it.
+   */
+  readonly status: number | null
+  /** The signal that stopped the command, or null. */
+  readonly signal: string | null
+  readonly stdout: string
+  /**
+   * `Running: <command>` and a newline, then what the command wrote to
+   * stderr. For a command that did not start, the start failure follows.
+   */
+  readonly stderr: string
+}
+
+/** The options of `shim`. */
+export type ShimOptions = {
+  /** The environment that gives `PATH`. */
+  readonly env: Environment
+  /** The runner that the shim starts, in place of the one that `detect` found. */
+  readonly runner?: string
+}
+
+/** The `shim` answer. */
+export type ShimAnswer =
+  | {
+      readonly created: false
+      readonly pm: string
+      readonly reason: string
+      readonly shim?: never
+      readonly path_prefix?: never
+      readonly runner?: never
+    }
+  | {
+      readonly created: true
+      readonly pm: string
+      /** The shim file: the directory as given, a `/`, and the name of the manager. */
+      readonly shim: string
+      /** The directory as given. A caller puts it first on `PATH`. */
+      readonly path_prefix: string
+      /** The command that the shim starts. */
+      readonly runner: string
+      readonly reason?: never
+    }
+
+/** What `applyConstraint` writes: one constraint on one package. */
+export type ConstraintRequest = {
+  readonly pkg: string
+  readonly range: string
+  /** The parents that scope the constraint. Empty for a direct constraint. */
+  readonly parents: readonly string[]
+  /** `--tighten-bare`: also tighten a bare override that governs the package. */
+  readonly tightenBare: boolean
+}
+
+/** One entry that `applyConstraint` wrote (ADR 001, `written[]`). */
+type WrittenEntry = {
+  /** Null for an entry that no parent scopes. */
+  readonly parent: string | null
+  /** Where the entry is, one key at a time. */
+  readonly path: readonly string[]
+  readonly value: PinValue
+  /** True for a value that was there before, and that the write kept. */
+  readonly preserved?: true
+}
+
+/** One entry that `applyConstraint` removed, because a new key replaces it. */
+type SupersededKey = {
+  readonly parent: string
+  readonly path: readonly string[]
+  readonly value: PinValue
+}
+
+/** An override entry that `applyConstraint` saw and did not change. */
+type ConstraintObservation =
+  | {
+      readonly type: 'unscoped_override'
+      readonly key: string
+      readonly range: string
+      readonly targets_this_package: boolean
+    }
+  | {
+      readonly type: 'manifest_pnpm_overrides_ignored'
+      readonly keys: readonly string[]
+      readonly pnpm_major: number | null
+    }
+  | { readonly type: 'pnpm_major_unknown' }
+
+/**
+ * The npm lockfile entries that `applyConstraint` removed (#124). A
+ * `reason` is present only when an override was written and the pass could
+ * not run.
+ */
+type LockfileInvalidated =
+  | { readonly performed: true; readonly keys: readonly string[]; readonly reason?: never }
+  | {
+      readonly performed: false
+      readonly keys: readonly string[]
+      readonly reason?: 'unreadable_range_floor' | 'no_packages_object'
+    }
+
+/** The `apply_constraint` answer. */
+export type ApplyConstraintAnswer = {
+  readonly pm: string
+  readonly package: string
+  readonly range: string
+  readonly override_location: string
+  readonly override_file: string
+  readonly mode: 'tighten-bare' | 'direct' | 'scoped'
+  readonly parents: readonly string[]
+  readonly written: readonly WrittenEntry[]
+  readonly superseded_keys: readonly SupersededKey[]
+  readonly alias_lookup: {
+    /** `unsupported` for pnpm, whose lockfile does not keep the declared key. */
+    readonly source: 'lockfile' | 'unsupported'
+    readonly parents_unresolved: readonly string[]
+  }
+  readonly lockfile_invalidated: LockfileInvalidated
+  readonly observations: readonly ConstraintObservation[]
+}
+
+/**
+ * The verbs of one ecosystem. `Detection` is what that ecosystem's `detect`
+ * finds.
  */
 export interface Adapter<Detection extends { readonly pm: string }> {
   /**
@@ -275,4 +487,32 @@ export interface Adapter<Detection extends { readonly pm: string }> {
   readonly compareVersions: (a: string, b: string) => Envelope<CompareVersionsAnswer>
   /** What `range` says about `version`, in this ecosystem's range rules. */
   readonly rangeFacts: (range: string, version: string) => Envelope<RangeFactsAnswer>
+  /**
+   * Whether the copies of `pkg` satisfy `range` and clear the alerts, and
+   * which copies outside `line` moved. It only reads. The verdict is `ok` in
+   * the answer: node.sh writes the answer and exits 1 when `ok` is false.
+   */
+  readonly validate: (
+    tree: Tree<Detection>,
+    pkg: string,
+    range: string,
+    options: ValidateOptions,
+  ) => Envelope<ValidateAnswer>
+  /** Run `install_cmd` in the tree. A write verb. */
+  readonly install: (
+    tree: Tree<Detection>,
+    source: InstallSource,
+  ) => Promise<Envelope<InstallAnswer>>
+  /**
+   * Write an executable file `<dir>/<pm>` that starts the runner of the tree,
+   * or the runner that the options name. With no runner in the options, it
+   * writes nothing when the package manager is on `PATH`. A write verb. A
+   * relative `dir` is relative to the root of the tree.
+   */
+  readonly shim: (tree: Tree<Detection>, dir: string, options: ShimOptions) => Envelope<ShimAnswer>
+  /** Write one constraint into the override file of the tree. A write verb. */
+  readonly applyConstraint: (
+    tree: Tree<Detection>,
+    request: ConstraintRequest,
+  ) => Envelope<ApplyConstraintAnswer>
 }
