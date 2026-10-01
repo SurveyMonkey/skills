@@ -416,7 +416,9 @@ describe('an error is a failure, never an empty list', () => {
     const spelled = join(w.root, 'spelled')
     symlinkSync(join(target, 'kid'), spelled)
     const { runner } = standIn((args) =>
-      args.includes('--show-toplevel') ? reply({ stdout: `${spelled}\n` }) : reply({ status: 128 }),
+      args.includes('--show-toplevel') && args[1] === join(target, 'kid')
+        ? reply({ stdout: `${spelled}\n` })
+        : reply({ status: 128, stderr: 'fatal: not a git repository\n' }),
     )
     expect(value(await discover(w, [target], { deps: { git: runner } }))).toEqual({
       target,
