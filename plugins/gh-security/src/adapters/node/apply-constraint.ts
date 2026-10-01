@@ -124,14 +124,12 @@ const blockIn = (source: unknown, location: NodeDetection['override_location']):
   return block
 }
 
-/** The final map of the workspace block. jq stops on a value that is not a text. */
-const workspaceMap = (manifest: unknown): Readonly<Record<string, string>> => {
-  const map = or(getPath(manifest, ['pnpm', 'overrides']), {}) as Readonly<Record<string, unknown>>
-  if (!Object.values(map).every((value) => typeof value === 'string')) {
-    throw new Error('pnpm-workspace.yaml overrides: an entry is not a text')
-  }
-  return map as Readonly<Record<string, string>>
-}
+/**
+ * The final map of the workspace block. Each value is a text: the block of
+ * the file holds texts, and the pass writes only texts into it.
+ */
+const workspaceMap = (manifest: unknown): Readonly<Record<string, string>> =>
+  or(getPath(manifest, ['pnpm', 'overrides']), {}) as Readonly<Record<string, string>>
 
 /** The passes, in the order of node.sh. It throws with the text of each refusal. */
 const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstraintAnswer => {

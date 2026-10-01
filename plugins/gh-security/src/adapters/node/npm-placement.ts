@@ -39,7 +39,7 @@ import {
   unique,
 } from './jq-json.ts'
 import { factsOf, stripSelector } from './list-pins.ts'
-import { isRecord } from './manifest.ts'
+import { isRecord, NO_DOCUMENT } from './manifest.ts'
 import { declarationsOf, lastSegment, type NpmLock, nameAt, resolveFrom } from './npm-lock.ts'
 import { satisfiesAll } from './validate.ts'
 
@@ -135,6 +135,9 @@ const graphOf = (lock: NpmLock) => {
  */
 export const placementsOf = (query: PlacementQuery): ReadonlyMap<string, Placement> => {
   const { lock, overrides, pkg, target, tighten } = query
+  // jq writes no placement for a lockfile with no document, and the next
+  // pass of node.sh stops on that empty text (exit 2).
+  if (lock.document === NO_DOCUMENT) throw new Error('package-lock.json holds no document')
   const { downFrom } = graphOf(lock)
   const keys = lock.entries.map(([path]) => path)
   /** `seg_ok`: the segment names the entry, and its selector admits the version of the entry. */

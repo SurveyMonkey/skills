@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { addBlocks, entriesOf, get, or, split } from './jq-json.ts'
+import { addBlocks, entriesOf, get, or } from './jq-json.ts'
 import { NO_DOCUMENT, readManifest } from './manifest.ts'
 
 /** The lockfile: its text, the whole document, and its `packages` object. */
@@ -41,12 +41,16 @@ export const readNpmLock = (root: string): NpmLock => {
   return { text, document, entries, byKey: new Map(entries) }
 }
 
-/** The text of a lockfile path after its last `node_modules/`. */
-export const lastSegment = (path: string): string => split(path, 'node_modules/').at(-1) ?? ''
+/**
+ * The text of a lockfile path after its last `node_modules/`, as jq's
+ * `split("node_modules/") | last` reads it. No caller gives the empty root
+ * path, for which jq answers null.
+ */
+export const lastSegment = (path: string): string => path.split('node_modules/').at(-1) as string
 
 /** `pname`: `.name` of the entry, else the last segment of its path. The root is ''. */
 export const nameAt = (lock: NpmLock, path: string): unknown =>
-  path === '' ? '' : or(get(lock.byKey.get(path) ?? null, 'name'), lastSegment(path))
+  path === '' ? '' : or(get(lock.byKey.get(path), 'name'), lastSegment(path))
 
 /**
  * `deps`: the three blocks of an entry that declare a dependency, merged. A

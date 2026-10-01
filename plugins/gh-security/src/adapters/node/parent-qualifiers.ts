@@ -118,7 +118,8 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   if (unique(read.map(({ pver }) => pver)).length <= 1) return null
   const unreadable = edges.some(({ pver }) => pver === MISSING)
   const rows = read.map(({ pver, cver }) => {
-    const major = split(trimStart(cver, 'v'), '.')[0] ?? null
+    // jq stops on an empty major, as `test` does on a value that is not a text.
+    const major = split(trimStart(cver, 'v'), '.')[0]
     return { pver, cm: test(major, /^[0-9]+$/) ? (major as string) : null }
   })
   const onLine = unique(
@@ -151,8 +152,12 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   }
 }
 
-/** The qualifiers of each parent, or the refusal of the shared parent. */
-export type Qualifiers = ReadonlyMap<string, readonly unknown[]>
+/**
+ * The qualifiers of each parent. Each one is a text: a version of pnpm, or
+ * the root spec or a plain semver version of npm. The npm pass stops on a
+ * version that is not a text before it can be a qualifier.
+ */
+export type Qualifiers = ReadonlyMap<string, readonly string[]>
 
 /**
  * The qualifiers of each parent that needs them, in the order of the call.
@@ -180,9 +185,9 @@ export const qualifiersOf = (
       `apply_constraint: cannot scope '${pkg}' on this line: the root manifest's own declared spec for a shared parent also admits that parent's copies on other major lines, so every key npm's EOVERRIDE rule allows would drag those lines across their major boundary (issue #132). Detail: ${render(refused, null)}. Nothing was written. This is the shared-parent shape: escalate it like a fatal cross-line move; the remedy is a bump of the shared parent or dropping the dependent that pins it.`,
     )
   }
-  const qualifiers = new Map<string, readonly unknown[]>()
+  const qualifiers = new Map<string, readonly string[]>()
   for (const { parent, refused: no, bare, qualifiers: each } of verdicts) {
-    if (!(no || bare) && each.length > 0) qualifiers.set(parent, each)
+    if (!(no || bare) && each.length > 0) qualifiers.set(parent, each as readonly string[])
   }
   if (placements.size === 0) return qualifiers
   return new Map(

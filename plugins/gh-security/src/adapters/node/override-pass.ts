@@ -97,12 +97,6 @@ const CONTAINER: Readonly<Record<NodeDetection['override_location'], readonly st
 /** jq's `+` of a text and a value: null adds nothing. */
 const plus = (text: string, value: string | null): string => text + (value ?? '')
 
-/** A qualifier in a key. jq stops on a value that is not a text. */
-const textOf = (value: unknown): string => {
-  if (typeof value !== 'string') throw new Error('cannot add a qualifier that is not a text')
-  return value
-}
-
 /** The write pass over `manifest`. It throws where jq stops. */
 export const writePass = (input: unknown, query: PassQuery): PassResult => {
   const { location, pkg, range, qualifiers, placements } = query
@@ -235,7 +229,7 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     if (location === 'pnpm.overrides') {
       if (qualified.length === 0) putOverride(parent, `${parent}>${key}`, value)
       for (const qualifier of qualified) {
-        putOverride(parent, `${parent}@${textOf(qualifier)}>${key}`, value)
+        putOverride(parent, `${parent}@${qualifier}>${key}`, value)
       }
       return
     }
@@ -259,7 +253,7 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     // qualified keys are inert. Only a pair on the same line gets here.
     supersedePair(parent, key)
     for (const qualifier of qualified) {
-      putNested(parent, `${parent}@${textOf(qualifier)}`, key, value)
+      putNested(parent, `${parent}@${qualifier}`, key, value)
     }
   }
 
