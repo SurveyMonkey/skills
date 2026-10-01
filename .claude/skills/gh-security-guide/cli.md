@@ -55,6 +55,8 @@ A handler may return a promise, and `run.ts` waits for it. A handler may also fa
 (`failedReport` in `src/cli/command.ts`). The report goes to stdout, the message goes to stderr,
 and the exit code is 1. `pr-status` does this, so a caller reads the same JSON on stdout when a
 URL failed.
+A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as the `failed`
+envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on stderr and exit 1.
 
 **The allow hook is a subcommand.** `hooks/hooks.json` registers a `PreToolUse` hook on `Bash`
 running `node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" allow-own-commands`, which reads the hook

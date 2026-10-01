@@ -21,7 +21,8 @@ const typeRank = (value: unknown): number => {
 /**
  * jq's order of two JSON values: null, false, true, numbers, strings, arrays,
  * then objects. Text is in the order of its UTF-8 bytes, which is the order
- * of its code points. JavaScript's own `<` compares UTF-16 units, which puts
+ * of its code points. `byText` in `src/lockfiles/shared.ts` uses this order
+ * for strings (#303). JavaScript's own `<` compares UTF-16 units, which puts
  * a character above U+FFFF before U+E000 to U+FFFF. Arrays compare entry by
  * entry, and then by length. Objects compare their sorted keys first, and
  * then their values in key order.
