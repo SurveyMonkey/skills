@@ -182,7 +182,7 @@ describe('runCli', () => {
 
   // #302 item 1. A throw is a defect in the command, and the caller reads
   // stdout as the contract: it gets the ADR 001 failed envelope, exit 1.
-  it.fails('renders a handler that throws as the failed envelope, with exit 1', async () => {
+  it('renders a handler that throws as the failed envelope, with exit 1', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
       throw new Error('boom')
     })
@@ -194,7 +194,7 @@ describe('runCli', () => {
     })
   })
 
-  it.fails('renders a handler that rejects with a non-Error as its text', async () => {
+  it('renders a handler that rejects with a non-Error as its text', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () =>
       Promise.reject('plain text'),
     )
@@ -206,7 +206,7 @@ describe('runCli', () => {
     })
   })
 
-  it.fails('renders a load that throws as the failed envelope too', async () => {
+  it('renders a load that throws as the failed envelope too', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockRejectedValue(new Error('no module'))
     const { io, written } = capturing()
     expect(await runCli(['version'], {}, io)).toBe(1)

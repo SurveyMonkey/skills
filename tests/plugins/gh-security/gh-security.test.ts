@@ -71,7 +71,7 @@ describe('a command that throws', () => {
   // directory on fd 0 makes that read throw EISDIR. No command throws on any
   // argument, so the input is the stdin. `run` cannot hand the child a
   // directory, so this spawns the child itself.
-  it.fails('writes the failed envelope to stdout, the message to stderr, and exits 1', () => {
+  it('writes the failed envelope to stdout, the message to stderr, and exits 1', () => {
     const directory = openSync(tmpdir(), 'r')
     try {
       const result = spawnSync(

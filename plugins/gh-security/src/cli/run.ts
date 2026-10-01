@@ -76,6 +76,25 @@ const renderReport = (result: FailedReport): Rendered => ({
 })
 
 /**
+ * The result of a command, or the `failed` envelope when the load or the
+ * handler throws (issue #302). A throw is a defect in the command. Without
+ * this guard, node ends with a stack trace and an empty stdout, and a caller
+ * that reads stdout as the contract reads nothing. The line has the form of
+ * `failedOnThrow` in `lib/envelope.ts`, `<command>: <message>`. Here it also
+ * goes to stdout as the envelope, so the caller reads one shape.
+ */
+const settle = async (
+  command: string,
+  attemptCommand: () => Promise<CommandResult> | CommandResult,
+): Promise<CommandResult> => {
+  try {
+    return await attemptCommand()
+  } catch (error) {
+    return failed(`${command}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
  * Run one invocation and answer with the process exit code. ADR 001's four
  * exit codes come from the envelope the handler returned, through
  * `exitCodeFor`, so a verb that is not implemented stays exit 2 and an
@@ -107,12 +126,9 @@ export const runCli = async (
       exitCode: exitCodeFor(envelope),
     })
   }
-  const handler = await entry.load()
-  const result: CommandResult = await handler({
-    args: parsed.args,
-    env,
-    io,
-    commandNames,
+  const result = await settle(parsed.command, async () => {
+    const handler = await entry.load()
+    return handler({ args: parsed.args, env, io, commandNames })
   })
   if (result === undefined) return EXIT_CODES.ok
   return emit(io, render(result))
