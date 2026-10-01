@@ -1,6 +1,6 @@
 // The observations of `apply_constraint` (#222): override entries that the
 // call saw and did not change. Each one is a lead for the pin audit (#7),
-// not a finding.
+// not a defect.
 //
 //   - `unscoped_override`: a bare entry of the block. "Bare" is per syntax.
 //     pnpm scopes with `>`, so a key with no `>` is bare. Yarn scopes with

@@ -163,7 +163,8 @@ export type Qualifiers = ReadonlyMap<string, readonly string[]>
  * The qualifiers of each parent that needs them, in the order of the call.
  * A parent that is refused, or that falls back to the bare key, has none.
  * The refusal of a shared parent (#132) is a failure, unless each copy of
- * that parent is placed (#147). Then the nested write serves it. A
+ * that parent on the line is placed (#147). Then the nested write serves
+ * it. A
  * qualifier that covers only placed copies is dropped: no placed copy
  * matches a top-level key. It throws where jq stops.
  */
@@ -205,11 +206,12 @@ export const qualifiersOf = (
 }
 
 /**
- * `bare_conflict`: a pre-existing bare nested key for a parent that this
- * call qualifies, on another major line. Deleting it strips the protection
- * of that line, and keeping it leaves the qualified keys inert: npm matches
- * the bare key first. So the call refuses (#132). A key on the same line is
- * no conflict: the write removes it, and reports it as superseded.
+ * `bare_conflict`: a bare nested key of the manifest, for a parent that
+ * this call qualifies, on another major line. A delete of that key strips
+ * the protection of its line. If the key stays, the qualified keys do
+ * nothing: npm matches the bare key first. So the call refuses (#132). A
+ * key on the same line is no conflict: the write removes it, and reports it
+ * as superseded.
  */
 export const bareConflict = (
   qualifiers: Qualifiers,

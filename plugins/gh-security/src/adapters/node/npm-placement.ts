@@ -2,7 +2,7 @@
 // pass of `verb_apply_constraint` in node.sh (#222). The jq there is the
 // specification.
 //
-// A pre-existing override rule can name a parent as a child key of another
+// An override rule of the manifest can name a parent as a child key of another
 // rule: `{"A": {"B": "<range>"}}`. npm scopes such a copy of B to the rule
 // that placed it. A top-level `"B": {...}` key never matches that copy. So
 // the constraint nests inside the rule, and the `"."` self key keeps the
