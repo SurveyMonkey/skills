@@ -21,6 +21,10 @@
 // **The transport is `process.ts`,** through the `run` option. So this
 // file's suite drives each failure in-process, with no `gh` on the machine.
 //
+// **One parity exception:** a `gh` that fails with an empty stderr gives the
+// detail `gh exited <status>`. The bash it replaces gave the empty text
+// (`discover-alerts.sh:441`). The port keeps the status on purpose (#302).
+//
 // This file ships. It imports nothing outside the plugin, and stays inside
 // the erasable subset.
 import { type Runner, type RunResult, run } from './process.ts'
@@ -204,6 +208,11 @@ const filter = (name: string, value: string | number | undefined): string[] =>
  *   4. gh's own stderr, because a caller cannot tell an expired token from a
  *      missing repository without it.
  *   5. The signal, or the status, when stderr is empty.
+ *
+ * Parity exception, #302 (ruling 9). For an empty stderr the answer is
+ * `gh exited <status>`. The bash script keeps the empty text for the same
+ * failure (`discover-alerts.sh:441`, `pr_err`). The port names the status,
+ * because a skip with an empty reason tells a reader nothing.
  */
 const accountOf = (result: RunResult, boundMs?: number): string => {
   if (result.startFailure !== null) return `cannot run gh: ${result.startFailure.message}`
