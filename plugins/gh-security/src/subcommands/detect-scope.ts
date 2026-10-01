@@ -25,8 +25,7 @@
 // is an error. It is never a fall back to the symref, because the symref is
 // the value that cannot be trusted. A repository with no default branch on
 // GitHub gives a null `default_branch`. The read names the host, because a
-// bare `OWNER/REPO` follows `GH_HOST` and the `gh` configuration, and could
-// ask another server.
+// bare `OWNER/REPO` follows `GH_HOST`, and could ask another server.
 //
 // With no nwo, or with a host that is not `github.com`, there is no GitHub
 // repository to ask. A name on another host can also exist on `github.com`,
