@@ -81,6 +81,7 @@ const typescriptSide = async (
 ): Promise<CommandResult> => {
   const mocks: GhReplies[] = []
   const factory: ClientFactory = () => ({
+    ...createGhMock(),
     viewPullRequest: (pull) => {
       const reply = replies[pull.pullRequest]
       const registered: GhReplies = {

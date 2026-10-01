@@ -133,9 +133,13 @@ describe('the client options', () => {
     expect([bound.calls[0]?.timeoutMs, unbound.calls[0]?.timeoutMs]).toEqual([5_000, undefined])
   })
 
-  it("defaults to process.ts's runner, with the one endpoint present", () => {
+  it("defaults to process.ts's runner, with every endpoint present", () => {
     // Built, not called: a call would start the real `gh`.
-    expect(Object.keys(createGhClient())).toEqual(['viewPullRequest'])
+    expect(Object.keys(createGhClient())).toEqual([
+      'viewPullRequest',
+      'viewDefaultBranch',
+      'listAdvisories',
+    ])
   })
 
   // Mutant: a default runner other than `process.ts`'s. A PATH with no `gh`

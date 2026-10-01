@@ -92,5 +92,7 @@ function answer<K extends GhEndpoint>(replies: GhReplies, endpoint: K): GhResult
 export function createGhMock(replies: GhReplies = {}): GhClient {
   return {
     viewPullRequest: async () => answer(replies, 'viewPullRequest'),
+    viewDefaultBranch: async () => answer(replies, 'viewDefaultBranch'),
+    listAdvisories: async () => answer(replies, 'listAdvisories'),
   }
 }

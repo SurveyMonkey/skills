@@ -26,6 +26,10 @@ import { type Runner, type RunResult, run } from './process.ts'
 export interface GhResults {
   /** One pull request's own fields. */
   viewPullRequest: Record<string, unknown>
+  /** The repository's default branch name, or null for a repository with none. */
+  viewDefaultBranch: { readonly name: string | null }
+  /** Every advisory on the page list, flattened to one list. */
+  listAdvisories: readonly Record<string, unknown>[]
 }
 
 export type GhEndpoint = keyof GhResults
@@ -34,6 +38,11 @@ export type GhEndpoint = keyof GhResults
  *  implements it, and so does `createGhMock` in the harness. */
 export interface GhClient {
   viewPullRequest(pull: { pullRequest: number }): Promise<GhResults['viewPullRequest']>
+  viewDefaultBranch(repo: { repository: string }): Promise<GhResults['viewDefaultBranch']>
+  listAdvisories(query: {
+    package: string
+    ecosystem: string
+  }): Promise<GhResults['listAdvisories']>
 }
 
 /**
@@ -221,5 +230,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
         ]),
         'gh pr view',
       ),
+    viewDefaultBranch: () => Promise.reject(new Error('not implemented')),
+    listAdvisories: () => Promise.reject(new Error('not implemented')),
   }
 }
