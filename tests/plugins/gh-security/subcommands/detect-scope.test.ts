@@ -268,7 +268,15 @@ describe('the answer for a remote that gives no nwo', () => {
 
   it('answers null for a repository with no remote, and runs no remote show', async () => {
     const w = world()
-    expect(value(await detect(w, [repoWith(w)]))).toEqual({
+    const calls: string[][] = []
+    const runner: Runner = async (command, args = [], options) => {
+      calls.push([...args])
+      return run(command, args, options)
+    }
+    const dir = repoWith(w)
+    const answer = await detectScope(context(w, [dir]), factoryOf({}), runner, '/nowhere')
+    expect(calls.some((args) => args.includes('show'))).toBe(false)
+    expect(value(answer)).toEqual({
       scope: 'repo',
       owner: null,
       repo: null,
@@ -302,7 +310,7 @@ describe('the answer for a remote that gives no nwo', () => {
     }
     await detectScope(context(w, [dir]), factoryOf({}), runner, '/nowhere')
     expect(seen).toHaveLength(1)
-    expect(seen[0]).toMatchObject({ LC_ALL: 'C' })
+    expect(seen[0]).toMatchObject({ ...w.sandbox.env, LC_ALL: 'C' })
   })
 })
 

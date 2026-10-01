@@ -392,6 +392,38 @@ describe('an error is a failure, never an empty list', () => {
     }
   })
 
+  it.skipIf(!notRoot).each([0o444, 0o111])(
+    'refuses a target with mode %o as one it cannot read',
+    async (mode) => {
+      const w = world()
+      const locked = join(w.root, 'half')
+      mkdirSync(locked)
+      chmodSync(locked, mode)
+      try {
+        expect(failure(await discover(w, [locked]))).toBe(
+          `could not read ${locked}: permission denied`,
+        )
+      } finally {
+        chmodSync(locked, 0o755)
+      }
+    },
+  )
+
+  it('lists a child as git spells it, though the system resolves it to another spelling', async () => {
+    const w = world()
+    const target = join(w.root, 'holder')
+    mkdirSync(join(target, 'kid'), { recursive: true })
+    const spelled = join(w.root, 'spelled')
+    symlinkSync(join(target, 'kid'), spelled)
+    const { runner } = standIn((args) =>
+      args.includes('--show-toplevel') ? reply({ stdout: `${spelled}\n` }) : reply({ status: 128 }),
+    )
+    expect(value(await discover(w, [target], { deps: { git: runner } }))).toEqual({
+      target,
+      repos: [spelled],
+    })
+  })
+
   it.skipIf(!notRoot)('refuses a child it cannot enter, with the cause', async () => {
     const w = world()
     const work = join(w.root, 'workspace')
@@ -764,6 +796,31 @@ describe('the walk for a .git stops at a filesystem boundary', () => {
         await discover(w, [join(mount, 'plain')], { deps: { git: runner, deviceOf: unknown } }),
       ),
     ).toContain(`git failed in ${join(w.root, 'home')} (exit 128)`)
+  })
+
+  it('goes on climbing when only the device of the start is unknown', async () => {
+    const w = world()
+    const home = join(w.root, 'home')
+    initRepo(w, home)
+    mkdirSync(join(home, 'plain'))
+    const { runner } = standIn(notARepository)
+    const deviceOf = (path: string): number | null => (path === join(home, 'plain') ? null : 1)
+    expect(
+      failure(await discover(w, [join(home, 'plain')], { deps: { git: runner, deviceOf } })),
+    ).toContain(`git failed in ${home} (exit 128)`)
+  })
+
+  it('goes on climbing when only the device of a parent is unknown', async () => {
+    const w = world()
+    const home = join(w.root, 'home')
+    initRepo(w, home)
+    mkdirSync(join(home, 'plain'))
+    const { runner } = standIn(notARepository)
+    const deviceOf = (path: string): number | null =>
+      path === home ? null : path === join(home, 'plain') ? 2 : 1
+    expect(
+      failure(await discover(w, [join(home, 'plain')], { deps: { git: runner, deviceOf } })),
+    ).toContain(`git failed in ${home} (exit 128)`)
   })
 
   it('answers no repository when the walk reaches the top without finding a .git', async () => {
