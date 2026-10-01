@@ -629,6 +629,7 @@ describe('searchOpenPullRequests', () => {
     ['an entry with no url', '[{"title":"x"}]'],
     ['a url that is not text', '[{"url":null}]'],
     ['an entry that is not an object', '["https://a/1"]'],
+    ['an entry that is null', '[null]'],
   ])('throws when gh answered %s', async (_shape, stdout) => {
     const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
     expect(error).toBeInstanceOf(GhError)
