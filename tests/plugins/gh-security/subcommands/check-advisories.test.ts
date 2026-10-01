@@ -294,6 +294,16 @@ describe('the listing', () => {
       },
     ])
     expect(value(await check(['lodash'], [bare])).vulnerable_ranges).toEqual([])
+    expect(value(await check(['lodash'], [bare])).verdict).toBeNull()
+  })
+
+  it('counts an advisory that has no range, so a version reads safe', async () => {
+    const bare = { vulnerabilities: [{ package: { name: 'lodash', ecosystem: 'npm' } }] }
+    expect(value(await check(['--version', '1.0.0', 'lodash'], [bare]))).toMatchObject({
+      advisory_count: 1,
+      vulnerable_ranges: [],
+      verdict: 'safe',
+    })
   })
 
   it('unions the ranges of the advisories, each once, in the byte order of the text', async () => {
@@ -473,6 +483,14 @@ describe('the four verdicts', () => {
     })
   })
 
+  it('reads the word true in a string as not parseable', async () => {
+    const route = withFacts((range, version) => facts(range, version, { parseable: 'true' }))
+    expect(value(await check(['--version', '1.0.0', 'lodash'], LODASH, route))).toMatchObject({
+      verdict: 'unknown',
+      matched_ranges: [],
+    })
+  })
+
   it('reads the word true in a string as not true', async () => {
     const route = withFacts((range, version) => facts(range, version, { satisfied: 'true' }))
     expect(value(await check(['--version', '1.0.0', 'lodash'], LODASH, route)).verdict).toBe('safe')
@@ -533,6 +551,14 @@ describe('a verb that fails', () => {
       ),
     ) as { adapter_errors: { error: string }[] }
     expect(spaced.adapter_errors[0]?.error).toBe('ends with space')
+    const cut = value(
+      await check(
+        ['--version', '1.0.0', 'lodash'],
+        LODASH,
+        broken(`${'x'.repeat(299)} tail`, 'failed'),
+      ),
+    ) as { adapter_errors: { error: string }[] }
+    expect(cut.adapter_errors[0]?.error).toBe('x'.repeat(299))
   })
 
   it('is an error when range_facts omits parseable or satisfied', async () => {
@@ -629,6 +655,16 @@ describe('a refusal', () => {
       'a vulnerabilities list that holds a non-object',
       advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [1] }),
       'the vulnerabilities of GHSA-aaaa-1111-bbbb are not a list of objects',
+    ],
+    [
+      'a vulnerabilities list that holds a list',
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [[]] }),
+      'the vulnerabilities of GHSA-aaaa-1111-bbbb are not a list of objects',
+    ],
+    [
+      'a package that is a list',
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [{ package: [] }] }),
+      'a vulnerability has a package that is not an object',
     ],
     [
       'a package that is not an object',
