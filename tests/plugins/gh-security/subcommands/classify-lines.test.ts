@@ -33,7 +33,11 @@ import { selectAdapter } from '#gh-security/adapters/registry.ts'
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
 import { type Envelope, failed, ok } from '#gh-security/lib/envelope.ts'
 import { type Runner, type RunResult, run } from '#gh-security/lib/process.ts'
-import { classifyLines, classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts'
+import {
+  classifyLines,
+  classifyLinesCommand,
+  type Signals,
+} from '#gh-security/subcommands/classify-lines.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 import { createGitFixtures } from '#harness/git.ts'
 import { pluginFile } from '#harness/paths.ts'
@@ -1433,6 +1437,109 @@ describe('--base-ref', () => {
     expect(readdirSync(repo.temp)).toEqual([])
   })
 
+  describe('a signal while the worktree exists', () => {
+    /** A stand-in for `process`: it logs each call, and the test sends the signals. */
+    const signalsOf = () => {
+      const log: string[] = []
+      const listeners = new Map<string, (signal: NodeJS.Signals) => void>()
+      const signals: Signals = {
+        on: (signal, listener) => {
+          log.push(`on ${signal}`)
+          listeners.set(signal, listener)
+        },
+        off: (signal, listener) => {
+          log.push(`off ${signal}`)
+          if (listeners.get(signal) === listener) listeners.delete(signal)
+        },
+        exit: (status) => {
+          log.push(`exit ${status}`)
+        },
+      }
+      const send = (signal: NodeJS.Signals): void => {
+        listeners.get(signal)?.(signal)
+      }
+      return { log, listeners, signals, send }
+    }
+
+    /** A real runner that sends signals after `worktree add`, and logs the removal. */
+    const sendingAfterAdd =
+      (
+        log: string[],
+        send: (signal: NodeJS.Signals) => void,
+        sent: readonly NodeJS.Signals[],
+      ): Runner =>
+      async (command, args = [], options) => {
+        const result = await run(command, args, options)
+        const words = args.slice(2, 4).join(' ')
+        if (words === 'worktree add') for (const signal of sent) send(signal)
+        if (words === 'worktree remove') log.push('worktree remove')
+        return result
+      }
+
+    it.each([
+      ['SIGINT', ['SIGINT'], 130],
+      ['SIGTERM', ['SIGTERM'], 143],
+      ['the first of two signals', ['SIGTERM', 'SIGINT'], 143],
+    ] as const)('removes the worktree, then exits for %s', async (_case, sent, status) => {
+      const repo = repository()
+      const { log, listeners, signals, send } = signalsOf()
+      await classifyLines(
+        context(['--repo-root', repo.work, '--base-ref', 'origin/main'], ONE, {
+          ...envOf(repo.sandbox, repo.temp),
+        }),
+        sendingAfterAdd(log, send, sent),
+        standIn({ fromTree: true }).route,
+        '/',
+        signals,
+      )
+      expect(log).toEqual([
+        'on SIGINT',
+        'on SIGTERM',
+        'worktree remove',
+        'off SIGINT',
+        'off SIGTERM',
+        `exit ${status}`,
+      ])
+      expect(listeners.size).toBe(0)
+      expect(repo.worktrees()).toBe(1)
+      expect(readdirSync(repo.temp)).toEqual([])
+    })
+
+    it('does not exit when no signal comes', async () => {
+      const repo = repository()
+      const { log, signals, send } = signalsOf()
+      const result = await classifyLines(
+        context(['--repo-root', repo.work, '--base-ref', 'origin/main'], ONE, {
+          ...envOf(repo.sandbox, repo.temp),
+        }),
+        sendingAfterAdd(log, send, []),
+        standIn({ fromTree: true }).route,
+        '/',
+        signals,
+      )
+      expect(statusesOf(result)).toEqual(['requires_major_bump'])
+      expect(log).toEqual([
+        'on SIGINT',
+        'on SIGTERM',
+        'worktree remove',
+        'off SIGINT',
+        'off SIGTERM',
+      ])
+    })
+
+    it('takes no signal without --base-ref', async () => {
+      const { log, signals } = signalsOf()
+      await classifyLines(
+        context(['--repo-root', SOME_ROOT], envelope([group('lodash', '4')])),
+        run,
+        standIn().route,
+        '/',
+        signals,
+      )
+      expect(log.filter((entry) => entry.startsWith('on '))).toEqual([])
+    })
+  })
+
   it('checks the input before any git call', async () => {
     const repo = repository()
     const calls: string[][] = []
@@ -1514,5 +1621,51 @@ describe('the process', () => {
       error: 'classify-lines expects discovery JSON on stdin',
     })
     expect(result.stderr).toBe('classify-lines expects discovery JSON on stdin\n')
+  })
+
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ])('removes the --base-ref worktree when %s stops it, and exits %i', async (signal, status) => {
+    const sandbox = createSandbox()
+    const fixtures = createGitFixtures(sandbox)
+    const work = fixtures.create(sandbox.join('repo'))
+    const temp = sandbox.join('tmp')
+    mkdirSync(temp)
+    // The prefix runs each git call. After `worktree add`, it sends the
+    // signal to the command, which then holds a worktree.
+    const hold = sandbox.join('hold.sh')
+    writeFileSync(
+      hold,
+      [
+        '"$@"',
+        'status=$?',
+        `case " $* " in *" worktree add "*) kill -s ${signal.slice(3)} "$PPID" ;; esac`,
+        'exit "$status"',
+        '',
+      ].join('\n'),
+    )
+    const result = await run(
+      process.execPath,
+      [
+        ENTRY,
+        'classify-lines',
+        '--env-prefix',
+        `sh ${hold}`,
+        '--repo-root',
+        work,
+        '--base-ref',
+        'origin/main',
+      ],
+      { env: { ...sandbox.env, TMPDIR: temp }, stdin: envelope([]) },
+    )
+    expect.soft({ status: result.status, signal: result.signal }).toEqual({ status, signal: null })
+    expect(
+      fixtures
+        .git(work, 'worktree', 'list', '--porcelain')
+        .split('\n')
+        .filter((line) => line.startsWith('worktree ')),
+    ).toEqual([`worktree ${realpathSync(work)}`])
+    expect(readdirSync(temp)).toEqual([])
   })
 })

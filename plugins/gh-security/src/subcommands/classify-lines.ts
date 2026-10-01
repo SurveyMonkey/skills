@@ -82,8 +82,11 @@
 //      directory.
 //   3. It reads that tree.
 //   4. It removes the worktree when the handler returns or throws.
-// A signal that stops the process skips step 4, where the script's EXIT trap
-// ran. `--repo-root` must be the top level of a repository. When the removal
+// From the start of step 2 to the end of step 4, a SIGINT or SIGTERM does not
+// stop the process at once. The process does step 4 as above, and then exits
+// with 130 or 143. So the worktree goes, as the script's EXIT trap removed
+// it. A signal before the end of step 3 does not stop step 3.
+// `--repo-root` must be the top level of a repository. When the removal
 // fails, the worktree and its directory stay. A deleted directory with its
 // entry still in the repository blocks later worktrees (`git.md`). A line on
 // stderr then says how to remove the worktree. It never runs
@@ -241,12 +244,26 @@ const readInput = (
   return { input, actionable, skipped }
 }
 
-/** The handler. The runner, the registry and the current directory are parameters. */
+/** The part of `process` that the signal handler of `--base-ref` uses. */
+export interface Signals {
+  readonly on: (signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void) => unknown
+  readonly off: (signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void) => unknown
+  readonly exit: (status: number) => void
+}
+
+/** The exit status of a process that a signal stopped, as a shell gives it. */
+const SIGNAL_STATUS: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 }
+
+/**
+ * The handler. The runner, the registry, the current directory and the
+ * signals of the process are parameters.
+ */
 export const classifyLines = async (
   context: CommandContext,
   spawn: Runner,
   route: typeof select,
   cwd: string,
+  signals: Signals = process,
 ): Promise<CommandResult> => {
   const parsed = parseCommandLine(context.args, {
     'env-prefix': { type: 'string', default: '' },
@@ -313,6 +330,12 @@ export const classifyLines = async (
   }
 
   let baseDir: string | null = null
+  // A signal while the worktree can exist only records itself. The `finally`
+  // below then removes the worktree, and exits with the status of the signal.
+  let stopped: NodeJS.Signals | null = null
+  const stop = (signal: NodeJS.Signals): void => {
+    stopped ??= signal
+  }
   try {
     let treeRoot = root
     if (baseRef !== '') {
@@ -355,6 +378,8 @@ export const classifyLines = async (
         )
       }
       const tree = join(baseDir, 'tree')
+      signals.on('SIGINT', stop)
+      signals.on('SIGTERM', stop)
       const added = await git([
         'worktree',
         'add',
@@ -386,6 +411,9 @@ export const classifyLines = async (
         removeQuietly(baseDir)
       }
     }
+    signals.off('SIGINT', stop)
+    signals.off('SIGTERM', stop)
+    if (stopped !== null) signals.exit(SIGNAL_STATUS[stopped] as number)
   }
 }
 
