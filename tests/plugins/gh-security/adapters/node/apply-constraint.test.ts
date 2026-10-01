@@ -1773,6 +1773,17 @@ describe('apply_constraint pnpm override file routing (issue #159)', () => {
     expect(workspaceText(dir)).toContain("  'minimatch@10.2.5>brace-expansion': '>=5.0.9 <6'\n")
   })
 
+  // The expected text is the file that node.sh wrote for the same copy.
+  it('leaves a key of the same name outside the overrides block as it is', () => {
+    const catalog = workspaceFile(
+      "catalog:\n  undici: ^6.0.0\n\npackages:\n  - packages/*\n\noverrides:\n  undici: '>=6.23.0'\n  ws: '>=8.17.1'\n",
+    )
+    const { dir } = apply(PNPM11, ['undici', '>=6.24.0 <7'], catalog)
+    expect(workspaceText(dir)).toBe(
+      "catalog:\n  undici: ^6.0.0\n\npackages:\n  - packages/*\n\noverrides:\n  'undici': '>=6.24.0 <7'\n  ws: '>=8.17.1'\n",
+    )
+  })
+
   it('tightens a pre-existing workspace key for the same package in place, exactly once', () => {
     const seeded = workspaceFile("overrides:\n  'minimatch@10.2.5>brace-expansion': '>=5.0.0'\n")
     const { dir } = apply(PNPM11, [...BRACE, 'minimatch'], seeded)
