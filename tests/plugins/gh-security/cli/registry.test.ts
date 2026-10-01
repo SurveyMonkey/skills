@@ -10,7 +10,9 @@ import { describe, expect, it } from 'vitest'
 
 import { COMMANDS } from '#gh-security/cli/registry.ts'
 import { checkAdvisoriesCommand } from '#gh-security/subcommands/check-advisories.ts'
+import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts'
 import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
+import { discoverAlertsCommand } from '#gh-security/subcommands/discover-alerts.ts'
 import { discoverReposCommand } from '#gh-security/subcommands/discover-repos.ts'
 import { pluginFile } from '#harness/paths.ts'
 
@@ -30,7 +32,9 @@ describe('the registry', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
       "import('../subcommands/check-advisories.ts')",
+      "import('../subcommands/classify-lines.ts')",
       "import('../subcommands/detect-scope.ts')",
+      "import('../subcommands/discover-alerts.ts')",
       "import('../subcommands/discover-repos.ts')",
       "import('../subcommands/ensure-worktree-exclude.ts')",
       "import('../subcommands/pr-status.ts')",
@@ -44,7 +48,9 @@ describe('the discovery entries', () => {
   // The loader of each entry is the one line that reaches the handler.
   it.each([
     ['check-advisories', checkAdvisoriesCommand],
+    ['classify-lines', classifyLinesCommand],
     ['detect-scope', detectScopeCommand],
+    ['discover-alerts', discoverAlertsCommand],
     ['discover-repos', discoverReposCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
@@ -55,7 +61,15 @@ describe('the discovery entries', () => {
       'check-advisories',
       'check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
     ],
+    [
+      'classify-lines',
+      'classify-lines [--env-prefix <prefix>] --repo-root <path> [--base-ref origin/<branch>] [--branch-style slash|flat]',
+    ],
     ['detect-scope', 'detect-scope [--env-prefix <prefix>] [<path>]'],
+    [
+      'discover-alerts',
+      'discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] [--stdin] <owner/repo>',
+    ],
     ['discover-repos', 'discover-repos [<path>]'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)

@@ -1,8 +1,8 @@
 // Parity for the adapter registry (RFC 002, "Parity is the migration
 // strategy"). It runs the single mode of `scripts/common/select-adapter.sh`
 // and `selectAdapter` on the same ecosystem and manifest, and compares the
-// whole answer. The `--from-discovery` batch mode of the script belongs to
-// `discover-alerts` (D2), and is not compared here.
+// whole answer. The `--from-discovery` batch mode of the script is the first
+// step of `classify-lines`, and `parity-classify-lines.test.ts` compares it.
 //
 // One difference is declared. The script answers `adapter_path`, the path of
 // the bash adapter. The registry answers the adapter itself, in process, and

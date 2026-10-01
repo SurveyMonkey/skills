@@ -23,10 +23,20 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
       'List every published advisory range of a package: check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
     load: async () => (await import('../subcommands/check-advisories.ts')).checkAdvisoriesCommand,
   },
+  'classify-lines': {
+    description:
+      'Classify the major line of each alert group against the lockfile (reads discovery JSON on stdin): classify-lines [--env-prefix <prefix>] --repo-root <path> [--base-ref origin/<branch>] [--branch-style slash|flat]',
+    load: async () => (await import('../subcommands/classify-lines.ts')).classifyLinesCommand,
+  },
   'detect-scope': {
     description:
       'Decide whether a path is in a repository, and say which: detect-scope [--env-prefix <prefix>] [<path>]',
     load: async () => (await import('../subcommands/detect-scope.ts')).detectScopeCommand,
+  },
+  'discover-alerts': {
+    description:
+      'Group the open Dependabot alerts of one repository by package major line: discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] [--stdin] <owner/repo>',
+    load: async () => (await import('../subcommands/discover-alerts.ts')).discoverAlertsCommand,
   },
   'discover-repos': {
     description: 'List the repository checkouts a directory holds: discover-repos [<path>]',

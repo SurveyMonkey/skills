@@ -1,6 +1,6 @@
 // The adapter registry: GitHub's advisory ecosystem to an adapter, in process.
-// This is the port of the single mode of `select-adapter.sh`. The `--from-
-// discovery` batch mode of that script belongs to `discover-alerts`.
+// This is the port of the single mode of `select-adapter.sh`. The batch mode
+// of that script, `--from-discovery`, is the first step of `classify-lines`.
 //
 // Routing keys on the alert's own ecosystem, never on a scan of the
 // repository root. A polyglot repository has one lockfile for each toolchain,
@@ -11,8 +11,8 @@
 // pip, maven, nuget, composer, go, rust, erlang, actions, pub, swift and
 // other. Only `npm` has an adapter today.
 //
-// The registry has no CLI entry. Its callers are `check-advisories` and, in
-// the next layer, `discover-alerts` and `classify-lines`.
+// The registry has no CLI entry. Its callers are `check-advisories`,
+// `discover-alerts` and `classify-lines`.
 //
 // This file ships. It imports nothing outside the plugin.
 
