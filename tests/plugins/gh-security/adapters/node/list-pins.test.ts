@@ -240,7 +240,7 @@ describe('list_pins on each override location', () => {
   //     -> ["\ue000","\uffff","\ud83d\ude00"]
   //   jq -nc '{"\ud83d\ude00-pkg":"1","\uffff-pkg":"1","a":"1"} | keys'
   //     -> ["a","\uffff-pkg","\ud83d\ude00-pkg"]
-  it.fails('sorts the keys of pnpm.overrides by code point, as jq `keys` does', () => {
+  it('sorts the keys of pnpm.overrides by code point, as jq `keys` does', () => {
     const { root, detection } = copyOf('pnpm11-workspace-overrides')
     put(root, ['pnpm', 'overrides'], { '\u{1F600}-pkg': '1', '\uffff-pkg': '1', a: '1' })
     const answer = node.listPins({ root, detection })

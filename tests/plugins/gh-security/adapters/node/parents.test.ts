@@ -130,7 +130,7 @@ describe('byText and namesOf, in the order of jq (#303)', () => {
   //     -> ["\ue000","\uffff","\ud83d\ude00"]
   //   jq -nc '{"\ud83d\ude00-pkg":"1","\uffff-pkg":"1","a":"1"} | keys'
   //     -> ["a","\uffff-pkg","\ud83d\ude00-pkg"]
-  it.fails('sorts text by code point, not by UTF-16 unit', () => {
+  it('sorts text by code point, not by UTF-16 unit', () => {
     expect(['\u{1F600}', '\uffff', '\ue000'].sort(byText)).toEqual([
       '\ue000',
       '\uffff',
@@ -139,7 +139,7 @@ describe('byText and namesOf, in the order of jq (#303)', () => {
   })
 
   // `jq 'unique'` of the same three names, once each: the same order.
-  it.fails('names each parent once, sorted by code point', () => {
+  it('names each parent once, sorted by code point', () => {
     const found = ['\u{1F600}', '\uffff', '\ue000', '\uffff'].map((name) => ({
       name,
       version: '1.0.0',

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { groupResolutions, uniqueCopies, uniqueParents } from '#gh-security/lockfiles/shared.ts'
 
 describe('uniqueCopies', () => {
-  it.fails('sorts the copies by code point of the version joined to the path', () => {
+  it('sorts the copies by code point of the version joined to the path', () => {
     const copies = [
       { version: '1.0.0', path: '\u{1F600}' },
       { version: '1.0.0', path: '\uffff' },
@@ -40,7 +40,7 @@ describe('uniqueCopies', () => {
 })
 
 describe('groupResolutions', () => {
-  it.fails('sorts the versions of a package by code point', () => {
+  it('sorts the versions of a package by code point', () => {
     const pairs = ['\u{1F600}', '\uffff', '\ue000'].map((version) => ({
       package: 'lodash',
       version,
@@ -50,7 +50,7 @@ describe('groupResolutions', () => {
 })
 
 describe('uniqueParents', () => {
-  it.fails('sorts the parents by code point of the name', () => {
+  it('sorts the parents by code point of the name', () => {
     const found = ['\u{1F600}', '\uffff', '\ue000'].map((name) => ({ name, version: '1.0.0' }))
     expect(uniqueParents(found).map(({ name }) => name)).toEqual(['\ue000', '\uffff', '\u{1F600}'])
   })
