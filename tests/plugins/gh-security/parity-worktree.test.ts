@@ -157,6 +157,26 @@ const CASES: readonly (readonly [string, Build])[] = [
     'a pointer to a gitdir that is none of these',
     (built) => pointer(built, 'gitdir: /somewhere/else\n'),
   ],
+  [
+    'a pointer with a submodule under worktrees/ inside a worktree',
+    (built) => pointer(built, 'gitdir: /abs/main/.git/worktrees/wt/modules/worktrees/foo\n'),
+  ],
+  [
+    'a pointer with a line separator in the name of the worktree',
+    (built) => pointer(built, 'gitdir: /abs/main/.git/worktrees/wt x/modules/worktrees/foo\n'),
+  ],
+  [
+    'a pointer with a common dir under worktrees/ and modules/',
+    (built) => pointer(built, 'gitdir: /abs/worktrees/wt/x/modules/app/.git/worktrees/fix\n'),
+  ],
+  [
+    'a pointer with two .git/ directories',
+    (built) => pointer(built, 'gitdir: /abs/.git/worktrees/x/modules/app/.git/worktrees/fix\n'),
+  ],
+  [
+    'a pointer with a bare common dir under worktrees/ and modules/',
+    (built) => pointer(built, 'gitdir: /abs/worktrees/x/modules/repo.git/worktrees/fix\n'),
+  ],
   ['a pointer with no newline', (built) => pointer(built, 'gitdir: /abs/main/.git/worktrees/wt')],
   ['a pointer that is not a gitdir line', (built) => pointer(built, 'not a pointer\n')],
   ['an empty pointer', (built) => pointer(built, '')],
