@@ -15,16 +15,18 @@
 // Each group: `{package, ecosystem, major_line, max_severity,
 // max_epss_percentile, alert_count, alerts[], sibling_alerts[],
 // highest_fixed_version, branch_name, repo}`. A skipped group also has
-// `reason`, and `open_pr_url` or `error`. Each alert: `{number, cve, ghsa,
+// `reason`. A group with an open pull request also has `open_pr_url`, and a
+// group whose search failed also has `error`. Each alert: `{number, cve, ghsa,
 // severity, summary, vulnerable_range, fixed_in, epss_percentile,
 // relationship, manifest}`.
 //
 // **One group for each package major line, not for each package** (#19). A
 // package that resolves at several majors has a different patched version on
 // each line, and a fix of one line leaves the others vulnerable. The line is
-// the first number of `first_patched_version`, after white space and a
-// `v` or `=` prefix are removed. An identifier with no plain first number
-// has no usable line: its line is `none`, and its group is skipped.
+// the first number of `first_patched_version`. The read first removes the
+// white space at each end, and each `v` and `=` at the start. An identifier
+// with no plain first number has no usable line. Its line is `none`, and its
+// group is skipped.
 //
 // `sibling_alerts` names every OTHER line of the same package, skipped lines
 // too: its major (null for `none`) and the unique ranges of its alerts. The
@@ -44,12 +46,14 @@
 // (#123). The caller probes the remote and gives the style.
 //
 // **The open pull request check** asks GitHub, for each group with a fix, if
-// an open pull request has one of these heads: the group's own branch; under
-// the slash style, the flat name too (a repository can flip back from flat);
-// and, for the newest line of a package under the slash style, the name
-// before the split into lines, `fix/dependabot-<package>`. A search that fails
-// skips the group with `PR check failed`, and never reads as "no pull
-// request".
+// an open pull request has one of these heads:
+//   - the group's own branch;
+//   - under the slash style, the flat name too, because a repository can
+//     flip back from flat;
+//   - for the newest line of a package under the slash style, the name from
+//     before the split into lines, `fix/dependabot-<package>`.
+// A search that fails skips the group with `PR check failed`. It never reads
+// as "no pull request".
 //
 // **`--stdin` reads the alerts from stdin** (#54), in the shape that the
 // alerts endpoint gives: a list of pages of alerts, or a list of alerts. Only
@@ -72,7 +76,9 @@
 //   - A package name must be text. The script fails on most other values.
 //   - `--stdin` and the `repository` check are new (#54).
 //   - The version sort for an ecosystem with no adapter is GNU's, without its
-//     rules for an empty name and a dot at the start. No candidate has one.
+//     rule for an empty name. No candidate is empty.
+//   - A line that ends in a line break, as in the identifier `"7\n.1.0"`, is
+//     not a number to jq 1.8, so the grouping fails (`jq.ts`).
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
@@ -95,14 +101,14 @@ import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
 import { createGhClient, type GhClient, type GhClientOptions, GhError } from '../lib/gh.ts'
-import { type Runner, run } from '../lib/process.ts'
+import { type Runner, type RunResult, run } from '../lib/process.ts'
 
 const USAGE =
   'usage: gh-security discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] ' +
   '[--stdin] <owner/repo>'
 
 /** How a `gh` client is made. A test gives its own. */
-export type ClientFactory = (options: GhClientOptions) => GhClient
+type ClientFactory = (options: GhClientOptions) => GhClient
 
 type Style = 'slash' | 'flat'
 
@@ -174,7 +180,8 @@ const negated = (value: unknown): number => {
 /**
  * The jq program of the script: group by package and line, find the newest
  * line of each package and the siblings of each line, then rank. It throws
- * where jq stops with an error.
+ * where jq stops with an error, and for a package name that is not text
+ * (the header).
  */
 const groupAlerts = (alerts: readonly unknown[]): Group[] => {
   const named = alerts.flatMap((alert) => {
@@ -245,7 +252,10 @@ const groupAlerts = (alerts: readonly unknown[]): Group[] => {
   return built.sort((a, b) => compareJq(a.sortKey, b.sortKey))
 }
 
-/** GNU's `order` in `verrevcmp`: a digit, a letter, `~`, then every other byte. */
+/**
+ * GNU's `order` in `verrevcmp`: `~` first, then a digit or the end, then a
+ * letter, then every other byte.
+ */
 const order = (byte: number | undefined): number => {
   if (byte === undefined) return 0
   if (isDigit(byte)) return 0
@@ -312,13 +322,25 @@ const prefixLength = (text: Uint8Array): number => {
 }
 
 /**
+ * The rank of GNU's rule for a dot at the start: `.` first, then `..`, then
+ * each other name with a dot at the start, then every other name.
+ */
+const dotRank = (text: Uint8Array): number => {
+  if (text[0] !== 0x2e) return 3
+  if (text.length === 1) return 0
+  return text.length === 2 && text[1] === 0x2e ? 1 : 2
+}
+
+/**
  * The order of `sort -V` for two candidates: GNU's `filevercmp`, then the
- * bytes, as `sort` breaks a tie. A candidate is never empty, and never starts
- * with a dot, so the rules of `filevercmp` for those are not here.
+ * bytes, as `sort` breaks a tie. A candidate is never empty, so the rule of
+ * `filevercmp` for an empty name is not here.
  */
 export const compareVersionText = (a: string, b: string): number => {
   const left = Buffer.from(a)
   const right = Buffer.from(b)
+  const dots = dotRank(left) - dotRank(right)
+  if (dots !== 0) return dots
   const leftPrefix = prefixLength(left)
   const rightPrefix = prefixLength(right)
   const first = verrevcmp(left.subarray(0, leftPrefix), right.subarray(0, rightPrefix))
@@ -356,7 +378,11 @@ const highestOf = (
         error: `compare_versions failed for ${ecosystem} (${candidate} vs ${best}): ${answer.error}`,
       }
     }
-    const result: unknown = (answer.value as { result?: unknown }).result
+    const value: unknown = answer.value
+    const result: unknown =
+      typeof value === 'object' && value !== null
+        ? (value as { result?: unknown }).result
+        : undefined
     if (result === 1) best = candidate
     else if (result !== 0 && result !== -1) {
       return {
@@ -401,8 +427,8 @@ const refusalOf = (alerts: readonly unknown[], target: string): string | null =>
 
 /**
  * The handler. The `gh` client factory, the process runner and the registry
- * are parameters: an example gives a stand-in client, a runner that records
- * its argv, or an adapter whose `compare_versions` is broken.
+ * are parameters. So an example can give a stand-in client, a runner that
+ * records its argv, or an adapter whose `compare_versions` is broken.
  */
 export const discoverAlerts = async (
   context: CommandContext,
@@ -442,9 +468,14 @@ export const discoverAlerts = async (
       alerts = await client.listDependabotAlerts({ host: GITHUB_HOST, owner, repo })
     } catch (error) {
       if (!(error instanceof GhError)) throw error
-      // Status 0 is a gh that answered, with a body that is not the promised shape.
+      // A gh that exits 0 can still fail: its body is not the promised shape,
+      // or a pipe broke. Only the first case is an unexpected response.
+      // `cause` is the RunResult of the call (`lib/gh.ts`). A stand-in can
+      // give another value.
+      const cause = error.cause as Partial<RunResult> | null | undefined
+      const broken = (cause?.streamErrors?.length ?? 0) > 0
       return failed(
-        error.status === 0
+        error.status === 0 && !broken
           ? `Unexpected API response for ${target}: ${error.detail}`
           : `Failed to fetch alerts for ${target}: ${error.detail}`,
       )
@@ -457,7 +488,8 @@ export const discoverAlerts = async (
   try {
     groups = groupAlerts(alerts)
   } catch (error) {
-    // Only a shape that jq cannot read throws here, and each throw is an Error.
+    // A shape that jq cannot read, or a name that is not text, throws here.
+    // Each throw is an Error.
     return failed(`Failed to group alerts for ${target}: ${(error as Error).message}`)
   }
 
@@ -474,7 +506,9 @@ export const discoverAlerts = async (
       .filter((fix) => fix !== '')
     let highest = 'none'
     if (fixes.length > 0) {
-      const found = highestOf(tostring(orElse(group.ecosystem, 'unknown')), fixes, route)
+      // The script read the ecosystem through `$( )`, which removes the
+      // newlines at its end.
+      const found = highestOf(chomp(tostring(orElse(group.ecosystem, 'unknown'))), fixes, route)
       if ('error' in found) return failed(found.error)
       highest = found.highest
     }
@@ -485,7 +519,9 @@ export const discoverAlerts = async (
       branch_name: branch,
       repo: target,
     }
-    if (fixes.length === 0) {
+    // The script skips on the text `none`, so a candidate `none` that sorts
+    // highest also skips the group.
+    if (highest === 'none') {
       skipped.push({ ...enriched, reason: 'no fix available' })
       continue
     }
