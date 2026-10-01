@@ -48,7 +48,11 @@
 # third probe reads the text after the last `/.git/`. A `/modules/` after a
 # `/worktrees/` there is a submodule inside a worktree (#226, round 3 ruling
 # 14). A common dir under a `worktrees/` directory is before that `/.git/`,
-# so it is no marker. Ambiguity only ever resolves toward refusing.
+# so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
+# its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
+# The probes do not find a submodule whose superproject git dir has no
+# `/.git/` in its path (`--separate-git-dir`). Each ambiguity that the probes
+# see resolves toward refusing.
 #
 # The walk is plain file inspection rather than `git rev-parse` so the
 # guard keeps working when git is missing or the cwd is a scratch directory,

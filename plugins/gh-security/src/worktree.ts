@@ -32,7 +32,11 @@
 // third probe reads the text after the last `/.git/`. A `/modules/` after a
 // `/worktrees/` there is a submodule inside a worktree (#226, round 3 ruling
 // 14). A common dir under a `worktrees/` directory is before that `/.git/`,
-// so it is no marker. When the pointer is unclear, the guard refuses.
+// so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
+// its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
+// The probes do not find a submodule whose superproject git dir has no
+// `/.git/` in its path (`--separate-git-dir`). When the probes see an unclear
+// pointer, the guard refuses.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from node
 // beyond `fs` and `path`.
@@ -91,7 +95,8 @@ const classify = (gitdir: string): Kind => {
   // The text after the last `/worktrees/`. A `/modules/` in it is a submodule
   // inside this worktree.
   const afterWorktrees = probe.slice(probe.lastIndexOf('/worktrees/') + '/worktrees/'.length)
-  // The text after the last `/.git/`, or all of it when there is none.
+  // The text from the `.git/` of the last `/.git/`, or all of it when there
+  // is none. The `(^|\/)` of the pattern reads both.
   const afterGitDir = probe.slice(probe.lastIndexOf('/.git/') + 1)
   return afterWorktrees.includes('/modules/') || isSubmodule || NESTED_SUBMODULE.test(afterGitDir)
     ? 'submodule'
