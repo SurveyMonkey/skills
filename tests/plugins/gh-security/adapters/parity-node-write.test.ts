@@ -43,6 +43,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -890,7 +891,8 @@ describe('install parity in a linked worktree', () => {
       expect(envelope.outcome).toBe('failed')
       if (envelope.outcome === 'ok') return
       expect(refusalAgreement(answer, envelope)).toBe('agree')
-      expect(existsSync(join(cwd, 'node_modules'))).toBe(false)
+      // npm-v3 ships `node_modules/express`, and an install adds more.
+      expect(readdirSync(join(cwd, 'node_modules'))).toEqual(['express'])
       expect(readFileSync(join(cwd, 'package-lock.json'), 'utf8')).toBe(lockBefore)
     },
     GIT_TIMEOUT_MS,
