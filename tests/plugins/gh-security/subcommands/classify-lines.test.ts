@@ -97,6 +97,7 @@ const RESOLVED: Record<string, Envelope<unknown>> = {
   'split-version': copies('split-version', ['1.0.0\n9.0.0']),
   'null-compare': copies('null-compare', ['1.0.0-null']),
   'nan-compare': copies('nan-compare', ['1.0.0-nan']),
+  'inf-compare': copies('inf-compare', ['1.0.0-inf']),
   'text-compare': copies('text-compare', ['1.0.0-text']),
   'nothing-compare': copies('nothing-compare', ['1.0.0-nothing']),
   'zero-compare': copies('zero-compare', ['1.0.0-zero']),
@@ -243,6 +244,7 @@ const standIn = (spec: StandInSpec = {}) => {
       if (a === '1.0.0-odd') return ok({} as never)
       if (a === '1.0.0-null') return ok(null as never)
       if (a === '1.0.0-nan') return ok({ result: Number.NaN } as never)
+      if (a === '1.0.0-inf') return ok({ result: Number.NEGATIVE_INFINITY } as never)
       if (a === '1.0.0-text') return ok({ result: '1' } as never)
       if (a === '1.0.0-nothing') return ok({ result: null } as never)
       if (a === '1.0.0-zero') return ok({ result: 0 } as never)
@@ -419,7 +421,8 @@ describe('the line statuses', () => {
   })
 
   it.each([
-    ['NaN', 'nan-compare', '{"result":null}'],
+    ['NaN', 'nan-compare', 'result NaN'],
+    ['an infinity', 'inf-compare', 'result -Infinity'],
     ['a result that is text', 'text-compare', '{"result":"1"}'],
     ['a null result', 'nothing-compare', '{"result":null}'],
   ])('reads a compare_versions result of %s as a broken read', async (_case, pkg, shown) => {
@@ -1299,10 +1302,17 @@ describe('--base-ref', () => {
     )
   })
 
+  /** The start of the line on stderr for a temporary directory that stays. */
+  const leftOver = (repo: ReturnType<typeof repository>) => {
+    const [dir] = readdirSync(repo.temp)
+    return `classify-lines: could not remove temporary directory ${join(repo.temp, dir as string)}: EACCES`
+  }
+
   it.skipIf(process.getuid?.() === 0)(
-    'keeps its answer when the empty temporary directory cannot be removed',
+    'keeps its answer when the empty temporary directory cannot be removed, and says so',
     async () => {
       const repo = repository()
+      const stderr: string[] = []
       // After the worktree is added, the parent of the temporary directory
       // takes no change. So the removal of that directory fails.
       const locking: Runner = async (command, args = [], options) => {
@@ -1313,6 +1323,7 @@ describe('--base-ref', () => {
       try {
         const result = await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], {
           runner: locking,
+          stderr,
         })
         expect(statusesOf(result)).toEqual(['requires_major_bump'])
         expect(repo.worktrees()).toBe(1)
@@ -1320,6 +1331,40 @@ describe('--base-ref', () => {
         chmodSync(repo.temp, 0o755)
       }
       expect(readdirSync(repo.temp)).toHaveLength(1)
+      expect(stderr).toHaveLength(1)
+      expect(stderr[0]?.startsWith(leftOver(repo))).toBe(true)
+      expect(stderr[0]?.endsWith('\n')).toBe(true)
+    },
+  )
+
+  it.skipIf(process.getuid?.() === 0)(
+    'keeps its refusal when worktree add fails and the directory cannot be removed, and says so',
+    async () => {
+      const repo = repository()
+      const stderr: string[] = []
+      const refuse = refusing('worktree add')
+      const locking: Runner = async (command, args = [], options) => {
+        const result = await refuse(command, args, options)
+        if (args.slice(2, 4).join(' ') === 'worktree add') chmodSync(repo.temp, 0o555)
+        return result
+      }
+      try {
+        expect(
+          await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], {
+            runner: locking,
+            stderr,
+          }),
+        ).toEqual(
+          failed('git worktree add for origin/main failed: git stub: refusing worktree add'),
+        )
+        expect(repo.worktrees()).toBe(1)
+      } finally {
+        chmodSync(repo.temp, 0o755)
+      }
+      expect(readdirSync(repo.temp)).toHaveLength(1)
+      expect(stderr).toHaveLength(1)
+      expect(stderr[0]?.startsWith(leftOver(repo))).toBe(true)
+      expect(stderr[0]?.endsWith('\n')).toBe(true)
     },
   )
 
@@ -1501,6 +1546,31 @@ describe('--base-ref', () => {
         `exit ${status}`,
       ])
       expect(listeners.size).toBe(0)
+      expect(repo.worktrees()).toBe(1)
+      expect(readdirSync(repo.temp)).toEqual([])
+    })
+
+    it('exits after a worktree add that a signal stopped, and keeps no worktree', async () => {
+      const repo = repository()
+      const { log, signals, send } = signalsOf()
+      const refuse = refusing('worktree add')
+      const stopping: Runner = async (command, args = [], options) => {
+        if (args.slice(2, 4).join(' ') === 'worktree add') send('SIGINT')
+        return refuse(command, args, options)
+      }
+      const result = await classifyLines(
+        context(['--repo-root', repo.work, '--base-ref', 'origin/main'], ONE, {
+          ...envOf(repo.sandbox, repo.temp),
+        }),
+        stopping,
+        standIn({ fromTree: true }).route,
+        '/',
+        signals,
+      )
+      expect(result).toEqual(
+        failed('git worktree add for origin/main failed: git stub: refusing worktree add'),
+      )
+      expect(log).toEqual(['on SIGINT', 'on SIGTERM', 'off SIGINT', 'off SIGTERM', 'exit 130'])
       expect(repo.worktrees()).toBe(1)
       expect(readdirSync(repo.temp)).toEqual([])
     })

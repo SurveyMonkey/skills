@@ -32,10 +32,10 @@
 //     cross_line_collision  resolved, but the lines of the package share a
 //                           parent in a shape that no override key can
 //                           separate (below). `collision_parents` names them.
-//     unknown               a `detect`, `resolved_versions` or
-//                           `compare_versions` read failed or broke its
-//                           contract, `present` is false, or `major_line`
-//                           is `none`.
+//     unknown               a `detect` read failed, a `resolved_versions`
+//                           or `compare_versions` read failed or broke its
+//                           contract, `present` is false, `major_line` is
+//                           `none`, or the group has no `package`.
 //
 // `requires_major_bump` groups move into `skipped` with the reason
 // `requires major version bump` (#101), and `cross_line_collision` groups with
@@ -57,9 +57,9 @@
 // **Contract discipline** (ADR 001). A broken read is never an empty answer.
 // A read is broken when it fails, or when a promised field is not there or
 // is of the wrong type. `present: true` with no versions is also broken. A
-// broken `detect`, `resolved_versions` or `compare_versions` read makes the
-// group `unknown`. `classify_errors[]` names the adapter, the package and
-// the error. Under `--base-ref`, each entry also has `base_ref`.
+// broken `resolved_versions` or `compare_versions` read, or a failed `detect`
+// read, makes the group `unknown`. `classify_errors[]` names the adapter, the
+// package and the error. Under `--base-ref`, each entry also has `base_ref`.
 //
 // The command itself fails, with exit 1, for bad input and for a `--base-ref`
 // step that fails. Bad input is a bad option, a `--repo-root` that is not a
@@ -84,8 +84,10 @@
 //   4. It removes the worktree when the handler returns or throws.
 // From the start of step 2 to the end of step 4, a SIGINT or SIGTERM does not
 // stop the process at once. The process does step 4 as above, and then exits
-// with 130 or 143. So the worktree goes, as the script's EXIT trap removed
-// it. A signal before the end of step 3 does not stop step 3.
+// with 130 or 143. It writes no answer on stdout. So the worktree goes, as
+// the script's EXIT trap removed it. A signal before the end of step 3 does
+// not stop step 3. Other signals, such as SIGHUP, stop the process at once,
+// and the worktree stays. The script's trap also ran for those.
 // `--repo-root` must be the top level of a repository. When the removal
 // fails, the worktree and its directory stay. A deleted directory with its
 // entry still in the repository blocks later worktrees (`git.md`). A line on
@@ -106,7 +108,7 @@
 // classify-lines.sh`:
 //   - A routed group has no `adapter_path`, because the route is in process.
 //     The route removes an `adapter_path` from each actionable group of the
-//     input. A group in the input `skipped` passes through as it is.
+//     input. A group in the input `skipped` keeps its `adapter_path`.
 //     `classify_errors[].adapter` is the name of the adapter, where the
 //     script gave the path.
 //   - `classify_errors[].error` is the message of the failed verb. The script
@@ -131,7 +133,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { constants, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import type { Adapter, Tree } from '../adapters/adapter.ts'
@@ -251,9 +253,6 @@ export interface Signals {
   readonly exit: (status: number) => void
 }
 
-/** The exit status of a process that a signal stopped, as a shell gives it. */
-const SIGNAL_STATUS: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 }
-
 /**
  * The handler. The runner, the registry, the current directory and the
  * signals of the process are parameters.
@@ -332,7 +331,9 @@ export const classifyLines = async (
   let baseDir: string | null = null
   // A signal while the worktree can exist only records itself. The `finally`
   // below then removes the worktree, and exits with the status of the signal.
-  let stopped: NodeJS.Signals | null = null
+  // The type comes from the assertion. With a type annotation, tsc reads the
+  // `null` and then sees no signal in the `finally`.
+  let stopped = null as NodeJS.Signals | null
   const stop = (signal: NodeJS.Signals): void => {
     stopped ??= signal
   }
@@ -402,18 +403,19 @@ export const classifyLines = async (
       // `worktree remove` drops this command's own entry and no other. A
       // directory whose removal failed stays, with its entry.
       if ((await git(['worktree', 'remove', '--force', tree])).status === 0) {
-        removeQuietly(baseDir)
+        removeDirectory(baseDir, context)
       } else if (existsSync(tree)) {
         context.io.stderr(
           `classify-lines: could not remove base-ref worktree ${tree}; remove it with: git -C ${given} worktree remove --force ${tree}\n`,
         )
       } else {
-        removeQuietly(baseDir)
+        removeDirectory(baseDir, context)
       }
     }
     signals.off('SIGINT', stop)
     signals.off('SIGTERM', stop)
-    if (stopped !== null) signals.exit(SIGNAL_STATUS[stopped] as number)
+    // The status that a shell gives: 128 and the number of the signal.
+    if (stopped !== null) signals.exit(128 + constants.signals[stopped])
   }
 }
 
@@ -428,13 +430,17 @@ const realOrEmpty = (path: string): string => {
 
 /**
  * Remove the empty temporary directory. A failure here does not change the
- * answer, as the script's `rm -rf ... || true` did not.
+ * answer, as the script's `rm -rf ... || true` did not. A line on stderr
+ * names it, where the script let `rm` say it.
  */
-const removeQuietly = (path: string): void => {
+const removeDirectory = (path: string, context: CommandContext): void => {
   try {
     rmSync(path, { recursive: true, force: true })
-  } catch {
+  } catch (error) {
     // The worktree is already gone. Only an empty directory stays.
+    context.io.stderr(
+      `classify-lines: could not remove temporary directory ${path}: ${(error as Error).message}\n`,
+    )
   }
 }
 
@@ -580,7 +586,8 @@ const classify = (
           const answer = adapter.compareVersions(version, `${line}.0.0`)
           const result: unknown =
             answer.outcome === 'ok' && isRecord(answer.value) ? answer.value.result : undefined
-          // A JSON number is finite. An in-process NaN is a broken answer.
+          // A JSON number is finite. A NaN or an infinity from the adapter is
+          // a broken answer, and JSON text cannot show it, so the error names it.
           if (typeof result === 'number' && Number.isFinite(result)) {
             if (result >= 0 && status !== 'unknown') status = 'line_absent'
             continue
@@ -590,7 +597,7 @@ const classify = (
             name,
             pkg,
             answer.outcome === 'ok'
-              ? `compare_versions broke its contract (ADR 001): ${JSON.stringify(answer.value)}`
+              ? `compare_versions broke its contract (ADR 001): ${typeof result === 'number' ? `result ${result}` : JSON.stringify(answer.value)}`
               : answer.error,
           )
         }
