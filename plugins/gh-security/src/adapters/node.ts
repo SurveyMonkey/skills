@@ -13,6 +13,7 @@ import { listPins } from './node/list-pins.ts'
 import { resolutionMap, resolvedVersions } from './node/lockfiles.ts'
 import { parents } from './node/parents.ts'
 import { compareVersions, rangeFacts } from './node/semver.ts'
+import { validate } from './node/validate.ts'
 import { why } from './node/why.ts'
 
 export const node: Adapter<NodeDetection> = {
@@ -25,7 +26,7 @@ export const node: Adapter<NodeDetection> = {
   listPins,
   compareVersions,
   rangeFacts,
-  validate: () => notImplemented('validate'),
+  validate,
   install: async () => notImplemented('install'),
   shim: () => notImplemented('shim'),
   applyConstraint: () => notImplemented('apply_constraint'),
