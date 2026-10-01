@@ -222,7 +222,7 @@ const childRoots = async (context: Context, target: string): Promise<string[]> =
     if (name.includes('\n')) {
       refuse(`could not list ${child}: a path containing a newline cannot be listed one per line`)
     }
-    if (name.includes('�')) {
+    if (name.includes('\uFFFD')) {
       refuse(`could not list ${child}: the name is not valid UTF-8`)
     }
     const resolved = enter(child)

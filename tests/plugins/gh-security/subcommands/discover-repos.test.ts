@@ -435,9 +435,9 @@ describe('an error is a failure, never an empty list', () => {
   it('refuses a child name that holds the mark for a byte that is not UTF-8', async () => {
     const w = world()
     const work = join(w.root, 'workspace')
-    initRepo(w, join(work, 'bad�name'))
+    initRepo(w, join(work, 'bad\uFFFDname'))
     expect(failure(await discover(w, [work]))).toBe(
-      `could not list ${work}/bad�name: the name is not valid UTF-8`,
+      `could not list ${work}/bad\uFFFDname: the name is not valid UTF-8`,
     )
   })
 
@@ -446,7 +446,9 @@ describe('an error is a failure, never an empty list', () => {
     const work = join(w.root, 'workspace')
     initRepo(w, join(work, 'b\nb'))
     initRepo(w, join(work, 'a\na'))
-    expect(failure(await discover(w, [work]))).toContain(`${work}/a\na`)
+    // The listing comes in the reverse of the byte order.
+    const list = () => ['b\nb', 'a\na']
+    expect(failure(await discover(w, [work], { deps: { list } }))).toContain(`${work}/a\na`)
   })
 
   describe('a checkout whose git state is broken', () => {
