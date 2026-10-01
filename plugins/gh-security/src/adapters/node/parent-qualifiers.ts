@@ -53,11 +53,17 @@ const MISSING = '-'
  * start with a digit is `-` here. node.sh keeps its text, and reads no
  * major from it unless it starts with `v` and then a digit. pnpm writes no
  * such version: a declared divergence.
+ *
+ * The parent name ends at its first `@` here, and at its last `@` in
+ * node.sh (#50). So a git copy is a copy of its parent here. Its version
+ * has an `@`, and is `-`: the parent then gets the bare key. node.sh gives
+ * the copy a different parent name. A declared divergence: the bare key
+ * covers that copy too.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpm.scan(text, pkg).edges.map(({ parent, parentVersion, version }) => ({
     parent: parent.name,
-    pver: parentVersion ?? MISSING,
+    pver: parentVersion === null || parentVersion.includes('@') ? MISSING : parentVersion,
     cver: version ?? MISSING,
   }))
 

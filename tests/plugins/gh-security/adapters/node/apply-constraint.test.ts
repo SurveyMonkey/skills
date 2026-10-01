@@ -280,6 +280,23 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(sortedKeys(pnpmOverrides(manifestAfter(fixture, args)))).toEqual(keys)
   })
 
+  // node.sh names this git copy `debug@git+ssh://git`, so `debug` has one
+  // version there. The port names it `debug`, with no version that can be a
+  // key (#50). Both write the bare key, which covers the two copies.
+  it('writes the bare key beside a git copy of the parent', () => {
+    const registryCopy: Setup = (dir) => {
+      const text = textAt(dir, 'pnpm-lock.yaml')
+        .replace('packages:\n\n', 'packages:\n\n  debug@4.3.4:\n    resolution: {integrity: x}\n\n')
+        .replace(
+          'snapshots:\n\n',
+          'snapshots:\n\n  debug@4.3.4:\n    dependencies:\n      ms: 2.1.3\n\n',
+        )
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), text)
+    }
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], registryCopy)
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+  })
+
   // The multiplicity gate reads the snapshot edges, not `packages:`.
   it('still writes qualified keys when the packages section is unreadable', () => {
     const dropPackages: Setup = (dir) => {
