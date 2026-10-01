@@ -8,6 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 
 import type { Tree } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
+import { byText, namesOf } from '#gh-security/adapters/node/parents.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 
@@ -118,5 +119,35 @@ describe('parents', () => {
         { name: 'test-exclude', version: '6.0.0' },
       ],
     })
+  })
+})
+
+describe('byText and namesOf, in the order of jq (#303)', () => {
+  // jq sorts text by code point. JavaScript's `<` sorts by UTF-16 unit, so a
+  // character above U+FFFF (a surrogate pair) lands before U+E000 to U+FFFF.
+  // Probe, jq 1.8.1:
+  //   jq -nc '["\ud83d\ude00", "\uffff", "\ue000"] | sort'
+  //     -> ["\ue000","\uffff","\ud83d\ude00"]
+  //   jq -nc '{"\ud83d\ude00-pkg":"1","\uffff-pkg":"1","a":"1"} | keys'
+  //     -> ["a","\uffff-pkg","\ud83d\ude00-pkg"]
+  it.fails('sorts text by code point, not by UTF-16 unit', () => {
+    expect(['\u{1F600}', '\uffff', '\ue000'].sort(byText)).toEqual([
+      '\ue000',
+      '\uffff',
+      '\u{1F600}',
+    ])
+  })
+
+  // `jq 'unique'` of the same three names, once each: the same order.
+  it.fails('names each parent once, sorted by code point', () => {
+    const found = ['\u{1F600}', '\uffff', '\ue000', '\uffff'].map((name) => ({
+      name,
+      version: '1.0.0',
+    }))
+    expect(namesOf(found)).toEqual(['\ue000', '\uffff', '\u{1F600}'])
+  })
+
+  it('answers 0 for equal text, and the sign of the order otherwise', () => {
+    expect([byText('a', 'a'), byText('a', 'b'), byText('b', 'a')]).toEqual([0, -1, 1])
   })
 })
