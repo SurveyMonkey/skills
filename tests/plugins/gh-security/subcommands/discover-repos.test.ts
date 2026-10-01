@@ -475,6 +475,22 @@ describe('an error is a failure, never an empty list', () => {
     )
   })
 
+  // The script's glob ends in a slash, so it never sees a file. A file with a
+  // name that the script refuses in a directory is skipped, with no error.
+  it.each([
+    ['a newline', 'a\nb'],
+    ['the mark for a byte that is not UTF-8', 'bad\uFFFDname'],
+  ])('skips a file whose name holds %s', async (_name, name) => {
+    const w = world()
+    const work = join(w.root, 'workspace')
+    initRepo(w, join(work, 'repo'))
+    writeFileSync(join(work, name), 'x')
+    expect(value(await discover(w, [work]))).toEqual({
+      target: work,
+      repos: [join(work, 'repo')],
+    })
+  })
+
   it('reports the first error in the byte order of the names', async () => {
     const w = world()
     const work = join(w.root, 'workspace')

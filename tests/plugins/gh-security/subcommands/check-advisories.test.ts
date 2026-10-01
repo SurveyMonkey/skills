@@ -306,6 +306,48 @@ describe('the listing', () => {
     })
   })
 
+  it('reads a range that is null as no range, and keeps the advisory', async () => {
+    const nullRange = advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', null)] })
+    expect(value(await check(['lodash'], [nullRange]))).toMatchObject({
+      advisory_count: 1,
+      vulnerable_ranges: [],
+    })
+  })
+
+  // `jq` keeps an empty string, and so does the port: it is a value and not a
+  // missing field.
+  it('keeps an empty string as a value and not as a missing field', async () => {
+    const empty = advisory('GHSA-aaaa-1111-bbbb', {
+      cve_id: '',
+      severity: '',
+      summary: '',
+      vulnerabilities: [vuln('lodash', '< 1', '')],
+    })
+    const answer = value(await check(['lodash'], [empty])) as { advisories: Advisory[] }
+    expect(answer.advisories[0]).toMatchObject({
+      cve_id: '',
+      severity: '',
+      summary: '',
+      first_patched_version: '',
+    })
+  })
+
+  // U+FF5E is the bytes EF BD 9E, and U+1F600 is F0 9F 98 80. The default
+  // sort compares UTF-16 units, and puts the second one first.
+  it('sorts the ranges by the bytes of the text and not by UTF-16 units', async () => {
+    const answer = value(
+      await check(
+        ['lodash'],
+        [
+          advisory('GHSA-aaaa-1111-bbbb', {
+            vulnerabilities: [vuln('lodash', '\u{1F600}'), vuln('lodash', '\uFF5E')],
+          }),
+        ],
+      ),
+    )
+    expect(answer.vulnerable_ranges).toEqual(['\uFF5E', '\u{1F600}'])
+  })
+
   it('unions the ranges of the advisories, each once, in the byte order of the text', async () => {
     const answer = value(
       await check(
@@ -574,6 +616,10 @@ describe('a verb that fails', () => {
       await check(['--version', '1.0.0', 'lodash'], LODASH, broken(long, 'failed')),
     ) as { adapter_errors: { error: string }[] }
     expect(answer.adapter_errors[0]?.error).toBe(`first line second line${'x'.repeat(278)}`)
+    const threeLines = value(
+      await check(['--version', '1.0.0', 'lodash'], LODASH, broken('a\nb\nc', 'failed')),
+    ) as { adapter_errors: { error: string }[] }
+    expect(threeLines.adapter_errors[0]?.error).toBe('a b c')
     const spaced = value(
       await check(
         ['--version', '1.0.0', 'lodash'],
@@ -685,6 +731,11 @@ describe('a refusal', () => {
     [
       'a vulnerabilities list that holds a non-object',
       advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [1] }),
+      'the vulnerabilities of GHSA-aaaa-1111-bbbb are not a list of objects',
+    ],
+    [
+      'a vulnerabilities list that holds an object and a non-object',
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', '< 1'), 1] }),
       'the vulnerabilities of GHSA-aaaa-1111-bbbb are not a list of objects',
     ],
     [

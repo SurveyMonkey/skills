@@ -51,6 +51,9 @@ describe('the nwo of a remote', () => {
     ['host:a:b/c', ['a:b', 'c', 'host']],
     // The last `@` ends the credentials.
     ['https://a@b@github.com/octo/app', ['octo', 'app', 'github.com']],
+    // A scheme at the start of the text is still a scheme, with no host before it
+    // to read. The script matches `*://*` the same way.
+    ['://github.com/octo/app', ['octo', 'app', 'github.com']],
   ])('reads %s as %j', (remote, pair) => {
     expect(parseRemote(remote)).toEqual({ owner: pair[0], repo: pair[1], host: pair[2] })
   })
@@ -62,6 +65,8 @@ describe('the nwo of a remote', () => {
     ['a relative path', '../sibling'],
     ['a path with a colon in a directory name', '/tmp/we:ird/a/b'],
     ['a path whose directory name is host and owner', '/tmp/we:ird/app'],
+    ['a relative path with a colon in a directory name', 'sub/we:ird/app'],
+    ['a parent path with a colon in a directory name', '../we:ird/app'],
     ['credentials that end in an at sign', 'a@b@:octo/app'],
     ['a port and no host', 'ssh://:2222/octo/app'],
     ['a scheme with no path', 'https://github.com'],
@@ -74,6 +79,9 @@ describe('the nwo of a remote', () => {
     ['no segment', 'git@github.com:'],
     // A part that is empty.
     ['an empty repository', 'https://github.com/octo/'],
+    // The three strips leave `octo/`, which is two segments with an empty second one.
+    ['an empty repository after three slashes', 'https://github.com/octo///'],
+    ['an empty repository before the suffix', 'https://github.com/octo//.git'],
     ['an empty owner', 'https://github.com//app'],
     ['an empty host', 'https:///octo/app'],
     ['an empty host in the scp form', ':octo/app'],
@@ -280,6 +288,39 @@ describe('the answer for a repository with a GitHub remote', () => {
     await expect(
       detect(w, [dir], { viewDefaultBranch: new Error('a defect, not a gh failure') }),
     ).rejects.toThrow('a defect, not a gh failure')
+  })
+})
+
+describe('a git that answers in an odd shape', () => {
+  // A stand-in runner, because real git writes one newline and one `HEAD branch`
+  // line. The script reads both through `$( )` and a greedy `sed`.
+  const answering =
+    (remote: string, shown: string): Runner =>
+    async (_command, args = []) => {
+      if (args.includes('rev-parse')) return reply({ stdout: '/work\n' })
+      if (args.includes('get-url')) return reply({ stdout: remote })
+      if (args.includes('symbolic-ref')) return reply({ status: 1 })
+      return reply({ stdout: shown })
+    }
+
+  it('removes every newline at the end of the remote, as $( ) does', async () => {
+    const w = world()
+    const runner = answering('https://gitlab.example.com/octo/app\n\n', 'HEAD branch: main\n')
+    const answer = value(await detectScope(context(w, ['/work']), factoryOf({}), runner, '/'))
+    expect(answer).toMatchObject({
+      git_remote: 'https://gitlab.example.com/octo/app',
+      nwo: 'octo/app',
+    })
+  })
+
+  it('reads the text after the last HEAD branch label of a line, as a greedy sed does', async () => {
+    const w = world()
+    const runner = answering(
+      'https://gitlab.example.com/octo/app',
+      '  HEAD branch: HEAD branch: x\n',
+    )
+    const answer = value(await detectScope(context(w, ['/work']), factoryOf({}), runner, '/'))
+    expect(answer.default_branch).toBe('x')
   })
 })
 
