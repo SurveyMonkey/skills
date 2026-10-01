@@ -7,8 +7,7 @@
 // reads, and the three verbs that write: `install`, `shim` and
 // `applyConstraint`. Each write verb refuses to run outside a linked
 // worktree (ADR 001, "Invocation"). `requireLinkedWorktree`
-// (`src/worktree.ts`) is its first statement, as in node.sh. The node
-// `applyConstraint` writes nothing yet, so it has no guard until layer 2.
+// (`src/worktree.ts`) is its first statement, as in node.sh.
 //
 // `detect` runs once for each call site. The caller gives its answer to the
 // other verbs in a `Tree`. No verb runs `detect` again.
