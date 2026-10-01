@@ -105,10 +105,12 @@ const PLAIN_NUMBER = /^[0-9]+\n?$/
 
 /**
  * The major of a version, by the rule of `line_of` in `discover-alerts.sh`
- * and `major_of` in `classify-lines.sh`: remove the white space at each end,
- * then each `v` and `=` at the start, then keep the part before the first
- * dot when it is a plain number. Else null. This is extraction, not
- * comparison: the order of versions is a question for the adapter.
+ * and `major_of` in `classify-lines.sh`:
+ *   1. Remove the white space at each end.
+ *   2. Remove each `v` and `=` at the start.
+ *   3. Keep the part before the first dot when it is a plain number.
+ * Else the major is null. This is extraction, not comparison. The order of
+ * versions is a question for the adapter.
  */
 export const majorOf = (version: unknown): string | null => {
   const head = tostring(version)
@@ -122,6 +124,7 @@ export const majorOf = (version: unknown): string | null => {
 /**
  * jq's `tonumber` for a major that {@link majorOf} gave. A major that ends
  * in a line break is not a number to jq 1.8, so it stops with an error.
+ * This port follows jq 1.8 here.
  */
 export const majorNumber = (major: string): number => {
   if (!/^[0-9]+$/.test(major)) throw new Error(`${JSON.stringify(major)} is not a number`)
