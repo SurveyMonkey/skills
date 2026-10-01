@@ -346,3 +346,175 @@ describe('a refusal', () => {
     expect(error.cause).toMatchObject({ stdout })
   })
 })
+
+// The endpoints of `detect-scope` and `check-advisories` (#225). The argv and
+// the expected answers are written by hand.
+describe('viewDefaultBranch', () => {
+  const ask = (reply: Reply, options: Omit<GhClientOptions, 'run'> = {}) => {
+    const { gh, calls } = clientAnswering(reply, options)
+    return { result: gh.viewDefaultBranch({ repository: 'octo/app' }), calls }
+  }
+
+  it('asks gh repo view for the default branch of the named repository, and nothing more', async () => {
+    const { result, calls } = ask({ stdout: '{"defaultBranchRef":{"name":"develop"}}' })
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: ['repo', 'view', 'octo/app', '--json', 'defaultBranchRef'],
+      },
+    ])
+  })
+
+  it('names the repository once, and never as --repo, even when the client has one', async () => {
+    const { result, calls } = ask(
+      { stdout: '{"defaultBranchRef":{"name":"main"}}' },
+      { repository: 'octo/other' },
+    )
+    await result
+    expect(calls[0]?.args).toEqual(['repo', 'view', 'octo/app', '--json', 'defaultBranchRef'])
+  })
+
+  it('answers the name that gh gave', async () => {
+    const { result } = ask({ stdout: '{"defaultBranchRef":{"name":"develop"}}' })
+    await expect(result).resolves.toEqual({ name: 'develop' })
+  })
+
+  it('answers a null name for a repository with no default branch', async () => {
+    const { result } = ask({ stdout: '{"defaultBranchRef":null}' })
+    await expect(result).resolves.toEqual({ name: null })
+  })
+
+  it.each([
+    ['no key at all', '{}'],
+    ['a ref with no name', '{"defaultBranchRef":{}}'],
+    ['an empty name', '{"defaultBranchRef":{"name":""}}'],
+    ['a name that is a number', '{"defaultBranchRef":{"name":7}}'],
+    ['a ref that is a string', '{"defaultBranchRef":"main"}'],
+    ['a ref that is a list', '{"defaultBranchRef":[]}'],
+  ])('throws when gh answered %s', async (_shape, stdout) => {
+    const { result } = ask({ stdout })
+    const error = (await result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.message).toBe(
+      `gh answered gh repo view with something that has no default branch name: ${stdout}`,
+    )
+    expect(error.detail).toBe(error.message)
+    expect(error.status).toBe(0)
+  })
+
+  it('throws when gh answered something that is not an object', async () => {
+    const { result } = ask({ stdout: '[]' })
+    const error = (await result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error.message).toBe('gh answered gh repo view with something that is not an object: []')
+  })
+
+  it("throws gh's own words and status when gh exits non-zero", async () => {
+    const { result } = ask({
+      status: 1,
+      stderr: 'GraphQL: Could not resolve to a Repository with the name octo/app.\n',
+    })
+    const error = (await result.catch((thrown: unknown) => thrown)) as GhError
+    expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
+      message:
+        'gh repo view octo/app --json defaultBranchRef failed: ' +
+        'GraphQL: Could not resolve to a Repository with the name octo/app.',
+      detail: 'GraphQL: Could not resolve to a Repository with the name octo/app.',
+      status: 1,
+    })
+  })
+})
+
+describe('listAdvisories', () => {
+  const ask = (reply: Reply, query = { package: 'lodash', ecosystem: 'npm' }) => {
+    const { gh, calls } = clientAnswering(reply)
+    return { result: gh.listAdvisories(query), calls }
+  }
+
+  it('asks the advisories endpoint for one package, with every page in one answer', async () => {
+    const { result, calls } = ask({ stdout: '[[]]' })
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'api',
+          'advisories?affects=lodash&ecosystem=npm&per_page=100',
+          '--paginate',
+          '--slurp',
+        ],
+      },
+    ])
+  })
+
+  it('encodes the package and the ecosystem, so one cannot add a parameter', async () => {
+    const { result, calls } = ask(
+      { stdout: '[]' },
+      { package: '@types/node&per_page=1', ecosystem: 'a b' },
+    )
+    await result
+    expect(calls[0]?.args[1]).toBe(
+      'advisories?affects=%40types%2Fnode%26per_page%3D1&ecosystem=a%20b&per_page=100',
+    )
+  })
+
+  it('answers the advisories of every page as one list, in order', async () => {
+    const { result } = ask({
+      stdout: '[[{"ghsa_id":"A"},{"ghsa_id":"B"}],[],[{"ghsa_id":"C"}]]',
+    })
+    await expect(result).resolves.toEqual([{ ghsa_id: 'A' }, { ghsa_id: 'B' }, { ghsa_id: 'C' }])
+  })
+
+  it.each([
+    ['no pages', '[]'],
+    ['one empty page', '[[]]'],
+  ])('answers an empty list for %s', async (_shape, stdout) => {
+    await expect(ask({ stdout }).result).resolves.toEqual([])
+  })
+
+  it.each([
+    ['an object', '{"message":"Not Found"}'],
+    ['a string', '"x"'],
+    ['null', 'null'],
+    ['a page that is an object', '[{"ghsa_id":"A"}]'],
+    ['an advisory that is a number', '[[1]]'],
+    ['an advisory that is null', '[[null]]'],
+    ['an advisory that is a list', '[[[]]]'],
+  ])('throws when gh answered %s', async (_shape, stdout) => {
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.message).toBe(
+      `gh answered gh api advisories with something that is not a list of pages of objects: ${stdout}`,
+    )
+    expect(error.detail).toBe(error.message)
+  })
+
+  it('cuts a long unreadable answer at 200 characters', async () => {
+    const stdout = JSON.stringify({ message: 'x'.repeat(300) })
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error.message).toBe(
+      `gh answered gh api advisories with something that is not a list of pages of objects: ${stdout.slice(0, 200)}`,
+    )
+  })
+
+  it('throws when gh answered something that is not JSON', async () => {
+    const error = (await ask({ stdout: 'oops' }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect(error.message).toMatch(
+      /^gh answered gh api advisories with something that is not JSON: /,
+    )
+  })
+
+  it("throws gh's own words and status when gh exits non-zero", async () => {
+    const error = (await ask({ status: 1, stderr: 'gh: HTTP 503\n' }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
+      message:
+        'gh api advisories?affects=lodash&ecosystem=npm&per_page=100 --paginate --slurp failed: gh: HTTP 503',
+      detail: 'gh: HTTP 503',
+      status: 1,
+    })
+  })
+})

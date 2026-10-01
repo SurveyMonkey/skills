@@ -92,3 +92,47 @@ it('fails an unregistered endpoint with a plain Error, never a GhError', async (
   expect(thrown).toBeInstanceOf(Error)
   expect(thrown).not.toBeInstanceOf(GhError)
 })
+
+// The endpoints of `detect-scope` and `check-advisories` (#225) have the same
+// semantics as `viewPullRequest`: one reply for each, a fail switch for each,
+// and a throw for an endpoint nobody registered.
+const REPO = { repository: 'octo/app' }
+const ADVISORIES = { package: 'lodash', ecosystem: 'npm' }
+
+it('answers viewDefaultBranch and listAdvisories with the reply registered for each', async () => {
+  const branch = { name: 'develop' }
+  const advisories = [{ ghsa_id: 'GHSA-aaaa-1111-bbbb' }]
+  const client = createGhMock({ viewDefaultBranch: branch, listAdvisories: advisories })
+
+  await expect(client.viewDefaultBranch(REPO)).resolves.toBe(branch)
+  await expect(client.listAdvisories(ADVISORIES)).resolves.toBe(advisories)
+})
+
+it('answers an empty advisory list and a null branch as replies', async () => {
+  const client = createGhMock({ viewDefaultBranch: { name: null }, listAdvisories: [] })
+
+  await expect(client.viewDefaultBranch(REPO)).resolves.toEqual({ name: null })
+  await expect(client.listAdvisories(ADVISORIES)).resolves.toEqual([])
+})
+
+it('fails only the endpoint that the fail switch was registered for', async () => {
+  const client = createGhMock({
+    viewDefaultBranch: ghFails('gh: HTTP 404'),
+    listAdvisories: [],
+  })
+
+  await expect(client.viewDefaultBranch(REPO)).rejects.toThrow(GhError)
+  await expect(client.viewDefaultBranch(REPO)).rejects.toThrow('gh: HTTP 404')
+  await expect(client.listAdvisories(ADVISORIES)).resolves.toEqual([])
+})
+
+it('throws and names the endpoint when nothing is registered for the new endpoints', async () => {
+  const client = createGhMock()
+
+  await expect(client.viewDefaultBranch(REPO)).rejects.toThrow(
+    'gh mock: no reply registered for viewDefaultBranch',
+  )
+  await expect(client.listAdvisories(ADVISORIES)).rejects.toThrow(
+    'gh mock: no reply registered for listAdvisories',
+  )
+})

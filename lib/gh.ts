@@ -1,10 +1,12 @@
 // The `gh` client: the interface that a command is written against, and the
 // real implementation of it. The exported names and signatures are the
-// target stack's `lib/gh.ts`. The one difference is the `gh pr view` field
-// list (see `PULL_REQUEST_FIELDS`). This file has only one endpoint of the
-// target's, `viewPullRequest`, because that is the one endpoint that
-// `pr-status` (#226) uses. A new endpoint comes with the command that calls
-// it, in the shape the target stack gives it (#274).
+// target stack's `lib/gh.ts`, with the differences named in the notes below
+// (`PULL_REQUEST_FIELDS`, `DEFAULT_BRANCH_FIELDS` and `ADVISORY_PAGE_SIZE`).
+// This file has the endpoints of the commands that exist:
+// `viewPullRequest` for `pr-status` (#226), `viewDefaultBranch` for
+// `detect-scope` and `listAdvisories` for `check-advisories` (#225). A new
+// endpoint comes with the command that calls it, in the shape the target
+// stack gives it (#274).
 //
 // A command gets a client as an argument, and never builds one itself. The
 // test double is `harness/gh.ts`.
@@ -131,6 +133,24 @@ const PULL_REQUEST_FIELDS =
   'headRefOid,statusCheckRollup,createdAt,state,mergeCommit,reviewDecision,' +
   'headRefName,baseRefName'
 
+/**
+ * The `--json` field of `gh repo view` for `viewDefaultBranch`. The endpoint
+ * is not in the target stack's list. `detect-scope` (#225, ruling 5) reads the
+ * default branch from GitHub, because the local `origin/HEAD` symref goes
+ * stale when the branch is renamed on GitHub (#167). So this is a known
+ * divergence from the target stack.
+ */
+const DEFAULT_BRANCH_FIELDS = 'defaultBranchRef'
+
+/**
+ * The page size of `listAdvisories`, the largest that the advisories
+ * endpoint allows. `check-advisories` (#225) lists every advisory of one
+ * package, so this endpoint is also not in the target stack's list, and is a
+ * known divergence from it. It is the call that `check-advisories.sh` made,
+ * with `--paginate --slurp`.
+ */
+const ADVISORY_PAGE_SIZE = 100
+
 /** An optional filter, as the two argv words gh wants or as nothing at all. */
 const filter = (name: string, value: string | number | undefined): string[] =>
   value === undefined ? [] : [`--${name}`, String(value)]
@@ -189,6 +209,34 @@ const record = (result: RunResult, what: string): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** What `viewDefaultBranch` promises: the name, or null for no default branch. */
+const defaultBranchOf = (result: RunResult): GhResults['viewDefaultBranch'] => {
+  const view = record(result, 'gh repo view')
+  const ref = view.defaultBranchRef
+  // A repository with no commits has no default branch, and `gh` answers null.
+  if (ref === null) return { name: null }
+  const name = isRecord(ref) ? ref.name : undefined
+  if (typeof name === 'string' && name !== '') return { name }
+  const said = `gh answered gh repo view with something that has no default branch name: ${JSON.stringify(view)}`
+  throw new GhError(said, result.status, { cause: result, detail: said })
+}
+
+/** What `listAdvisories` promises: pages of advisory objects, flattened. */
+const advisoriesOf = (result: RunResult): GhResults['listAdvisories'] => {
+  const pages = parse(result, 'gh api advisories')
+  if (
+    !Array.isArray(pages) ||
+    !pages.every((page) => Array.isArray(page) && page.every(isRecord))
+  ) {
+    const said = `gh answered gh api advisories with something that is not a list of pages of objects: ${JSON.stringify(pages).slice(0, 200)}`
+    throw new GhError(said, result.status, { cause: result, detail: said })
+  }
+  return (pages as Record<string, unknown>[][]).flat()
+}
+
 /** A `GhClient` that runs the real `gh`. */
 export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   const spawn = options.run ?? run
@@ -230,7 +278,19 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
         ]),
         'gh pr view',
       ),
-    viewDefaultBranch: () => Promise.reject(new Error('not implemented')),
-    listAdvisories: () => Promise.reject(new Error('not implemented')),
+    viewDefaultBranch: async (repo) =>
+      defaultBranchOf(
+        await succeeded(['repo', 'view', repo.repository, '--json', DEFAULT_BRANCH_FIELDS]),
+      ),
+    listAdvisories: async (query) =>
+      advisoriesOf(
+        await succeeded([
+          'api',
+          `advisories?affects=${encodeURIComponent(query.package)}` +
+            `&ecosystem=${encodeURIComponent(query.ecosystem)}&per_page=${ADVISORY_PAGE_SIZE}`,
+          '--paginate',
+          '--slurp',
+        ]),
+      ),
   }
 }
