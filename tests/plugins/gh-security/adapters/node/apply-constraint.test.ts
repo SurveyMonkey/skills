@@ -2011,19 +2011,23 @@ describe('more routes that no spec example takes', () => {
   })
 
   // bash stops with jq's exit 2 there, after it wrote package.json: a
-  // declared divergence of the exit status. Both sides keep that write.
-  it('writes the override, then refuses the stale pass on a lockfile that holds no document', () => {
-    const { envelope, dir } = apply('npm-stale-nested', ['undici', '>=6.19.0 <7'], (copy) =>
-      writeFileSync(join(copy, 'package-lock.json'), ''),
-    )
-    expect({
-      envelope,
-      override: (readJson(dir, 'package.json').overrides as Json).undici,
-    }).toEqual({
-      envelope: { outcome: 'failed', error: 'apply_constraint: cannot read package-lock.json' },
-      override: '>=6.19.0 <7',
-    })
-  })
+  // declared divergence of the exit status. Both sides keep that write. A
+  // range with no floor major stops there too.
+  it.each([['>=6.19.0 <7'], ['<7']])(
+    'writes the override %s, then refuses the stale pass on a lockfile that holds no document',
+    (range) => {
+      const { envelope, dir } = apply('npm-stale-nested', ['undici', range], (copy) =>
+        writeFileSync(join(copy, 'package-lock.json'), ''),
+      )
+      expect({
+        envelope,
+        override: (readJson(dir, 'package.json').overrides as Json).undici,
+      }).toEqual({
+        envelope: { outcome: 'failed', error: 'apply_constraint: cannot read package-lock.json' },
+        override: range,
+      })
+    },
+  )
 
   it('walks a graph where two paths reach one copy', () => {
     const diamond = lockEdit((packages) => {
