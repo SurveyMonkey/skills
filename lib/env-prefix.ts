@@ -1,9 +1,8 @@
 // `env_prefix`, in one place. The four per-script `set_env_prefix`/`run_env`
 // pairs (`fix-group.sh`, `audit-pins-driver.sh`, `post-agent.sh`,
-// `render-pr.sh`) become this module. The `detect-scope` and
-// `check-advisories` commands import it. The `gh` client and the git helpers
-// take no prefix. A caller that needs one wraps the runner with
-// {@link withEnvPrefix}.
+// `render-pr.sh`) become this module. The commands that take `--env-prefix`
+// import it. The `gh` client and the git helpers take no prefix. A caller that
+// needs one wraps the runner with {@link withEnvPrefix}.
 //
 // **The prefix is opaque, and that is the contract** (the plugin guide,
 // "`env_prefix` is an opaque, optional seam"). It is a command prefix the

@@ -20,7 +20,12 @@
 //     one adapter, so the unit tests hold a failing `range_facts` with a
 //     stand-in.
 //   - The port refuses `--version` for an ecosystem with no adapter, with exit
-//     3. The script cannot be asked, because its caller routes first.
+//     3. The script has no such answer: its caller gives it an adapter path.
+//   - The port encodes the package and the ecosystem in the query. The script
+//     puts them in as they are. The rows use plain names.
+//   - The port treats a parseable range with a non-boolean `satisfied` as
+//     unevaluated (ruling 12 on #225). The unit tests hold it, because the
+//     real adapter never gives one.
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 

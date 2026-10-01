@@ -14,9 +14,9 @@
 //
 // **An empty list is an answer.** A target that is not a directory, a target
 // or a child that cannot be entered, and every git failure other than "not a
-// git repository" and a bare repository are errors. An unreadable workspace must never read as a
-// tidy empty one. Each git failure names git's exit status, because git can
-// fail with nothing on stderr.
+// git repository" and a bare repository are errors. An unreadable workspace
+// must never read as a tidy empty one. Each git failure names git's exit
+// status, because git can fail with nothing on stderr.
 //
 // **"Not a git repository" is believed only when no `.git` exists at or above
 // the path on the path's own filesystem.** A target below a broken checkout
@@ -37,7 +37,7 @@
 // dot-directory, and a bare repository (git refuses `--show-toplevel` in one,
 // by the work-tree refusal or by `safe.bareRepository=explicit`).
 //
-// Differences from the script, all of them refusals or repairs:
+// Differences from the script:
 //   - A child whose name has a newline is an error, as in the script. A
 //     resolved root with a newline is kept whole here. The script splits it
 //     into two entries.

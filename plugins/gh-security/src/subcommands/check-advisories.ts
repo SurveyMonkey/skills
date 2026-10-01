@@ -47,7 +47,8 @@
 // failure goes into `adapter_errors`, so a broken adapter shows its cause
 // rather than an audit where every pin is inconclusive. An answer with
 // `parseable` true and a `satisfied` that is not true or false is treated the
-// same way (ruling 12 on #225). The script read it as no match.
+// same way (ruling 12 on #225). The script read the text `true` as a match, and
+// read each other value of that kind as no match.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner that the `gh` client uses, so `gh` runs as
@@ -59,15 +60,18 @@
 //     verdict, and the adapter comes from `--ecosystem`. `--adapter` is an
 //     unknown option.
 //   - `--version` for an ecosystem with no adapter is exit 3, unsupported, and
-//     asks GitHub nothing. The script could not be asked, because its caller
-//     routes first.
+//     asks GitHub nothing. The script has no such answer: its caller gives it
+//     an adapter path, and it never looks at the ecosystem.
 //   - `adapter_errors[].error` is the message of the failed verb. The script
 //     quoted the text that its child wrote on stderr.
 //   - The package and the ecosystem are encoded in the query. The script put
 //     them in as they were.
-//   - A parseable range with no truth value is unevaluated and goes into
-//     `adapter_errors`. The script counted it as no match, so a package could
-//     read `safe` (ruling 12).
+//   - A parseable range with a `satisfied` that is not true or false is
+//     unevaluated and goes into `adapter_errors`. The script counted the text
+//     `true` as a match, and each other such value as no match, so a package
+//     could read `safe` (ruling 12).
+//   - A `parseable` that is not the value true is unevaluated, with no entry
+//     in `adapter_errors`. The script also read the text `true` as true.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
@@ -102,7 +106,7 @@ export type ClientFactory = (options: GhClientOptions) => GhClient
  */
 const NOT_GIVEN = '\0'
 
-/** How much of a failure goes into `adapter_errors`. */
+/** How much of the message of a failed verb goes into `adapter_errors`. */
 const SHOWN_CHARACTERS = 300
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

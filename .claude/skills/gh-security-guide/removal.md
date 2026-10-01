@@ -73,5 +73,6 @@ unnoticed match hides. `no-advisories` means the query succeeded and returned no
 non-security pin, a misspelled package name, and the wrong ecosystem all produce identically.
 
 When the adapter itself fails on a range, the message of the failed verb (stderr, for the bash
-script) is kept in `adapter_errors[]` rather than discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
-broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
+script) is kept in `adapter_errors[]` rather than discarded. The verdict is unchanged, because an
+unevaluated range is never folded into `safe`. A broken adapter otherwise turned every pin in the
+audit inconclusive with nothing naming the cause.

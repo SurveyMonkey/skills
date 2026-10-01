@@ -1,9 +1,10 @@
 // `gh-security discover-repos`. The seam is the exported handler, with the
 // git runner, the device lookup and the directory listing as parameters. Most
 // examples run real git on real directories built by `harness/git.ts`
-// (`mocking.md`: git is never mocked). A stand-in runner appears only for a
-// git failure that real git cannot be made to give on demand: dubious
-// ownership, a git that prints nothing, a git that is missing. The expected
+// (`mocking.md`: git is never mocked). A stand-in appears only for an answer
+// that real git cannot be made to give on demand, such as dubious ownership,
+// a git that prints nothing, a git that is missing, or a spelling of a path
+// that the system has changed. The expected
 // values are written by hand from the contract in the header of the command.
 // The bash script is compared in `parity-discover-repos.test.ts`.
 import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'

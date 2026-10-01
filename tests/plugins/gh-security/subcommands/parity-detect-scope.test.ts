@@ -5,11 +5,13 @@
 // scratch directory, with a literal `origin` URL. `gh` is the one mock
 // boundary. The bash script never calls it.
 //
-// One difference is declared (ruling 5 on #225, the fix for #167). When the
-// remote gives an `nwo`, the port reads `default_branch` from GitHub, where
-// the script reads the local `origin/HEAD` symref. The rows below give the
-// mock the same branch that the symref names, so every field is compared. The
-// stale-symref row gives a different branch, and asserts the difference.
+// One difference is declared (rulings 5 and 11 on #225, the fix for #167).
+// When the remote host is `github.com`, the port reads `default_branch` from
+// GitHub, where the script reads the local `origin/HEAD` symref. The rows
+// below give the mock the same branch that the symref names, so every field is
+// compared. The stale-symref row gives a different branch, and asserts the
+// difference. A remote on another host reads the symref in both, and the unit
+// tests hold that.
 //
 // Three more differences are declared, and held by the unit tests:
 //   - A failed read from GitHub is an error in the port. The script has no
