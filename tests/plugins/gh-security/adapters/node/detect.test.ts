@@ -24,6 +24,7 @@ import {
 import { delimiter, join } from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'
 
+import { onPath } from '#gh-security/adapters/node/detect.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 import { createSandbox } from '#harness/sandbox.ts'
@@ -418,6 +419,16 @@ describe('the runner', () => {
     // mid-round ruling 13).
     it('finds nothing on an absent PATH', () => {
       expect(runnerOf(fixture('yarn-berry'), undefined)).toMatchObject({ pm_exec: 'yarn' })
+    })
+
+    // `shim` asks the same question for the manager itself (#222).
+    it('answers for the tool that it is asked about, and for no other', () => {
+      const bin = pathWith('npm')
+      const root = fixture('npm-v3')
+      expect([onPath('npm', root, { PATH: bin }), onPath('pnpm', root, { PATH: bin })]).toEqual([
+        true,
+        false,
+      ])
     })
   })
 })
