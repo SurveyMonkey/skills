@@ -354,7 +354,7 @@ describe('ensureWorktreeExclude: the refusals', () => {
 
   // #302 item 2. The open of the temporary file uses `wx`, so a file at that
   // name stays and the open fails. The cleanup must then leave that file.
-  it.fails('leaves a file that already has the temporary name, and refuses', async () => {
+  it('leaves a file that already has the temporary name, and refuses', async () => {
     const { sandbox, repo, info, exclude } = setup()
     const taken = join(info, '.exclude.taken')
     writeFileSync(taken, 'not ours\n')

@@ -25,8 +25,10 @@
 
 import { randomBytes } from 'node:crypto'
 import {
-  chmodSync,
+  closeSync,
+  fchmodSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -155,7 +157,9 @@ const withLine = (text: string): string =>
 /**
  * Write the new exclude file beside the old one, and rename it over. The
  * rename is one step, so a reader sees the old file or the new file. The
- * temporary file is removed when a step fails.
+ * temporary file is removed when a step after the open fails. When the open
+ * itself fails, the path belongs to someone else, because `wx` refuses a
+ * name that is taken. Nothing is removed then (issue #302).
  */
 const publish = (
   infoDir: string,
@@ -164,10 +168,20 @@ const publish = (
   suffix: () => string,
 ): boolean => {
   const temporary = join(infoDir, `.exclude.${suffix()}`)
+  let fd: number
   try {
-    writeFileSync(temporary, withLine(existing.text), { flag: 'wx', encoding: 'latin1' })
-    // After the write, because the mode of a new file follows the umask.
-    chmodSync(temporary, existing.mode)
+    fd = openSync(temporary, 'wx', existing.mode)
+  } catch {
+    return false
+  }
+  try {
+    try {
+      writeFileSync(fd, withLine(existing.text), 'latin1')
+      // After the write, because the mode of a new file follows the umask.
+      fchmodSync(fd, existing.mode)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(temporary, exclude)
     return true
   } catch {
