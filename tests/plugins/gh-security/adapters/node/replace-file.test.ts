@@ -67,6 +67,19 @@ describe('replaceFile', () => {
     }).toEqual({ link: false, text: 'new\n', target: 'old\n' })
   })
 
+  it('writes no file in the temporary directory of the system', () => {
+    const dir = scratch()
+    const before = process.env.TMPDIR
+    process.env.TMPDIR = join(dir, 'missing')
+    try {
+      replaceFile(join(dir, 'file'), 'new\n', ERROR)
+    } finally {
+      if (before === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = before
+    }
+    expect(readdirSync(dir)).toEqual(['file'])
+  })
+
   it('replaces a dangling symlink', () => {
     const dir = scratch()
     symlinkSync(join(dir, 'missing'), join(dir, 'file'))

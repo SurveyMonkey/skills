@@ -302,15 +302,19 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   // node.sh names this git copy `debug@git+ssh://git`, so no parent `debug`
   // reads it. The port drops its edge too (#50). Each expected value is the
   // answer of node.sh on the same copy.
-  /** Registry copies of `debug` beside the git copy, each with its version of `ms`. */
+  /**
+   * Copies of `debug` beside the git copy, each with its version of `ms`. A
+   * copy with the version '' has the snapshot key `debug`, with no version.
+   */
   const registryCopies =
     (...copies: (readonly [string, string])[]): Setup =>
     (dir) => {
+      const keyOf = (debug: string) => (debug === '' ? 'debug' : `debug@${debug}`)
       const packages = copies.map(
-        ([debug]) => `  debug@${debug}:\n    resolution: {integrity: x}\n\n`,
+        ([debug]) => `  ${keyOf(debug)}:\n    resolution: {integrity: x}\n\n`,
       )
       const snapshots = copies.map(
-        ([debug, ms]) => `  debug@${debug}:\n    dependencies:\n      ms: ${ms}\n\n`,
+        ([debug, ms]) => `  ${keyOf(debug)}:\n    dependencies:\n      ms: ${ms}\n\n`,
       )
       const text = textAt(dir, 'pnpm-lock.yaml')
         .replace('packages:\n\n', `packages:\n\n${packages.join('')}`)
@@ -327,6 +331,15 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
         ['2.6.9', '2.0.0'],
       ],
       { 'debug@2.6.9>ms': '^2.1.3', 'debug@4.3.4>ms': '^2.1.3' },
+    ],
+    [
+      'two registry copies and a copy with no version',
+      [
+        ['4.3.4', '2.1.2'],
+        ['2.6.9', '2.0.0'],
+        ['', '2.0.0'],
+      ],
+      { 'debug>ms': '^2.1.3' },
     ],
   ] as const)('reads no edge from a git copy of the parent, beside %s', (_, copies, keys) => {
     const manifest = manifestAfter(
