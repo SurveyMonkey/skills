@@ -227,8 +227,8 @@ const inputsOf = (
  * is its semver max, no sibling alert is on this major, and no sibling range
  * matches a version on either side. The first test that fails makes it
  * `fatal`. A vanished line has no version left, and `semverMax` answers a
- * version of the baseline. So two tests of node.sh have no line of their
- * own here: `status` and "in the baseline".
+ * version of the baseline. So the test of the max also does two tests of
+ * node.sh: `status` and "in the baseline".
  */
 const classOf = (
   { siblings, siblingsUnreadable }: Inputs,
@@ -236,8 +236,7 @@ const classOf = (
 ): Move['class'] => {
   if (siblingsUnreadable || siblings === null) return 'fatal'
   const [landed, ...more] = move.after
-  if (landed === undefined || more.length > 0) return 'fatal'
-  if (landed !== semverMax(move.before)) return 'fatal'
+  if (more.length > 0 || landed !== semverMax(move.before)) return 'fatal'
   if (siblings.some(({ major }) => major === move.major)) return 'fatal'
   const hit = [...move.before, ...move.after].some((version) =>
     siblings.some(({ vulnerable_ranges }) =>
