@@ -53,6 +53,11 @@ describe('the jq rules for values', () => {
     expect(() => get([], 'a')).toThrow('cannot index a array')
   })
 
+  it('get and has see no key that an object only inherits, such as a parent named constructor', () => {
+    expect([get({}, 'constructor'), get({}, 'toString')]).toEqual([null, null])
+    expect([has({}, 'constructor'), has({}, 'toString')]).toEqual([false, false])
+  })
+
   it('getPath ends at a null, and stops on a text on the way', () => {
     expect(getPath({ a: null }, ['a', 'b'])).toBeNull()
     expect(getPath({ a: { b: 2 } }, ['a', 'b'])).toBe(2)
@@ -120,6 +125,10 @@ describe('the jq rules for values', () => {
       'b',
     ])
     expect([compare('a', 'b'), compare('b', 'a'), compare(2, 2)]).toEqual([-1, 1, 0])
+  })
+
+  it('unique keeps one of each equal list or object, as jq does', () => {
+    expect(unique([{ a: 1 }, ['x'], { a: 1 }, ['x']])).toEqual([['x'], { a: 1 }])
   })
 
   it.each([

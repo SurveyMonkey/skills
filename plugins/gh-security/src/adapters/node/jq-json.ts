@@ -138,7 +138,8 @@ const RANK: Readonly<Record<string, number>> = {
 /**
  * jq's order: null, false, true, numbers, texts, lists, objects. Texts sort
  * by UTF-16 unit here and by code point in jq, so the order differs only
- * for a character above U+FFFF. Lists and objects never meet here.
+ * for a character above U+FFFF. Two lists, or two objects, have no fixed
+ * order here. jq sorts them by their contents.
  */
 export const compare = (a: unknown, b: unknown): number => {
   const rank = (RANK[jqType(a)] as number) - (RANK[jqType(b)] as number)
@@ -147,11 +148,14 @@ export const compare = (a: unknown, b: unknown): number => {
   return (a as number | string) < (b as number | string) ? -1 : 1
 }
 
-/** jq's `unique`: sorted, each value once. */
-export const unique = <T>(values: readonly T[]): T[] =>
-  [...values]
-    .sort(compare)
-    .filter((value, index, sorted) => index === 0 || sorted[index - 1] !== value)
+/**
+ * jq's `unique`: sorted, each value once. Two values are the same value when
+ * jq's `==` says so, so two equal objects in a lockfile are one version.
+ */
+export const unique = <T>(values: readonly T[]): T[] => {
+  const sorted = [...values].sort(compare)
+  return sorted.filter((value, index) => sorted.findIndex((each) => equal(each, value)) === index)
+}
 
 /** jq's `split`: an empty text has no parts. It throws for a value that is not a text. */
 export const split = (value: unknown, separator: string): string[] => {
