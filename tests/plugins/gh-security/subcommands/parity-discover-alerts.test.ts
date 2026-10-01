@@ -27,7 +27,7 @@
 //     `<owner>/<repo>`, and a second target. The unit tests hold them.
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { selectAdapter } from '#gh-security/adapters/registry.ts'
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
@@ -39,6 +39,10 @@ import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 import { firstDifference, runBash } from '#harness/parity.ts'
 import { pluginFile } from '#harness/paths.ts'
 import { createSandbox } from '#harness/sandbox.ts'
+
+// Each row starts the bash side as real processes, which is slow on a CI
+// runner. The time limit is for that, and not for a hang.
+vi.setConfig({ testTimeout: 60_000 })
 
 const COMMON = pluginFile('gh-security', 'scripts', 'common')
 const SCRIPT = join(COMMON, 'discover-alerts.sh')

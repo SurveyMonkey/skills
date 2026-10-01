@@ -27,11 +27,11 @@
 //   - The script writes a failure as JSON on stderr. The CLI renders a failure
 //     as JSON on stdout and prose on stderr (`cli.md`). The exit status is the
 //     same, and the rows compare it.
-//   - Empty stdin gives no output and exit 0 in the pipeline. The port refuses
+//   - Empty stdin gives exit 0 and no JSON in the pipeline. The port refuses
 //     it. A row below shows the two answers.
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { selectAdapter } from '#gh-security/adapters/registry.ts'
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
@@ -43,6 +43,10 @@ import { createGitFixtures } from '#harness/git.ts'
 import { firstDifference, runBash } from '#harness/parity.ts'
 import { pluginFile } from '#harness/paths.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
+
+// Each row starts the bash side as real processes, which is slow on a CI
+// runner. The time limit is for that, and not for a hang.
+vi.setConfig({ testTimeout: 60_000 })
 
 const COMMON = pluginFile('gh-security', 'scripts', 'common')
 const SELECT = join(COMMON, 'select-adapter.sh')
@@ -336,7 +340,8 @@ describe('classify-lines parity: the refusals', () => {
 
   it('answers nothing for empty stdin in the pipeline, where the port refuses it', async () => {
     const bash = bashSide('', ['--repo-root', FIXTURES_ROOT])
-    expect({ status: bash.status, stdout: bash.stdout }).toEqual({ status: 0, stdout: '' })
+    // The second stage writes one empty line, and no JSON.
+    expect({ status: bash.status, stdout: bash.stdout }).toEqual({ status: 0, stdout: '\n' })
     expect(answerOf(await typescriptSide('', ['--repo-root', FIXTURES_ROOT])).status).toBe(1)
   })
 })
