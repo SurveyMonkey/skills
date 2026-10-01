@@ -94,5 +94,7 @@ export function createGhMock(replies: GhReplies = {}): GhClient {
     viewPullRequest: async () => answer(replies, 'viewPullRequest'),
     viewDefaultBranch: async () => answer(replies, 'viewDefaultBranch'),
     listAdvisories: async () => answer(replies, 'listAdvisories'),
+    listDependabotAlerts: async () => answer(replies, 'listDependabotAlerts'),
+    searchOpenPullRequests: async () => answer(replies, 'searchOpenPullRequests'),
   }
 }

@@ -18,6 +18,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `lib/git.ts` | Git calls: `runGit`, `gitOut`, `gitOk`, `gitLines`, and repository queries |
 | `lib/gh.ts` | The typed `gh` client |
 | `src/state.ts` | The fix driver's state file, typed |
+| `src/jq.ts` | The jq order, `unique`, `tostring`, `tonumber`, `//`, field reads and the major trim rule that `discover-alerts` and `classify-lines` share |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
@@ -97,10 +98,11 @@ its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `s
 synchronous, so it keeps a local runner.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
-into handlers and mocked one method at a time. Its API is the target stack's, with three methods:
-`viewPullRequest` for `pr-status`, `viewDefaultBranch` for `detect-scope`, and `listAdvisories` for
-`check-advisories`. A method comes with the command that calls it. The last two are not in the
-target stack, and `lib/gh.ts` names them as divergences. A method answers with the
+into handlers and mocked one method at a time. Its API is the target stack's, with five methods:
+`viewPullRequest` for `pr-status`, `viewDefaultBranch` for `detect-scope`, `listAdvisories` for
+`check-advisories`, and `listDependabotAlerts` and `searchOpenPullRequests` for `discover-alerts`.
+A method comes with the command that calls it. The last four are not in the target stack, and
+`lib/gh.ts` names them as divergences. A method answers with the
 value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
 that error into an envelope. Octokit is not the client, because nothing shipped imports anything
 outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's

@@ -139,6 +139,8 @@ describe('the client options', () => {
       'viewPullRequest',
       'viewDefaultBranch',
       'listAdvisories',
+      'listDependabotAlerts',
+      'searchOpenPullRequests',
     ])
   })
 
@@ -516,5 +518,139 @@ describe('listAdvisories', () => {
       detail: 'gh: HTTP 503',
       status: 1,
     })
+  })
+})
+
+describe('listDependabotAlerts', () => {
+  const ask = (reply: Reply, query = { host: 'github.com', owner: 'octo', repo: 'app' }) => {
+    const { gh, calls } = clientAnswering(reply)
+    return { result: gh.listDependabotAlerts(query), calls }
+  }
+
+  it('asks the alerts endpoint of one repository on the named host, with every page', async () => {
+    const { result, calls } = ask({ stdout: '[[]]' })
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'api',
+          '--hostname',
+          'github.com',
+          'repos/octo/app/dependabot/alerts?state=open&per_page=100',
+          '--paginate',
+          '--slurp',
+        ],
+      },
+    ])
+  })
+
+  it('encodes the owner and the name, so neither can add a segment or a parameter', async () => {
+    const { result, calls } = ask(
+      { stdout: '[]' },
+      { host: 'github.com', owner: '-o/x', repo: 'a?b#c' },
+    )
+    await result
+    expect(calls[0]?.args[3]).toBe(
+      'repos/-o%2Fx/a%3Fb%23c/dependabot/alerts?state=open&per_page=100',
+    )
+  })
+
+  it('answers the alerts of every page as one list, in order', async () => {
+    const { result } = ask({ stdout: '[[{"number":1},{"number":2}],[],[{"number":3}]]' })
+    await expect(result).resolves.toEqual([{ number: 1 }, { number: 2 }, { number: 3 }])
+  })
+
+  it.each([
+    ['an object', '{"message":"Not Found"}'],
+    ['a page that is an object', '[{"number":1}]'],
+    ['an alert that is null', '[[null]]'],
+  ])('throws when gh answered %s', async (_shape, stdout) => {
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect({ message: error.message, status: error.status }).toEqual({
+      message: `gh answered gh api dependabot alerts with something that is not a list of pages of objects: ${stdout}`,
+      status: 0,
+    })
+  })
+
+  it("throws gh's own words and status when gh exits non-zero", async () => {
+    const error = (await ask({ status: 1, stderr: 'gh: Not Found (HTTP 404)\n' }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'gh: Not Found (HTTP 404)',
+      status: 1,
+    })
+  })
+})
+
+describe('searchOpenPullRequests', () => {
+  const ask = (reply: Reply) => {
+    const { gh, calls } = clientAnswering(reply, { repository: 'not/this' })
+    return {
+      result: gh.searchOpenPullRequests({
+        repository: 'github.com/octo/app',
+        head: 'fix/dependabot-lodash-4x',
+      }),
+      calls,
+    }
+  }
+
+  it('lists the open pull requests of a head search, and names the repository once', async () => {
+    const { result, calls } = ask({ stdout: '[]' })
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'pr',
+          'list',
+          '--repo',
+          'github.com/octo/app',
+          '--search',
+          'head:fix/dependabot-lodash-4x',
+          '--state',
+          'open',
+          '--json',
+          'url',
+        ],
+      },
+    ])
+  })
+
+  it('answers each url, in the order that gh gave, and nothing else', async () => {
+    const { result } = ask({ stdout: '[{"url":"https://a/1","title":"x"},{"url":"https://a/2"}]' })
+    await expect(result).resolves.toEqual([{ url: 'https://a/1' }, { url: 'https://a/2' }])
+  })
+
+  it.each([
+    ['an object', '{"url":"https://a/1"}'],
+    ['an entry with no url', '[{"title":"x"}]'],
+    ['a url that is not text', '[{"url":null}]'],
+    ['an entry that is not an object', '["https://a/1"]'],
+    ['an entry that is null', '[null]'],
+  ])('throws when gh answered %s', async (_shape, stdout) => {
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.message).toBe(
+      `gh answered gh pr list with something that is not a list of pull requests with a url: ${stdout}`,
+    )
+  })
+
+  it('cuts a long unreadable answer at 200 characters', async () => {
+    const stdout = JSON.stringify({ message: 'x'.repeat(300) })
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error.message).toBe(
+      `gh answered gh pr list with something that is not a list of pull requests with a url: ${stdout.slice(0, 200)}`,
+    )
+  })
+
+  it("throws gh's own words when gh exits non-zero", async () => {
+    const error = (await ask({
+      status: 1,
+      stderr: 'gh: could not resolve to a Repository\n',
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error.detail).toBe('gh: could not resolve to a Repository')
   })
 })
