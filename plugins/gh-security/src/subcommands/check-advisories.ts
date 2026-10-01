@@ -35,7 +35,8 @@
 //                   package. It is NOT a synonym for safe. A pin may exist
 //                   for a reason that is not security, and a misspelled name
 //                   or the wrong ecosystem gives the same empty answer.
-// With no `--version` the verdict is null.
+// With no `--version` the verdict is null, except `no-advisories` when the
+// query returned nothing.
 //
 // Carried over from the script: an advisory with no range gives no range to
 // evaluate. With `--version`, a package whose advisories all lack a range reads

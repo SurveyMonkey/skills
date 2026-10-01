@@ -26,18 +26,18 @@
 // branch on GitHub gives a null `default_branch`.
 //
 // With no nwo, there is no repository to ask. The command then reads the
-// `origin/HEAD` symref, and after it `git remote show origin` as the script
-// does. It never writes: `git remote set-head` is a write. The value is null
+// `origin/HEAD` symref. When there is an `origin`, it then runs
+// `git remote show origin`, as the script does. It never writes: `git remote set-head` is a write. The value is null
 // when both fail, and a caller that needs the branch must stop.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner for `git` and for `gh`, so each runs as
-// `<prefix> git ...` and `<prefix> gh ...`. The remote call and the GitHub
-// call are the two that need an identity. Nothing here names a tool, or looks
+// `<prefix> git ...` and `<prefix> gh ...`. Only `git remote show origin` and
+// the GitHub call reach the network, and they need an identity. Nothing here names a tool, or looks
 // for one.
 //
 // Differences from the script:
-//   - The default branch comes from GitHub, as above. This is the one
+//   - The default branch comes from GitHub, as above. This is the main
 //     difference in the answers of a working checkout.
 //   - `HEAD branch: (unknown)`, which git writes for a remote with no HEAD,
 //     gives a null `default_branch`. The script answers the text `(unknown)`.

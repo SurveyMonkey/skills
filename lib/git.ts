@@ -281,9 +281,9 @@ const ORIGIN_PREFIX = 'refs/remotes/origin/'
  *
  * This value goes stale. Git writes `origin/HEAD` once, at clone time, and
  * `git fetch` never refreshes it. A branch that is renamed on GitHub then
- * stays wrong in each older checkout (#167). So `detect-scope` does not call
- * this function when the remote gives an `nwo`: it asks GitHub for the
- * branch. A caller that needs the branch for a GitHub repository does the
+ * stays wrong in each older checkout (#167). So `detect-scope` does not use
+ * this function. It asks GitHub for the branch when the remote gives an
+ * `nwo`. A caller that needs the branch for a GitHub repository does the
  * same.
  */
 export const defaultBranch = async (options: RepoOptions): Promise<string | null> => {

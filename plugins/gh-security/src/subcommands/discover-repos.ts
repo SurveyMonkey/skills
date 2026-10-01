@@ -14,7 +14,7 @@
 //
 // **An empty list is an answer.** A target that is not a directory, a target
 // or a child that cannot be entered, and every git failure other than "not a
-// git repository" are errors. An unreadable workspace must never read as a
+// git repository" and a bare repository are errors. An unreadable workspace must never read as a
 // tidy empty one. Each git failure names git's exit status, because git can
 // fail with nothing on stderr.
 //
