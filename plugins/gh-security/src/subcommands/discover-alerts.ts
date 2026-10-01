@@ -22,8 +22,8 @@
 // **One group for each package major line, not for each package** (#19). A
 // package that resolves at several majors has a different patched version on
 // each line, and a fix of one line leaves the others vulnerable. The line is
-// the leading number of `first_patched_version`, after white space and a
-// `v` or `=` prefix are removed. An identifier with no plain leading number
+// the first number of `first_patched_version`, after white space and a
+// `v` or `=` prefix are removed. An identifier with no plain first number
 // has no usable line: its line is `none`, and its group is skipped.
 //
 // `sibling_alerts` names every OTHER line of the same package, skipped lines
@@ -37,7 +37,7 @@
 // ecosystem with no adapter, the order is the version sort of GNU `sort -V`,
 // because the group only shows that some fix exists.
 //
-// `--branch-style` picks the spelling of each `branch_name`:
+// `--branch-style` picks the form of each `branch_name`:
 // `fix/dependabot-<package>-<line>x` (`slash`, the default) or
 // `fix-dependabot-<package>-<line>x` (`flat`). A line of `none` ends in
 // `-unfixed`. A remote with a branch named `fix` refuses every `fix/*` push
@@ -53,7 +53,7 @@
 //
 // **`--stdin` reads the alerts from stdin** (#54), in the shape that the
 // alerts endpoint gives: a list of pages of alerts, or a list of alerts. Only
-// the fetch moves. The grouping, the ranking, the names and the open pull
+// the fetch moves. The groups, their order, the names and the open pull
 // request check are the same, so the same alerts give the same output. This
 // lets a caller group the alerts again with another `--branch-style`, with no
 // second fetch. An alert with a `repository` must name the target, so alerts
@@ -72,7 +72,7 @@
 //   - A package name must be text. The script fails on most other values.
 //   - `--stdin` and the `repository` check are new (#54).
 //   - The version sort for an ecosystem with no adapter is GNU's, without its
-//     rules for an empty name and a leading dot. No candidate can have one.
+//     rules for an empty name and a dot at the start. No candidate has one.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
@@ -112,7 +112,7 @@ const GITHUB_HOST = 'github.com'
 /** `<owner>/<repo>`: two names, with no slash and no white space in either. */
 const TARGET = /^([^/\s]+)\/([^/\s]+)$/
 
-/** Text with its trailing newlines removed, as `$( )` removes them. */
+/** Text without the newlines at its end, as `$( )` removes them. */
 const chomp = (text: string): string => text.replace(/\n+$/, '')
 
 /** The rank of a severity: critical first, and any other word last. */

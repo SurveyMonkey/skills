@@ -1,5 +1,5 @@
 // `gh-security classify-lines`. The seam is the exported handler, with the
-// process runner, the registry and the working directory as parameters.
+// process runner, the registry and the current directory as parameters.
 //
 // The adapter is a stand-in, given through the registry parameter (`mocking.md`,
 // "The injected collaborator"). It stands in for the node adapter, and answers

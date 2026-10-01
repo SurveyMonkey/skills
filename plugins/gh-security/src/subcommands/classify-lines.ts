@@ -52,7 +52,7 @@
 // entry to `classify_errors[]`.
 //
 // **Contract discipline** (ADR 001). An adapter answer that fails, that has a
-// promised field missing or of the wrong type, or that says `present: true`
+// promised field that is not there or of the wrong type, or that says `present: true`
 // with no versions, is a broken read, never an empty answer. Its group is
 // `unknown`, and `classify_errors[]` names the adapter, the package and the
 // error. Under `--base-ref`, each entry also has `base_ref`. A failure of the
@@ -102,9 +102,9 @@
 //     worktree first, and then found that a group list was bad.
 //   - `declared_ranges` must give lists of text. The script stops with no
 //     `{"error": ...}` on another value.
-//   - With one adapter process for all reads, a `detect` that fails also
-//     fails `resolved_versions`, so the group is `unknown`. In the script,
-//     `detect` ran only in the collision check.
+//   - In process, `resolved_versions` reads the answer of `detect`. So a
+//     `detect` that fails also fails `resolved_versions`, and the group is
+//     `unknown`. In the script, `detect` ran only in the collision check.
 //   - A package name with a tab, a line break or a backslash is read as it
 //     is. The script escaped it for one read and not for the other.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
@@ -140,7 +140,7 @@ const ORIGIN = 'origin/'
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/** Text with its trailing newlines removed, as `$( )` removes them. */
+/** Text without the newlines at its end, as `$( )` removes them. */
 const chomp = (text: string): string => text.replace(/\n+$/, '')
 
 /** The first line of a child's stderr, as `head -n 1` gives it. */
@@ -218,7 +218,7 @@ const readInput = (
   return { input, actionable, skipped }
 }
 
-/** The handler. The runner, the registry and the working directory are parameters. */
+/** The handler. The runner, the registry and the current directory are parameters. */
 export const classifyLines = async (
   context: CommandContext,
   spawn: Runner,
