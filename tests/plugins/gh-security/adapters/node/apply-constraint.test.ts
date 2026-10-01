@@ -2156,6 +2156,31 @@ describe('more routes that no spec example takes', () => {
     expect(answer('npm-stale-nested', ['axios', '>=1.18.0 <2']).mode).toBe('direct')
   })
 
+  it('reads no dependent edge from a declaration that is not a text', () => {
+    const zedRule = both(
+      rule({ zed: { nx: '^22' } }),
+      lockEdit((packages) => {
+        ;((packages[''] as Json).dependencies as Json).zed = '^1.0.0'
+        packages['node_modules/zed'] = { version: '1.0.0', dependencies: { nx: 5 } }
+      }),
+    )
+    expect(manifestAfter(PLACED, nx, zedRule).overrides).toEqual({
+      zed: { nx: '^22' },
+      nx: { 'brace-expansion': '>=5.0.9 <6' },
+    })
+  })
+
+  it('tightens no pnpm key with a `>`, even one that starts with the package', () => {
+    const scoped = manifestEdit((manifest) => {
+      manifest.pnpm = { overrides: { 'brace-expansion@>=5.0.0': '^5.0.0' } }
+    })
+    const tighten = ['--tighten-bare', ...BRACE]
+    expect(pnpmOverrides(manifestAfter('pnpm-cross-line', tighten, scoped))).toEqual({
+      'brace-expansion@>=5.0.0': '^5.0.0',
+      'brace-expansion': '>=5.0.9 <6',
+    })
+  })
+
   it('qualifies the parents that no rule places beside one that a rule places', () => {
     const twoParents = lockEdit((packages) => {
       const declares = { 'brace-expansion': '^5.0.4' }
