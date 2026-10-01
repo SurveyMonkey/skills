@@ -220,16 +220,13 @@ const groupAlerts = (alerts: readonly unknown[]): Group[] => {
       name,
       line,
       ecosystem: fields.ecosystem,
-      fixedVersions: members.flatMap((alert) => {
-        if (lineOf(alert) === 'none') return []
-        const identifier = pathOf(
-          alert,
-          'security_vulnerability',
-          'first_patched_version',
-          'identifier',
-        )
-        return identifier === null || identifier === false ? [] : [identifier]
-      }),
+      // An alert with a usable line has an identifier that is not null or
+      // false, so the script's `// empty` drops nothing here.
+      fixedVersions: members
+        .filter((alert) => lineOf(alert) !== 'none')
+        .map((alert) =>
+          pathOf(alert, 'security_vulnerability', 'first_patched_version', 'identifier'),
+        ),
       newest: line !== 'none' && newest.get(name) === majorNumber(line),
       sortKey: [severityRank(maxSeverity), negated(maxEpss), name, line],
     }
@@ -332,7 +329,11 @@ export const compareVersionText = (a: string, b: string): number => {
   return whole === 0 ? Buffer.compare(left, right) : whole
 }
 
-/** The highest candidate, or an error that the command reports as it is. */
+/**
+ * The highest candidate, or an error that the command reports as it is. The
+ * caller gives at least one candidate, so the script's `none` for no
+ * candidate is not here.
+ */
 const highestOf = (
   ecosystem: string,
   candidates: readonly string[],
@@ -363,7 +364,7 @@ const highestOf = (
       }
     }
   }
-  return { highest: best === '' ? 'none' : best }
+  return { highest: best }
 }
 
 /** The text that `jq -r` prints for a list of values, one on each line, as `$( )` keeps it. */
