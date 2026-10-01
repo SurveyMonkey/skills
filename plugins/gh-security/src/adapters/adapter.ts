@@ -412,13 +412,13 @@ type ConstraintObservation =
 /**
  * The npm lockfile entries that `applyConstraint` removed (#124). A
  * `reason` is present only when an override was written and the pass could
- * not run.
+ * not run. A pass that did not run removed no entry.
  */
 type LockfileInvalidated =
   | { readonly performed: true; readonly keys: readonly string[]; readonly reason?: never }
   | {
       readonly performed: false
-      readonly keys: readonly string[]
+      readonly keys: readonly []
       readonly reason?: 'unreadable_range_floor' | 'no_packages_object'
     }
 
