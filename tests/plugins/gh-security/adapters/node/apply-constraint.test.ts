@@ -105,8 +105,8 @@ const manifestAfter = (fixture: string, args: readonly string[], setup?: Setup):
 }
 
 /**
- * The error of a refusal. Each refusal comes before a write, so the files
- * after it are the files before it.
+ * The error of a refusal that comes before the first write. The files after
+ * it are the files before it.
  */
 const refusalOf = (fixture: string, args: readonly string[], setup?: Setup): string => {
   const dir = copyOf(fixture, setup)
@@ -143,6 +143,9 @@ const BRACE = ['brace-expansion', '>=5.0.9 <6'] as const
 
 const LODASH = ['lodash', '>=4.17.21 <5'] as const
 
+/** A call that writes package.json of yarn-berry, so a guard that comes too late shows. */
+const LODASH_BUMP = ['lodash', '>=4.17.23 <5'] as const
+
 const PLACED = 'npm-override-placed-parent'
 
 const PNPM11 = 'pnpm11-workspace-overrides'
@@ -163,7 +166,7 @@ describe('mutating verbs run only in a linked worktree', () => {
     ['../../main/.git/worktrees/fix/modules/vendor'],
     ['../../.git/modules/worktrees/foo'],
   ])('refuses in a git submodule with the gitdir %s, and writes nothing', (gitdir) => {
-    expect(refusalOf('yarn-berry', LODASH, pointer(gitdir))).toContain('submodule')
+    expect(refusalOf('yarn-berry', LODASH_BUMP, pointer(gitdir))).toContain('submodule')
   })
 
   it.each([
@@ -173,18 +176,21 @@ describe('mutating verbs run only in a linked worktree', () => {
     const fixture = useFixture('yarn-berry', { gitShape })
     onTestFinished(fixture.cleanup)
     const before = textAt(fixture.path, 'package.json')
-    const envelope = node.applyConstraint(treeAt(fixture.path), requestOf(LODASH))
+    const envelope = node.applyConstraint(treeAt(fixture.path), requestOf(LODASH_BUMP))
     expect(envelope.outcome === 'failed' && envelope.error).toContain(words)
     expect(textAt(fixture.path, 'package.json')).toBe(before)
   })
 
-  it('refuses in a subdirectory of a primary checkout', () => {
+  it('refuses in a subdirectory of a primary checkout, and writes nothing', () => {
     const fixture = useFixture('yarn-berry', { gitShape: 'primary-checkout' })
     onTestFinished(fixture.cleanup)
-    const envelope = node.applyConstraint(treeAt(appIn(fixture.path)), requestOf(LODASH))
+    const app = appIn(fixture.path)
+    const before = textAt(app, 'package.json')
+    const envelope = node.applyConstraint(treeAt(app), requestOf(LODASH_BUMP))
     expect(envelope.outcome === 'failed' && envelope.error).toContain(
       'subdirectory of the primary checkout',
     )
+    expect(textAt(app, 'package.json')).toBe(before)
   })
 
   it.each([
@@ -2030,7 +2036,113 @@ describe('more routes that no spec example takes', () => {
     const number = lockEdit((packages) => {
       ;(packages['node_modules/minimatch'] as Json).version = 10
     })
-    expect(refusalOf('npm-cross-line', minimatch, number)).not.toBe('')
+    expect(refusalOf('npm-cross-line', minimatch, number)).toBe(
+      'cannot test a value that is not a text',
+    )
+  })
+
+  // The expected values below are the answers of node.sh on the same
+  // copies, read once by hand.
+  const paths = ({ written }: ApplyConstraintAnswer) => written.map(({ path }) => path)
+
+  /** A root dependency `zed`, with its own copy of nx at `version`. */
+  const zedWithNx = (version: string, child?: Json) =>
+    lockEdit((packages) => {
+      ;((packages[''] as Json).dependencies as Json).zed = '^1.0.0'
+      packages['node_modules/zed'] = { version: '1.0.0', dependencies: { nx: '^22.0.0' } }
+      packages['node_modules/zed/node_modules/nx'] = {
+        version,
+        dependencies: { 'brace-expansion': '^5.0.4' },
+      }
+      if (child !== undefined) {
+        packages['node_modules/zed/node_modules/nx/node_modules/brace-expansion'] = child
+      }
+    })
+
+  it('keeps the qualifier of a version that a placed copy and a normal copy share', () => {
+    expect(paths(answer(PLACED, nx, both(secondNxLine, zedWithNx('22.7.9'))))).toEqual([
+      ['overrides', 'lerna', 'nx', '.'],
+      ['overrides', 'lerna', 'nx', 'brace-expansion'],
+      ['overrides', 'nx@22.7.9', 'brace-expansion'],
+    ])
+  })
+
+  it('writes the top-level key for a normal copy whose child has no major', () => {
+    expect(paths(answer(PLACED, nx, zedWithNx('22.6.0', { version: 'x.1' })))).toEqual([
+      ['overrides', 'lerna', 'nx', '.'],
+      ['overrides', 'lerna', 'nx', 'brace-expansion'],
+      ['overrides', 'nx@22.6.0', 'brace-expansion'],
+    ])
+  })
+
+  it('counts a copy whose child has no major on the line, not off it', () => {
+    const noMajor = lockEdit((packages) => {
+      packages['node_modules/minimatch/node_modules/brace-expansion'] = { version: 'x.1' }
+    })
+    expect(paths(answer('npm-cross-line', minimatch, noMajor))).toEqual([
+      ['overrides', 'minimatch@^10.2.5', 'brace-expansion'],
+      ['overrides', 'minimatch@10.0.3', 'brace-expansion'],
+    ])
+  })
+
+  it('reads two equal parent versions that are objects as one version', () => {
+    const objects = lockEdit((packages) => {
+      for (const [key, entry] of Object.entries(packages)) {
+        if (key.endsWith('node_modules/minimatch')) (entry as Json).version = { a: 1 }
+      }
+    })
+    expect(paths(answer('npm-cross-line', minimatch, objects))).toEqual([
+      ['overrides', 'minimatch', 'brace-expansion'],
+    ])
+  })
+
+  it('skips a lockfile entry of the package that is not an object', () => {
+    const nullEntry = lockEdit((packages) => {
+      packages['node_modules/undici'] = null
+    })
+    expect(answer('npm-stale-nested', ['undici', '>=6.19.0 <7'], nullEntry)).toMatchObject({
+      written: [{ parent: null, path: ['overrides', 'undici'], value: '>=6.19.0 <7' }],
+      lockfile_invalidated: { performed: true, keys: [] },
+    })
+  })
+
+  it('reads an entry whose name is false by its path, as jq `//` does', () => {
+    const falseName = lockEdit((packages) => {
+      ;(packages['node_modules/nx/node_modules/axios'] as Json).name = false
+    })
+    const args = ['axios', '>=1.18.0 <2', 'nx']
+    expect(answer('npm-stale-nested', args, falseName).lockfile_invalidated).toEqual({
+      performed: true,
+      keys: ['node_modules/nx/node_modules/axios'],
+    })
+  })
+
+  it('reads no pnpm field for npm', () => {
+    const textField = manifestEdit((manifest) => {
+      manifest.pnpm = 'x'
+    })
+    const result = answer('npm-stale-nested', ['axios', '>=1.18.0 <2', 'nx'], textField)
+    expect({
+      written: paths(result),
+      observations: result.observations.map(({ type }) => type),
+    }).toEqual({
+      written: [['overrides', 'nx', 'axios']],
+      observations: ['unscoped_override', 'unscoped_override'],
+    })
+  })
+
+  it('looks for no bare npm pair beside the qualified keys of pnpm', () => {
+    const npmPair = manifestEdit((manifest) => {
+      manifest.overrides = { minimatch: { 'brace-expansion': '^1.1.12' } }
+    })
+    expect(paths(answer('pnpm-cross-line', minimatch, npmPair))).toEqual([
+      ['pnpm', 'overrides', 'minimatch@10.0.3>brace-expansion'],
+      ['pnpm', 'overrides', 'minimatch@10.2.5>brace-expansion'],
+    ])
+  })
+
+  it('takes the direct mode for a call with no parents', () => {
+    expect(answer('npm-stale-nested', ['axios', '>=1.18.0 <2']).mode).toBe('direct')
   })
 
   it('qualifies the parents that no rule places beside one that a rule places', () => {
