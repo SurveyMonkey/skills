@@ -464,12 +464,48 @@ describe('the four verdicts', () => {
     expect(value(await check(['lodash'], LODASH, route)).verdict).toBeNull()
   })
 
-  it('reads a range that is parseable but has no truth value as no match', async () => {
-    const route = withFacts((range, version) => facts(range, version, { satisfied: null }))
+  const refused = (shown: string) =>
+    `range_facts gave parseable true and a satisfied that is not true or false (ADR 001): ${shown}`
+
+  // Ruling 12 on #225. The script read these as no match, and a package could
+  // read `safe`. A range that has no truth value was not evaluated.
+  it.each([
+    ['null', null, 'null'],
+    ['the word true', 'true', '"true"'],
+    ['the number 1', 1, '1'],
+  ])(
+    'reads a parseable range with %s as satisfied as unevaluated, never safe',
+    async (_name, satisfied, shown) => {
+      const route = withFacts((range, version) => facts(range, version, { satisfied }))
+      const answer = value(await check(['--version', '1.0.0', 'lodash'], LODASH, route))
+      expect(answer).toMatchObject({
+        verdict: 'unknown',
+        matched_ranges: [],
+        unevaluated_ranges: ['< 4.17.12', '< 4.17.21', '>= 3.0.0, < 4.17.19'],
+      })
+      expect(answer.adapter_errors).toEqual(
+        ['< 4.17.12', '< 4.17.21', '>= 3.0.0, < 4.17.19'].map((range) => ({
+          range,
+          status: 1,
+          error: refused(shown),
+        })),
+      )
+    },
+  )
+
+  it('is vulnerable, and not unknown, when one range matched and another has no truth value', async () => {
+    const route = withFacts((range, version) =>
+      facts(range, version, { satisfied: range === '< 4.17.12' ? true : null }),
+    )
     expect(value(await check(['--version', '1.0.0', 'lodash'], LODASH, route))).toMatchObject({
-      verdict: 'safe',
-      matched_ranges: [],
+      verdict: 'vulnerable',
+      matched_ranges: ['< 4.17.12'],
     })
+  })
+
+  it('keeps a false satisfied as an evaluated range with no match', async () => {
+    const answer = value(await check(['--version', '9.0.0', 'lodash']))
+    expect(answer).toMatchObject({ verdict: 'safe', unevaluated_ranges: [], adapter_errors: [] })
   })
 
   it('reads a range that is not parseable as unevaluated, whatever it says of satisfied', async () => {
@@ -489,11 +525,6 @@ describe('the four verdicts', () => {
       verdict: 'unknown',
       matched_ranges: [],
     })
-  })
-
-  it('reads the word true in a string as not true', async () => {
-    const route = withFacts((range, version) => facts(range, version, { satisfied: 'true' }))
-    expect(value(await check(['--version', '1.0.0', 'lodash'], LODASH, route)).verdict).toBe('safe')
   })
 })
 

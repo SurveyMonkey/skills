@@ -45,7 +45,9 @@
 // A `range_facts` answer without `parseable` or `satisfied` is an error (ADR
 // 001). A verb that fails is not an error: its range is unevaluated, and the
 // failure goes into `adapter_errors`, so a broken adapter shows its cause
-// rather than an audit where every pin is inconclusive.
+// rather than an audit where every pin is inconclusive. An answer with
+// `parseable` true and a `satisfied` that is not true or false is treated the
+// same way (ruling 12 on #225). The script read it as no match.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner that the `gh` client uses, so `gh` runs as
@@ -63,6 +65,9 @@
 //     quoted the text that its child wrote on stderr.
 //   - The package and the ecosystem are encoded in the query. The script put
 //     them in as they were.
+//   - A parseable range with no truth value is unevaluated and goes into
+//     `adapter_errors`. The script counted it as no match, so a package could
+//     read `safe` (ruling 12).
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
@@ -278,7 +283,16 @@ export const checkAdvisories = async (
         )
       }
       if (facts.parseable !== true) unevaluated.push(range)
-      else if (facts.satisfied === true) matched.push(range)
+      else if (typeof facts.satisfied !== 'boolean') {
+        // A parseable range has a truth value (ADR 001). Without one, the range
+        // is not evaluated, and it must never count toward `safe` (ruling 12).
+        adapterErrors.push({
+          range,
+          status: 1,
+          error: `range_facts gave parseable true and a satisfied that is not true or false (ADR 001): ${JSON.stringify(facts.satisfied)}`,
+        })
+        unevaluated.push(range)
+      } else if (facts.satisfied) matched.push(range)
     }
   }
 
