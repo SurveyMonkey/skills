@@ -8,6 +8,10 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { COMMANDS } from '#gh-security/cli/registry.ts'
+import { checkAdvisoriesCommand } from '#gh-security/subcommands/check-advisories.ts'
+import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
+import { discoverReposCommand } from '#gh-security/subcommands/discover-repos.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -25,10 +29,35 @@ describe('the registry', () => {
   it('reaches each handler through a dynamic import of its own subcommand module', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
+      "import('../subcommands/check-advisories.ts')",
+      "import('../subcommands/detect-scope.ts')",
+      "import('../subcommands/discover-repos.ts')",
       "import('../subcommands/ensure-worktree-exclude.ts')",
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
     ])
+  })
+})
+
+describe('the discovery entries', () => {
+  // The loader of each entry is the one line that reaches the handler.
+  it.each([
+    ['check-advisories', checkAdvisoriesCommand],
+    ['detect-scope', detectScopeCommand],
+    ['discover-repos', discoverReposCommand],
+  ])('loads the handler of %s', async (name, handler) => {
+    expect(await COMMANDS[name]?.load()).toBe(handler)
+  })
+
+  it.each([
+    [
+      'check-advisories',
+      'check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
+    ],
+    ['detect-scope', 'detect-scope [--env-prefix <prefix>] [<path>]'],
+    ['discover-repos', 'discover-repos [<path>]'],
+  ])('describes %s with its usage', (name, usage) => {
+    expect(COMMANDS[name]?.description).toContain(usage)
   })
 })

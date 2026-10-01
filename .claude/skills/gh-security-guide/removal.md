@@ -59,7 +59,8 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
 ## Removability is judged against the advisory database, never repo alert history
 
 `check-advisories.sh` unions the vulnerable ranges of **every published advisory** for a package
-and, given `--adapter` and `--version`, returns a verdict for one candidate version. The pin audit
+and, given `--version`, returns a verdict for one candidate version. The bash script also needs
+`--adapter`. The CLI command takes the adapter from `--ecosystem`. The pin audit
 has no other source for "is this version safe", and the reason is structural: a pin keeps
 vulnerable versions out of the lockfile, so every advisory published after the pin produced no
 alert on that repository. Asking the repo's own alert history is asking "was anything reported
@@ -71,6 +72,7 @@ could not be read — never folded into `safe`, since an unreadable range is exa
 unnoticed match hides. `no-advisories` means the query succeeded and returned nothing, which a
 non-security pin, a misspelled package name, and the wrong ecosystem all produce identically.
 
-When the adapter itself fails on a range, its stderr is kept in `adapter_errors[]` rather than
-discarded. The verdict is unchanged — an unevaluated range is never folded into `safe` — but a
-broken adapter otherwise turned every pin in the audit inconclusive with nothing naming the cause.
+When the adapter itself fails on a range, the message of the failed verb (stderr, for the bash
+script) is kept in `adapter_errors[]` rather than discarded. The verdict is unchanged, because an
+unevaluated range is never folded into `safe`. A broken adapter otherwise turned every pin in the
+audit inconclusive with nothing naming the cause.

@@ -41,6 +41,7 @@ const noProcess: Runner = () => Promise.reject(new Error('the mock client starts
 const mockFactory =
   (replies: Readonly<Record<string, GhReplies['viewPullRequest']>>): ClientFactory =>
   (options) => ({
+    ...createGhMock(),
     viewPullRequest: (pull) =>
       createGhMock({
         viewPullRequest: replies[`${options.repository}#${pull.pullRequest}`],
@@ -642,6 +643,7 @@ describe('the process that runs gh', () => {
     // The wrapper must not depend on a client that always passes arguments.
     const { runner, calls } = recordingRunner('{}')
     const factory: ClientFactory = (options) => ({
+      ...createGhMock(),
       viewPullRequest: async () => {
         await options.run?.('gh')
         return view()
