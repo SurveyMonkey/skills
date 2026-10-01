@@ -90,6 +90,13 @@ const RESOLVED: Record<string, Envelope<unknown>> = {
   'empty-version': copies('empty-version', ['', '1.0.0']),
   'empty-last': copies('empty-last', ['1.0.0', '']),
   'split-version': copies('split-version', ['1.0.0\n9.0.0']),
+  'null-compare': copies('null-compare', ['1.0.0-null']),
+  'wo-range': copies('wo-range', ['1.5.0', '2.5.0']),
+  stray: copies('stray', ['1.1.11', '5.0.5']),
+  'scoped-bare': copies('scoped-bare', ['5.1.6', '10.0.3']),
+  dirty: copies('dirty', ['1.0.0']),
+  'null-reply': ok(null),
+  'long-reply': ok({ present: true, versions: 'x'.repeat(300) }),
   boom: failed('resolved_versions: parser refused the lockfile'),
   sparse: ok({ pm: 'npm', present: true }),
   'not-an-object': ok('nothing'),
@@ -141,6 +148,12 @@ const DECLARED: Record<string, Envelope<unknown>> = {
   'dr-broken 5': failed('declared_ranges: parser refused the lockfile'),
   'dr-not-text 1': ranges({ parents_read: ['a'], parents_other_lines: [5] }),
   'dr-not-text 5': ranges({ parents_read: ['a'] }),
+  'wo-range 1': ranges({ parents_without_range: ['p'] }),
+  'wo-range 2': ranges({ parents_read: ['p'] }),
+  'stray 1': ranges({ parents_read: ['a'], parents_other_lines: ['zz@1.0.0'] }),
+  'stray 5': ranges({ parents_read: ['a'], parents_other_lines: ['zz@1.0.0'] }),
+  'scoped-bare 5': ranges({ parents_read: ['@npmcli/x'], parents_other_lines: ['@npmcli/x'] }),
+  'scoped-bare 10': ranges({ parents_read: ['@npmcli/x'], parents_other_lines: ['@npmcli/x'] }),
 }
 
 interface StandInSpec {
@@ -153,6 +166,9 @@ interface StandInSpec {
   readonly throws?: boolean
 }
 
+/** The environment that each `detect` call was given. */
+const detectEnvironments: unknown[] = []
+
 /**
  * A registry whose `npm` adapter is the stand-in, and the log of its calls.
  * The log is the claim of the cache examples: a verb with a cache key runs
@@ -162,8 +178,9 @@ const standIn = (spec: StandInSpec = {}) => {
   const calls: string[] = []
   const adapter: Adapter<NodeDetection> = {
     ...node,
-    detect: (root) => {
+    detect: (root, env) => {
       calls.push('detect')
+      detectEnvironments.push(env)
       if (spec.detect !== undefined) return spec.detect as Envelope<NodeDetection>
       let location = 'location' in spec ? spec.location : 'overrides'
       const file = join(root, 'override-location')
@@ -173,6 +190,8 @@ const standIn = (spec: StandInSpec = {}) => {
     resolvedVersions: (tree, pkg) => {
       calls.push(`resolved_versions ${pkg}`)
       if (spec.throws === true) throw new Error('a defect in the adapter')
+      // An untracked file in the tree: a removal without --force refuses it.
+      if (pkg === 'dirty') writeFileSync(join(tree.root, 'dirty-file'), 'x\n')
       if (spec.fromTree === true && pkg === 'treecoll') return copies(pkg, ['1.5.0', '2.5.0'])
       if (spec.fromTree === true) {
         const file = join(tree.root, 'resolved-version')
@@ -195,6 +214,7 @@ const standIn = (spec: StandInSpec = {}) => {
       calls.push(`compare_versions ${a} ${b}`)
       if (a.includes('badcompare')) return failed('compare_versions: unversionable input')
       if (a === '1.0.0-odd') return ok({} as never)
+      if (a === '1.0.0-null') return ok(null as never)
       return node.compareVersions(a, b)
     },
   }
@@ -337,6 +357,7 @@ describe('the line statuses', () => {
     ['a present that is not true or false', 'present-not-a-boolean', undefined],
     ['a copy with no version', 'version-missing', undefined],
     ['a copy that is not an object', 'version-not-an-object', undefined],
+    ['a reply that is null', 'null-reply', 'null'],
   ])('reads %s as a broken read: unknown, and named', async (_case, pkg, shown) => {
     const found = await statusOf(pkg, '2')
     expect(found).toMatchObject({ where: 'actionable', status: 'unknown', majors: [] })
@@ -350,6 +371,47 @@ describe('the line statuses', () => {
         `resolved_versions broke its contract (ADR 001): ${shown}`,
       )
     }
+  })
+
+  it('cuts the text of a broken reply at 200 characters', async () => {
+    const found = await statusOf('long-reply', '2')
+    const shown = JSON.stringify({ present: true, versions: 'x'.repeat(300) }).slice(0, 200)
+    expect(found.errors[0]?.error).toBe(`resolved_versions broke its contract (ADR 001): ${shown}`)
+  })
+
+  it('reads a compare_versions that answers null as a broken read', async () => {
+    const found = await statusOf('null-compare', '2')
+    expect(found).toMatchObject({ status: 'unknown' })
+    expect(found.errors.map((entry) => entry.error)).toEqual([
+      'compare_versions broke its contract (ADR 001): null',
+    ])
+  })
+
+  it('reads a line with line breaks at the end without them, as the script does', async () => {
+    expect(await statusOf('lodash', '4\n\n')).toMatchObject({ status: 'resolved' })
+  })
+
+  it('reads a package name as it is', async () => {
+    const { route, calls } = standIn()
+    await classifyLines(
+      context(['--repo-root', SOME_ROOT], envelope([group('lodash\n', '4')])),
+      run,
+      route,
+      '/',
+    )
+    expect(calls).toContain('resolved_versions lodash\n')
+  })
+
+  it('gives detect the environment of the command', async () => {
+    detectEnvironments.length = 0
+    const env = { PATH: '/only/this' }
+    await classifyLines(
+      context(['--repo-root', SOME_ROOT], envelope([group('lodash', '4')]), env),
+      run,
+      standIn().route,
+      '/',
+    )
+    expect(detectEnvironments).toEqual([env])
   })
 
   it('trims a v prefix and build metadata to a plain major', async () => {
@@ -495,6 +557,32 @@ describe('the collision check (#132)', () => {
     })
   })
 
+  it('moves a shared scoped entry with no version, and names it whole', async () => {
+    expect(await check('scoped-bare', '5')).toMatchObject({
+      status: 'cross_line_collision',
+      parents: ['@npmcli/x'],
+    })
+  })
+
+  it('counts a parent without a range as eligible', async () => {
+    expect(await check('wo-range', '1', { location: 'resolutions' })).toMatchObject({
+      status: 'cross_line_collision',
+      parents: ['p'],
+    })
+  })
+
+  it('keeps lines with no shared parent under Yarn resolutions too', async () => {
+    expect(await check('disjoint', '1', { location: 'resolutions' })).toMatchObject({
+      where: 'actionable',
+      status: 'resolved',
+      parents: undefined,
+    })
+  })
+
+  it('keeps a group whose shared copy is not one of the shared parents', async () => {
+    expect(await check('stray', '5')).toMatchObject({ where: 'actionable', status: 'resolved' })
+  })
+
   it('moves a shared entry with no version, to be safe', async () => {
     expect(await check('null-copy', '5')).toMatchObject({
       status: 'cross_line_collision',
@@ -610,6 +698,7 @@ describe('the route', () => {
             group('rails', '7', { ecosystem: 'rubygems' }),
             group('ghost', '1', { ecosystem: null }),
             group('five', '1', { ecosystem: 5 }),
+            group('listed', '1', { ecosystem: ['npm'] }),
           ],
           [OLD],
         ),
@@ -635,6 +724,7 @@ describe('the route', () => {
         group('rails', '7', { ecosystem: 'rubygems' }),
         group('ghost', '1', { ecosystem: null }),
         group('five', '1', { ecosystem: 5 }),
+        group('listed', '1', { ecosystem: ['npm'] }),
       ].map((entry) => ({
         ...entry,
         adapter: null,
@@ -740,7 +830,7 @@ describe('the flat rewrite (#123)', () => {
   const STDIN = envelope(
     [
       group('lodash', '4', { branch_name: 'fix/dependabot-lodash-4x' }),
-      group('express', '4', { branch_name: 'sec/express-4' }),
+      group('express', '4', { branch_name: 'sec/fix/dependabot-express-4x' }),
       group('minimatch', '4', { branch_name: 'fix-dependabot-minimatch-4x' }),
     ],
     [
@@ -759,7 +849,11 @@ describe('the flat rewrite (#123)', () => {
     'renames the plugin branches of both lists, and no other name (%j)',
     async (style) => {
       expect(names(await answer(STDIN, ['--repo-root', SOME_ROOT, ...style]))).toEqual({
-        a: ['fix-dependabot-lodash-4x', 'sec/express-4', 'fix-dependabot-minimatch-4x'],
+        a: [
+          'fix-dependabot-lodash-4x',
+          'sec/fix/dependabot-express-4x',
+          'fix-dependabot-minimatch-4x',
+        ],
         s: ['fix-dependabot-left-pad-unfixed', undefined, 7],
       })
     },
@@ -769,7 +863,11 @@ describe('the flat rewrite (#123)', () => {
     expect(
       names(await answer(STDIN, ['--repo-root', SOME_ROOT, '--branch-style', 'slash'])),
     ).toEqual({
-      a: ['fix/dependabot-lodash-4x', 'sec/express-4', 'fix-dependabot-minimatch-4x'],
+      a: [
+        'fix/dependabot-lodash-4x',
+        'sec/fix/dependabot-express-4x',
+        'fix-dependabot-minimatch-4x',
+      ],
       s: ['fix/dependabot-left-pad-unfixed', undefined, 7],
     })
   })
@@ -941,6 +1039,88 @@ describe('--base-ref', () => {
     repo.fixtures.git(other, 'push', '-q', 'origin', 'HEAD:main')
     const result = await at(repo, ['--repo-root', repo.work, '--base-ref=origin/main'])
     expect(statusesOf(result)).toEqual(['line_absent'])
+  })
+
+  it('fetches under a narrowed fetch refspec', async () => {
+    const repo = repository()
+    repo.fixtures.git(
+      repo.work,
+      'config',
+      'remote.origin.fetch',
+      '+refs/heads/other:refs/remotes/origin/other',
+    )
+    const other = repo.sandbox.join('other')
+    repo.fixtures.git(
+      repo.sandbox.path,
+      'clone',
+      '-q',
+      join(repo.sandbox.join('repo'), 'origin.git'),
+      other,
+    )
+    writeFileSync(join(other, 'resolved-version'), '3.0.0\n')
+    repo.fixtures.git(other, 'commit', '-qam', 'advance')
+    repo.fixtures.git(other, 'push', '-q', 'origin', 'HEAD:main')
+    const result = await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'])
+    expect(statusesOf(result)).toEqual(['line_absent'])
+  })
+
+  it('takes a main that origin rewrote, which is not a fast-forward', async () => {
+    const repo = repository()
+    const other = repo.sandbox.join('other')
+    repo.fixtures.git(
+      repo.sandbox.path,
+      'clone',
+      '-q',
+      join(repo.sandbox.join('repo'), 'origin.git'),
+      other,
+    )
+    repo.fixtures.git(other, 'checkout', '-q', '--orphan', 'rewritten')
+    writeFileSync(join(other, 'resolved-version'), '3.0.0\n')
+    repo.fixtures.git(other, 'add', '-A')
+    repo.fixtures.git(other, 'commit', '-qm', 'rewritten')
+    repo.fixtures.git(other, 'push', '-q', '--force', 'origin', 'HEAD:main')
+    const result = await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'])
+    expect(statusesOf(result)).toEqual(['line_absent'])
+  })
+
+  it('removes a worktree that a verb left a file in', async () => {
+    const repo = repository()
+    await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], {
+      stdin: envelope([group('dirty', '1')]),
+      spec: { fromTree: false },
+    })
+    expect(repo.worktrees()).toBe(1)
+    expect(readdirSync(repo.temp)).toEqual([])
+  })
+
+  it('runs git in the environment of the command', async () => {
+    const repo = repository()
+    const result = await classifyLines(
+      context(['--repo-root', repo.work, '--base-ref', 'origin/main'], ONE, {
+        ...envOf(repo.sandbox, repo.temp),
+        GIT_CONFIG_COUNT: '1',
+        // A local origin is the `file` transport, and this refuses it.
+        GIT_CONFIG_KEY_0: 'protocol.file.allow',
+        GIT_CONFIG_VALUE_0: 'never',
+      }),
+      run,
+      standIn({ fromTree: true }).route,
+      '/',
+    )
+    expect((result as { error: string }).error).toMatch(
+      /^git fetch for --base-ref origin\/main failed: /,
+    )
+  })
+
+  it('refuses a top level from a git that failed, whatever it printed', async () => {
+    const repo = repository()
+    const failing: Runner = async (command, args = [], options) =>
+      args.includes('--show-toplevel')
+        ? { ...(await run(command, args, options)), status: 128 }
+        : run(command, args, options)
+    expect(
+      await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], { runner: failing }),
+    ).toEqual(failed(`--base-ref requires --repo-root to be a git repository: ${repo.work}`))
   })
 
   it('adds base_ref to each classify_errors entry', async () => {

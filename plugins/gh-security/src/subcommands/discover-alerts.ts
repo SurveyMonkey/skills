@@ -367,9 +367,6 @@ const highestOf = (
   return { highest: best }
 }
 
-/** The text that `jq -r` prints for a list of values, one on each line, as `$( )` keeps it. */
-const printed = (values: readonly unknown[]): string => chomp(values.map(tostring).join('\n'))
-
 /** The alerts on stdin, or the reason they cannot be read. */
 const alertsOnStdin = (text: string, target: string): unknown[] | string => {
   let parsed: unknown
@@ -388,7 +385,8 @@ const alertsOnStdin = (text: string, target: string): unknown[] | string => {
 /** Why the alerts cannot be grouped for this target, or null when they can. */
 const refusalOf = (alerts: readonly unknown[], target: string): string | null => {
   for (const alert of alerts) {
-    if (typeof alert !== 'object' || alert === null || Array.isArray(alert)) {
+    // The flat list holds no list, so an object here is not a list.
+    if (typeof alert !== 'object' || alert === null) {
       return `an alert is not an object: ${JSON.stringify(alert)}`
     }
     const repository = (alert as Record<string, unknown>).repository
@@ -469,14 +467,14 @@ export const discoverAlerts = async (
   for (const group of groups) {
     const name = chomp(group.name)
     const line = chomp(group.line)
-    const versions = printed(group.fixedVersions)
+    // The script reads each line that `jq -r` prints as a candidate, so an
+    // identifier with a line break gives one candidate for each line.
+    const fixes = group.fixedVersions
+      .flatMap((version) => tostring(version).split('\n'))
+      .filter((fix) => fix !== '')
     let highest = 'none'
-    if (versions !== '') {
-      const found = highestOf(
-        tostring(orElse(group.ecosystem, 'unknown')),
-        versions.split('\n').filter((candidate) => candidate !== ''),
-        route,
-      )
+    if (fixes.length > 0) {
+      const found = highestOf(tostring(orElse(group.ecosystem, 'unknown')), fixes, route)
       if ('error' in found) return failed(found.error)
       highest = found.highest
     }
@@ -487,7 +485,7 @@ export const discoverAlerts = async (
       branch_name: branch,
       repo: target,
     }
-    if (highest === 'none') {
+    if (fixes.length === 0) {
       skipped.push({ ...enriched, reason: 'no fix available' })
       continue
     }

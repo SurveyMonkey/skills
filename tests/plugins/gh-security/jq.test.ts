@@ -14,6 +14,9 @@ import {
   uniqueJq,
 } from '#gh-security/jq.ts'
 
+/** A character by its code point. A formatter keeps this, where it rewrites a `\u` escape. */
+const ch = (code: number): string => String.fromCodePoint(code)
+
 describe('compareJq', () => {
   it('orders the types as jq does: null, false, true, numbers, text, lists, objects', () => {
     // jq -n '[{}, [], "a", 1, true, false, null] | sort'
@@ -35,8 +38,10 @@ describe('compareJq', () => {
 
   it('orders a character above U+FFFF after U+FFFD, as code points do', () => {
     // JavaScript's own sort puts the surrogate pair first.
-    expect(['\u{1F600}', '�'].sort()).toEqual(['\u{1F600}', '�'])
-    expect(sortJq(['\u{1F600}', '�'])).toEqual(['�', '\u{1F600}'])
+    const smile = ch(0x1f600)
+    const replacement = ch(0xfffd)
+    expect([smile, replacement].sort()).toEqual([smile, replacement])
+    expect(sortJq([smile, replacement])).toEqual([replacement, smile])
   })
 
   it('orders lists entry by entry, then a shorter list first', () => {
@@ -139,8 +144,9 @@ describe('majorOf', () => {
     ['an equals prefix', '=7.1', '7'],
     ['v and = together', 'v=v7', '7'],
     ['white space at each end', '  7.29.0 \t', '7'],
-    ['a no-break space and an ideographic space', ' 7.0　', '7'],
-    ['a next-line and a line separator', '\u0085 7.0', '7'],
+    ['a no-break space and an ideographic space', `${ch(0xa0)}7.0${ch(0x3000)}`, '7'],
+    ['a next-line and a line separator', `${ch(0x85)}${ch(0x2028)}7.0`, '7'],
+    ['a next-line at the end', `7${ch(0x85)}`, '7'],
     ['a leading zero', '07.1.0', '07'],
     ['a major with no dot', '12', '12'],
     ['a number', 7, '7'],
@@ -153,11 +159,12 @@ describe('majorOf', () => {
     ['prose', 'See vendor advisory'],
     ['empty text', ''],
     ['a leading dot', '.5'],
-    ['a byte order mark, which is not white space to jq', '﻿7.0'],
+    ['a byte order mark, which is not white space to jq', `${ch(0xfeff)}7.0`],
+    ['a byte order mark at the end', `7${ch(0xfeff)}`],
     ['a line break inside the major', '7\n8.0'],
     ['a negative number', -7],
     ['a sign', '+7.0'],
-    ['a digit of another script', '٣.0'],
+    ['a digit of another script', `${ch(0x663)}.0`],
     ['a list', [7]],
     ['null', null],
   ])('finds no major in %s', (_case, version) => {

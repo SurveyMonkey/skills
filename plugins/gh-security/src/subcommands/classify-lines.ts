@@ -268,7 +268,7 @@ export const classifyLines = async (
       group: { ...(rest as JsonObject), adapter: found.name, supported: true },
       name: found.name,
       adapter: found.adapter,
-      pkg: chomp(orElse(group.package, '') as string),
+      pkg: orElse(group.package, '') as string,
       line: chomp(tostring(orElse(group.major_line, 'none'))),
     })
   }

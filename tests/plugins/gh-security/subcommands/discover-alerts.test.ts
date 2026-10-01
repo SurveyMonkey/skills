@@ -72,8 +72,9 @@ interface StandIn {
   readonly alerts?: readonly unknown[] | GhError | Error
   /** The open pull request URL for each `head:` search that finds one. */
   readonly prs?: Readonly<Record<string, string>>
-  /** When set, every `head:` search fails with it. */
+  /** When set, every `head:` search fails with it, or each head that it names. */
   readonly search?: GhError | Error
+  readonly failing?: readonly string[]
 }
 
 /**
@@ -94,7 +95,7 @@ const standIn = (spec: StandIn) => {
     },
     searchOpenPullRequests: async ({ repository, head }) => {
       asked.push(`${repository} head:${head}`)
-      if (spec.search !== undefined) throw spec.search
+      if (spec.search !== undefined && (spec.failing ?? [head]).includes(head)) throw spec.search
       const url = spec.prs?.[head]
       return url === undefined ? [] : [{ url }]
     },
@@ -272,11 +273,43 @@ describe('the groups', () => {
     expect(actionable[1]?.max_epss_percentile).toBe(0)
   })
 
-  it('reads the highest EPSS of a group in the order of jq', async () => {
+  it.each([
+    ['rising', [0.2, 0.7]],
+    ['falling', [0.7, 0.2]],
+  ])('reads the highest EPSS of a group in the order of jq, %s', async (_case, values) => {
     const { actionable } = await answer(['octo/app'], {
-      alerts: [alert(1, 'a', '1.0.1', { epss: 0.2 }), alert(2, 'a', '1.0.2', { epss: 0.7 })],
+      alerts: values.map((epss, index) => alert(index, 'a', `1.0.${index}`, { epss })),
     })
     expect(actionable[0]?.max_epss_percentile).toBe(0.7)
+  })
+
+  it('keeps the first severity of the lowest rank, as a stable sort does', async () => {
+    const { actionable } = await answer(['octo/app'], {
+      alerts: [
+        alert(1, 'a', '1.0.1', { severity: 'moderate' }),
+        alert(2, 'a', '1.0.2', { severity: 'unknown' }),
+      ],
+    })
+    expect(actionable[0]?.max_severity).toBe('moderate')
+  })
+
+  it('makes one group of a line whose alerts come apart in the list', async () => {
+    const { actionable } = await answer(['octo/app'], {
+      alerts: [
+        alert(1, 'undici', '7.1.0'),
+        alert(2, 'undici', '6.1.0'),
+        alert(3, 'undici', '7.2.0'),
+        alert(4, 'lodash', '4.17.21'),
+        alert(5, 'undici', '6.2.0'),
+      ],
+    })
+    expect(actionable.map((group) => [group.package, group.major_line, group.alert_count])).toEqual(
+      [
+        ['lodash', '4', 1],
+        ['undici', '6', 2],
+        ['undici', '7', 2],
+      ],
+    )
   })
 
   it.each([
@@ -472,11 +505,21 @@ describe('compareVersionText', () => {
     ['1.2.tar.gz', '1.10.tar.gz', -1],
     ['1.~x', '1.0', -1],
     ['1-2', '1+2', 1],
-    ['1.é', '1.e', 1],
+    [`1.${String.fromCodePoint(0xe9)}`, '1.e', 1],
     ['abc', 'abd', -1],
     ['a1', '1', 1],
     ['1.2', '1.3', -1],
     ['21', '12', 1],
+    // These rows came from a search for each mutant of the sort, and each is
+    // checked against GNU sort 9.7 (`sort -V | tail -1`). The sort of macOS
+    // puts `1.AAb` above `1.`.
+    ['10-9', '11', -1],
+    ['11~a', '1b-~', 1],
+    ['1A9aAb', '1.~', 1],
+    ['1.', '1.AAb', 1],
+    ['1-', '1a', 1],
+    ['1A', '1a', -1],
+    ['1.3a', '1.2b', 1],
     ['1.0', '1.00', -1],
     ['1.2.3', '1.2.3', 0],
   ])('orders %s against %s as %s', (a, b, order) => {
@@ -515,6 +558,37 @@ describe('the open pull request check', () => {
     expect(skipped.find((group) => group.open_pr_url === PR)?.reason).toBe(
       'open PR exists (legacy branch fix/dependabot-undici)',
     )
+  })
+
+  it('applies a PR on the legacy name to line 10, and not to line 9', async () => {
+    const { skipped } = await answer(['octo/app'], {
+      alerts: [alert(1, 'x', '9.1.0'), alert(2, 'x', '10.1.0')],
+      prs: { 'fix/dependabot-x': PR },
+    })
+    expect(skipped.map((group) => [group.major_line, group.reason])).toEqual([
+      ['10', 'open PR exists (legacy branch fix/dependabot-x)'],
+    ])
+  })
+
+  it('names a PR on the own flat branch under the flat style as open PR exists', async () => {
+    const { skipped } = await answer(['--branch-style', 'flat', 'octo/app'], {
+      prs: { 'fix-dependabot-undici-6x': PR },
+    })
+    expect(
+      skipped.filter((group) => group.open_pr_url === PR).map((group) => group.reason),
+    ).toEqual(['open PR exists'])
+  })
+
+  it('stops at a search that fails, and does not read a later head', async () => {
+    const { skipped } = await answer(['octo/app'], {
+      alerts: [alert(1, 'x', '1.0.1')],
+      search: new GhError('gh pr list failed', 1, { cause: null, detail: 'gh: HTTP 502' }),
+      failing: ['fix/dependabot-x-1x'],
+      prs: { 'fix-dependabot-x-1x': PR },
+    })
+    expect(skipped.map((group) => [group.reason, group.error, group.open_pr_url])).toEqual([
+      ['PR check failed', 'gh: HTTP 502', undefined],
+    ])
   })
 
   it('names the first head that has a PR: its own, then the flat twin, then the legacy name', async () => {
