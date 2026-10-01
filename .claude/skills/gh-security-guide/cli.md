@@ -20,7 +20,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/state.ts` | The fix driver's state file, typed |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
-| `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
+| `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, preflight, scoring, rendering, the drivers |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
@@ -97,8 +97,10 @@ its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `s
 synchronous, so it keeps a local runner.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
-into handlers and mocked one method at a time. Its API is the target stack's. It has one method,
-`viewPullRequest`, and a method comes with the command that calls it. A method answers with the
+into handlers and mocked one method at a time. Its API is the target stack's, with three methods:
+`viewPullRequest` for `pr-status`, `viewDefaultBranch` for `detect-scope`, and `listAdvisories` for
+`check-advisories`. A method comes with the command that calls it. The last two are not in the
+target stack, and `lib/gh.ts` names them as divergences. A method answers with the
 value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
 that error into an envelope. Octokit is not the client, because nothing shipped imports anything
 outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's

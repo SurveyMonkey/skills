@@ -24,7 +24,9 @@ it, and carries it in the dispatch payload. Each agent then prepends it verbatim
 `git`, package-manager, and adapter-script invocation — composed **after** the command's own `cd`
 locator, because the prefix injects environment without changing directory — and runs those
 commands bare when the field is absent. It wraps a command, not a shell builtin, so it can never
-stand in for a `cd`. `check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+stand in for a `cd`. `check-advisories.sh` makes its own `gh` call, so it takes the same wrapping. The ported
+commands `check-advisories` and `detect-scope` take `--env-prefix`, and wrap their own `gh` and `git`
+calls with it.
 
 The failure class this guards against is manager-agnostic: per-directory environment tools load
 through interactive shell hooks that non-interactive tool shells never run, so a bare `gh`, `git`,

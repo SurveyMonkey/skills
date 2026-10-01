@@ -59,7 +59,8 @@ Anything else that judges a tree change reads it the same way. Two rules travel 
 ## Removability is judged against the advisory database, never repo alert history
 
 `check-advisories.sh` unions the vulnerable ranges of **every published advisory** for a package
-and, given `--adapter` and `--version`, returns a verdict for one candidate version. The pin audit
+and, given `--version`, returns a verdict for one candidate version. The bash script also needs
+`--adapter`. The CLI command takes the adapter from `--ecosystem`. The pin audit
 has no other source for "is this version safe", and the reason is structural: a pin keeps
 vulnerable versions out of the lockfile, so every advisory published after the pin produced no
 alert on that repository. Asking the repo's own alert history is asking "was anything reported
