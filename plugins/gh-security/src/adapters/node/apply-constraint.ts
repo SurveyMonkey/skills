@@ -29,19 +29,15 @@
 // Where jq stops in a pass that node.sh gives no message, bash exits 5 with
 // the text of jq. The port answers `failed` with its own text.
 //
-// node.sh writes each file to a temporary file, and then moves it into
-// place with `mv`. The port writes in place. This gives three declared
-// divergences:
-//
-//   - A written file keeps its mode. In node.sh it gets the mode 0600.
-//   - A symlink stays, and the port writes the file that it points to.
-//     node.sh puts a regular file in place of the symlink.
-//   - An error of the disk in the write can leave part of the file. In
-//     node.sh, the file stays as it was until the move.
+// Each write goes through a temporary file and a rename (`replace-file.ts`),
+// as node.sh does with `mktemp` and `mv` (ruling 14). A failed step answers
+// `failed` with the `die` text of node.sh. node.sh has no `die` for the
+// move of package-lock.json, so the port uses the words of package.json.
+// A written file keeps its mode, where node.sh gives it 0600.
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Envelope, Failure } from '../../lib/envelope.ts'
@@ -67,6 +63,7 @@ import {
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
+import { replaceFile } from './replace-file.ts'
 import { workspaceOverrides } from './workspace-overrides.ts'
 import { writeWorkspaceOverrides } from './workspace-write.ts'
 
@@ -228,9 +225,10 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   }
   // A document that did not change keeps its bytes (#159 review).
   if (!equal(output, manifest)) {
-    dieOn(`apply_constraint: cannot replace package.json in ${root}`, () =>
-      writeFileSync(manifestPath, `${render(output, indent)}\n`),
-    )
+    replaceFile(manifestPath, `${render(output, indent)}\n`, {
+      write: 'apply_constraint: failed to write package.json',
+      rename: `apply_constraint: cannot replace package.json in ${root}`,
+    })
   }
   let invalidated: ApplyConstraintAnswer['lockfile_invalidated'] = { performed: false, keys: [] }
   const wroteOverride = pass.written.some(({ path }) => path[0] === 'overrides')
@@ -239,9 +237,13 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
     const result = dieOn(CANNOT_READ_LOCKFILE, () => invalidationOf(current, pkg, range))
     invalidated = result.invalidated
     if (result.lockfile !== null) {
-      writeFileSync(
+      replaceFile(
         join(root, 'package-lock.json'),
         `${render(result.lockfile, indentOf(current.text))}\n`,
+        {
+          write: 'apply_constraint: failed to write package-lock.json',
+          rename: `apply_constraint: cannot replace package-lock.json in ${root}`,
+        },
       )
     }
   }

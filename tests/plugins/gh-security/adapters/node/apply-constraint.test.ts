@@ -9,7 +9,20 @@
 // the jq of the spec example does. The verdict examples run `validate`,
 // `resolved_versions` or `list_pins` on the tree that the call wrote. The
 // testing skill says why ("Assert the verdict, not the parse").
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'
 
@@ -2599,4 +2612,85 @@ describe('the refusal of the root keys', () => {
     })
     expect(refusalOf('npm-v3', LODASH, text)).toBe('apply_constraint: cannot read package.json')
   })
+})
+
+describe('the write of each file, through a temporary file and a rename', () => {
+  const STALE = ['axios', '>=1.18.0 <2', 'nx'] as const
+  const WRITES = [
+    ['package.json', 'npm-stale-nested', STALE],
+    ['package-lock.json', 'npm-stale-nested', STALE],
+    ['pnpm-workspace.yaml', PNPM11, [...BRACE, 'minimatch']],
+  ] as const
+
+  /** A scratch directory outside the copy, removed after the test. */
+  const outsideDir = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'apply-constraint-outside-'))
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }))
+    return dir
+  }
+
+  it.each(WRITES)(
+    'replaces a symlink at %s, and leaves the file that it points to as it was',
+    (file, fixture, args) => {
+      const outside = outsideDir()
+      const { envelope, dir } = apply(fixture, args, (copy) => {
+        renameSync(join(copy, file), join(outside, file))
+        symlinkSync(join(outside, file), join(copy, file))
+      })
+      answerOf(envelope)
+      const specimen = textAt(join(FIXTURES_ROOT, fixture), file)
+      expect({
+        link: lstatSync(join(dir, file)).isSymbolicLink(),
+        changed: textAt(dir, file) !== specimen,
+        target: textAt(outside, file) === specimen,
+      }).toEqual({ link: false, changed: true, target: true })
+    },
+  )
+
+  it('adds the block to the copy, not to the file that a symlink points to', () => {
+    const outside = outsideDir()
+    const text = 'packages:\n  - packages/*\n'
+    writeFileSync(join(outside, 'pnpm-workspace.yaml'), text)
+    const { envelope, dir } = apply(PNPM11, [...BRACE], (copy) => {
+      rmSync(join(copy, 'pnpm-workspace.yaml'))
+      symlinkSync(join(outside, 'pnpm-workspace.yaml'), join(copy, 'pnpm-workspace.yaml'))
+    })
+    answerOf(envelope)
+    expect({
+      written: textAt(dir, 'pnpm-workspace.yaml'),
+      target: textAt(outside, 'pnpm-workspace.yaml'),
+    }).toEqual({ written: `${text}overrides:\n  'brace-expansion': '>=5.0.9 <6'\n`, target: text })
+  })
+
+  it.each(WRITES)('keeps the mode of %s', (file, fixture, args) => {
+    const { envelope, dir } = apply(fixture, args, (copy) => chmodSync(join(copy, file), 0o640))
+    answerOf(envelope)
+    expect(statSync(join(dir, file)).mode & 0o7777).toBe(0o640)
+  })
+
+  it.skipIf(process.getuid?.() === 0).each([
+    ['package.json', 'npm-stale-nested', STALE, 'apply_constraint: failed to write package.json'],
+    [
+      'pnpm-workspace.yaml',
+      PNPM11,
+      [...BRACE, 'minimatch'],
+      'pnpm-workspace.yaml overrides: failed to rewrite the block',
+    ],
+  ] as const)(
+    'fails at the write of %s in a directory that cannot be written, and changes no file',
+    (_, fixture, args, error) => {
+      const dir = copyOf(fixture)
+      const before = readdirSync(dir).map((name) => [name, readOptional(dir, name)])
+      chmodSync(dir, 0o555)
+      try {
+        expect(node.applyConstraint(treeAt(dir), requestOf(args))).toEqual({
+          outcome: 'failed',
+          error,
+        })
+      } finally {
+        chmodSync(dir, 0o755)
+      }
+      expect(readdirSync(dir).map((name) => [name, readOptional(dir, name)])).toEqual(before)
+    },
+  )
 })

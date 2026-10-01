@@ -11,17 +11,25 @@
 // file that pnpm reads in a different way ships. A block that the reader
 // refuses after the write is a failure with the words of the reader.
 //
+// The writer makes the new text in memory, and then puts it in place
+// through a temporary file and a rename (`replace-file.ts`). node.sh first
+// adds the `overrides:` line to the file in place, and then moves the
+// rewrite over it. So for a symlink with no block, node.sh also changes the
+// file that the symlink points to. The port does not. A failed write of the
+// temporary file answers the `die` text of the awk step.
+//
 // node.sh also refuses an entry that the final map does not hold. No caller
 // makes that state: `apply_constraint` only adds and changes entries. So the
 // port has no such check.
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { hasWorkspaceOverrides } from './detect.ts'
 import { equal } from './jq-json.ts'
+import { replaceFile } from './replace-file.ts'
 import { entryOf, workspaceOverrides } from './workspace-overrides.ts'
 
 // The awk patterns, with `[[:space:]]` spelled out.
@@ -138,7 +146,10 @@ export const writeWorkspaceOverrides = (
       text += 'overrides:\n'
     }
   }
-  writeFileSync(path, rewrite(text, order, want))
+  replaceFile(path, rewrite(text, order, want), {
+    write: 'pnpm-workspace.yaml overrides: failed to rewrite the block',
+    rename: `pnpm-workspace.yaml overrides: cannot replace pnpm-workspace.yaml in ${root}`,
+  })
   // A refusal of the read is the refusal of the call, as in node.sh.
   const read = Object.fromEntries(workspaceOverrides(root).map(({ key, value }) => [key, value]))
   if (!equal(read, final)) {
