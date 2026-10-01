@@ -73,8 +73,9 @@ requires the cwd to sit inside a **linked** worktree, which a primary checkout, 
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
 The TypeScript port of the guard is `requireLinkedWorktree` in `plugins/gh-security/src/worktree.ts`.
-It is a function, not a command. The write verbs of the adapter call it in process, as their first
-statement (#222): `install` and `shim` of the node adapter, in `src/adapters/node/install.ts` and
-`src/adapters/node/shim.ts`. The node `applyConstraint` answers `not-implemented` and writes
-nothing until layer 2 of #222 ports it with the same first statement. `validate` only reads, so it
-has no guard. `tests/plugins/gh-security/parity-worktree.test.ts` runs the guard against the script.
+It is a function, not a command. Each write verb of the adapter calls it in process, as its first
+statement (#222). In the node adapter, these are `install` (`src/adapters/node/install.ts`) and
+`shim` (`src/adapters/node/shim.ts`). The node `applyConstraint` writes nothing and answers
+`not-implemented`. Layer 2 of #222 ports it, with the same first statement. `validate` only reads,
+so it has no guard. `tests/plugins/gh-security/parity-worktree.test.ts` runs the guard against the
+script.
