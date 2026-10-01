@@ -40,6 +40,7 @@ export type GhEndpoint = keyof GhResults
  *  implements it, and so does `createGhMock` in the harness. */
 export interface GhClient {
   viewPullRequest(pull: { pullRequest: number }): Promise<GhResults['viewPullRequest']>
+  /** `repository` is `[HOST/]OWNER/REPO`, as `gh repo view` reads it. */
   viewDefaultBranch(repo: { repository: string }): Promise<GhResults['viewDefaultBranch']>
   listAdvisories(query: {
     package: string

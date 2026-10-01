@@ -18,12 +18,15 @@
 // `src/other-repo` reads downstream as a real repository.
 //
 // **`default_branch` comes from GitHub when the remote host is `github.com`**
-// (#167, rulings 5 and 11 on #225). The `nwo` field does not depend on the host. The local `origin/HEAD` symref is written once, at clone
-// time, and `git fetch` never refreshes it. A branch that is renamed on GitHub
-// then stays wrong in each older checkout, with no sign. A failed read from
-// GitHub is an error. It is never a fall back to the symref, because the
-// symref is the value that cannot be trusted. A repository with no default
-// branch on GitHub gives a null `default_branch`.
+// (#167, rulings 5 and 11 on #225). The `nwo` field does not depend on the
+// host. The local `origin/HEAD` symref is written once, at clone time, and
+// `git fetch` never refreshes it. A branch that is renamed on GitHub then
+// stays wrong in each older checkout, with no sign. A failed read from GitHub
+// is an error. It is never a fall back to the symref, because the symref is
+// the value that cannot be trusted. A repository with no default branch on
+// GitHub gives a null `default_branch`. The read names the host, because a
+// bare `OWNER/REPO` follows `GH_HOST` and the `gh` configuration, and could
+// ask another server.
 //
 // With no nwo, or with a host that is not `github.com`, there is no GitHub
 // repository to ask. A name on another host can also exist on `github.com`,
@@ -169,7 +172,7 @@ export const detectScope = async (
   if (pair !== null && pair.host.toLowerCase() === GITHUB_HOST) {
     try {
       const view = await makeClient({ env: context.env, run: prefixed }).viewDefaultBranch({
-        repository: `${pair.owner}/${pair.repo}`,
+        repository: `${GITHUB_HOST}/${pair.owner}/${pair.repo}`,
       })
       defaultBranch = view.name ?? ''
     } catch (error) {

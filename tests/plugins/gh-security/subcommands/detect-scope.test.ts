@@ -182,7 +182,24 @@ describe('the answer for a repository with a GitHub remote', () => {
       },
     })
     await detectScope(context(w, [dir]), factory, run, '/nowhere')
-    expect(asked).toEqual(['Owner/My.Repo'])
+    expect(asked).toEqual(['github.com/Owner/My.Repo'])
+  })
+
+  // A bare `--web/app` could read as an option of `gh repo view`. With the
+  // host in front, it is a name.
+  it('never lets an owner that starts with a dash reach gh as an option', async () => {
+    const w = world()
+    const dir = repoWith(w, 'https://github.com/--web/app.git')
+    const asked: string[] = []
+    const factory: ClientFactory = () => ({
+      ...createGhMock(),
+      viewDefaultBranch: async (repo) => {
+        asked.push(repo.repository)
+        return { name: 'main' }
+      },
+    })
+    await detectScope(context(w, [dir]), factory, run, '/nowhere')
+    expect(asked).toEqual(['github.com/--web/app'])
   })
 
   it.each([
@@ -205,7 +222,7 @@ describe('the answer for a repository with a GitHub remote', () => {
       },
     })
     const answer = value(await detectScope(context(w, [dir]), factory, run, '/nowhere'))
-    expect(asked).toEqual(['octo/app'])
+    expect(asked).toEqual(['github.com/octo/app'])
     expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'develop' })
   })
 
@@ -489,7 +506,14 @@ describe('--env-prefix', () => {
     await detectScope(context(w, ['--env-prefix', 'env', '/work']), real, runner, '/nowhere')
     const gh = calls.find((call) => call.args.includes('repo'))
     expect(gh?.command).toBe('env')
-    expect(gh?.args).toEqual(['gh', 'repo', 'view', 'octo/app', '--json', 'defaultBranchRef'])
+    expect(gh?.args).toEqual([
+      'gh',
+      'repo',
+      'view',
+      'github.com/octo/app',
+      '--json',
+      'defaultBranchRef',
+    ])
   })
 
   it('puts the prefix before every git call, after splitting a prefix of several words', async () => {
