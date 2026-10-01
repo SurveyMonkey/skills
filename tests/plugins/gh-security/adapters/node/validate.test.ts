@@ -13,6 +13,7 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 
 import type { Tree, ValidateOptions } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
+import { satisfiesAll } from '#gh-security/adapters/node/validate.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 
@@ -640,5 +641,26 @@ describe('the override-placed shape of npm', () => {
       ok: false,
       unresolved: [{ version: '5.0.5', path: 'node_modules/brace-expansion' }],
     })
+  })
+})
+
+// `apply_constraint` reads ranges with this function too (#222, layer 2).
+// Each row is the jq answer of `satisfies`, run on the same input.
+describe('satisfiesAll, the jq rule for a range', () => {
+  it.each([
+    ['1.2.3', '>=1.0.0 <2', true],
+    ['2.0.0', '>=1.0.0 <2', false],
+    ['1.0.0', '>=2 || >=0.5', true],
+    ['1.0.0', '< 1.0.0', false],
+  ])('answers %s in %s as %s', (version, range, expected) => {
+    expect(satisfiesAll(version, range)).toBe(expected)
+  })
+
+  it.each([
+    ['an empty alternative', '>=0 ||'],
+    ['an operator with no version', '>='],
+    ['a bad comparator after a match', '>=0.5 || >='],
+  ])('stops where jq stops: %s', (_shape, range) => {
+    expect(() => satisfiesAll('1.0.0', range)).toThrow()
   })
 })

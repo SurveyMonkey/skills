@@ -12,6 +12,16 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 
 import type { Pin, Tree } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
+import {
+  blockOf,
+  factsOf,
+  INVALID,
+  stripSelector,
+  typeOf,
+  workspaceView,
+  yarnKey,
+} from '#gh-security/adapters/node/list-pins.ts'
+import { NO_DOCUMENT } from '#gh-security/adapters/node/manifest.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 
@@ -738,3 +748,66 @@ describe('list_pins through pnpm-workspace.yaml', () => {
 
 const notAnObjectOfNoType =
   "list_pins: 'pnpm.overrides' in package.json is a , not an object of override entries. Refusing to report a manifest this script cannot read as a repository with no pins."
+
+// `apply_constraint` reads the block and the keys with these exports too
+// (#222, layer 2). Each row is the jq answer on the same input.
+describe('the readers that apply_constraint reuses', () => {
+  it.each([
+    ['an object block', { overrides: { a: '1' } }, 'overrides', { a: '1' }],
+    ['a block of false', { overrides: false }, 'overrides', null],
+    ['no block', {}, 'resolutions', null],
+    ['a pnpm field of false', { pnpm: false }, 'pnpm.overrides', INVALID],
+    ['a top level that is a list', [], 'overrides', INVALID],
+    ['no document', NO_DOCUMENT, 'overrides', NO_DOCUMENT],
+  ] as const)('blockOf reads %s', (_shape, manifest, location, expected) => {
+    expect(blockOf(manifest, location)).toEqual(expected)
+  })
+
+  it.each([
+    [[], 'array'],
+    ['x', 'string'],
+    [true, 'boolean'],
+    [NO_DOCUMENT, ''],
+  ] as const)('typeOf names %j as %j', (value, expected) => {
+    expect(typeOf(value)).toBe(expected)
+  })
+
+  it('workspaceView puts the block of the file in place of pnpm.overrides', () => {
+    const root = join(FIXTURES_ROOT, 'pnpm11-workspace-overrides')
+    expect(workspaceView(root, { pnpm: { overrides: { x: '1' }, y: 2 } }, { ws: '2' })).toEqual({
+      pnpm: { overrides: { ws: '2' }, y: 2 },
+    })
+  })
+
+  it('workspaceView drops pnpm.overrides when the file has no block', () => {
+    const root = join(FIXTURES_ROOT, 'pnpm-v9')
+    expect(workspaceView(root, { pnpm: { overrides: { x: '1' }, y: 2 } }, {})).toEqual({
+      pnpm: { y: 2 },
+    })
+  })
+
+  it.each([
+    ['@a/b@^1', { name: '@a/b', selector: '^1' }],
+    ['@a/b', { name: '@a/b', selector: null }],
+    ['a@1@2', { name: 'a@1', selector: '2' }],
+  ])('stripSelector reads %s', (target, expected) => {
+    expect(stripSelector(target)).toEqual(expected)
+  })
+
+  it('factsOf reads an npm: value as an alias of the package it names', () => {
+    expect(factsOf('npm:@scope/real@^2')).toEqual({
+      kind: 'alias',
+      range: null,
+      alias_package: '@scope/real',
+      alias_range: '^2',
+    })
+  })
+
+  it.each([
+    ['@a/b/c', { parents: ['@a/b'], target: 'c' }],
+    ['@a/b', { parents: [], target: '@a/b' }],
+    ['a@^3/b', { parents: ['a@^3'], target: 'b' }],
+  ])('yarnKey reads %s', (key, expected) => {
+    expect(yarnKey(key)).toEqual(expected)
+  })
+})
