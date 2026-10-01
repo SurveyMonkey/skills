@@ -2662,35 +2662,125 @@ describe('the write of each file, through a temporary file and a rename', () => 
     }).toEqual({ written: `${text}overrides:\n  'brace-expansion': '>=5.0.9 <6'\n`, target: text })
   })
 
-  it.each(WRITES)('keeps the mode of %s', (file, fixture, args) => {
-    const { envelope, dir } = apply(fixture, args, (copy) => chmodSync(join(copy, file), 0o640))
+  it('replaces a dangling symlink, and makes no file where it points', () => {
+    const outside = outsideDir()
+    const { envelope, dir } = apply(PNPM11, [...BRACE], (copy) => {
+      rmSync(join(copy, 'pnpm-workspace.yaml'))
+      symlinkSync(join(outside, 'pnpm-workspace.yaml'), join(copy, 'pnpm-workspace.yaml'))
+    })
     answerOf(envelope)
-    expect(statSync(join(dir, file)).mode & 0o7777).toBe(0o640)
+    expect({
+      written: textAt(dir, 'pnpm-workspace.yaml'),
+      outside: readdirSync(outside),
+    }).toEqual({ written: "overrides:\n  'brace-expansion': '>=5.0.9 <6'\n", outside: [] })
   })
 
+  // node.sh refuses this file with `cannot append`. A rename needs only the
+  // directory, so the port writes it: a declared divergence.
+  it('replaces a workspace file with no block that cannot be written', () => {
+    const text = 'packages:\n  - packages/*\n'
+    const { envelope, dir } = apply(PNPM11, [...BRACE], (copy) => {
+      writeFileSync(join(copy, 'pnpm-workspace.yaml'), text)
+      chmodSync(join(copy, 'pnpm-workspace.yaml'), 0o444)
+    })
+    answerOf(envelope)
+    expect({
+      written: textAt(dir, 'pnpm-workspace.yaml'),
+      mode: statSync(join(dir, 'pnpm-workspace.yaml')).mode & 0o7777,
+    }).toEqual({ written: `${text}overrides:\n  'brace-expansion': '>=5.0.9 <6'\n`, mode: 0o444 })
+  })
+
+  it.each(WRITES)('keeps the mode of %s', (file, fixture, args) => {
+    // A mode that no umask makes from the 0o666 of a new file.
+    const { envelope, dir } = apply(fixture, args, (copy) => chmodSync(join(copy, file), 0o766))
+    answerOf(envelope)
+    expect(statSync(join(dir, file)).mode & 0o7777).toBe(0o766)
+  })
+
+  /** The call on a copy, and each file of the copy before and after it. */
+  const failedCall = (dir: string, args: readonly string[]) => {
+    const files = () => readdirSync(dir).map((name) => [name, readOptional(dir, name)])
+    const before = files()
+    return { envelope: node.applyConstraint(treeAt(dir), requestOf(args)), before, after: files() }
+  }
+
+  // Each text is the text of node.sh on the same copy.
   it.skipIf(process.getuid?.() === 0).each([
-    ['package.json', 'npm-stale-nested', STALE, 'apply_constraint: failed to write package.json'],
+    [
+      'package.json',
+      'npm-stale-nested',
+      undefined,
+      STALE,
+      'apply_constraint: cannot replace package.json',
+    ],
     [
       'pnpm-workspace.yaml',
       PNPM11,
+      undefined,
       [...BRACE, 'minimatch'],
-      'pnpm-workspace.yaml overrides: failed to rewrite the block',
+      'pnpm-workspace.yaml overrides: cannot replace pnpm-workspace.yaml',
+    ],
+    [
+      'a new pnpm-workspace.yaml',
+      PNPM11,
+      (copy: string) => rmSync(join(copy, 'pnpm-workspace.yaml')),
+      [...BRACE],
+      'pnpm-workspace.yaml overrides: cannot create pnpm-workspace.yaml',
     ],
   ] as const)(
     'fails at the write of %s in a directory that cannot be written, and changes no file',
-    (_, fixture, args, error) => {
-      const dir = copyOf(fixture)
-      const before = readdirSync(dir).map((name) => [name, readOptional(dir, name)])
+    (_, fixture, setup, args, error) => {
+      const dir = copyOf(fixture, setup)
       chmodSync(dir, 0o555)
       try {
-        expect(node.applyConstraint(treeAt(dir), requestOf(args))).toEqual({
-          outcome: 'failed',
-          error,
+        const { envelope, before, after } = failedCall(dir, args)
+        expect({ envelope, after }).toEqual({
+          envelope: { outcome: 'failed', error: `${error} in ${dir}` },
+          after: before,
         })
       } finally {
         chmodSync(dir, 0o755)
       }
-      expect(readdirSync(dir).map((name) => [name, readOptional(dir, name)])).toEqual(before)
+    },
+  )
+
+  it('fails with the text of node.sh for a directory at pnpm-workspace.yaml', () => {
+    const dir = copyOf(PNPM11, (copy) => {
+      rmSync(join(copy, 'pnpm-workspace.yaml'))
+      mkdirSync(join(copy, 'pnpm-workspace.yaml'))
+    })
+    const { envelope, before, after } = failedCall(dir, [...BRACE])
+    expect({ envelope, after }).toEqual({
+      envelope: {
+        outcome: 'failed',
+        error: `pnpm-workspace.yaml overrides: cannot create pnpm-workspace.yaml in ${dir}`,
+      },
+      after: before,
+    })
+  })
+
+  // node.sh has no `die` for this move. The text is the text of the port.
+  it.skipIf(process.getuid?.() === 0)(
+    'fails at the write of package-lock.json in a directory that cannot be written',
+    () => {
+      const dir = copyOf('npm-stale-nested')
+      const lock = textAt(dir, 'package-lock.json')
+      answerOf(node.applyConstraint(treeAt(dir), requestOf(STALE)))
+      // package.json has the rule now, so the second call writes only the lockfile.
+      writeFileSync(join(dir, 'package-lock.json'), lock)
+      chmodSync(dir, 0o555)
+      try {
+        const { envelope, before, after } = failedCall(dir, STALE)
+        expect({ envelope, after }).toEqual({
+          envelope: {
+            outcome: 'failed',
+            error: `apply_constraint: cannot replace package-lock.json in ${dir}`,
+          },
+          after: before,
+        })
+      } finally {
+        chmodSync(dir, 0o755)
+      }
     },
   )
 })

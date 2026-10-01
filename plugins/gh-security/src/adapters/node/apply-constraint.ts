@@ -30,10 +30,12 @@
 // the text of jq. The port answers `failed` with its own text.
 //
 // Each write goes through a temporary file and a rename (`replace-file.ts`),
-// as node.sh does with `mktemp` and `mv` (ruling 14). A failed step answers
-// `failed` with the `die` text of node.sh. node.sh has no `die` for the
-// move of package-lock.json, so the port uses the words of package.json.
-// A written file keeps its mode, where node.sh gives it 0600.
+// as node.sh does with `mktemp` and `mv` (ruling 14). A failed write answers
+// `failed` with the `mv` text of node.sh. node.sh has no `die` for the move
+// of package-lock.json, so the port uses the words of package.json. The
+// `failed to write` texts of node.sh are for a failure of jq in `$TMPDIR`.
+// The port has no such step. A written file keeps its mode, where node.sh
+// gives it 0600.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -225,10 +227,11 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   }
   // A document that did not change keeps its bytes (#159 review).
   if (!equal(output, manifest)) {
-    replaceFile(manifestPath, `${render(output, indent)}\n`, {
-      write: 'apply_constraint: failed to write package.json',
-      rename: `apply_constraint: cannot replace package.json in ${root}`,
-    })
+    replaceFile(
+      manifestPath,
+      `${render(output, indent)}\n`,
+      `apply_constraint: cannot replace package.json in ${root}`,
+    )
   }
   let invalidated: ApplyConstraintAnswer['lockfile_invalidated'] = { performed: false, keys: [] }
   const wroteOverride = pass.written.some(({ path }) => path[0] === 'overrides')
@@ -240,10 +243,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       replaceFile(
         join(root, 'package-lock.json'),
         `${render(result.lockfile, indentOf(current.text))}\n`,
-        {
-          write: 'apply_constraint: failed to write package-lock.json',
-          rename: `apply_constraint: cannot replace package-lock.json in ${root}`,
-        },
+        `apply_constraint: cannot replace package-lock.json in ${root}`,
       )
     }
   }

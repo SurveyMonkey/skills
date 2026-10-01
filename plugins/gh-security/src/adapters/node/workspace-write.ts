@@ -11,12 +11,21 @@
 // file that pnpm reads in a different way ships. A block that the reader
 // refuses after the write is a failure with the words of the reader.
 //
-// The writer makes the new text in memory, and then puts it in place
-// through a temporary file and a rename (`replace-file.ts`). node.sh first
-// adds the `overrides:` line to the file in place, and then moves the
-// rewrite over it. So for a symlink with no block, node.sh also changes the
-// file that the symlink points to. The port does not. A failed write of the
-// temporary file answers the `die` text of the awk step.
+// The writer makes the new text in memory. Then it puts the text in place
+// through a temporary file and a rename (`replace-file.ts`). For a file
+// with no block, node.sh first adds the `overrides:` line in place, and
+// then moves the rewrite over the file. This gives four declared
+// differences:
+//
+//   - node.sh changes the file that a symlink points to. For a dangling
+//     symlink, it makes that file. The port changes neither.
+//   - A file that cannot be written fails in node.sh with `cannot append`.
+//     The port replaces it, because a rename needs only the directory.
+//   - When the move then fails, node.sh keeps the added line. The port
+//     keeps the file as it was.
+//   - A failed write answers the `mv` text of node.sh, or for no file the
+//     `cannot create` text. node.sh gives `failed to rewrite the block`
+//     only when awk fails, and the port has no such step.
 //
 // node.sh also refuses an entry that the final map does not hold. No caller
 // makes that state: `apply_constraint` only adds and changes entries. So the
@@ -136,8 +145,9 @@ export const writeWorkspaceOverrides = (
   const current = Object.fromEntries(workspaceOverrides(root).map(({ key, value }) => [key, value]))
   const { empty, order, want } = deltaOf(current, final)
   if (empty) return
+  const exists = statSync(path, { throwIfNoEntry: false })?.isFile() === true
   let text = 'overrides:\n'
-  if (statSync(path, { throwIfNoEntry: false })?.isFile() === true) {
+  if (exists) {
     text = readFileSync(path, 'utf8')
     if (!hasWorkspaceOverrides(root)) {
       // A file with no newline at the end gets one first, so that the new
@@ -146,10 +156,11 @@ export const writeWorkspaceOverrides = (
       text += 'overrides:\n'
     }
   }
-  replaceFile(path, rewrite(text, order, want), {
-    write: 'pnpm-workspace.yaml overrides: failed to rewrite the block',
-    rename: `pnpm-workspace.yaml overrides: cannot replace pnpm-workspace.yaml in ${root}`,
-  })
+  replaceFile(
+    path,
+    rewrite(text, order, want),
+    `pnpm-workspace.yaml overrides: cannot ${exists ? 'replace' : 'create'} pnpm-workspace.yaml in ${root}`,
+  )
   // A refusal of the read is the refusal of the call, as in node.sh.
   const read = Object.fromEntries(workspaceOverrides(root).map(({ key, value }) => [key, value]))
   if (!equal(read, final)) {

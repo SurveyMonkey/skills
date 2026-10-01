@@ -18,7 +18,7 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 
 import { replaceFile } from '#gh-security/adapters/node/replace-file.ts'
 
-const ERRORS = { write: 'the write failed', rename: 'the rename failed' }
+const ERROR = 'cannot replace the file'
 
 const notRoot = process.getuid?.() !== 0
 
@@ -34,7 +34,7 @@ const modeOf = (path: string): number => statSync(path).mode & 0o7777
 describe('replaceFile', () => {
   it('writes a new file, and leaves no temporary file', () => {
     const dir = scratch()
-    replaceFile(join(dir, 'file'), 'new\n', ERRORS)
+    replaceFile(join(dir, 'file'), 'new\n', ERROR)
     expect({ files: readdirSync(dir), text: readFileSync(join(dir, 'file'), 'utf8') }).toEqual({
       files: ['file'],
       text: 'new\n',
@@ -45,10 +45,11 @@ describe('replaceFile', () => {
     const dir = scratch()
     const file = join(dir, 'file')
     writeFileSync(file, 'old\n')
-    chmodSync(file, 0o640)
-    replaceFile(file, 'new\n', ERRORS)
+    // A mode that no umask makes from the 0o666 of a new file.
+    chmodSync(file, 0o766)
+    replaceFile(file, 'new\n', ERROR)
     expect({ mode: modeOf(file), text: readFileSync(file, 'utf8') }).toEqual({
-      mode: 0o640,
+      mode: 0o766,
       text: 'new\n',
     })
   })
@@ -58,7 +59,7 @@ describe('replaceFile', () => {
     const outside = scratch()
     writeFileSync(join(outside, 'target'), 'old\n')
     symlinkSync(join(outside, 'target'), join(dir, 'file'))
-    replaceFile(join(dir, 'file'), 'new\n', ERRORS)
+    replaceFile(join(dir, 'file'), 'new\n', ERROR)
     expect({
       link: lstatSync(join(dir, 'file')).isSymbolicLink(),
       text: readFileSync(join(dir, 'file'), 'utf8'),
@@ -69,19 +70,19 @@ describe('replaceFile', () => {
   it('replaces a dangling symlink', () => {
     const dir = scratch()
     symlinkSync(join(dir, 'missing'), join(dir, 'file'))
-    replaceFile(join(dir, 'file'), 'new\n', ERRORS)
+    replaceFile(join(dir, 'file'), 'new\n', ERROR)
     expect({ files: readdirSync(dir), text: readFileSync(join(dir, 'file'), 'utf8') }).toEqual({
       files: ['file'],
       text: 'new\n',
     })
   })
 
-  it('throws with the rename text when the rename fails, and leaves no temporary file', () => {
+  it('throws when the rename fails, and leaves no temporary file', () => {
     // A rename onto a directory that holds a file fails, on Linux and on macOS.
     const dir = scratch()
     mkdirSync(join(dir, 'file'))
     writeFileSync(join(dir, 'file', 'inner'), 'old\n')
-    expect(() => replaceFile(join(dir, 'file'), 'new\n', ERRORS)).toThrow(ERRORS.rename)
+    expect(() => replaceFile(join(dir, 'file'), 'new\n', ERROR)).toThrow(ERROR)
     expect({
       files: readdirSync(dir),
       inner: readFileSync(join(dir, 'file', 'inner'), 'utf8'),
@@ -89,13 +90,13 @@ describe('replaceFile', () => {
   })
 
   it.skipIf(!notRoot)(
-    'throws with the write text when the directory cannot be written, and leaves the old file whole',
+    'throws when the directory cannot be written, and leaves the old file whole',
     () => {
       const dir = scratch()
       writeFileSync(join(dir, 'file'), 'old\n')
       chmodSync(dir, 0o555)
       try {
-        expect(() => replaceFile(join(dir, 'file'), 'new\n', ERRORS)).toThrow(ERRORS.write)
+        expect(() => replaceFile(join(dir, 'file'), 'new\n', ERROR)).toThrow(ERROR)
         expect({
           files: readdirSync(dir),
           text: readFileSync(join(dir, 'file'), 'utf8'),
