@@ -22,11 +22,12 @@
 //
 // **One group for each package major line, not for each package** (#19). A
 // package that resolves at several majors has a different patched version on
-// each line, and a fix of one line leaves the others vulnerable. The line is
-// the first number of `first_patched_version`. The read first removes the
-// white space at each end, and each `v` and `=` at the start. An identifier
-// with no plain first number has no usable line. Its line is `none`, and its
-// group is skipped.
+// each line, and a fix of one line leaves the others vulnerable. The line
+// comes from `first_patched_version`. The read first removes the white space
+// at each end, and each `v` and `=` at the start. The line is then the part
+// before the first dot, when that part is a plain number. Any other
+// identifier, such as `7-beta.1`, has no usable line. Its line is `none`, and
+// its group is skipped.
 //
 // `sibling_alerts` names every OTHER line of the same package, skipped lines
 // too: its major (null for `none`) and the unique ranges of its alerts. The
@@ -78,7 +79,14 @@
 //   - The version sort for an ecosystem with no adapter is GNU's, without its
 //     rule for an empty name. No candidate is empty.
 //   - A line that ends in a line break, as in the identifier `"7\n.1.0"`, is
-//     not a number to jq 1.8, so the grouping fails (`jq.ts`).
+//     not a number to jq 1.8, so the grouping fails (`jq.ts`). The script
+//     fails the same way under jq 1.8. Under jq 1.7, its `tonumber` reads
+//     the line as 7.
+//   - A fetch whose body is not the promised shape on exit 0 has the message
+//     of the `gh` client, which says what the body was. The script said
+//     `Invalid JSON response` for a body that is not JSON, and quoted the
+//     `message` of an object. `--stdin` reads the text itself, and keeps
+//     those two cases apart, with its own words.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
 //
