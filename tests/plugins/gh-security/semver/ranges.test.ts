@@ -396,3 +396,89 @@ describe('rangeFloorMajor', () => {
     expect(rangeFloorMajor(range)).toBe(expected)
   })
 })
+
+// #303 items 1 and 2. Each expected value is the answer of the jq original.
+// The probe loads the library from node.sh, and then calls one function:
+//
+//   SEMVER_JQ=$(awk '/^SEMVER_JQ=/{f=1;next} /^JQLIB/{f=0} f' \
+//     plugins/gh-security/scripts/ecosystems/node.sh)
+//   jq -nc --arg v 1.0.0 --arg r '>=0 ||' "$SEMVER_JQ"' satisfies($v; $r)'
+//   jq -nc --arg r $'>=1 ||　<2' "$SEMVER_JQ"' $r | range_alternatives'
+//
+// jq 1.8.1 gave these answers. `[[:space:]]` is the Unicode White_Space set:
+// 9 to 13, 32, 133, 160, 5760, 8192 to 8202, 8232, 8233, 8239, 8287 and
+// 12288. This list came from
+// `jq -nc '[range(0;65536) | select([.] | implode | test("^[[:space:]]$"))]'`.
+describe('satisfies, where jq stops (#303)', () => {
+  // Every row: jq stops with an error, for example "Cannot iterate over null".
+  it.fails.each([
+    ['an empty alternative after a match', '>=0 ||'],
+    ['an empty alternative before a match', '|| >=0'],
+    ['an empty alternative between two', '>=0 || || >=0'],
+    ['a range of white space only', ' '],
+    ['an operator with no version after a match', '>=0.5 || >='],
+  ])('throws for %s', (_shape, range) => {
+    expect(() => satisfies('1.0.0', range)).toThrow()
+  })
+
+  // Pinning example, green when written: `satisfies` already throws here,
+  // because the empty version has no core.
+  it('throws for an operator with no version', () => {
+    expect(() => satisfies('1.0.0', '>=')).toThrow()
+  })
+
+  // Pinning example, green when written: `"" | split("||")` is `[]`, so an
+  // empty range has no alternative, and jq answers false.
+  it('answers false for an empty range', () => {
+    expect(satisfies('1.0.0', '')).toBe(false)
+  })
+})
+
+describe('the white space of a range (#303)', () => {
+  const ASCII_SPACES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20]
+  const WIDE_SPACES = [
+    0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+    0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+  ]
+  // Zero width and format characters that Oniguruma does not count as space.
+  const NOT_SPACES = [0x180e, 0x200b, 0x200c, 0xfeff, 0x2060]
+  const at = (code: number) => String.fromCodePoint(code)
+
+  // jq: `>=0.5<C><2` against 3.0.0 is false when C splits the range into
+  // `>=0.5` and `<2`.
+  it.each(ASCII_SPACES.map((code) => [code.toString(16)]))(
+    'splits a range at the ASCII space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(satisfies('3.0.0', `>=0.5${space}<2`)).toBe(false)
+    },
+  )
+
+  it.fails.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'splits a range at the wide space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(satisfies('3.0.0', `>=0.5${space}<2`)).toBe(false)
+    },
+  )
+
+  // jq: the same range is true when C is no space: one token, `>=0.5C<2`,
+  // whose version reads as 0.0 after the first dot.
+  it.each(NOT_SPACES.map((code) => [code.toString(16)]))('does not split at U+%s', (hex) => {
+    const character = at(Number.parseInt(hex, 16))
+    expect(satisfies('3.0.0', `>=0.5${character}<2`)).toBe(true)
+  })
+
+  it.fails('splits the alternatives and the comparators at the wide spaces together', () => {
+    expect(rangeAlternatives('>=1 ||　<2\u0085')).toEqual([['>=1'], ['<2']])
+  })
+
+  it.fails('drops a wide space after an operator, as jq does', () => {
+    expect(rangeAlternatives('>= 1')).toEqual([['>=1']])
+    expect(satisfies('0.1.0', '>= 0.5')).toBe(false)
+  })
+
+  it.fails('flattens a range with wide spaces into its tokens', () => {
+    expect(rangeTokens('>=1 ||　<2\u0085')).toEqual(['>=1', '<2'])
+  })
+})
