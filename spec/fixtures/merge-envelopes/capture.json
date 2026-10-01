@@ -1,0 +1,188 @@
+{
+  "actionable": [
+    {
+      "package": "qs",
+      "ecosystem": "npm",
+      "major_line": "6",
+      "max_severity": "critical",
+      "max_epss_percentile": 0.1,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix/dependabot-qs-6x"
+    },
+    {
+      "package": "tar",
+      "ecosystem": "npm",
+      "major_line": "6",
+      "max_severity": "critical",
+      "max_epss_percentile": 0.1,
+      "alert_count": 1,
+      "repo": "octo/web",
+      "branch_name": "fix/dependabot-tar-6x"
+    },
+    {
+      "package": "minimist",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.9,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-minimist-1x"
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix/dependabot-lodash-4x"
+    },
+    {
+      "package": "Accepts",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-Accepts-1x"
+    },
+    {
+      "package": "accepts",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-accepts-1x"
+    },
+    {
+      "package": "express",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-express-4x"
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "3",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-lodash-3x"
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-lodash-4x"
+    },
+    {
+      "package": "send",
+      "ecosystem": "npm",
+      "major_line": "10",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-send-10x"
+    },
+    {
+      "package": "send",
+      "ecosystem": "npm",
+      "major_line": "9",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-send-9x"
+    },
+    {
+      "package": "debug",
+      "ecosystem": "npm",
+      "major_line": "2",
+      "max_severity": "medium",
+      "max_epss_percentile": 0.99,
+      "alert_count": 1,
+      "repo": "octo/web",
+      "branch_name": "fix/dependabot-debug-2x"
+    },
+    {
+      "package": "ms",
+      "ecosystem": "npm",
+      "major_line": "2",
+      "max_severity": "low",
+      "max_epss_percentile": 0.99,
+      "alert_count": 1,
+      "repo": "octo/web",
+      "branch_name": "fix/dependabot-ms-2x"
+    },
+    {
+      "package": "cookie",
+      "ecosystem": "npm",
+      "major_line": "0",
+      "max_severity": "low",
+      "max_epss_percentile": 0.2,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-cookie-0x"
+    },
+    {
+      "package": "cookie",
+      "ecosystem": "npm",
+      "major_line": "0",
+      "max_severity": "low",
+      "max_epss_percentile": 0.2,
+      "alert_count": 2,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-cookie-0x"
+    },
+    {
+      "package": "semver",
+      "ecosystem": "npm",
+      "major_line": "7",
+      "max_severity": "moderate",
+      "max_epss_percentile": 1,
+      "alert_count": 1,
+      "repo": "octo/web",
+      "branch_name": "fix/dependabot-semver-7x"
+    }
+  ],
+  "skipped": [
+    {
+      "package": "path-to-regexp",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.7,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-path-to-regexp-1x",
+      "reason": "requires major version bump"
+    },
+    {
+      "package": "debug",
+      "ecosystem": "npm",
+      "major_line": "none",
+      "max_severity": "low",
+      "max_epss_percentile": 0,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix-dependabot-debug-unfixed",
+      "reason": "no fix available"
+    }
+  ]
+}

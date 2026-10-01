@@ -1,0 +1,6 @@
+{
+  "checkout": "/work/old",
+  "excluded": true,
+  "reason": "branch namespace probe failed twice",
+  "stderr": "fatal: could not read from remote repository.\n"
+}

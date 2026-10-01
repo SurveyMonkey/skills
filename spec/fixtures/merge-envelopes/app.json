@@ -1,0 +1,122 @@
+{
+  "checkout": "/work/app",
+  "nwo": "octo/app",
+  "default_branch": "main",
+  "branch_style": "slash",
+  "actionable": [
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-lodash-4x"
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "3",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-lodash-3x"
+    },
+    {
+      "package": "express",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-express-4x"
+    },
+    {
+      "package": "minimist",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.9,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-minimist-1x"
+    },
+    {
+      "package": "send",
+      "ecosystem": "npm",
+      "major_line": "9",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-send-9x"
+    },
+    {
+      "package": "send",
+      "ecosystem": "npm",
+      "major_line": "10",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-send-10x"
+    },
+    {
+      "package": "cookie",
+      "ecosystem": "npm",
+      "major_line": "0",
+      "max_severity": "low",
+      "max_epss_percentile": 0.2,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-cookie-0x"
+    },
+    {
+      "package": "accepts",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-accepts-1x"
+    },
+    {
+      "package": "Accepts",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-Accepts-1x"
+    },
+    {
+      "package": "cookie",
+      "ecosystem": "npm",
+      "major_line": "0",
+      "max_severity": "low",
+      "max_epss_percentile": 0.2,
+      "alert_count": 2,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-cookie-0x"
+    }
+  ],
+  "skipped": [
+    {
+      "package": "path-to-regexp",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.7,
+      "alert_count": 1,
+      "repo": "octo/app",
+      "branch_name": "fix/dependabot-path-to-regexp-1x",
+      "reason": "requires major version bump"
+    }
+  ],
+  "classify_errors": []
+}
