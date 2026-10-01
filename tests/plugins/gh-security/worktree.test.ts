@@ -203,6 +203,13 @@ describe('requireLinkedWorktree: pointers that are written by hand', () => {
       'this is a git submodule',
     ],
     ['gitdir: /abs/worktrees/wt/x/modules/app/.git/worktrees/fix', null],
+    ['gitdir: /abs/.git/worktrees/x/modules/app/.git/worktrees/fix', null],
+    ['gitdir: /abs/main/.git/worktrees/wt x/modules/worktrees/foo', 'this is a git submodule'],
+    ['gitdir: /abs/main/.git/worktrees/wt\rx/modules/worktrees/foo', 'this is a git submodule'],
+    // A bare common dir has no `/.git/`, so the probe reads all of the text.
+    // A worktree of it under `worktrees/<x>/modules/` is refused. That is the
+    // safe direction.
+    ['gitdir: /abs/worktrees/x/modules/repo.git/worktrees/fix', 'this is a git submodule'],
   ])('reads %j', (content, refusedAs) => {
     const built = scene()
     const directory = pointerAt(built, content)

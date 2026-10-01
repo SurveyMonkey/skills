@@ -75,8 +75,12 @@ const gitdirOf = (dotGit: string): string => {
 /** What a gitdir is: a linked worktree, a submodule, or neither. */
 type Kind = 'worktree' | 'submodule' | 'other'
 
-/** A `/modules/` after a `worktrees/` directory: a submodule inside a worktree. */
-const NESTED_SUBMODULE = /(^|\/)worktrees\/.*\/modules\//
+/**
+ * A `/modules/` after a `worktrees/` directory: a submodule inside a worktree.
+ * The `s` flag lets `.` match a line separator, as the `*` of the bash glob
+ * does. git keeps such a character in the name of a worktree.
+ */
+const NESTED_SUBMODULE = /(^|\/)worktrees\/.*\/modules\//s
 
 const classify = (gitdir: string): Kind => {
   // A trailing `/`, so that the last segment can be tested as a marker too. A
