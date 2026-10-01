@@ -299,21 +299,42 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(sortedKeys(pnpmOverrides(manifestAfter(fixture, args)))).toEqual(keys)
   })
 
-  // node.sh names this git copy `debug@git+ssh://git`, so `debug` has one
-  // version there. The port names it `debug`, with no version that can be a
-  // key (#50). Both write the bare key, which covers the two copies.
-  it('writes the bare key beside a git copy of the parent', () => {
-    const registryCopy: Setup = (dir) => {
+  // node.sh names this git copy `debug@git+ssh://git`, so no parent `debug`
+  // reads it. The port drops its edge too (#50). Each expected value is the
+  // answer of node.sh on the same copy.
+  /** Registry copies of `debug` beside the git copy, each with its version of `ms`. */
+  const registryCopies =
+    (...copies: (readonly [string, string])[]): Setup =>
+    (dir) => {
+      const packages = copies.map(
+        ([debug]) => `  debug@${debug}:\n    resolution: {integrity: x}\n\n`,
+      )
+      const snapshots = copies.map(
+        ([debug, ms]) => `  debug@${debug}:\n    dependencies:\n      ms: ${ms}\n\n`,
+      )
       const text = textAt(dir, 'pnpm-lock.yaml')
-        .replace('packages:\n\n', 'packages:\n\n  debug@4.3.4:\n    resolution: {integrity: x}\n\n')
-        .replace(
-          'snapshots:\n\n',
-          'snapshots:\n\n  debug@4.3.4:\n    dependencies:\n      ms: 2.1.3\n\n',
-        )
+        .replace('packages:\n\n', `packages:\n\n${packages.join('')}`)
+        .replace('snapshots:\n\n', `snapshots:\n\n${snapshots.join('')}`)
       writeFileSync(join(dir, 'pnpm-lock.yaml'), text)
     }
-    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], registryCopy)
-    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+
+  it.each([
+    ['one registry copy', [['4.3.4', '2.1.3']], { 'debug>ms': '^2.1.3' }],
+    [
+      'two registry copies',
+      [
+        ['4.3.4', '2.1.2'],
+        ['2.6.9', '2.0.0'],
+      ],
+      { 'debug@2.6.9>ms': '^2.1.3', 'debug@4.3.4>ms': '^2.1.3' },
+    ],
+  ] as const)('reads no edge from a git copy of the parent, beside %s', (_, copies, keys) => {
+    const manifest = manifestAfter(
+      'pnpm-git-parent',
+      ['ms', '^2.1.3', 'debug'],
+      registryCopies(...copies),
+    )
+    expect(pnpmOverrides(manifest)).toEqual(keys)
   })
 
   // The multiplicity gate reads the snapshot edges, not `packages:`.

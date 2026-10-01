@@ -55,17 +55,20 @@ const MISSING = '-'
  * such version: a declared divergence.
  *
  * The parent name ends at its first `@` here, and at its last `@` in
- * node.sh (#50). So a git copy is a copy of its parent here. Its version
- * has an `@`, and is `-`: the parent then gets the bare key. node.sh gives
- * the copy a different parent name. A declared divergence: the bare key
- * covers that copy too.
+ * node.sh (#50). The two differ only for a parent version with an `@`, for
+ * example a `git+ssh://git@` copy. node.sh gives that copy a different
+ * parent name, so no parent of the call matches it. The port drops its
+ * edge, as node.sh does in effect.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
-  pnpm.scan(text, pkg).edges.map(({ parent, parentVersion, version }) => ({
-    parent: parent.name,
-    pver: parentVersion === null || parentVersion.includes('@') ? MISSING : parentVersion,
-    cver: version ?? MISSING,
-  }))
+  pnpm
+    .scan(text, pkg)
+    .edges.filter(({ parentVersion }) => parentVersion?.includes('@') !== true)
+    .map(({ parent, parentVersion, version }) => ({
+      parent: parent.name,
+      pver: parentVersion ?? MISSING,
+      cver: version ?? MISSING,
+    }))
 
 /** The edges of npm, from `npm_copy_rows`. */
 export const npmEdges = (lock: NpmLock, pkg: string): readonly Edge[] =>
