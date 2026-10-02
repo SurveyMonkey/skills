@@ -155,9 +155,9 @@ export const readString = (state: StateFile, path: string): Envelope<string> => 
 }
 
 /**
- * The same read for a key whose empty value is legitimate, `env_prefix` being
- * the one the drivers have. Anything that is not a non-empty string is `null`,
- * which for this seam means "bare", the ordinary single-login case.
+ * The same read for a key whose empty value is legitimate. Anything that is
+ * not a non-empty string is `null`. Do not use it for `env_prefix`: there a
+ * value that is not text is a failure, and `loadDriverState` refuses it.
  */
 export const readOptionalString = (state: StateFile, path: string): string | null => {
   const value = at(state.data, path)
@@ -210,9 +210,9 @@ export interface DriverState {
   readonly scorer: string
   readonly worktree: string
   readonly package: string
-  /** The major line, as the text that `setup` wrote. */
+  /** The major line, as the text that `setup` wrote. `loadDriverState` checks that it is digits. */
   readonly majorLine: string
-  /** The prefix as `setup` wrote it, or null for no prefix. */
+  /** The prefix as `setup` wrote it. An absent, null or empty value is null: no prefix. */
   readonly envPrefix: string | null
 }
 

@@ -11,11 +11,12 @@ been written yet ([#171](https://github.com/SurveyMonkey/skills/issues/171)).
 **Stepped, with a state file at `$WORK/state.json`, not one run**, because the Bash tool's
 10-minute ceiling cannot wrap a control install plus a fix install (field runs: ~4 minutes each,
 up to ~17 minutes total) and the remediation ladder needs a seam where judgment can escape to the
-agent. The subcommands, the exit-code contract and the option surface are stated once, in the
-script's own header (`common/fix-group.sh:1-76`); restating them here is how the two drift.
+agent. The subcommands, the exit-code contract and the option surface are stated in the
+script's own header (`common/fix-group.sh:1-76`), and for the port in the header of
+`src/subcommands/fix-group.ts`; restating them here is how the two drift.
 
 The TypeScript port is `gh-security fix-group <phase>`, one phase at a time (#232). The header of
-`src/subcommands/fix-group.ts` states the contract of each phase that is ported, and each
+`src/subcommands/fix-group.ts` states the contract of each ported phase, and each
 difference from the script. Each phase has its own module, `fix-group-<phase>.ts`. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
 `setup` writes. Until the port is complete, the agent calls the script for each step. A state

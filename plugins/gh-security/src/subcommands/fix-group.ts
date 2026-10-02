@@ -9,8 +9,8 @@
 //   fix-group baseline --work <dir>
 //
 // `apply` and `score` come in later layers of #232. `cleanup` stays in the
-// bash, and #234 ports it (round 5 ruling 5). Until then the agent calls
-// `fix-group.sh` for all six steps.
+// bash, and #234 ports it (round 5 ruling 5 on #232). Until then the agent
+// calls `fix-group.sh` for all six steps.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
@@ -38,13 +38,14 @@
 //             keeps the branch. Then it adds the worktree `<work>/fix` on a
 //             new branch from `origin/<default>`, and writes the state.
 //   classify  runs `why`. A package that only peer resolutions reach stops
-//             here (#103). Then `declared_ranges --line`, and the eligible
-//             parents: read, unreadable and without a range, by name (#76,
-//             #83, #85).
-//   baseline  reads `resolved_versions`, runs the control install (one
-//             retry for a registry timeout), commits the drift on the
-//             lockfile and its install files with the drift subject, fails
-//             on any other change, and reads `resolved_versions` again.
+//             here (#103). Then it runs `declared_ranges --line`, and lists
+//             the eligible parents by name: read, unreadable and without a
+//             range (#76, #83, #85).
+//   baseline  reads `resolved_versions`. It runs the control install, with
+//             one retry for a registry timeout. It commits the drift on the
+//             lockfile and its install files with the drift subject. Any
+//             other change is a failure. Then it reads `resolved_versions`
+//             again.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `setup` records (env-prefix.md). The prefix sets no
@@ -63,21 +64,27 @@
 //     process. `detect` runs again before each verb, as each `node.sh` call
 //     did, and its failure is the failure of that verb.
 //   - `detect` reads the PATH of this command, not the PATH under the
-//     prefix. The bash ran `node.sh` under the prefix. So when the package
-//     manager is on the PATH only under the prefix, `detect` can choose
-//     `corepack <pm>` or the yarn release of the repository, where the
-//     bash chose `<pm>`.
+//     prefix. The bash ran `node.sh` under the prefix. The package manager
+//     can be on the PATH only under the prefix. Then `detect` can choose
+//     `corepack <pm>` or the yarn release of the repository. The bash
+//     chose `<pm>`.
 //   - An install that the verb itself refuses, as the worktree guard does,
 //     is a failed control install, and its output is the message of the
 //     verb.
-//   - `--scorer` stays, for `score` (ruling 4). Without it, the state names
-//     the bash scorer in this plugin, `scripts/common/score-merge-risk.sh`.
+//   - `--scorer` stays, for `score` (round 5 ruling 4 on #232). Without it,
+//     the state names the bash scorer in this plugin,
+//     `scripts/common/score-merge-risk.sh`.
 //   - A bad command line is exit 1 with `{"error": ...}` in node's words. The
-//     bash printed the shell's text for a missing value, and no JSON.
+//     bash printed the shell's text for an absent value, and no JSON.
 //   - `setup` refuses a group that is JSON but not an object, with its own
-//     message. A `declared_ranges` answer whose parent lists are not lists
-//     of names is a `classify` failure. In the bash, jq stopped on each of
-//     these, and the run ended with exit 1.
+//     message. The bash also gave exit 1, with another message: a list has
+//     none of the keys, and a string or a number has no `major_line`.
+//   - `setup` takes a JSON number for `major_line` as node reads it. So
+//     `4.0` is the line `4`, and `1e1` is the line `10`. The bash read the
+//     text of the number (`4.0`, `1E+1`) and refused it.
+//   - A `declared_ranges` answer whose parent lists are not lists of names
+//     is a `classify` failure. In the bash, jq stopped on it, and the run
+//     ended with exit 1.
 //   - A failed `mkdir` or a failed write of the state quotes node's error.
 //   - `baseline` reads `install_signals` before it writes `baseline` and
 //     `drift_commit`. So a state whose list cannot be read gets neither key.

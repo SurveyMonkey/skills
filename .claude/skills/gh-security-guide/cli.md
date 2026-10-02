@@ -59,7 +59,8 @@ may also fail with a report (`failedReport` in `src/cli/command.ts`). The report
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
 same JSON on stdout when a URL failed.
 A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
-that goes back to the agent, which `apply` gives when a later layer ports it.
+that goes back to the agent, which `apply` gives when a later layer ports it. These two codes are
+the codes of `fix-group.sh`. They are not `not-implemented` and `unsupported` of ADR 001.
 A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as
 the `failed` envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on
 stderr and exit 1.
