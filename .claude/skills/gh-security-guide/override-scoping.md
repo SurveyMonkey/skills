@@ -31,7 +31,9 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   of the parent from outside the registry, such as a git copy (`debug@git+ssh://git@...`,
   `debug@git+https://...`). So when such a parent must get qualified keys,
   the TypeScript `apply_constraint` refuses before it writes, and names the parent
-  ([#50](https://github.com/SurveyMonkey/skills/issues/50), ruling 2). A single-version parent keeps the
+  ([#50](https://github.com/SurveyMonkey/skills/issues/50), ruling 2). The plain key reaches each copy
+  of such a parent. So where a copy has the package on another major line, the TypeScript
+  `apply_constraint` also refuses the plain key (#50). A single-version parent keeps the
   bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
   the bare key on two fallback paths — no parent version qualifies for the target line, or none
   of its snapshot keys carries a readable version — because an entry that over-covers beats

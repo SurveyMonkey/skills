@@ -481,10 +481,10 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(error).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
-  // Ruling 2 on #50 names each git copy, and a git URL can have no `@`. For
-  // a GitHub host, pnpm writes a codeload tarball (see the header of the
-  // pnpm-git-parent lockfile). For another host, it writes the `git+https`
-  // URL. A `file:` copy is also outside the registry.
+  // Ruling 2 on #50 names each git copy, and a git URL can have no `@`. The
+  // specifier sets the shape. For `github:`, pnpm writes a codeload tarball.
+  // A `git+https` specifier can give a URL with no `@`. A `file:` copy is
+  // also outside the registry.
   const OTHER_COPIES = [
     'git+https://git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
     'https://codeload.github.com/example/debug/tar.gz/da66c86c5fd71ef570f36b5b1edfa4472149f1bc',

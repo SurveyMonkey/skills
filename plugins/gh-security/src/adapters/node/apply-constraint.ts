@@ -16,10 +16,13 @@
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
-// A declared parity exception (#50, ruling 2): where the keys of a pnpm
-// parent must be version-qualified and that parent has a copy from outside
-// the registry, such as a git copy, the port refuses. node.sh writes the
-// keys, and no key matches that copy.
+// Declared parity exceptions (#50, ruling 2). A pnpm parent can have a copy
+// from outside the registry, such as a git copy. Where the keys of that
+// parent must be version-qualified, the port refuses. Where it keeps the
+// plain key and a copy has the package on another major line, the port also
+// refuses. node.sh writes keys in both cases. Beside one registry copy on
+// the line, the port writes the plain key. For a URL with no `@`, node.sh
+// writes a qualified key for each copy there.
 //
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then

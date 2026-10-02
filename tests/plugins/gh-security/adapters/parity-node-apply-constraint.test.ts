@@ -14,10 +14,11 @@
 // names the same path on each side.
 //
 // The directory is a scratch copy of a fixture. `fakeLinkedWorktree` gives it
-// the `.git` pointer file of a linked worktree, and a real gitdir beside it
-// with a `commondir` file. The guard of each side reads these files and runs
-// no git. Only the TypeScript guard reads `commondir` (#304 item 1). A second describe runs the guard cases in
-// real repositories that harness/git.ts builds.
+// the `.git` pointer file of a linked worktree. It also makes a real gitdir
+// beside it, with a `commondir` file. The guard of each side reads these
+// files and runs no git. Only the TypeScript guard reads `commondir` (#304
+// item 1). A second describe runs the guard cases in real repositories that
+// harness/git.ts builds.
 //
 // Three kinds of case run:
 //
@@ -43,9 +44,13 @@
 // with a git copy beside two registry copies. bash writes keys qualified by
 // the registry versions, which miss the git copy. The port refuses, and
 // writes nothing. Beside one registry copy, both sides write the plain key.
-// The port refuses each other copy from outside the registry in the same way,
-// such as a `git+https` URL. There bash also writes a key that names the URL.
-// No fixture has that copy, so the unit tests hold it.
+// That is true for a git URL with an `@`. For another copy from outside the
+// registry, such as a `git+https` URL, bash keeps the edge. Beside two
+// registry copies, the port refuses it in the same way. Beside one registry
+// copy, the port writes the plain key, and bash writes a qualified key for
+// each copy. Where a copy has the package on another major line, the port
+// refuses the plain key too (#50). No fixture has such a copy as a parent,
+// so the unit tests hold these cases.
 //
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There

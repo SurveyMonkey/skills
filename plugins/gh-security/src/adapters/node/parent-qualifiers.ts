@@ -34,8 +34,11 @@
 // a git URL, a codeload tarball and a `file:` path. No key qualified by a
 // registry version matches that copy. So where the keys of that parent must
 // be version-qualified, the call refuses before any write (#50, ruling 2).
-// With one registry copy, the plain key covers the other copy too. node.sh
-// writes the qualified keys: a declared parity exception.
+// The plain key reaches each copy of the parent. So with one registry copy,
+// the plain key covers the other copy too. Where a copy has the package on
+// another major line, the plain key moves it across that line, and the call
+// refuses (#50). Both refusals are declared parity exceptions. For the
+// writes of node.sh, see `pnpmEdges`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -76,9 +79,9 @@ const isOutsideRegistry = (parentVersion: string | null): parentVersion is strin
  *
  * The port drops the edge of each copy from outside the registry. For a
  * version with an `@`, node.sh does this in effect. For another version,
- * such as a `git+https` URL, node.sh keeps the edge and writes a key that
- * names the URL: a declared parity exception (#50). `pnpmCopiesOutsideRegistry`
- * keeps these copies for the refusal of #50.
+ * such as a `git+https` URL, node.sh keeps the edge. Then it can write a key
+ * that names the URL: a declared parity exception (#50).
+ * `pnpmCopiesOutsideRegistry` keeps these copies for the refusals of #50.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpm

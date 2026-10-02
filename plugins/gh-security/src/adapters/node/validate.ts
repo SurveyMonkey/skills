@@ -186,9 +186,9 @@ type Inputs = {
 }
 
 /**
- * The inputs of the checks, or a refusal: for a baseline, a range or a
- * sibling list, as node.sh refuses, or for a line with no alert range (#304
- * item 3).
+ * The inputs of the checks, or a refusal. node.sh refuses a bad baseline, a
+ * bad range and a bad sibling list. The port also refuses a line with no
+ * alert range (#304 item 3).
  */
 const inputsOf = (
   pkg: string,
