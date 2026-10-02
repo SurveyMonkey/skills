@@ -13,7 +13,7 @@
 // is a real seam because the port runs it as a child. It writes its argv and
 // its directory to a log. The package manager is a stand-in on PATH.
 // The expected values come from the contract in the header of `fix-group.ts`
-// and from the jq probes that it cites. `parity-fix-group-score.test.ts`
+// and from jq probes of the bash lines. `parity-fix-group-score.test.ts`
 // compares the port with `fix-group.sh` and the real scorer.
 import {
   chmodSync,
@@ -265,13 +265,13 @@ const route =
           return failed('detect: the stand-in found no lockfile')
         return node.detect(root, env)
       },
-      resolvedVersions: () => {
-        w.verbs.push('resolved_versions')
+      resolvedVersions: (_tree, pkg) => {
+        w.verbs.push(`resolved_versions ${pkg}`)
         const message = w.script.failures.rv
         return message === undefined ? ok(w.script.rv as never) : failed(message)
       },
-      why: async (_tree, _pkg, source) => {
-        w.verbs.push('why')
+      why: async (_tree, pkg, source) => {
+        w.verbs.push(`why ${pkg}`)
         w.script.onWhy()
         // The source gives the runner of the package manager. A verb that
         // reads `raw` from it runs `npm why`.
@@ -285,8 +285,8 @@ const route =
         const message = w.script.failures.why
         return message === undefined ? ok(w.script.why as never) : failed(message)
       },
-      declaredRanges: (_tree, _pkg, line) => {
-        w.verbs.push(`declared_ranges ${String(line)}`)
+      declaredRanges: (_tree, pkg, line) => {
+        w.verbs.push(`declared_ranges ${pkg} ${String(line)}`)
         const message = w.script.failures.declared
         return message === undefined ? ok(w.script.declared as never) : failed(message)
       },
@@ -387,7 +387,7 @@ describe('the command', () => {
     expect(answer.stderr).toContain('no readable state file')
   })
 
-  it('names the scorer of this plugin, a script that is there', () => {
+  it('names the adapter script of this plugin, a script that is there', () => {
     expect(NODE_ADAPTER).toBe(pluginFile('gh-security', 'scripts', 'ecosystems', 'node.sh'))
     expect(existsSync(NODE_ADAPTER)).toBe(true)
   })
@@ -448,7 +448,7 @@ describe('score (phase 5)', () => {
   it('reads each verb once, in the order of the bash', async () => {
     const w = world()
     await score(w)
-    expect(w.verbs).toEqual(['resolved_versions', 'why', 'declared_ranges 4'])
+    expect(w.verbs).toEqual(['resolved_versions lodash', 'why lodash', 'declared_ranges lodash 4'])
     expect(w.detects).toBe(3)
   })
 
@@ -550,18 +550,18 @@ describe('score (phase 5)', () => {
       },
     )
 
-    it('gives one --declared-range for each distinct range', async () => {
-      const w = world((x) => {
-        x.script.declared = { ...DECLARED, ranges: ['^4.17.20', '~4.17.0'] }
-      })
-      await score(w)
-      expect(argvOf(w)?.slice(12)).toEqual([
-        '--declared-range',
-        '^4.17.20',
-        '--declared-range',
-        '~4.17.0',
-      ])
-    })
+    // The adapter makes the list distinct and sorts it. `score` gives each
+    // range on, in the order it has, as `jq -r '.ranges[]?'` did.
+    it.each([[['^4.17.20', '~4.17.0']], [['~4.17.0', '^4.17.20']], [['^4.17.20', '^4.17.20']]])(
+      'gives one --declared-range for each range of %j, in order',
+      async (ranges) => {
+        const w = world((x) => {
+          x.script.declared = { ...DECLARED, ranges }
+        })
+        await score(w)
+        expect(argvOf(w)?.slice(12)).toEqual(ranges.flatMap((range) => ['--declared-range', range]))
+      },
+    )
 
     it('splits a range with a newline into one flag for each line, and drops empty lines', async () => {
       const w = world((x) => {
@@ -604,15 +604,18 @@ describe('score (phase 5)', () => {
   describe('declared_ranges_cause', () => {
     // The sentinel is the same and the reviewer's conclusion is not, so the two
     // ways of reaching it are reported apart.
-    it('says that parents declared nothing when parents were read', async () => {
-      const w = world((x) => {
-        x.script.declared = { ...DECLARED, ranges: [], parents_without_range: ['express'] }
-      })
-      expect(pick(await score(w), 'declared_ranges_cause')).toEqual({
-        exit: 0,
-        declared_ranges_cause: 'parents_declared_nothing',
-      })
-    })
+    it.each([[['express']], [['express', 'koa']], [['express', 'koa', 'hapi']]])(
+      'says that parents declared nothing when parents were read: %j',
+      async (read) => {
+        const w = world((x) => {
+          x.script.declared = { ...DECLARED, ranges: [], parents_read: read }
+        })
+        expect(pick(await score(w), 'declared_ranges_cause')).toEqual({
+          exit: 0,
+          declared_ranges_cause: 'parents_declared_nothing',
+        })
+      },
+    )
 
     it.each([
       ['an empty list', { parents_read: [] }],
@@ -678,6 +681,17 @@ describe('score (phase 5)', () => {
       await score(w)
       expect(flag(argvOf(w), '--before')).toBe('4.17.19')
     })
+
+    it.each(['bare-override', 'direct-update', 'scoped-override'])(
+      'comes from the baseline for the action %s',
+      async (action) => {
+        const w = world((x) => {
+          x.state.action = action
+        })
+        await score(w)
+        expect(flag(argvOf(w), '--before')).toBe('4.17.20')
+      },
+    )
 
     it('needs the baseline on an ordinary fix, and not the pre-drift snapshot', async () => {
       const w = world((x) => {
@@ -771,7 +785,7 @@ describe('score (phase 5)', () => {
       const w = world((x) => {
         x.state.baseline = rv('4.17.19', '4.17.20')
         x.script.compare = ((a: string, b: string) => {
-          // The first compare is the post-fix list, which holds one version.
+          // The post-fix list has one version, so only the baseline is compared.
           return ok({ a, b, result, delta: 'none', major_distance: 0 })
         }) as never
       })
@@ -953,37 +967,45 @@ describe('score (phase 5)', () => {
       expect(answer.status).toBe(1)
       expect(answer.stderr).toContain("no usable value for 'package_path'")
       expect(stateOf(w).post_fix).toEqual(rv('4.17.21'))
-      expect(w.verbs).toEqual(['resolved_versions'])
+      expect(w.verbs).toEqual(['resolved_versions lodash'])
     })
 
     it.each(['', 5])('refuses a package_path of %j', async (path) => {
       const w = world((x) => {
         x.state.package_path = path
       })
-      expect((await score(w)).status).toBe(1)
+      const answer = await score(w)
+      expect(answer.status).toBe(1)
+      expect(answer.stderr).toContain("no usable value for 'package_path'")
     })
   })
 
   describe('a write of the state that fails', () => {
     it.each([
-      ['post_fix', (w: World) => blockState(w)],
+      ['post_fix', (w: World) => blockState(w), ['resolved_versions lodash'], false],
       [
         'declared_post',
         (w: World) => {
           w.script.onWhy = () => blockState(w)
         },
+        ['resolved_versions lodash', 'why lodash', 'declared_ranges lodash 4'],
+        false,
       ],
       [
         'risk',
         (w: World) => {
           scorerHook(w, 'mkdir "$STATE_TMP"\n')
         },
+        ['resolved_versions lodash', 'why lodash', 'declared_ranges lodash 4'],
+        true,
       ],
-    ])('stops with exit 1 at %s', async (_key, arrange) => {
+    ])('stops with exit 1 at %s, and does nothing after it', async (_key, arrange, verbs, ran) => {
       const w = world(arrange)
       const answer = await score(w)
       expect(answer.status).toBe(1)
       expect(answer.stderr).toContain(BLOCKED)
+      expect(w.verbs).toEqual(verbs)
+      expect(argvOf(w) !== null).toBe(ran)
     })
   })
 
@@ -1027,22 +1049,23 @@ describe('score (phase 5)', () => {
 
     // A scorer that writes nothing, and one with JSON of the wrong shape.
     it.each([
-      ['nothing', ''],
-      ['white space', ' \n '],
-      ['text that is not JSON', 'nope'],
-      ['a list', '[{"band":"Low"}]'],
-      ['a text', '"band"'],
-      ['null', 'null'],
-      ['an object with no band', '{"package":"lodash"}'],
-      ['two objects', '{"band":1}{"band":2}'],
-    ])('is a phase failure for %s on stdout', async (_name, text) => {
+      ['nothing', '', ''],
+      ['white space', ' \n ', ' \n '],
+      ['text that is not JSON', 'nope', 'nope'],
+      ['text that is not JSON, with newlines at its end', 'nope\n\n', 'nope'],
+      ['a list', '[{"band":"Low"}]', '[{"band":"Low"}]'],
+      ['a text', '"band"', '"band"'],
+      ['null', 'null', 'null'],
+      ['an object with no band', '{"package":"lodash"}\n', '{"package":"lodash"}'],
+      ['two objects', '{"band":1}{"band":2}', '{"band":1}{"band":2}'],
+    ])('is a phase failure for %s on stdout', async (_name, text, shown) => {
       const w = world()
       scorerOut(w, text)
       const answer = await score(w)
       expect(answer.json).toEqual({
         status: 'failure',
         phase: 'validate',
-        detail: `score-merge-risk.sh returned no usable report: ${text.replace(/\n+$/, '')}`,
+        detail: `score-merge-risk.sh returned no usable report: ${shown}`,
       })
       expect(answer.status).toBe(3)
       expect(stateOf(w).risk).toBeUndefined()
@@ -1209,7 +1232,7 @@ describe('score (phase 5)', () => {
       expect(w.verbs).toEqual([])
     })
 
-    // jq gave the scorer the text of a number or a boolean as the action.
+    // jq gave the report the text of a number or a boolean as the action.
     it.each([[5], [true], [false], [[]], [{}]])('refuses an action of %j', async (action) => {
       const w = world((x) => {
         x.state.action = action as JsonValue
@@ -1221,35 +1244,41 @@ describe('score (phase 5)', () => {
       expect(w.verbs).toEqual([])
     })
 
-    it.each(['override_scope', 'bare_override'])('needs %s to be text', async (key) => {
-      for (const value of [undefined, null, '', 5, true, []]) {
-        const w = world((x) => {
-          if (value === undefined) without(x, key)
-          else x.state[key] = value as JsonValue
-        })
-        const answer = await score(w)
-        expect(answer.status).toBe(1)
-        expect(answer.stderr).toContain(`no usable value for '${key}'`)
-        expect(argvOf(w)).toBeNull()
-      }
+    it.each(
+      ['override_scope', 'bare_override'].flatMap((key) =>
+        [undefined, null, '', 5, true, []].map((value) => [key, value] as const),
+      ),
+    )('needs %s to be text, not %j', async (key, value) => {
+      const w = world((x) => {
+        if (value === undefined) without(x, key)
+        else x.state[key] = value as JsonValue
+      })
+      const answer = await score(w)
+      expect(answer.status).toBe(1)
+      expect(answer.stderr).toContain(`no usable value for '${key}'`)
+      expect(argvOf(w)).toBeNull()
     })
 
-    // `cmd_apply` writes `override_scope` and `apply_result` three statements
+    // `cmd_apply` writes `override_scope` and `apply_result` a few statements
     // apart. A run that stops between them leaves one, and `null.written` is
     // `null` in jq, so `score` once reported ready_for_pr with no edit at all.
     it.each([
-      ['apply_result', ['apply_result']],
-      ['validate', ['validate']],
-      ['observations_first', ['observations_first']],
-      ['applied_parents and eligible_parents', ['applied_parents', 'eligible_parents']],
-      ['drift_commit', ['drift_commit']],
-    ])('refuses to report ready_for_pr when %s was never written', async (_name, keys) => {
+      ['apply_result', ['apply_result'], 'apply_result'],
+      ['validate', ['validate'], 'validate'],
+      ['observations_first', ['observations_first'], 'observations_first'],
+      [
+        'applied_parents and eligible_parents',
+        ['applied_parents', 'eligible_parents'],
+        'applied_parents // eligible_parents',
+      ],
+      ['drift_commit', ['drift_commit'], 'drift_commit'],
+    ])('refuses to report ready_for_pr when %s was never written', async (_name, keys, shown) => {
       const w = world((x) => {
         without(x, ...keys)
       })
       const answer = await score(w)
       expect(answer.status).toBe(1)
-      expect(answer.stderr).toContain('no usable value')
+      expect(answer.stderr).toContain(`no usable value for '${shown}'`)
       expect(answer.json.status).toBeUndefined()
       expect(JSON.stringify(answer.json)).not.toContain('ready_for_pr')
       // The scorer ran, and the report is in the state, as in the bash.
@@ -1266,7 +1295,9 @@ describe('score (phase 5)', () => {
       const w = world((x) => {
         x.state[key] = null
       })
-      expect((await score(w)).status).toBe(1)
+      const answer = await score(w)
+      expect(answer.status).toBe(1)
+      expect(answer.stderr).toContain(`no usable value for '${key}'`)
     })
 
     it('names the key of the two parent lists when neither has a value', async () => {
@@ -1284,6 +1315,8 @@ describe('score (phase 5)', () => {
       ['an empty applied list', [], ['express'], []],
       ['a false applied value', false, ['express'], ['express']],
       ['a null applied value', null, ['express'], ['express']],
+      ['a zero applied value', 0, ['express'], 0],
+      ['an empty text applied value', '', ['express'], ''],
       ['an absent applied value', undefined, ['express'], ['express']],
       ['a false eligible value', false, false, false],
     ])('reads applied_parents for %s', async (_name, applied, eligible, expected) => {
@@ -1407,6 +1440,42 @@ describe('score (phase 5)', () => {
       ).toEqual({ exit: 0, requires_major_bump: [], other_line_moves: null, benign_moves: [] })
     })
 
+    it('keeps the three lists of the stored results apart', async () => {
+      const w = world((x) => {
+        x.state.observations_first = ['before']
+        x.state.apply_result = {
+          ...APPLY_RESULT,
+          superseded_keys: ['old'],
+          observations: ['after'],
+        }
+      })
+      expect(
+        pick(await score(w), 'observations_pre_fix', 'superseded_keys', 'observations'),
+      ).toEqual({
+        exit: 0,
+        observations_pre_fix: ['before'],
+        superseded_keys: ['old'],
+        observations: ['after'],
+      })
+    })
+
+    // jq `//` reads false as absent, and a `??` does not.
+    it.each([
+      ['apply_result', 'written'],
+      ['apply_result', 'superseded_keys'],
+      ['apply_result', 'observations'],
+      ['validate', 'requires_major_bump'],
+      ['declared', 'parents_unreadable'],
+      ['declared', 'parents_malformed'],
+    ])('reads %s with %s of false as none', async (source, key) => {
+      const w = world((x) => {
+        if (source === 'declared') x.script.declared = { ...DECLARED, [key]: false }
+        else if (source === 'validate') x.state.validate = { ...VALIDATE, [key]: false }
+        else x.state.apply_result = { ...APPLY_RESULT, [key]: false }
+      })
+      expect(pick(await score(w), key)).toEqual({ exit: 0, [key]: [] })
+    })
+
     it('keeps only the moves of the class benign_dedup', async () => {
       const moves: JsonValue[] = [
         { major: 3, class: 'benign_dedup' },
@@ -1444,7 +1513,7 @@ describe('score (phase 5)', () => {
   })
 })
 
-// `env_prefix` reaches the adapter, the install and the scorer. The prefix
+// `env_prefix` reaches the scorer and the package manager that `why` starts. The prefix
 // logs the directory and its first argument. `score` runs no git command, so
 // the git rows are for the other phases, and the end of this file runs them
 // all.
@@ -1513,7 +1582,8 @@ describe('env_prefix reaches the scorer', () => {
 })
 
 // The real flow, through `setup`, `classify`, `baseline` and `apply`, with the
-// real node adapter and the real scorer, and a prefix that logs each child.
+// real node adapter and the real scorer, and a prefix that logs the children
+// that the driver starts: git, the package manager and the scorer.
 describe('the whole run', () => {
   const NPM = `#!/bin/sh
 case "$1" in
@@ -1522,7 +1592,7 @@ case "$1" in
 esac
 `
 
-  it('reaches ready_for_pr, and each child ran under the prefix', async () => {
+  it('reaches ready_for_pr, and git, the package manager and the scorer ran under the prefix', async () => {
     const sandbox = createSandbox()
     const fixtures = createGitFixtures(sandbox)
     const repo = fixtures.create(join(realpathSync(sandbox.path), 'r'))
