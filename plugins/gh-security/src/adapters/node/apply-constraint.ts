@@ -17,8 +17,9 @@
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
 // A declared parity exception (#50, ruling 2): where the keys of a pnpm
-// parent must be version-qualified and that parent has a git copy, the port
-// refuses. node.sh writes the keys, and no key matches the git copy.
+// parent must be version-qualified and that parent has a copy from outside
+// the registry, such as a git copy, the port refuses. node.sh writes the
+// keys, and no key matches that copy.
 //
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
@@ -64,10 +65,10 @@ import { type Placement, placementRefusal, placementsOf, tightenedRules } from '
 import { writePass } from './override-pass.ts'
 import {
   bareConflict,
-  gitParentRefusal,
   npmEdges,
+  outsideRegistryRefusal,
+  pnpmCopiesOutsideRegistry,
   pnpmEdges,
-  pnpmGitCopies,
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
@@ -205,9 +206,12 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
         pkg,
       ),
     )
-    // A qualified key misses a git copy of its parent (#50, ruling 2).
+    // A qualified key misses a copy of its parent from outside the registry
+    // (#50, ruling 2).
     const refusal =
-      pnpmLock === null ? null : gitParentRefusal(qualifiers, pnpmGitCopies(pnpmLock, pkg), pkg)
+      pnpmLock === null
+        ? null
+        : outsideRegistryRefusal(qualifiers, pnpmCopiesOutsideRegistry(pnpmLock, pkg), pkg)
     if (refusal !== null) throw new Error(refusal.error)
   }
   if (location === 'overrides' && qualifiers.size > 0) {

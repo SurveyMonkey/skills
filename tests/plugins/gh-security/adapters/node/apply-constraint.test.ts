@@ -150,11 +150,11 @@ const GIT_DEBUG =
   'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
 
 /** The refusal of #50, written by hand from ruling 2. */
-const gitParentRefusal = (
+const outsideRegistryRefusal = (
   pkg: string,
   parents: readonly (readonly [string, readonly string[]])[],
 ): string =>
-  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches its git copy (issue #50). Detail: ${JSON.stringify(parents.map(([parent, git_versions]) => ({ parent, git_versions })))}. Nothing was written. The remedy is a registry version for the git dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
 
 const readOptional = (dir: string, file: string): string | null => {
   try {
@@ -395,14 +395,14 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     const parents = await parentsByWhy('pnpm-git-parent-copies')
     expect(parents).toEqual(['debug'])
     expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])).toBe(
-      gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]),
+      outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
     )
   })
 
   it('names each refused parent, and only the parents with a git copy (#50)', () => {
     expect(
       pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'finalhandler', 'debug']),
-    ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+    ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
   /** Copies of `parent` at the start of each section, each with its version of `ms`. */
@@ -426,7 +426,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     const send = parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'])
     expect(
       pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], send),
-    ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+    ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
   it('gives each refused parent its own git copies, in the order of the file (#50)', () => {
@@ -439,7 +439,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(
       pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], setup),
     ).toBe(
-      gitParentRefusal('ms', [
+      outsideRegistryRefusal('ms', [
         ['send', [sendGit]],
         ['debug', [debugGit, GIT_DEBUG]],
       ]),
@@ -452,7 +452,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       ['ms', '^2.1.3', 'debug'],
       registryCopies(['4.3.4', '2.1.2'], ['2.6.9', '2.0.0']),
     )
-    expect(error).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+    expect(error).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
   // Ruling 2 on #50 names each git copy, and a git URL can have no `@`. For
@@ -475,17 +475,14 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       writeFileSync(join(dir, 'pnpm-lock.yaml'), moved)
     }
 
-  it.fails.each(OTHER_COPIES)(
-    'refuses a copy at %s beside two registry copies (#50)',
-    (version) => {
-      const setup = gitCopyAt(version)
-      expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
-        gitParentRefusal('ms', [['debug', [version]]]),
-      )
-    },
-  )
+  it.each(OTHER_COPIES)('refuses a copy at %s beside two registry copies (#50)', (version) => {
+    const setup = gitCopyAt(version)
+    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
+      outsideRegistryRefusal('ms', [['debug', [version]]]),
+    )
+  })
 
-  it.fails.each(OTHER_COPIES)(
+  it.each(OTHER_COPIES)(
     'writes the plain key for a copy at %s beside one registry copy (#50)',
     (version) => {
       const setup = both(gitCopyAt(version), registryCopies(['4.3.4', '2.1.3']))

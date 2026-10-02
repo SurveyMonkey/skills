@@ -30,10 +30,11 @@
 // A parent with one version keeps the bare key. Yarn keys stay bare, so this
 // pass does not run for yarn.
 //
-// A pnpm parent can also have a git copy, such as `debug@git+ssh://git@...`.
-// No version-qualified key matches it. So where the keys of that parent must
+// A pnpm parent can also have a copy from outside the registry. Examples are
+// a git URL, a codeload tarball and a `file:` path. No key qualified by a
+// registry version matches that copy. So where the keys of that parent must
 // be version-qualified, the call refuses before any write (#50, ruling 2).
-// With one registry copy, the plain key covers the git copy too. node.sh
+// With one registry copy, the plain key covers the other copy too. node.sh
 // writes the qualified keys: a declared parity exception.
 //
 // This file ships. It imports nothing outside the plugin.
@@ -54,9 +55,13 @@ type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: un
 /** The missing value of an edge, as the rows of node.sh write it. */
 const MISSING = '-'
 
-/** A parent version with an `@`, such as a `git+ssh://git@` URL: a git copy (#50). */
-const isGitCopy = (parentVersion: string | null): parentVersion is string =>
-  parentVersion?.includes('@') === true
+/**
+ * A parent version from outside the registry (#50). A registry version starts
+ * with a digit, as `parent.version` of the pnpm reader does. A git URL, with
+ * or without an `@`, a codeload tarball and a `file:` path do not.
+ */
+const isOutsideRegistry = (parentVersion: string | null): parentVersion is string =>
+  parentVersion !== null && !/^[0-9]/.test(parentVersion)
 
 /**
  * The edges of pnpm, from `pnpm_edge_rows`. A child version that does not
@@ -67,29 +72,33 @@ const isGitCopy = (parentVersion: string | null): parentVersion is string =>
  * The parent name ends at its first `@` here, and at its last `@` in
  * node.sh (#50). The two differ only for a parent version with an `@`, for
  * example a `git+ssh://git@` copy. node.sh gives that copy a different
- * parent name, so no parent of the call matches it. The port drops its
- * edge, as node.sh does in effect. `pnpmGitCopies` keeps these copies for
- * the refusal of #50.
+ * parent name, so no parent of the call matches it.
+ *
+ * The port drops the edge of each copy from outside the registry. For a
+ * version with an `@`, node.sh does this in effect. For another version,
+ * such as a `git+https` URL, node.sh keeps the edge and writes a key that
+ * names the URL: a declared parity exception (#50). `pnpmCopiesOutsideRegistry`
+ * keeps these copies for the refusal of #50.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpm
     .scan(text, pkg)
-    .edges.filter(({ parentVersion }) => !isGitCopy(parentVersion))
+    .edges.filter(({ parentVersion }) => !isOutsideRegistry(parentVersion))
     .map(({ parent, parentVersion, version }) => ({
       parent: parent.name,
       pver: parentVersion ?? MISSING,
       cver: version ?? MISSING,
     }))
 
-/** The versions of the git copies of each pnpm parent of `pkg`, in the order of the file. */
-export const pnpmGitCopies = (
+/** The versions from outside the registry of each pnpm parent of `pkg`, in the order of the file. */
+export const pnpmCopiesOutsideRegistry = (
   text: string,
   pkg: string,
 ): ReadonlyMap<string, readonly string[]> => {
   const copies = pnpm
     .scan(text, pkg)
     .edges.flatMap(({ parent, parentVersion }) =>
-      isGitCopy(parentVersion) ? [{ name: parent.name, version: parentVersion }] : [],
+      isOutsideRegistry(parentVersion) ? [{ name: parent.name, version: parentVersion }] : [],
     )
   return new Map(
     copies.map(({ name }) => [
@@ -280,21 +289,22 @@ export const bareConflict = (
 
 /**
  * The refusal of #50 (ruling 2): a pnpm parent that this call qualifies has a
- * git copy. No key qualified by a registry version matches that copy, so the
- * fix would leave it as it is. The detail names each such parent, in the
- * order of the call, with the versions of its git copies.
+ * copy from outside the registry, such as a git copy. No key qualified by a
+ * registry version matches that copy, so the fix would leave it as it is. The
+ * detail names each such parent, in the order of the call, with the versions
+ * of those copies.
  */
-export const gitParentRefusal = (
+export const outsideRegistryRefusal = (
   qualifiers: Qualifiers,
-  gitCopies: ReadonlyMap<string, readonly string[]>,
+  outside: ReadonlyMap<string, readonly string[]>,
   pkg: string,
 ): Failure | null => {
   const detail = [...qualifiers.keys()].flatMap((parent) => {
-    const versions = gitCopies.get(parent)
-    return versions === undefined ? [] : [{ parent, git_versions: versions }]
+    const versions = outside.get(parent)
+    return versions === undefined ? [] : [{ parent, versions_outside_registry: versions }]
   })
   if (detail.length === 0) return null
   return failed(
-    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches its git copy (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for the git dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
   )
 }
