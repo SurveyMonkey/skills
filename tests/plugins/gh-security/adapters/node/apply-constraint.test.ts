@@ -453,6 +453,25 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     )
   })
 
+  // The order of the call, not of the file: here `debug` comes first in the
+  // call, and `send` first in the file.
+  it('gives the refused parents in the order of the call (#50)', () => {
+    const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
+    const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
+    const setup = both(
+      parentCopies('debug', [debugGit, '2.1.2']),
+      parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
+    )
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug', 'send'], setup),
+    ).toBe(
+      outsideRegistryRefusal('ms', [
+        ['debug', [debugGit, GIT_DEBUG]],
+        ['send', [sendGit]],
+      ]),
+    )
+  })
+
   it('refuses a git copy of the parent beside two registry copies (#50)', () => {
     const error = pnpmRefusalOf(
       'pnpm-git-parent',
@@ -545,6 +564,29 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       )
     },
   )
+
+  // A range with no floor has no line, so no copy is off the line.
+  it('writes the plain key for a range with no floor beside a git copy on another line (#50)', () => {
+    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3']))
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '<3', 'debug'], setup)
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '<3' })
+  })
+
+  // A child with no readable line counts as on the line, as in `qual_result`.
+  it('writes the plain key when the ms of the git copy has no readable line (#50)', () => {
+    const setup = both(gitChildAt('link:vendor/ms'), registryCopies(['4.3.4', '2.1.3']))
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+  })
+
+  // A qualified parent with a git copy gets the first refusal, also when a
+  // copy is off the line.
+  it('gives the qualified-key refusal before the plain-key refusal (#50)', () => {
+    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3'], ['2.6.9', '1.0.0']))
+    expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+      outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
 
   // The multiplicity gate reads the snapshot edges, not `packages:`.
   it('still writes qualified keys when the packages section is unreadable', () => {
