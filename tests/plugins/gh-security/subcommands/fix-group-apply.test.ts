@@ -5,9 +5,9 @@
 //
 // As in the bash spec, the adapter is a stand-in that gives a written
 // answer for each call, and records each call. It comes through the
-// registry parameter: the real node adapter with `why`, `declared_ranges`,
-// `resolved_versions`, `apply_constraint` and `validate` replaced
-// (`mocking.md`, "The injected collaborator"). `install` is real. `detect`
+// registry parameter (`mocking.md`, "The injected collaborator"). It is the
+// real node adapter, with `why`, `declared_ranges`, `resolved_versions`,
+// `apply_constraint` and `validate` replaced. `install` is real. `detect`
 // is real too, with a count of its calls and a failure that an example can
 // put at one call. The package manager is a stand-in on PATH, because an install
 // reaches the network. git is real: each example runs in a repository with a

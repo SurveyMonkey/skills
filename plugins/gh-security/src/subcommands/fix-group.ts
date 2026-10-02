@@ -124,7 +124,7 @@
 //   - Two details of `apply` use a colon where the bash text had a dash:
 //     the alerts with no range, and a `drift_commit` that is not a boolean.
 //     In the second, `reporting a real fix` is also `that reports a real
-//     fix`.
+//     fix`, and `leaving the alerts open` is also `leaves the alerts open`.
 //   - `drift_commit` must be a JSON boolean. The text `true` or `false` is
 //     exit 3 here, and the bash took it. Empty text is exit 3 here, and
 //     exit 1 in the bash.
@@ -136,11 +136,11 @@
 //     the first `apply_constraint`. The bash gave jq the value, and went on.
 //   - Each `vulnerable_range` goes to validate as one value. The bash split
 //     a range with a newline into one flag for each line.
-//   - A `written[]` entry that cannot be read (not an object, or a `path`
-//     that is neither a list nor null) is an `apply` failure at any place
-//     in the list. The bash stopped on an entry that is not an object or
-//     null. It could pass a bad `path` when an earlier entry was a bare key.
-//     It read a null entry as a scoped entry.
+//   - A `written[]` entry that cannot be read is an `apply` failure at any
+//     place in the list. Such an entry is not an object, or has a `path`
+//     that is neither a list nor null. The bash stopped on an entry that is
+//     not an object or null. It could pass a bad `path` when an earlier
+//     entry was a bare key. It read a null entry as a scoped entry.
 //   - An `other_line_moves` entry that is not an object is fatal, and the
 //     detail quotes it. The bash stopped on each other entry that is not
 //     null, and quoted no entry. It read a null entry as no move.
@@ -148,12 +148,13 @@
 //     move, quoted whole. The bash walked the values of an object, with the
 //     rule for an entry. It read a text, a number or a boolean as no move.
 //   - The stale-lockfile stop reads `keys` only as a list. jq `length`
-//     also gave 0 for `{}`, `""` and `0`, so the bash stopped there (exit
-//     3), where the port gives `validate_failed_after_ladder` (exit 2).
+//     also gave 0 for `{}`, `""` and `0`. So for these the bash stopped
+//     (exit 3), and the port gives `validate_failed_after_ladder` (exit 2).
 //   - A no-op whose `resolved_versions` holds an object or a list is a
 //     `validate` failure, as when jq `join` stopped in the bash.
 //   - An alert that is not an object has no range: `<unnumbered>`. The bash
-//     stopped in jq, and the detail named no alert.
+//     read a null alert the same way. On a text, a number, a boolean or a
+//     list, it stopped in jq, and the detail named no alert.
 //   - The major of `highest_fixed_version` is read in base 10. The bash read
 //     a zero at the start as octal.
 //   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The

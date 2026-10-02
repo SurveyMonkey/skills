@@ -200,10 +200,11 @@ export const nextRung = (
 export const budgetSpent = (installs: number): boolean => installs >= FIX_INSTALL_BUDGET
 
 /**
- * The entries of `other_line_moves` whose class is the one given. An entry
- * that is not an object is fatal: a move that cannot be read never lets the
- * run go on. Null or absent is no move, as with no baseline. A value that is
- * neither a list nor null is one fatal move.
+ * The entries of `other_line_moves` whose class is the one given. A list
+ * entry that is not an object, null included, is fatal: a move that cannot
+ * be read never lets the run go on. A null or absent `other_line_moves` is
+ * no move, as validate gives with no baseline. A value that is neither a
+ * list nor null is one fatal move.
  */
 export const movesOf = (
   moves: JsonValue | undefined,
