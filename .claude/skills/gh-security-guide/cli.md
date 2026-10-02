@@ -22,7 +22,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
-| `src/subcommands/` | The PreToolUse allow hook, discovery, preflight, scoring, rendering, the drivers |
+| `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), preflight, scoring, rendering, the drivers |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
 
@@ -51,7 +51,9 @@ in prose on stderr. An unknown command is the one deliberate exception to that s
 command's result, so its envelope goes to stderr as JSON and stdout stays empty, because a caller
 reading stdout as this CLI's contract must never read "there is no such command" as a payload.
 A command may also answer with silence, which is exit 0 and nothing written at all.
-A handler may return a promise, and `run.ts` waits for it. A handler may also fail with a report
+A handler may return a promise, and `run.ts` waits for it. A command may compose other commands in process. It calls their exported handlers, and never
+starts this CLI as a child: `prepare-checkout` runs `detect-scope`, `discover-alerts` and
+`classify-lines` this way. A handler may also fail with a report
 (`failedReport` in `src/cli/command.ts`). The report goes to stdout, the message goes to stderr,
 and the exit code is 1. `pr-status` does this, so a caller reads the same JSON on stdout when a
 URL failed.
