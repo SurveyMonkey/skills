@@ -636,10 +636,15 @@ describe('the own-line shapes of #168', () => {
       await realStatuses('npm-major-bump-below-above', [
         alerted('got', '11', '< 11.8.5'),
         alerted('got', '11', '< 11.8.5', [{ major: null, vulnerable_ranges: ['< 1.0.0'] }]),
+        alerted('got', '11', '< 11.8.5', [{ major: 0, vulnerable_ranges: ['< 0.5.0'] }]),
       ]),
     ).toEqual({
       actionable: [],
-      skipped: ['got@11:requires major version bump', 'got@11:requires major version bump'],
+      skipped: [
+        'got@11:requires major version bump',
+        'got@11:requires major version bump',
+        'got@11:requires major version bump',
+      ],
       errors: [],
     })
   })
@@ -730,6 +735,7 @@ describe('the own-line shapes of #168', () => {
   it.each([
     ['a satisfied that is null', ok({ parseable: true, satisfied: null })],
     ['an answer that is null', ok(null)],
+    ['a parseable of false with a satisfied of true', ok({ parseable: false, satisfied: true })],
   ])('reads a range_facts with %s as a broken read', async (_name, reply) => {
     const adapter = { ...node, rangeFacts: () => reply } as Adapter<NodeDetection>
     const route: typeof selectAdapter = (ecosystem, manifest = null) => {

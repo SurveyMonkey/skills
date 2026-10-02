@@ -661,7 +661,9 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
     })
   })
 
-  it.each(['latest', '', 'npm:other@^5.0.0'])(
+  // `^4.0.0 || latest` admits 4.12.5 on its first alternative, and its floor
+  // is on major 4. So only the parse test makes it a break.
+  it.each(['latest', '', 'npm:other@^5.0.0', '^4.0.0 || latest'])(
     'flags a new copy whose parent declares the range %j, which does not parse',
     (range) => {
       const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', range))
@@ -679,6 +681,14 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
       })
     },
   )
+
+  it('does not flag a new copy that satisfies a range whose floor is on another major', () => {
+    const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', '>=3'))
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
 
   it('flags a range that the copy breaks with no floor, such as <4', () => {
     const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', '<4'))
