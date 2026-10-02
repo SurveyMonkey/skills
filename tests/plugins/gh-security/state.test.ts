@@ -282,6 +282,34 @@ describe('loadDriverState', () => {
     )
   })
 
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['empty', ''],
+  ])('reads a prefix that is %s as no prefix', (_shape, value) => {
+    const data: Record<string, unknown> = { ...SETUP, env_prefix: value }
+    if (value === undefined) delete data.env_prefix
+    expect(unwrap(loadDriverState(work(data))).envPrefix).toBeNull()
+  })
+
+  // A prefix of another type is not "no prefix": the run would go on under
+  // the wrong account. The bash passed the text on, and the call failed.
+  it.fails.each([7, ['env', 'A=1'], {}])('refuses a prefix that is %j', (value) => {
+    const envelope = loadDriverState(work({ ...SETUP, env_prefix: value }))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(
+      "no usable value for 'env_prefix'",
+    )
+  })
+
+  // setup writes digits only. A major line of other text goes into a regex
+  // and a number, so a load refuses it too.
+  it.fails.each(['0x10', '1e1', ' 4', '4.x'])('refuses a major_line of %j', (value) => {
+    const envelope = loadDriverState(work({ ...SETUP, major_line: value }))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(
+      "no usable value for 'major_line'",
+    )
+  })
+
   // The second: a file that could not be read. A zero-byte file is what a
   // crashed setup left.
   it.each([
