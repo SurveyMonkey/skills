@@ -29,8 +29,8 @@ export interface FixGroupDeps {
  */
 export const DRIFT_SUBJECT = 'chore(deps): refresh lockfile (control install, no manifest change)'
 
-/** The phase names of an exit 3 that `setup`, `classify` and `baseline` give. */
-export type FailedPhase = 'worktree' | 'classify' | 'baseline'
+/** The phase names of an exit 3. `apply` gives `apply` and `validate`. */
+export type FailedPhase = 'worktree' | 'classify' | 'baseline' | 'apply' | 'validate'
 
 /**
  * Exit 3: a terminal failure of one phase, `fail_phase` in the bash. The

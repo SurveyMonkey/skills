@@ -1,32 +1,39 @@
 // `gh-security fix-group <phase>`: the driver for one dependency-fix group.
 // This is the port of `scripts/common/fix-group.sh` (#232), one phase at a
-// time. This layer ports the first three phases:
+// time. These four phases are ported:
 //
 //   fix-group setup    --group-json <file> --repo-root <path>
 //                      --default-branch <name>
 //                      [--env-prefix "<string>"] [--scorer <path>]
 //   fix-group classify --work <dir>
 //   fix-group baseline --work <dir>
+//   fix-group apply    --work <dir>
 //
-// `apply` and `score` come in later layers of #232. `cleanup` stays in the
-// bash, and #234 ports it (round 5 ruling 5 on #232). Until then the agent
-// calls `fix-group.sh` for all six steps.
+// `score` comes in a later layer of #232. `cleanup` stays in the bash, and
+// #234 ports it (round 5 ruling 5 on #232). Until then the agent calls
+// `fix-group.sh` for all six steps.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
 // The state file is the only thing that goes from one step to the next.
 //
-// Contract, for these three phases:
-//   exit 0  {"status":"ok","step":"setup|classify|baseline", ...}
+// Contract, for these four phases:
+//   exit 0  {"status":"ok","step":"setup|classify|baseline|apply", ...}
 //           an intermediate step completed.
-//   exit 3  {"status":"failure","phase":"worktree|classify|baseline",
-//            "detail":"..."}  a terminal failure. The agent copies it to
-//           its result block. stderr has `fix-group: <phase> failure:
-//           <detail>`.
+//           {"status":"no_op", ...}  terminal: nothing to fix (`apply`).
+//   exit 2  {"status":"needs_judgment","decision_point":"...",
+//            "evidence":{...}}  only from `apply`: a branch that the tree
+//           cannot decide. It fails closed, and never guesses. stderr has
+//           `fix-group: needs judgment at <decision_point>`. The decision
+//           points are `install_failure` (its evidence has `phase:
+//           "install"`), `validate_failed_after_ladder` and
+//           `install_budget_exhausted`.
+//   exit 3  {"status":"failure","phase":"worktree|classify|baseline|apply|
+//            validate","detail":"..."}  a terminal failure. The agent
+//           copies it to its result block. stderr has `fix-group: <phase>
+//           failure: <detail>`.
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
-// Exit 2 (`needs_judgment`) is for `apply`. None of these three phases
-// gives it.
 //
 // What each phase does:
 //   setup     checks the group, then refuses a work directory that is
@@ -46,6 +53,20 @@
 //             lockfile and its install files with the drift subject. Any
 //             other change is a failure. Then it reads `resolved_versions`
 //             again.
+//   apply     checks the state before its first write: `classify` and
+//             `baseline` ran, and each alert has a range. It writes the
+//             range `>=<fixed> <next major>`, then runs `apply_constraint`,
+//             one fix install, and `validate --line`. A fatal move on
+//             another line stops it (#83). While validate fails, it goes up
+//             the ladder: a line with no copy stops it, then step 1 adds
+//             the parents that npm violation paths name, then step 2 writes
+//             the bare override, then the stale-lockfile stop, then a
+//             judgment. The state counts the fix installs of the run, and
+//             the fourth is the last (`FIX_INSTALL_BUDGET`). When validate
+//             passes, an empty diff is a no-op or a lockfile refresh, as
+//             the drift commit decides (#146). Else the widest shape of
+//             `written[]` labels the fix. `fix-group-ladder.ts` has each
+//             decision as a pure function.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `setup` records (env-prefix.md). The prefix sets no
@@ -95,6 +116,32 @@
 //   - A later phase refuses a state whose `major_line` is not digits, or
 //     whose `env_prefix` is not text, with exit 1. The bash gave the text of
 //     each one to the adapter or to the prefix, and did not check it.
+//   - A key path in the text of a state failure has no leading dot:
+//     `'group.alerts'`, where the bash wrote `'.group.alerts'`.
+//   - `apply` reads `group.sibling_alerts` before its first write. A null
+//     value is exit 1 with nothing written. The bash read it at each
+//     validate, after the first fix install.
+//   - Two details of `apply` use a colon where the bash text had a dash:
+//     the alerts with no range, and a `drift_commit` that is not a boolean.
+//   - `drift_commit` must be a JSON boolean. The text `true` or `false` is
+//     exit 3 here, and the bash took it. Empty text is exit 3 here, and
+//     exit 1 in the bash.
+//   - `fix_installs` is read from its JSON value, so `3.0` is the count 3.
+//     The bash read the text `3.0` and refused it.
+//   - `eligible_parents` must be a list of names, and a stored
+//     `observations_first` must be a list. Each other value is exit 1 before
+//     the first `apply_constraint`. The bash gave jq the value, and went on.
+//   - Each `vulnerable_range` goes to validate as one value. The bash split
+//     a range with a newline into one flag for each line.
+//   - A `written[]` entry that cannot be read (not an object, or a `path`
+//     that is not a list) is an `apply` failure at any place in the list.
+//     The bash could pass it when an earlier entry was a bare key.
+//   - An `other_line_moves` entry that is not an object is fatal, and the
+//     detail quotes it. The bash also stopped, and quoted no entry.
+//   - An alert that is not an object has no range: `<unnumbered>`. The bash
+//     stopped in jq, and the detail named no alert.
+//   - The major of `highest_fixed_version` is read in base 10. The bash read
+//     a leading zero as octal.
 //   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The
 //     worktree is the workspace of the run, as in the bash, which has no
 //     trap. `cleanup` removes it. The guard for a crashed run stops the next
@@ -108,6 +155,7 @@ import type { CommandContext, CommandHandler, CommandResult } from '../cli/comma
 import { parseArguments } from '../lib/args.ts'
 import { failed } from '../lib/envelope.ts'
 import { run } from '../lib/process.ts'
+import { apply } from './fix-group-apply.ts'
 import { baseline } from './fix-group-baseline.ts'
 import { classify } from './fix-group-classify.ts'
 import { type FixGroupDeps, loadPhase } from './fix-group-common.ts'
@@ -115,7 +163,10 @@ import { setup } from './fix-group-setup.ts'
 
 export type { FixGroupDeps } from './fix-group-common.ts'
 
-const USAGE = 'usage: gh-security fix-group <setup|classify|baseline> [options]'
+const USAGE = 'usage: gh-security fix-group <setup|classify|baseline|apply> [options]'
+
+/** The phases after `setup`. Each reads the state that `--work` names. */
+const PHASES = { classify, baseline, apply } as const
 
 /** The handler. The runner and the registry are parameters. */
 export const fixGroup = async (
@@ -125,10 +176,10 @@ export const fixGroup = async (
   const [phase, ...args] = context.args
   if (phase === undefined) return failed(USAGE)
   if (phase === 'setup') return setup(args, context.env, deps)
-  if (phase !== 'classify' && phase !== 'baseline') {
+  if (!Object.hasOwn(PHASES, phase)) {
     return failed(
-      `fix-group: '${phase}' is not a phase of this command. It ports setup, classify and ` +
-        'baseline; apply, score and cleanup still run in fix-group.sh.',
+      `fix-group: '${phase}' is not a phase of this command. It ports setup, classify, ` +
+        'baseline and apply; score and cleanup still run in fix-group.sh.',
     )
   }
   const parsed = parseArguments(args, { work: { type: 'string', default: '' } })
@@ -136,7 +187,7 @@ export const fixGroup = async (
   if (parsed.value.work === '') return failed(`${phase}: --work is required`)
   const loaded = loadPhase(parsed.value.work, context.env, deps)
   if (loaded.outcome !== 'ok') return loaded
-  return phase === 'classify' ? classify(loaded.value) : baseline(loaded.value)
+  return PHASES[phase as keyof typeof PHASES](loaded.value)
 }
 
 export const fixGroupCommand: CommandHandler = (context) =>
