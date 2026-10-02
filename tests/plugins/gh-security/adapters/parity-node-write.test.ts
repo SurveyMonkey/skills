@@ -36,6 +36,14 @@
 //     succeeded gives one. There, bash `shim` refuses with its own message,
 //     and the TypeScript caller gets the refusal of `detect`.
 //
+// Declared exceptions of #304, where bash passes and the port refuses, each
+// a test of its own below:
+//
+//   - Item 2: an alert range with a comparator and then a `^` or `~`, such
+//     as `<^7.0.0`. node.sh reads it as `<0.0.0`, which matches nothing.
+//   - Item 3: `--line` with `--vulnerable` flags that hold only newlines.
+//     node.sh then runs no completeness check.
+//
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There
 // the check is the refusal alone.
@@ -741,6 +749,40 @@ describe('validate parity on the generated cases', () => {
     expect(validateBoth(join(FIXTURES_ROOT, 'yarn-multi-major'), [...flags, ...range])).toBe(
       'agree',
     )
+  })
+})
+
+describe('validate: the declared exceptions of #304', () => {
+  const both = (args: readonly string[]) => {
+    const call = callOf(args) as Call
+    const dir = join(FIXTURES_ROOT, 'yarn-multi-major')
+    const bash = runBash({ command: ADAPTER, args: ['validate', ...args], cwd: dir })
+    return {
+      bash: { status: bash.status, ok: (JSON.parse(bash.stdout) as { ok: boolean }).ok },
+      typescript: node.validate(treeOf(dir), call.pkg, call.range, call.options),
+    }
+  }
+
+  it.fails('bash passes the alert range <^7.0.0, and the port refuses it (item 2)', () => {
+    expect(both(['--line', '6', '--vulnerable', '<^7.0.0', 'undici', '>=6.0.0 <7'])).toEqual({
+      bash: { status: 0, ok: true },
+      typescript: {
+        outcome: 'failed',
+        error:
+          "validate: --vulnerable range '<^7.0.0' is not a parseable version range. Copy the alert's vulnerable_range verbatim; an unreadable range would silently mark every resolved copy as not vulnerable.",
+      },
+    })
+  })
+
+  it.fails('bash passes a line whose alert flag is only a newline, and the port refuses it (item 3)', () => {
+    expect(both(['--line', '7', '--vulnerable', '\n', 'undici', '>=7.0.0 <8'])).toEqual({
+      bash: { status: 0, ok: true },
+      typescript: {
+        outcome: 'failed',
+        error:
+          "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19).",
+      },
+    })
   })
 })
 
