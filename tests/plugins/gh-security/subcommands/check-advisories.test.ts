@@ -515,6 +515,8 @@ describe('the four verdicts', () => {
     ['null', null, 'null'],
     ['the word true', 'true', '"true"'],
     ['the number 1', 1, '1'],
+    ['an object', { yes: true }, '{"yes":true}'],
+    ['an array', [true], '[true]'],
   ])(
     'reads a parseable range with %s as satisfied as unevaluated, never safe',
     async (_name, satisfied, shown) => {
