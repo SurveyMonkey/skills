@@ -7,8 +7,8 @@
 // header of `fix-group.ts`.
 //
 // Each function is the port of a jq filter or a shell test in
-// `cmd_apply`, `apply_call`, `fix_install_step`, `uncovered_parents` and
-// `line_versions` of `scripts/common/fix-group.sh`.
+// `cmd_apply`, `apply_call`, `validate_call`, `fix_install_step`,
+// `uncovered_parents` and `line_versions` of `scripts/common/fix-group.sh`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -31,8 +31,9 @@ const recordOf = (value: unknown): Record<string, unknown> | null =>
 /**
  * The range of the fix: `>=<fixed> <next major>`. It always has an upper
  * bound, so it never installs a later major. `3.1.2` gives `>=3.1.2 <4`, and
- * `0.5.3` gives `>=0.5.3 <1`. The major is the digits after a leading `v`,
- * `V` or `=`, up to the first other character. Null when there are none.
+ * `0.5.3` gives `>=0.5.3 <1`. The major is the digits at the start, after
+ * any `v`, `V` or `=`, up to the next other character. Null when there are
+ * none.
  */
 export const rangeOf = (fixed: string): string | null => {
   const major = (/^[vV=]*([0-9]*)/.exec(fixed) as RegExpExecArray)[1] as string
@@ -112,7 +113,7 @@ const NO_PARENT_IN_PATH =
 const INSTALL_PATH = /(^|\/)node_modules\//
 
 /**
- * Step 1 of the ladder: the parents of the violating copies. Only an npm
+ * Step 1 of the ladder: the parents of the copies that violate. Only an npm
  * path names a parent. pnpm and Yarn Berry name the copy, so there the step
  * cannot run, and the answer says so. A parent on another major line never
  * gets an entry (#83), and a parent that has one already is not added again.

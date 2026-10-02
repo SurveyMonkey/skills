@@ -54,8 +54,11 @@ import {
 /** A step that ends the phase: exit 1, 2 or 3. */
 type Stop = FailedReport | Failure
 
+/** The decision points of exit 2, as the header of `fix-group.ts` lists them. */
+type DecisionPoint = 'install_failure' | 'validate_failed_after_ladder' | 'install_budget_exhausted'
+
 /** Exit 2: a decision that goes back to the agent. Fail closed, never guess. */
-const needsJudgment = (decisionPoint: string, evidence: JsonObject): FailedReport =>
+const needsJudgment = (decisionPoint: DecisionPoint, evidence: JsonObject): FailedReport =>
   failedReport(
     `fix-group: needs judgment at ${decisionPoint}`,
     { status: 'needs_judgment', decision_point: decisionPoint, evidence },

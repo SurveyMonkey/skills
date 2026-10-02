@@ -7,8 +7,9 @@
 // answer for each call, and records each call. It comes through the
 // registry parameter: the real node adapter with `why`, `declared_ranges`,
 // `resolved_versions`, `apply_constraint` and `validate` replaced
-// (`mocking.md`, "The injected collaborator"). `detect` and `install` are
-// real. The package manager is a stand-in on PATH, because an install
+// (`mocking.md`, "The injected collaborator"). `install` is real. `detect`
+// is real too, with a count of its calls and a failure that an example can
+// put at one call. The package manager is a stand-in on PATH, because an install
 // reaches the network. git is real: each example runs in a repository with a
 // bare origin from `harness/git.ts`. The expected values are written by hand
 // from the contract in the header of `fix-group.ts`.

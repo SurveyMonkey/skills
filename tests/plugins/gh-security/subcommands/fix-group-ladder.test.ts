@@ -146,7 +146,7 @@ describe('the parent that a violation path names', () => {
   })
 })
 
-describe('step 1: the parents of the violating copies', () => {
+describe('step 1: the parents of the copies that violate', () => {
   const REASON =
     "no violating copy's path names its enclosing parent: pnpm reports <name>@<version> and " +
     'Yarn Berry the resolution locator <name>@npm:<version>, both of which name the copy ' +

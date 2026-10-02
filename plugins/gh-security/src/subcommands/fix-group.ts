@@ -116,39 +116,46 @@
 //   - A later phase refuses a state whose `major_line` is not digits, or
 //     whose `env_prefix` is not text, with exit 1. The bash gave the text of
 //     each one to the adapter or to the prefix, and did not check it.
-//   - A key path in the text of a state failure has no leading dot:
+//   - A key path in the text of a state failure has no dot at the start:
 //     `'group.alerts'`, where the bash wrote `'.group.alerts'`.
 //   - `apply` reads `group.sibling_alerts` before its first write. A null
 //     value is exit 1 with nothing written. The bash read it at each
 //     validate, after the first fix install.
 //   - Two details of `apply` use a colon where the bash text had a dash:
 //     the alerts with no range, and a `drift_commit` that is not a boolean.
+//     In the second, `reporting a real fix` is also `that reports a real
+//     fix`.
 //   - `drift_commit` must be a JSON boolean. The text `true` or `false` is
 //     exit 3 here, and the bash took it. Empty text is exit 3 here, and
 //     exit 1 in the bash.
 //   - `fix_installs` is read from its JSON value, so `3.0` is the count 3.
-//     The bash read the text `3.0` and refused it.
+//     The bash, with jq 1.7 or later, read the text `3.0` and refused it.
+//     jq 1.6 gave the text `3`.
 //   - `eligible_parents` must be a list of names, and a stored
 //     `observations_first` must be a list. Each other value is exit 1 before
 //     the first `apply_constraint`. The bash gave jq the value, and went on.
 //   - Each `vulnerable_range` goes to validate as one value. The bash split
 //     a range with a newline into one flag for each line.
 //   - A `written[]` entry that cannot be read (not an object, or a `path`
-//     that is not a list) is an `apply` failure at any place in the list.
-//     The bash could pass it when an earlier entry was a bare key.
+//     that is neither a list nor null) is an `apply` failure at any place
+//     in the list. The bash stopped on an entry that is not an object or
+//     null. It could pass a bad `path` when an earlier entry was a bare key.
+//     It read a null entry as a scoped entry.
 //   - An `other_line_moves` entry that is not an object is fatal, and the
-//     detail quotes it. The bash stopped on a text or a number entry, and
-//     quoted no entry. It read a null entry as no move.
+//     detail quotes it. The bash stopped on each other entry that is not
+//     null, and quoted no entry. It read a null entry as no move.
 //   - An `other_line_moves` that is neither a list nor null is one fatal
-//     move, quoted whole. The bash walked the values of an object, so it
-//     stopped only on an object that held a fatal move or a text. It read a
-//     text, a number or a boolean as no move.
+//     move, quoted whole. The bash walked the values of an object, with the
+//     rule for an entry. It read a text, a number or a boolean as no move.
+//   - The stale-lockfile stop reads `keys` only as a list. jq `length`
+//     also gave 0 for `{}`, `""` and `0`, so the bash stopped there (exit
+//     3), where the port gives `validate_failed_after_ladder` (exit 2).
 //   - A no-op whose `resolved_versions` holds an object or a list is a
 //     `validate` failure, as when jq `join` stopped in the bash.
 //   - An alert that is not an object has no range: `<unnumbered>`. The bash
 //     stopped in jq, and the detail named no alert.
 //   - The major of `highest_fixed_version` is read in base 10. The bash read
-//     a leading zero as octal.
+//     a zero at the start as octal.
 //   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The
 //     worktree is the workspace of the run, as in the bash, which has no
 //     trap. `cleanup` removes it. The guard for a crashed run stops the next
