@@ -680,6 +680,14 @@ describe('the own-line shapes of #168', () => {
     })
   })
 
+  // got 9.6.0 and 12.6.1 are both above line 8. With no copy below the line,
+  // the check does not run, so alerts that it cannot read give no error.
+  it('does not run the own-range check for a group with no copy below its line', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [group('got', '8', { alerts: 'x' })]),
+    ).toEqual({ actionable: ['got@8:line_absent'], skipped: [], errors: [] })
+  })
+
   it('skips an alert with no range, and reads the next alert', async () => {
     const entry = group('got', '11', {
       alerts: [{ vulnerable_range: null }, { vulnerable_range: '< 11.8.5' }],
