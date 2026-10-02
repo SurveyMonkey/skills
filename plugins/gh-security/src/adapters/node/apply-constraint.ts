@@ -216,7 +216,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       const offLine = pnpmParentsOffLine(pnpmLock, pkg, targetOf(range))
       const refusal =
         outsideRegistryRefusal(qualifiers, outside, pkg) ??
-        plainKeyRefusal(parents, qualifiers, outside, offLine, pkg)
+        plainKeyRefusal(parents, outside, offLine, pkg)
       if (refusal !== null) throw new Error(refusal.error)
     }
   }

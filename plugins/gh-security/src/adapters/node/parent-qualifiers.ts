@@ -339,18 +339,18 @@ export const pnpmParentsOffLine = (
  * each copy of the parent. So where a copy of the parent has `pkg` on another
  * major line, the plain key moves that copy across its line. The detail names
  * each such parent, in the order of the call, with the versions of its copies
- * from outside the registry.
+ * from outside the registry. The call runs it after `outsideRegistryRefusal`,
+ * which refuses first each qualified parent with such a copy.
  */
 export const plainKeyRefusal = (
   parents: readonly string[],
-  qualifiers: Qualifiers,
   outside: ReadonlyMap<string, readonly string[]>,
   offLine: ReadonlySet<string>,
   pkg: string,
 ): Failure | null => {
   const detail = [...new Set(parents)].flatMap((parent) => {
     const versions = outside.get(parent)
-    if (versions === undefined || qualifiers.has(parent) || !offLine.has(parent)) return []
+    if (versions === undefined || !offLine.has(parent)) return []
     return [{ parent, versions_outside_registry: versions }]
   })
   if (detail.length === 0) return null
