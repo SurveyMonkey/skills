@@ -43,6 +43,7 @@ import { failed } from '#gh-security/lib/envelope.ts'
 import { createGhClient } from '#gh-security/lib/gh.ts'
 import { type Runner, type RunResult, run } from '#gh-security/lib/process.ts'
 import { allowOwnCommands, ENTRY } from '#gh-security/subcommands/allow-own-commands.ts'
+import { mergeEnvelopes } from '#gh-security/subcommands/merge-envelopes.ts'
 import {
   prepareCheckout,
   prepareCheckoutCommand,
@@ -465,6 +466,16 @@ describe('the branch namespace probe', SLOW, () => {
       twice(answer({ stdout: `${SHA}\trefs/heads/fix-later\n` })),
       `git ls-remote gave output that is not a refs/heads/fix line: ${SHA}\trefs/heads/fix-later\n`,
     ],
+    [
+      'the output, when the object name is not hex',
+      twice(answer({ stdout: `${'z'.repeat(40)}\trefs/heads/fix\n` })),
+      `git ls-remote gave output that is not a refs/heads/fix line: ${'z'.repeat(40)}\trefs/heads/fix\n`,
+    ],
+    [
+      'the output, when a space and not a tab follows the object name',
+      twice(answer({ stdout: `${SHA} refs/heads/fix\n` })),
+      `git ls-remote gave output that is not a refs/heads/fix line: ${SHA} refs/heads/fix\n`,
+    ],
   ])('excludes the checkout after two failed attempts, with %s', async (_name, probes, stderr) => {
     const w = world()
     const work = checkout(w, 'app')
@@ -479,21 +490,28 @@ describe('the branch namespace probe', SLOW, () => {
     })
   })
 
-  it('excludes the checkout after two attempts whose output could not be read', async () => {
-    const w = world()
-    const work = checkout(w, 'app')
-    // A failed pipe can cut the output short on exit 0 (`lib/process.ts`).
-    const broken = answer({ streamErrors: [{ code: 'EIO', message: 'read EIO' }] })
-    expect(await prepare(w, [work], REPLIES, probing(...twice(broken)))).toEqual({
-      outcome: 'ok',
-      value: {
-        checkout: work,
-        excluded: true,
-        reason: 'branch namespace probe failed twice',
-        stderr: 'a pipe of git ls-remote failed: EIO, read EIO',
-      },
-    })
-  })
+  it.each([
+    ['no output', ''],
+    ['a hit line', `${SHA}\trefs/heads/fix\n`],
+  ])(
+    'excludes the checkout after two attempts whose pipe failed, with %s',
+    async (_name, stdout) => {
+      const w = world()
+      const work = checkout(w, 'app')
+      // A failed pipe can cut the output short on exit 0 (`lib/process.ts`), so
+      // no output of that attempt is a verdict.
+      const broken = answer({ stdout, streamErrors: [{ code: 'EIO', message: 'read EIO' }] })
+      expect(await prepare(w, [work], REPLIES, probing(...twice(broken)))).toEqual({
+        outcome: 'ok',
+        value: {
+          checkout: work,
+          excluded: true,
+          reason: 'branch namespace probe failed twice',
+          stderr: 'a pipe of git ls-remote failed: EIO, read EIO',
+        },
+      })
+    },
+  )
 
   it('reads an object name of 41 digits as output that is not a hit', async () => {
     const w = world()
@@ -730,6 +748,60 @@ describe('the command line', SLOW, () => {
     const input = { tool_name: 'Bash', tool_input: { command: `node ${ENTRY} ${command}` } }
     expect(allowOwnCommands(input, ENTRY, commandNames)?.hookSpecificOutput).toMatchObject({
       permissionDecision: 'allow',
+    })
+  })
+})
+
+describe('the answers, as merge-envelopes reads them', SLOW, () => {
+  // `merge-envelopes` refuses a field that `prepare-checkout` does not give.
+  // So each shape that this command gives must pass that check.
+  it('merges a kept answer and each kind of excluded answer with no refusal', async () => {
+    const w = world()
+    const kept = value(await prepare(w, [checkout(w, 'app')]))
+    const answers = [
+      kept,
+      value(await prepare(w, [checkout(w, 'api', { origin: null })], {})),
+      value(await prepare(w, [checkout(w, 'web')], { viewDefaultBranch: { name: null } })),
+      value(
+        await prepare(
+          w,
+          [checkout(w, 'old')],
+          REPLIES,
+          probing(...twice(answer({ status: 128, stderr: 'fatal: gone\n' }))),
+        ),
+      ),
+    ]
+    const dir = join(w.sandbox.path, 'answers')
+    mkdirSync(dir)
+    const files = answers.map((one, index) => {
+      const file = join(dir, `${index}.json`)
+      writeFileSync(file, JSON.stringify(one))
+      return file
+    })
+    expect(mergeEnvelopes(context(w, files), w.root)).toEqual({
+      outcome: 'ok',
+      value: {
+        checkouts: [
+          {
+            checkout: kept.checkout,
+            nwo: 'octo/app',
+            default_branch: 'main',
+            branch_style: 'slash',
+            classify_errors: [],
+          },
+        ],
+        excluded: [
+          { checkout: join(w.root, 'api'), reason: 'no usable origin', stderr: '' },
+          { checkout: join(w.root, 'web'), reason: 'no resolvable default branch', stderr: '' },
+          {
+            checkout: join(w.root, 'old'),
+            reason: 'branch namespace probe failed twice',
+            stderr: 'fatal: gone\n',
+          },
+        ],
+        actionable: kept.actionable,
+        skipped: kept.skipped,
+      },
     })
   })
 })
