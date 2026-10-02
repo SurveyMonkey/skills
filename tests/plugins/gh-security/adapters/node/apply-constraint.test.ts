@@ -391,7 +391,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
   })
 
-  it.fails('refuses the parent that why names, beside two registry copies, and writes nothing (#50)', async () => {
+  it('refuses the parent that why names, beside two registry copies, and writes nothing (#50)', async () => {
     const parents = await parentsByWhy('pnpm-git-parent-copies')
     expect(parents).toEqual(['debug'])
     expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])).toBe(
@@ -399,13 +399,13 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     )
   })
 
-  it.fails('names each refused parent, and only the parents with a git copy (#50)', () => {
+  it('names each refused parent, and only the parents with a git copy (#50)', () => {
     expect(
       pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'finalhandler', 'debug']),
     ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
-  it.fails('refuses a git copy of the parent beside two registry copies (#50)', () => {
+  it('refuses a git copy of the parent beside two registry copies (#50)', () => {
     const error = pnpmRefusalOf(
       'pnpm-git-parent',
       ['ms', '^2.1.3', 'debug'],

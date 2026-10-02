@@ -30,6 +30,12 @@
 // A parent with one version keeps the bare key. Yarn keys stay bare, so this
 // pass does not run for yarn.
 //
+// A pnpm parent can also have a git copy, such as `debug@git+ssh://git@...`.
+// No version-qualified key matches it. So where the keys of that parent must
+// be version-qualified, the call refuses before any write (#50, ruling 2).
+// With one registry copy, the plain key covers the git copy too. node.sh
+// writes the qualified keys: a declared parity exception.
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { type Failure, failed } from '../../lib/envelope.ts'
@@ -48,6 +54,10 @@ type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: un
 /** The missing value of an edge, as the rows of node.sh write it. */
 const MISSING = '-'
 
+/** A parent version with an `@`, such as a `git+ssh://git@` URL: a git copy (#50). */
+const isGitCopy = (parentVersion: string | null): parentVersion is string =>
+  parentVersion?.includes('@') === true
+
 /**
  * The edges of pnpm, from `pnpm_edge_rows`. A child version that does not
  * start with a digit is `-` here. node.sh keeps its text, and reads no
@@ -58,17 +68,36 @@ const MISSING = '-'
  * node.sh (#50). The two differ only for a parent version with an `@`, for
  * example a `git+ssh://git@` copy. node.sh gives that copy a different
  * parent name, so no parent of the call matches it. The port drops its
- * edge, as node.sh does in effect.
+ * edge, as node.sh does in effect. `pnpmGitCopies` keeps these copies for
+ * the refusal of #50.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpm
     .scan(text, pkg)
-    .edges.filter(({ parentVersion }) => parentVersion?.includes('@') !== true)
+    .edges.filter(({ parentVersion }) => !isGitCopy(parentVersion))
     .map(({ parent, parentVersion, version }) => ({
       parent: parent.name,
       pver: parentVersion ?? MISSING,
       cver: version ?? MISSING,
     }))
+
+/** The versions of the git copies of each pnpm parent of `pkg`, in the order of the file. */
+export const pnpmGitCopies = (
+  text: string,
+  pkg: string,
+): ReadonlyMap<string, readonly string[]> => {
+  const copies = pnpm
+    .scan(text, pkg)
+    .edges.flatMap(({ parent, parentVersion }) =>
+      isGitCopy(parentVersion) ? [{ name: parent.name, version: parentVersion }] : [],
+    )
+  return new Map(
+    copies.map(({ name }) => [
+      name,
+      copies.filter((copy) => copy.name === name).map(({ version }) => version),
+    ]),
+  )
+}
 
 /** The edges of npm, from `npm_copy_rows`. */
 export const npmEdges = (lock: NpmLock, pkg: string): readonly Edge[] =>
@@ -246,5 +275,26 @@ export const bareConflict = (
   }
   return failed(
     `apply_constraint: a pre-existing bare override for '${pkg}' under a parent this call must version-qualify pins a DIFFERENT major line: ${render(detail, null)}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+  )
+}
+
+/**
+ * The refusal of #50 (ruling 2): a pnpm parent that this call qualifies has a
+ * git copy. No key qualified by a registry version matches that copy, so the
+ * fix would leave it as it is. The detail names each such parent, in the
+ * order of the call, with the versions of its git copies.
+ */
+export const gitParentRefusal = (
+  qualifiers: Qualifiers,
+  gitCopies: ReadonlyMap<string, readonly string[]>,
+  pkg: string,
+): Failure | null => {
+  const detail = [...qualifiers.keys()].flatMap((parent) => {
+    const versions = gitCopies.get(parent)
+    return versions === undefined ? [] : [{ parent, git_versions: versions }]
+  })
+  if (detail.length === 0) return null
+  return failed(
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches its git copy (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for the git dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
   )
 }

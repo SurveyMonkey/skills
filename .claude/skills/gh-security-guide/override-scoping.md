@@ -27,7 +27,10 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   with. A bare key there matched every copy of the parent, which is how `ws` 7.x/8.x and
   `brace-expansion` 1.x each collapsed their sibling lines on the field run; the qualified form is
   the one five shipped field PRs validated with `other_line_moves: []`
-  ([#100](https://github.com/SurveyMonkey/skills/issues/100)). A single-version parent keeps the
+  ([#100](https://github.com/SurveyMonkey/skills/issues/100)). No qualified key matches a git
+  copy of the parent (`debug@git+ssh://git@...`). So when such a parent must get qualified keys,
+  the TypeScript `apply_constraint` refuses before it writes, and names the parent
+  ([#50](https://github.com/SurveyMonkey/skills/issues/50), ruling 2). A single-version parent keeps the
   bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
   the bare key on two fallback paths — no parent version qualifies for the target line, or none
   of its snapshot keys carries a readable version — because an entry that over-covers beats

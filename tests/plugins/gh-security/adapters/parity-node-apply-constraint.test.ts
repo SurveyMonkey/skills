@@ -1313,7 +1313,7 @@ describe('apply_constraint parity on a git parent (#50)', () => {
   )
 
   // The declared exception of ruling 2 on #50.
-  it.fails(
+  it(
     'differs beside two registry copies: bash writes, and the port refuses and writes nothing',
     () => {
       const outcome = outcomeOf(GIT_PARENT_REFUSED)

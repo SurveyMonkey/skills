@@ -16,6 +16,10 @@
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
+// A declared parity exception (#50, ruling 2): where the keys of a pnpm
+// parent must be version-qualified and that parent has a git copy, the port
+// refuses. node.sh writes the keys, and no key matches the git copy.
+//
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
 // package.json, then package-lock.json. As in node.sh, a later step can
@@ -60,8 +64,10 @@ import { type Placement, placementRefusal, placementsOf, tightenedRules } from '
 import { writePass } from './override-pass.ts'
 import {
   bareConflict,
+  gitParentRefusal,
   npmEdges,
   pnpmEdges,
+  pnpmGitCopies,
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
@@ -189,10 +195,9 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   }
   let qualifiers: Qualifiers = new Map()
   if (location !== 'resolutions' && parents.length > 0) {
-    const edges =
-      location === 'pnpm.overrides'
-        ? pnpmEdges(readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8'), pkg)
-        : npmEdges(npmLock(), pkg)
+    const pnpmLock =
+      location === 'pnpm.overrides' ? readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8') : null
+    const edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
     qualifiers = orStop(
       qualifiersOf(
         { location, edges, parents, target: targetOf(range), manifest },
@@ -200,6 +205,10 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
         pkg,
       ),
     )
+    // A qualified key misses a git copy of its parent (#50, ruling 2).
+    const refusal =
+      pnpmLock === null ? null : gitParentRefusal(qualifiers, pnpmGitCopies(pnpmLock, pkg), pkg)
+    if (refusal !== null) throw new Error(refusal.error)
   }
   if (location === 'overrides' && qualifiers.size > 0) {
     const conflict = bareConflict(qualifiers, placements, manifest, pkg, range)
