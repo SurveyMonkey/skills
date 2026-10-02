@@ -36,13 +36,13 @@
 // its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
 // When the probes see an unclear pointer, the guard refuses.
 //
-// The probes do not find a submodule whose superproject git dir has no
-// `/.git/` in its path (`git clone --separate-git-dir`), when the path of the
-// submodule starts with `worktrees/`. So the guard also reads the gitdir: git
-// writes a `commondir` file into the gitdir of each linked worktree, and into
-// no gitdir of a submodule. A gitdir that reads as a worktree but has no
-// `commondir` file is refused (#304 item 1). The bash script does not do this
-// check. That is a declared parity exception.
+// The probes do not find one submodule. Its path starts with `worktrees/`,
+// and the git dir of its superproject has no `/.git/` (`git clone
+// --separate-git-dir`). So the guard also reads the gitdir. git writes a
+// `commondir` file into the gitdir of each linked worktree. It writes none
+// into the gitdir of a submodule. So a gitdir that reads as a worktree but
+// has no `commondir` file is refused (#304 item 1). The bash script does not
+// do this check. That is a declared parity exception.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from node
 // beyond `fs` and `path`.

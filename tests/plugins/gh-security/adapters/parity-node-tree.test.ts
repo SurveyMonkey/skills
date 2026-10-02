@@ -26,9 +26,8 @@
 //
 //   - `pnpm-git-parent` and `pnpm-git-parent-copies`: the #50 divergence.
 //     bash names the parent `debug@git+ssh://git`, and the TypeScript reader
-//     names it `debug`. Then `apply_constraint` of the port refuses that
-//     parent where its keys must be version-qualified, because no qualified
-//     key matches the git copy (ruling 2 on #50). bash writes the keys.
+//     names it `debug`. The refusal of ruling 2 on #50 is in
+//     parity-node-apply-constraint.test.ts.
 //   - `npm-v1`: bash reads no parents from a lockfileVersion 1 lockfile and
 //     answers with none. The TypeScript reader refuses that lockfile, as
 //     `resolved_versions` does on both sides. Zero parents from a lockfile

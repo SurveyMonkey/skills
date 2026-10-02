@@ -50,13 +50,12 @@
 # 14). A common dir under a `worktrees/` directory is before that `/.git/`,
 # so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
 # its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
-# The probes do not find a submodule whose superproject git dir has no
-# `/.git/` in its path (`--separate-git-dir`), when the path of the submodule
-# starts with `worktrees/`. This script passes it. The TypeScript port,
-# `requireLinkedWorktree` in `src/worktree.ts`, also requires the `commondir`
-# file that git writes into the gitdir of a linked worktree, so it refuses
-# this case (#304). Each ambiguity that the probes see resolves toward
-# refusing.
+# The probes do not find one submodule. Its path starts with `worktrees/`,
+# and the git dir of its superproject has no `/.git/` (`--separate-git-dir`).
+# This script passes it. The TypeScript port, `requireLinkedWorktree` in
+# `src/worktree.ts`, also requires the `commondir` file that git writes into
+# the gitdir of a linked worktree. So the port refuses this case (#304). When
+# the probes see an unclear pointer, the guard refuses.
 #
 # The walk is plain file inspection rather than `git rev-parse` so the
 # guard keeps working when git is missing or the cwd is a scratch directory,

@@ -13,9 +13,10 @@
 // restores the tree between the two runs. So a refusal that names a path
 // names the same path on each side.
 //
-// The directory is a scratch copy of a fixture, with the `.git` pointer file
-// of a linked worktree, as `use_fixture` makes it. The guard of each side
-// reads that file and runs no git. A second describe runs the guard cases in
+// The directory is a scratch copy of a fixture. `fakeLinkedWorktree` gives it
+// the `.git` pointer file of a linked worktree, and a real gitdir beside it
+// with a `commondir` file. The guard of each side reads these files and runs
+// no git. Only the TypeScript guard reads `commondir` (#304 item 1). A second describe runs the guard cases in
 // real repositories that harness/git.ts builds.
 //
 // Three kinds of case run:
@@ -42,6 +43,9 @@
 // with a git copy beside two registry copies. bash writes keys qualified by
 // the registry versions, which miss the git copy. The port refuses, and
 // writes nothing. Beside one registry copy, both sides write the plain key.
+// The port refuses each other copy from outside the registry in the same way,
+// such as a `git+https` URL. There bash also writes a key that names the URL.
+// No fixture has that copy, so the unit tests hold it.
 //
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There

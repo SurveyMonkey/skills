@@ -46,8 +46,6 @@ const FORMATS: readonly { pm: string; lockfile: string; reader: Reader }[] = [
 ]
 
 const DECLARED: Readonly<Record<string, string>> = {
-  // `pnpm-git-parent` is not out. The #50 difference is in the name of a
-  // parent, which these verbs do not answer (parity-node-tree.test.ts).
   // A Yarn Classic lockfile. `detect` refuses it with exit 3 before any
   // parser runs, and detection is not in these modules.
   'yarn-classic': 'refused by detect, not by a parser',

@@ -35,9 +35,8 @@ export const FIXTURES_ROOT = resolve(import.meta.dirname, '..', 'spec', 'fixture
 /**
  * The gitdir that `fakeLinkedWorktree` makes for `dir` by default. It is
  * beside `dir`, not in it. `fake_linked_worktree` writes a pointer to a path
- * that does not exist, but the TypeScript guard also requires the
- * `commondir` file that git writes into the gitdir of a linked worktree
- * (#304). So this gitdir is real.
+ * that does not exist. The TypeScript guard also requires a `commondir` file
+ * in the gitdir (#304). So this gitdir is real.
  */
 export const defaultWorktreeGitdir = (dir: string): string =>
   join(`${dir}.main`, '.git', 'worktrees', 'fix')

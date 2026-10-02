@@ -51,9 +51,9 @@ const STRICT_TOKEN = /^[v=]*[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z
 
 /**
  * One operator at most: a comparator, or a `^` or `~`. node.sh strips a
- * comparator and then a `^` or `~`, so it passes `<^5.0.0`, which jq reads
- * as `<0.0.0` and which matches nothing. Here that token is unreadable, and
- * the range is refused (#304 item 2, a declared parity exception).
+ * comparator and then a `^` or `~`. So it passes `<^5.0.0`. jq reads that
+ * as `<0.0.0`, which matches nothing. Here that token is unreadable, and the
+ * range is refused (#304 item 2, a declared parity exception).
  */
 const tokenOk = (token: string): boolean =>
   STRICT_TOKEN.test(token.replace(/^(>=|<=|>|<|=|~|\^)/, ''))
@@ -185,7 +185,11 @@ type Inputs = {
   readonly siblingsUnreadable: boolean
 }
 
-/** The inputs of the checks, or the refusal of node.sh for a baseline, a range or a sibling list. */
+/**
+ * The inputs of the checks, or a refusal: for a baseline, a range or a
+ * sibling list, as node.sh refuses, or for a line with no alert range (#304
+ * item 3).
+ */
 const inputsOf = (
   pkg: string,
   range: string,

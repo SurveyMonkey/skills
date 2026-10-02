@@ -12,10 +12,10 @@
 //
 // Declared exception (#304 item 1): the function also requires a `commondir`
 // file in the gitdir of a linked worktree, and the script does not. So a
-// submodule of a superproject cloned with `--separate-git-dir`, which the
-// script passes, is refused by the function. A hand-written pointer that
-// reads as a worktree gets a `commondir`, so that row compares the reading
-// of the pointer text alone.
+// submodule at a `worktrees/` path of a superproject cloned with
+// `--separate-git-dir`, which the script passes, is refused by the function.
+// A hand-written pointer that reads as a worktree gets a `commondir`. So that
+// row compares only how each side reads the pointer text.
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'

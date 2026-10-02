@@ -19,11 +19,10 @@
 // the environment of this process, and the TypeScript side reads PATH from
 // that same environment.
 //
-// No fixture is out. `pnpm-git-parent` was, as the #50
-// divergence. But bash and the port agree on its `resolved_versions` and
-// `resolution_map`: the git copy is no registry copy on either side. The #50
-// divergence is in the name of the parent, which parity-node-tree.test.ts
-// declares, and in the `apply_constraint` refusal of ruling 2 on #50.
+// No fixture is out. On `pnpm-git-parent` and `pnpm-git-parent-copies`,
+// bash and the port agree on `resolved_versions` and `resolution_map`. The
+// #50 differences are the name of a git parent (parity-node-tree.test.ts)
+// and the refusal of ruling 2 (parity-node-apply-constraint.test.ts).
 //
 // Declared divergence in the exit status: where jq itself stops, bash exits
 // with jq's own status 5, and writes jq's own message. That status is not
@@ -198,7 +197,7 @@ describe('the fixture set', () => {
     expect(accepted.map((fixture) => fixture.name)).toContain(name)
   })
 
-  // These fixtures were out until #50. Now each side must agree on them.
+  // Each side must agree on the git parent fixtures of #50.
   it.each(['pnpm-git-parent', 'pnpm-git-parent-copies'])(
     'compares the git parent fixture %s',
     (name) => {

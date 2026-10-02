@@ -27,11 +27,12 @@
 //
 // Verdicts, and why there are four:
 //   vulnerable    - at least one advisory range admits the version.
-//   safe          - advisories exist, every range was evaluated, none matched.
+//   safe          - advisories exist, each entry has a range, every range
+//                   was evaluated, and none matched.
 //   unknown       - no range matched, but one could not be evaluated, or an
-//                   advisory entry has no range. It is never safe, because
-//                   the range that could not be evaluated is where an
-//                   unnoticed match would hide.
+//                   advisory entry has no range. It is never safe: a match
+//                   can hide in a range that was not evaluated, or in an
+//                   entry with no range.
 //   no-advisories - the query succeeded and returned nothing for this
 //                   package. It is NOT a synonym for safe. A pin may exist
 //                   for a reason that is not security, and a misspelled name
