@@ -436,6 +436,33 @@ describe('setup (phase 1)', () => {
       expect(answer.stderr).toContain(`origin/${BRANCH}=${pushed}`)
     })
 
+    // Each path of the drift commit must be a drift path, not one of them.
+    it('refuses a drift subject over the lockfile and package.json, and keeps the branch', async () => {
+      const w = world()
+      w.fixtures.git(w.repo, 'checkout', '-q', '-b', BRANCH)
+      writeFileSync(join(w.repo, 'package-lock.json'), '{"lockfileVersion":3,"n":1}\n')
+      writeFileSync(join(w.repo, 'package.json'), '{"name":"x"}\n')
+      w.fixtures.git(w.repo, 'add', '-A')
+      w.fixtures.git(w.repo, 'commit', '-qm', DRIFT_SUBJECT)
+      w.fixtures.git(w.repo, 'checkout', '-q', 'main')
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      expect(pick(await setup(w), 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
+    })
+
+    // The bash counts the subjects: one commit, never two (#152).
+    it('refuses two commits beyond origin/main when one has the drift subject', async () => {
+      const w = world()
+      commitOnBranch(w, 'package-lock.json', '{"lockfileVersion":3,"n":1}\n', DRIFT_SUBJECT)
+      w.fixtures.git(w.repo, 'checkout', '-q', BRANCH)
+      writeFileSync(join(w.repo, 'package-lock.json'), '{"lockfileVersion":3,"n":2}\n')
+      w.fixtures.git(w.repo, 'commit', '-qam', 'chore: by hand')
+      w.fixtures.git(w.repo, 'checkout', '-q', 'main')
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      expect(pick(await setup(w), 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
+    })
+
     it('refuses a drift subject on a commit with no change', async () => {
       const w = world()
       w.fixtures.git(w.repo, 'checkout', '-q', '-b', BRANCH)
@@ -733,6 +760,7 @@ describe('classify (phase 2)', () => {
       ['@scope/bare', '@scope/pkg', 'minimatch'],
     ],
     ['nothing for lists that are null', { parents_read: null }, []],
+    ['no malformed parent', { parents_read: ['express'], parents_malformed: ['koa'] }, ['express']],
   ])('takes %s as eligible', async (_shape, lists, eligible) => {
     const w = await afterSetup()
     const route = stand({
@@ -771,10 +799,29 @@ describe('classify (phase 2)', () => {
     expect(answer.stderr).toContain(detail)
   })
 
-  it('fails the phase on an answer of why that is not an object', async () => {
+  it.each([null, []])(
+    'fails the phase on an answer of why that is %j, not an object',
+    async (value) => {
+      const w = await afterSetup()
+      const answer = await classify(w, stand({ why: async () => ok(value as never) }))
+      expect(answer.stderr).toContain('adapter why lodash emitted no JSON object')
+    },
+  )
+
+  // The bash compared the text of the field, so the string "true" stops too.
+  it('stops on a peer_only that is the string "true"', async () => {
     const w = await afterSetup()
-    const answer = await classify(w, stand({ why: async () => ok(null as never) }))
-    expect(answer.stderr).toContain('adapter why lodash emitted no JSON object')
+    const route = stand({
+      why: async (tree, pkg, source) => {
+        const answer = await node.why(tree, pkg, source)
+        return answer.outcome === 'ok'
+          ? ok({ ...answer.value, peer_only: 'true' as never })
+          : answer
+      },
+    })
+    const answer = await classify(w, route)
+    expect(pick(answer, 'phase')).toEqual({ status: 3, phase: 'classify' })
+    expect(answer.stderr).toContain('peer_only_dependency: lodash')
   })
 
   it('refuses a relationship outside the enum of the contract', async () => {
@@ -833,6 +880,7 @@ describe('classify (phase 2)', () => {
 
   it.each([
     ['not an object', () => ok(null as never), 'did not return a JSON object'],
+    ['a list', () => ok([] as never), 'did not return a JSON object'],
     [
       'a parents list of numbers',
       () => ok({ parents_read: [1] } as never),
@@ -925,7 +973,9 @@ describe('baseline (phase 3)', () => {
       w,
       "git mv package-lock.json npm-shrinkwrap.json\nprintf '\\n' >> npm-shrinkwrap.json\n",
     )
-    expect((await baseline(w)).stderr).toContain('could not be parsed after the control install')
+    const answer = await baseline(w)
+    expect(pick(answer, 'phase')).toEqual({ status: 3, phase: 'baseline' })
+    expect(answer.stderr).toContain('could not be parsed after the control install')
     expect(head(w)[0]).toBe(DRIFT_SUBJECT)
     expect(head(w)).toContain('npm-shrinkwrap.json')
   })
@@ -972,6 +1022,10 @@ describe('baseline (phase 3)', () => {
     ['socket hang up', 'npm ERR! network socket hang up', 2],
     ['ECONNRESET', 'npm ERR! read ECONNRESET', 2],
     ['a registry that timed out', 'the registry timed out', 2],
+    ['ESOCKETTIMEDOUT', 'npm ERR! code ESOCKETTIMEDOUT', 2],
+    ['network timeout', 'npm ERR! network timeout at: https://registry.npmjs.org/x', 2],
+    ['Timeout awaiting', "npm ERR! Timeout awaiting 'request' for 30000ms", 2],
+    ['a lower-case etimedout, as grep -i matches', 'connect etimedout 10.0.0.1:443', 2],
     [
       'self-signed',
       'npm ERR! request to https://registry.npmjs.org/x failed, reason: self signed certificate',
@@ -1019,14 +1073,37 @@ describe('baseline (phase 3)', () => {
     expect(stateOf(w).install_signals).toEqual(['earlier'])
   })
 
-  it('is exit 1 on a state whose install_signals is not a list', async () => {
+  it('writes a signal once when the state already had it', async () => {
+    const w = await ready()
+    editState(w, (state) => {
+      state.install_signals = ['pnpm_field_no_longer_read']
+    })
+    installs(
+      w,
+      `printf ' WARN  The "pnpm" field in package.json is no longer read by pnpm\\n' >&2\n`,
+    )
+    await baseline(w)
+    expect(stateOf(w).install_signals).toEqual(['pnpm_field_no_longer_read'])
+  })
+
+  // The list is read before the three writes, so a bad list writes none of
+  // them (the header of fix-group.ts).
+  it('is exit 1 on a state whose install_signals is not a list, and writes no key', async () => {
     const w = await ready()
     editState(w, (state) => {
       state.install_signals = 'x'
     })
+    installs(w, "printf '\\n' >> package-lock.json\n")
     const answer = await baseline(w)
     expect(answer.status).toBe(1)
     expect(answer.stderr).toContain("no usable value for 'install_signals'")
+    const state = stateOf(w)
+    expect([state.baseline, state.drift_commit, state.install_signals]).toEqual([
+      undefined,
+      false,
+      'x',
+    ])
+    expect(head(w)[0]).toBe(DRIFT_SUBJECT)
   })
 
   // The order is the point (#146): the baseline is after the control install.
@@ -1221,7 +1298,9 @@ describe('env_prefix', () => {
   it('wraps each git call of setup, each package-manager call, and each git call after', async () => {
     const w = world()
     w.env.PREFIX_LOG = w.sandbox.join('prefix.log')
-    const prefix = logging(w)
+    // A prefix of more than one word, as a real one is: each later phase
+    // splits the text that setup recorded.
+    const prefix = `env PREFIX_WORDS=3 ${logging(w)}`
     expect((await setup(w, '--env-prefix', prefix)).status).toBe(0)
     expect(logged(w)).toEqual(['git'])
     expect((await classify(w)).status).toBe(0)
