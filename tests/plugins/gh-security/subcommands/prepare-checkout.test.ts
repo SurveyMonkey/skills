@@ -494,7 +494,7 @@ describe('the branch namespace probe', SLOW, () => {
     })
   })
 
-  it.fails('reads an object name of 41 digits as output that is not a hit', async () => {
+  it('reads an object name of 41 digits as output that is not a hit', async () => {
     const w = world()
     const work = checkout(w, 'app')
     const line = `${'a'.repeat(41)}\trefs/heads/fix\n`

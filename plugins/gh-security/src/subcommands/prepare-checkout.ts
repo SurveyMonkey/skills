@@ -86,8 +86,11 @@ const USAGE = 'usage: gh-security prepare-checkout [--env-prefix <prefix>] <root
 /** The one ref that the probe asks for. */
 const FIX_REF = 'refs/heads/fix'
 
-/** A line of `ls-remote` for the probe's ref: an object name, a tab, the ref. */
-const HIT = /^[0-9a-f]{40,64}\trefs\/heads\/fix$/
+/**
+ * A line of `ls-remote` for the probe's ref: an object name, a tab, the ref.
+ * An object name has 40 digits (sha-1) or 64 digits (sha-256).
+ */
+const HIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})\trefs\/heads\/fix$/
 
 /** The reasons of the four exclusion causes. */
 const REASONS = {
