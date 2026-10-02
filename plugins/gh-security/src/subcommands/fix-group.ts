@@ -11,7 +11,7 @@
 //   fix-group score    --work <dir>
 //
 // `cleanup` stays in the bash, and #234 ports it (round 5 ruling 5 on #232).
-// Until then the agent calls `fix-group.sh cleanup`.
+// Until then the agent calls `fix-group.sh` for all six steps.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
@@ -21,9 +21,10 @@
 //   exit 0  {"status":"ok","step":"setup|classify|baseline|apply", ...}
 //           an intermediate step completed.
 //           {"status":"no_op", ...}  terminal: nothing to fix (`apply`).
-//           {"status":"ready_for_pr", ...}  terminal: hand to phase 6
-//           (`score`). It has the package, the action, the risk report, the
-//           written entries, the observations and the validate report.
+//           {"status":"ready_for_pr", ...}  terminal: hand to phase 6. Only
+//           `score` gives it. It has the package, the action, the risk
+//           report, the written entries, the observations and the validate
+//           report.
 //   exit 2  {"status":"needs_judgment","decision_point":"...",
 //            "evidence":{...}}  only from `apply`: a branch that the tree
 //           cannot decide. It fails closed, and never guesses. stderr has
@@ -32,13 +33,14 @@
 //           "install"`), `validate_failed_after_ladder` and
 //           `install_budget_exhausted`.
 //   exit 3  {"status":"failure","phase":"worktree|classify|baseline|apply|
-//            validate","detail":"..."}  a terminal failure. `score` gives
-//           only `validate`: a verb that fails after the fix, a field that
-//           the contract promises and the answer lacks, a version that
-//           cannot be compared, or a scorer that fails or has no usable
-//           report. The agent
+//            validate","detail":"..."}  a terminal failure. The agent
 //           copies it to its result block. stderr has `fix-group: <phase>
-//           failure: <detail>`.
+//           failure: <detail>`. `score` gives only `validate`. The causes
+//           are a verb that fails after the fix, a promised field that is
+//           absent, a version that cannot be compared, and a why capture
+//           that cannot be written. They are also a scorer that fails or has
+//           no usable report, and a stored or scored value of the wrong
+//           type (see the differences below).
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
 //
@@ -83,14 +85,16 @@
 //             `<work>/why-<package_path>.json`. `--before` is the lowest
 //             version on the line in the baseline, or in the pre-drift
 //             snapshot for a lockfile refresh. It is not given when that
-//             snapshot has no version on the line (#76). `--after` is the
+//             snapshot has `present` other than the text `true`. It is not
+//             given when it has no version on the line (#76). `--after` is the
 //             lowest version on the line after the fix, and it is never
 //             empty. The scorer runs in the worktree with `--package`,
 //             `--after`, `--adapter`, `--why-json`, `--override-scope`, an
 //             optional `--before`, and one `--declared-range` for each
 //             range, or `none`. The state keeps its `risk` report. Then the
-//             state keys of `apply` are read, and an absent key stops the
-//             phase with exit 1, after the scorer has run.
+//             stored `apply_result`, `validate`, parent list, `drift_commit`
+//             and `observations_first` are read. One that is absent or null
+//             stops the phase with exit 1, after the scorer has run.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `setup` records (env-prefix.md). The prefix sets no
@@ -125,10 +129,11 @@
 //     `--adapter` with the path of `scripts/ecosystems/node.sh` in this
 //     plugin. The state has the name of the adapter and not a path. The
 //     registry has no other adapter, so the node script is the one that
-//     exists.
+//     exists. A second adapter needs a map from its name to its script.
 //   - `score` runs `why` through the package manager under the prefix, and
-//     the other verbs in process, as the other phases do. The scorer runs
-//     the bash adapter under the same prefix, so a prefix reaches each child.
+//     the other verbs in process, as the other phases do. The scorer starts
+//     the bash adapter itself. That child inherits the environment that the
+//     prefix sets, and has no prefix of its own.
 //   - A scorer that does not start fails the phase with the text of node's
 //     error. The bash gave the text of the shell.
 //   - A bad command line is exit 1 with `{"error": ...}` in node's words. The
@@ -194,16 +199,20 @@
 //   - The major of `highest_fixed_version` is read in base 10. The bash read
 //     a zero at the start as octal.
 //   - `score` reads `action`, `override_scope` and `bare_override` as text.
-//     The bash gave the text of a number or a boolean to the scorer
-//     (`5`, `true`), and the text of a list or an object. Each other value
-//     is exit 1 here. A key with no text, or `null`, is exit 1 in both.
+//     The bash gave the text of a number or a boolean (`5`, `true`) to the
+//     report, and for `override_scope` also to the scorer. It also gave the
+//     text of a list or an object. Each other value is exit 1 here. A key
+//     with no text, or `null`, is exit 1 in both.
 //   - `score` writes the why capture through a temporary file, and renames
 //     it. The bash wrote the file in place.
+//   - The why capture is the answer as one line of JSON. The bash wrote the
+//     text of the adapter, which has indents. The scorer reads both alike.
 //   - `ranges` of the post-fix `declared_ranges` must be null or a list of
 //     text. The bash read a text, a number, `true` and `false` as an empty
 //     list. It read each value of an object, and `null` or a number in a
-//     list as the text of the value. Here each of these is a `validate`
-//     failure. A range with a newline is one flag for each line, in both.
+//     list as the text of the value. It read a list in a list as the lines
+//     of its indented JSON. Here each of these is a `validate` failure. A
+//     range with a newline is one flag for each line, in both.
 //   - `parents_read` must be null, `false` or a list when `ranges` is empty.
 //     The bash gave `length` of a text (its characters), of a number (its
 //     absolute value) and of an object (its keys), and stopped on `true`.

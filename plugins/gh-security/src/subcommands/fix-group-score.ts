@@ -35,7 +35,8 @@ import { lineVersions, movesOf } from './fix-group-ladder.ts'
 
 /**
  * The adapter script that the scorer calls, as `--adapter`. Only the node
- * adapter has a script, and the registry has no other.
+ * adapter has a script, and the registry has no other. A second adapter
+ * needs a map from its name to its script here.
  */
 export const NODE_ADAPTER = fileURLToPath(
   new URL('../../scripts/ecosystems/node.sh', import.meta.url),
@@ -130,8 +131,9 @@ const factorsOf = (risk: JsonObject): readonly JsonValue[] | null => {
 }
 
 /**
- * One `--declared-range` for each distinct range, and one for each line of a
- * range. Null when `ranges` is neither null nor a list of text.
+ * One `--declared-range` for each range, and one for each line of a range.
+ * The adapter makes the list distinct. Null when `ranges` is neither null
+ * nor a list of text.
  */
 const rangesOf = (declared: JsonObject): string[] | null => {
   const ranges = fieldOf(declared, 'ranges')
@@ -161,9 +163,8 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
         `expected text, found ${JSON.stringify(action)}.`,
     )
   }
-  // A true no-op is terminal at `apply`: there is no change to score and no
-  // PR to open, so scoring one would manufacture a rating for a diff that
-  // does not exist (#34).
+  // A no-op is terminal at `apply`. There is no change to score and no PR
+  // to open. A rating here would be for a diff that does not exist (#34).
   if (action === 'no-op') {
     return failed('score: apply returned no_op, which is terminal. There is no change to score.')
   }
@@ -183,10 +184,10 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
   const postSaved = save(keeper, 'post_fix', post.value as unknown as JsonObject)
   if (postSaved !== null) return postSaved
 
-  // The why capture gets its own package-qualified name under the work
-  // directory: a predictable name in a shared directory lets a sibling agent
-  // overwrite it mid-run (#133), and a scoped name used as it is would name a
-  // directory that the work directory never has (#161).
+  // The why capture has its own package-qualified name under the work
+  // directory. A predictable name in a shared directory lets a sibling agent
+  // overwrite it mid-run (#133). A scoped name used as it is would name a
+  // directory that the work directory does not have (a sibling of #161).
   const packagePath = readString(keeper.state, 'package_path')
   if (packagePath.outcome !== 'ok') return packagePath
   const whyFile = `${work}/why-${packagePath.value}.json`
@@ -211,9 +212,9 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
     )
   }
 
-  // Always the line: without it the verb collects every declaration of the
-  // name anywhere in the lockfile, and parents on lines that the override
-  // never touched score as distance this fix crossed (#76).
+  // Always give the line. Without it, the verb collects every declaration of
+  // the name in the lockfile. Parents on lines that the override never
+  // touched then score as distance that this fix crossed (#76).
   const declaredTree = loaded.tree()
   const declaredAnswer =
     declaredTree.outcome === 'ok'
@@ -342,8 +343,9 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
     rangesCause = read === 0 ? 'none_readable' : 'parents_declared_nothing'
   }
 
-  // Each stored value is read before the report is built. An absent value
-  // is never a default: a report that names no edit is not ready for a PR.
+  // Each stored value is read before the report is built. An absent
+  // required value is never a default. A report that names no edit is not
+  // ready for a PR.
   const applyResult = readValue(keeper.state, 'apply_result')
   if (applyResult.outcome !== 'ok') return applyResult
   const validateResult = readValue(keeper.state, 'validate')
