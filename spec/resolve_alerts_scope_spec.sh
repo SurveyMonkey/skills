@@ -20,7 +20,7 @@
 # `prepare-checkout` and `merge-envelopes` commands run them, and their
 # examples are in tests/plugins/gh-security/subcommands/. #227 removed their
 # prose pins. SKILL.md still states these rules in prose, with no pin, until
-# #237 makes the skill call the commands (ruling 7 of round 5).
+# #237 makes the skill call the commands (ruling 7 of round 5, on #227).
 
 Describe 'scope is the checkouts on disk, in prose (issue #188)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"

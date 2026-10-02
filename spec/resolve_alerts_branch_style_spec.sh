@@ -7,7 +7,7 @@
 # file blocks every `fix/*` ref, and each fix agent finished its entire fix —
 # bump, install, validate ok, local commit — before the push failed with
 #   ! [remote rejected] fix/dependabot-postcss-8x -> fix/dependabot-postcss-8x (directory file conflict)
-# The fix is one probe per checkout before dispatch, and a naming scheme with
+# The fix is one probe per checkout before dispatch, and a scheme of names with
 # no slash. Since #227 the probe is code: the `prepare-checkout` command runs
 # it, retries it once, excludes the checkout on a second failure, and passes
 # `--branch-style flat` to discovery after a hit.

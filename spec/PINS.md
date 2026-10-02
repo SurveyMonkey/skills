@@ -66,61 +66,61 @@ until then it stays here, marked, as the record of the rule the port must reprod
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 40 | prescribes running discover-repos.sh | judgment | - |
-| 46 | states the rule as the checkouts on disk and nothing else | judgment | - |
-| 55 | reads a checkout as the whole scope | judgment | - |
-| 61 | reads a plain directory as its immediate checkout roots, non-recursively | judgment | - |
-| 69 | forbids the orchestrator from classifying the directory itself | judgment | - |
-| 75 | still says scope comes from git rather than from directory names | judgment | - |
-| 82 | stops on an empty list with the no-repositories sentence | judgment | - |
-| 90 | stops on a non-zero exit because there is no checkout to exclude | judgment | - |
-| 98 | reads a symlinked entry once, under its resolved root | judgment | - |
-| 107 | treats a git failure as an error rather than an empty scope | judgment | - |
-| 115 | states the non-goal in phase 1 | judgment | - |
-| 123 | closes every form the convenience could take | judgment | - |
-| 129 | puts cloning on the user | judgment | - |
-| 137 | says a partial set of checkouts is the correct scope | judgment | - |
-| 156 | carries no $1 | judgment | - |
-| 165 | no longer asks what to operate on | judgment | - |
-| 186 | no longer mentions the $1 | judgment | - |
-| 193 | says there is no org, login, or question left | judgment | - |
-| 204 | splits the failure rule by what the script was run for | judgment | - |
-| 210 | stops the run on a run-level script | judgment | - |
-| 216 | excludes the checkout on a per-checkout script | judgment | - |
-| 227 | resolves every checkout before phase 3 | judgment | - |
-| 233 | settles branch names and classification before the question | judgment | - |
-| 239 | no longer hedges that an offered group may be withdrawn | judgment | - |
-| 257 | carries no $1 | judgment | - |
-| 264 | no longer speaks of a clone destination | judgment | - |
-| 273 | instantiates a path-taking prefix against the checkout itself | judgment | - |
-| 281 | resolves env_prefix per checkout, so neighbors can differ | judgment | - |
-| 288 | withdraws a doomed group before the question is ever asked | judgment | - |
-| 294 | presents branch names as final in the phase 4 plan | judgment | - |
-| 302 | states the exclusion rule once | judgment | - |
-| 308 | continues with the others and stops only when none survive | judgment | - |
-| 315 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
-| 323 | reports every excluded checkout by name in phase 2 | judgment | - |
-| 330 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
-| 337 | excludes a repo whose adapter detect fails in phase 5 | mechanical | preflight-repo.sh |
-| 344 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
-| 353 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
-| 363 | omits the column for one checkout and shows it for several | judgment | - |
-| 369 | no longer keys the column on a scope mode | judgment | - |
-| 377 | branches on a null scope | judgment | - |
-| 383 | drops the git_remote cross-check it can no longer make | judgment | - |
-| 389 | stops on a null nwo | judgment | - |
-| 399 | re-runs detect-scope against the checkout the user names | judgment | - |
-| 405 | reads the second output rather than the first | judgment | - |
-| 413 | stays repo-scoped in the checkout vocabulary | judgment | - |
+| 41 | prescribes running discover-repos.sh | judgment | - |
+| 47 | states the rule as the checkouts on disk and nothing else | judgment | - |
+| 56 | reads a checkout as the whole scope | judgment | - |
+| 62 | reads a plain directory as its immediate checkout roots, non-recursively | judgment | - |
+| 70 | forbids the orchestrator from classifying the directory itself | judgment | - |
+| 76 | still says scope comes from git rather than from directory names | judgment | - |
+| 83 | stops on an empty list with the no-repositories sentence | judgment | - |
+| 91 | stops on a non-zero exit because there is no checkout to exclude | judgment | - |
+| 99 | reads a symlinked entry once, under its resolved root | judgment | - |
+| 108 | treats a git failure as an error rather than an empty scope | judgment | - |
+| 116 | states the non-goal in phase 1 | judgment | - |
+| 124 | closes every form the convenience could take | judgment | - |
+| 130 | puts cloning on the user | judgment | - |
+| 138 | says a partial set of checkouts is the correct scope | judgment | - |
+| 157 | carries no $1 | judgment | - |
+| 166 | no longer asks what to operate on | judgment | - |
+| 187 | no longer mentions the $1 | judgment | - |
+| 194 | says there is no org, login, or question left | judgment | - |
+| 205 | splits the failure rule by what the script was run for | judgment | - |
+| 211 | stops the run on a run-level script | judgment | - |
+| 217 | excludes the checkout on a per-checkout script | judgment | - |
+| 228 | resolves every checkout before phase 3 | judgment | - |
+| 234 | settles branch names and classification before the question | judgment | - |
+| 240 | no longer hedges that an offered group may be withdrawn | judgment | - |
+| 258 | carries no $1 | judgment | - |
+| 265 | no longer speaks of a clone destination | judgment | - |
+| 274 | instantiates a path-taking prefix against the checkout itself | judgment | - |
+| 282 | resolves env_prefix per checkout, so neighbors can differ | judgment | - |
+| 289 | withdraws a doomed group before the question is ever asked | judgment | - |
+| 295 | presents branch names as final in the phase 4 plan | judgment | - |
+| 303 | states the exclusion rule once | judgment | - |
+| 309 | continues with the others and stops only when none survive | judgment | - |
+| 316 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
+| 324 | reports every excluded checkout by name in phase 2 | judgment | - |
+| 331 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
+| 338 | excludes a repo whose adapter detect fails in phase 5 | mechanical | preflight-repo.sh |
+| 345 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
+| 354 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
+| 364 | omits the column for one checkout and shows it for several | judgment | - |
+| 370 | no longer keys the column on a scope mode | judgment | - |
+| 378 | branches on a null scope | judgment | - |
+| 384 | drops the git_remote cross-check it can no longer make | judgment | - |
+| 390 | stops on a null nwo | judgment | - |
+| 400 | re-runs detect-scope against the checkout the user names | judgment | - |
+| 406 | reads the second output rather than the first | judgment | - |
+| 414 | stays repo-scoped in the checkout vocabulary | judgment | - |
 
 ### `spec/resolve_alerts_branch_style_spec.sh`: 4 pins (3 judgment, 1 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 29 | reports every flat-scheme repo in the phase 7 summary | mechanical | summarize-run.sh |
-| 37 | consumes either spelling verbatim | judgment | - |
-| 48 | carries the field push-rejection specimen verbatim | judgment | - |
-| 54 | forbids improvising a branch name at push time | judgment | - |
+| 31 | reports every flat-scheme repo in the phase 7 summary | mechanical | summarize-run.sh |
+| 39 | consumes either spelling verbatim | judgment | - |
+| 50 | carries the field push-rejection specimen verbatim | judgment | - |
+| 56 | forbids improvising a branch name at push time | judgment | - |
 
 ### `spec/audit_pins_scratch_spec.sh`: 7 pins (7 judgment, 0 mechanical)
 
