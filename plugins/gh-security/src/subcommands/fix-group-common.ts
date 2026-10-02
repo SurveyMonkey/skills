@@ -23,9 +23,9 @@ export interface FixGroupDeps {
 }
 
 /**
- * The subject of the drift commit. Three places read it: the stale-branch
- * guard of `setup`, the commit of `baseline`, and the safety check of
- * `cleanup`. So it is spelled once.
+ * The subject of the drift commit. Here, the stale-branch guard of `setup`
+ * and the commit of `baseline` read it. The `cleanup` of the bash has its
+ * own copy until #234.
  */
 export const DRIFT_SUBJECT = 'chore(deps): refresh lockfile (control install, no manifest change)'
 
@@ -54,8 +54,9 @@ export const outputOf = (result: RunResult): string =>
 export type Git = (dir: string, args: readonly string[]) => Promise<RunResult>
 
 /**
- * The runners of one phase. The prefix wraps each child. It comes after the
- * directory: git takes `-C`, and a verb gives its own `cwd`.
+ * The runners of one phase. The prefix wraps each child, and sets no
+ * directory: git gets `-C <dir>` after the prefix, and a verb gives its own
+ * `cwd`.
  */
 export const runners = (
   spawn: Runner,

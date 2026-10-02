@@ -176,10 +176,11 @@ export const writeKey = (state: StateFile, key: string, value: JsonValue): Envel
   writeObject(state.path, { ...state.data, [key]: value })
 
 /**
- * A list of strings that the state can carry, `install_signals` being the
- * one the drivers have. An absent or null key is the empty list, as the
- * bash read `.install_signals // []` gave it. Any other value is a failure,
- * because the union that a later step writes from it would be wrong.
+ * A list of strings that the state can carry. `install_signals` is the one
+ * that the drivers have. An absent or null key is the empty list. Any other
+ * value is a failure, because the union that a later step writes from it
+ * would be wrong. The bash read `.install_signals // []`, which also took
+ * `false` as the empty list, and a list of other values as it was.
  */
 export const readOptionalStrings = (state: StateFile, path: string): Envelope<string[]> => {
   const value = readOptionalValue(state, path) ?? []

@@ -31,7 +31,10 @@ export const DEFAULT_SCORER = fileURLToPath(
   new URL('../../scripts/common/score-merge-risk.sh', import.meta.url),
 )
 
-/** The keys a group must carry, in the order that the bash names them. */
+/**
+ * The keys a group must carry, in the order of the bash, then `ecosystem`,
+ * which only the port requires.
+ */
 const REQUIRED = [
   'package',
   'major_line',
@@ -44,7 +47,7 @@ const REQUIRED = [
 /** Not a string, or the empty string: jq's `blank_string` of the bash. */
 const blank = (value: JsonValue | undefined): boolean => typeof value !== 'string' || value === ''
 
-/** The keys of a group that carry no usable value, in the order the bash checks them. */
+/** The keys of a group that carry no usable value, in the order of the bash, then `ecosystem`. */
 const unusable = (group: JsonObject): string[] =>
   [
     blank(group.package) && 'package',

@@ -31,12 +31,12 @@
 // What each phase does:
 //   setup     checks the group, then refuses a work directory that is
 //             already there (a crashed run). It fetches the default branch
-//             and the fix branch. A local branch of the fix name is deleted
-//             only when it is this flow's own leftover: its tip is
-//             `origin/<default>`, or `origin/<branch>`, or one drift commit
-//             over the drift paths alone. Else the phase fails and keeps the
-//             branch. Then it adds the worktree `<work>/fix` on a new branch
-//             from `origin/<default>`, and writes the state.
+//             and the fix branch. It deletes a local branch of the fix name
+//             only when the branch is this flow's own leftover. Its tip must
+//             be `origin/<default>`, or `origin/<branch>`, or one drift
+//             commit over the drift paths alone. Else the phase fails and
+//             keeps the branch. Then it adds the worktree `<work>/fix` on a
+//             new branch from `origin/<default>`, and writes the state.
 //   classify  runs `why`. A package that only peer resolutions reach stops
 //             here (#103). Then `declared_ranges --line`, and the eligible
 //             parents: read, unreadable and without a range, by name (#76,
@@ -47,8 +47,9 @@
 //             on any other change, and reads `resolved_versions` again.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
-// opaque prefix that `setup` records (env-prefix.md). The prefix comes after
-// the directory: git takes `-C`, and a verb gives its child a `cwd`.
+// opaque prefix that `setup` records (env-prefix.md). The prefix sets no
+// directory: git gets `-C <dir>` after the prefix, and a verb gives its
+// child a `cwd`.
 //
 // Differences from `fix-group.sh`:
 //   - There is no `--adapter <path>`. The route is the `ecosystem` of the
@@ -61,6 +62,11 @@
 //     manager that a verb starts (`why`, `install`), and not an adapter
 //     process. `detect` runs again before each verb, as each `node.sh` call
 //     did, and its failure is the failure of that verb.
+//   - `detect` reads the PATH of this command, not the PATH under the
+//     prefix. The bash ran `node.sh` under the prefix. So when the package
+//     manager is on the PATH only under the prefix, `detect` can choose
+//     `corepack <pm>` or the yarn release of the repository, where the
+//     bash chose `<pm>`.
 //   - An install that the verb itself refuses, as the worktree guard does,
 //     is a failed control install, and its output is the message of the
 //     verb.
@@ -68,7 +74,7 @@
 //     the bash scorer in this plugin, `scripts/common/score-merge-risk.sh`.
 //   - A bad command line is exit 1 with `{"error": ...}` in node's words. The
 //     bash printed the shell's text for a missing value, and no JSON.
-//   - A group that is JSON but not an object is refused with its own
+//   - `setup` refuses a group that is JSON but not an object, with its own
 //     message. A `declared_ranges` answer whose parent lists are not lists
 //     of names is a `classify` failure. In the bash, jq stopped on each of
 //     these, and the run ended with exit 1.
@@ -76,11 +82,17 @@
 //   - `baseline` reads `install_signals` before it writes `baseline` and
 //     `drift_commit`. So a state whose list cannot be read gets neither key.
 //     The bash wrote both, and then stopped with exit 1.
+//   - `install_signals` must be absent, null, or a list of strings. The bash
+//     also read `false` as the empty list, and a list of other values went
+//     into the union. Here each of these is exit 1.
+//   - A later phase refuses a state whose `major_line` is not digits, or
+//     whose `env_prefix` is not text, with exit 1. The bash gave the text of
+//     each one to the adapter or to the prefix, and did not check it.
 //   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The
 //     worktree is the workspace of the run, as in the bash, which has no
-//     trap. `cleanup` removes it, and the guard for a crashed run stops the
-//     next `setup` (ruling 15 on #225 is for a worktree that a command
-//     removes before it ends).
+//     trap. `cleanup` removes it. The guard for a crashed run stops the next
+//     `setup`. Ruling 15 on #225 is for a worktree that a command removes
+//     before it ends.
 //
 // This file ships. It imports nothing outside the plugin.
 

@@ -58,8 +58,8 @@ in process. It calls their exported handlers, and never starts this CLI as a chi
 may also fail with a report (`failedReport` in `src/cli/command.ts`). The report goes to stdout,
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
 same JSON on stdout when a URL failed.
-A report can also name exit 2 or 3. `fix-group` uses them for its own contract: exit 3
-is a failed phase, and exit 2 is a decision that goes back to the agent.
+A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
+that goes back to the agent, which `apply` gives when a later layer ports it.
 A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as
 the `failed` envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on
 stderr and exit 1.
