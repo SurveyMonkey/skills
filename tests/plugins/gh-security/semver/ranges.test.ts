@@ -416,9 +416,23 @@ describe('satisfies, where jq stops (#303)', () => {
     ['an empty alternative before a match', '|| >=0'],
     ['an empty alternative between two', '>=0 || || >=0'],
     ['a range of white space only', ' '],
-    ['an operator with no version after a match', '>=0.5 || >='],
   ])('throws for %s', (_shape, range) => {
-    expect(() => satisfies('1.0.0', range)).toThrow()
+    expect(() => satisfies('1.0.0', range)).toThrow(/has an alternative with no comparator/)
+  })
+
+  // jq reads each comparator, so the bad one stops it after a match, and also
+  // when an earlier comparator of the same alternative is already false.
+  // Probe, jq 1.8.1: each of these gives "split input and separator must be
+  // strings", with 1.0.0 as the version.
+  it.each([
+    ['an operator with no version after a match', '>=0.5 || >='],
+    ['an operator with no version after a failed comparator', '<0.5 >='],
+    ['a caret with no version', '^'],
+    ['a tilde with no version', '~'],
+    ['an equal sign with no version', '='],
+    ['a bare v', 'v'],
+  ])('throws for %s', (_shape, range) => {
+    expect(() => satisfies('1.0.0', range)).toThrow(/is not a version this adapter can read/)
   })
 
   // Pin example. It passes when written: `satisfies` already throws here,
@@ -441,7 +455,12 @@ describe('the white space of a range (#303)', () => {
     0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
   ]
   // Zero width and format characters that Oniguruma does not count as space.
-  const NOT_SPACES = [0x180e, 0x200b, 0x200c, 0xfeff, 0x2060]
+  // Next to each edge of the set, too. Probe, jq 1.8.1: none of these is
+  // `[[:space:]]`.
+  const NOT_SPACES = [
+    0x86, 0x9f, 0xa1, 0x180e, 0x1681, 0x1fff, 0x200b, 0x200c, 0x202a, 0x205e, 0x2060, 0x3001,
+    0xfeff,
+  ]
   const at = (code: number) => String.fromCodePoint(code)
 
   // jq: `>=0.5<C><2` against 3.0.0 is false when C splits the range into
@@ -468,6 +487,18 @@ describe('the white space of a range (#303)', () => {
     const character = at(Number.parseInt(hex, 16))
     expect(satisfies('3.0.0', `>=0.5${character}<2`)).toBe(true)
   })
+
+  // A character that is no space stays in the token after an operator and in
+  // the flat split. Probe, jq 1.8.1: `">=\ufeff0.5" | gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")`
+  // keeps the character, and `[">=1\ufeff<2" | splits("[[:space:],|]+")]` is one token.
+  it.each(NOT_SPACES.map((code) => [code.toString(16)]))(
+    'keeps U+%s after an operator, and in the flat split',
+    (hex) => {
+      const character = at(Number.parseInt(hex, 16))
+      expect(rangeAlternatives(`>=${character}0.5`)).toEqual([[`>=${character}0.5`]])
+      expect(rangeTokens(`>=1${character}<2`)).toEqual([`>=1${character}<2`])
+    },
+  )
 
   it('splits the alternatives and the comparators at the wide spaces together', () => {
     expect(rangeAlternatives('>=1 ||　<2\u0085')).toEqual([['>=1'], ['<2']])
