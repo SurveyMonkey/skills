@@ -18,7 +18,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `lib/git.ts` | Git calls: `runGit`, `gitOut`, `gitOk`, `gitLines`, and repository queries |
 | `lib/gh.ts` | The typed `gh` client |
 | `src/state.ts` | The fix driver's state file, typed |
-| `src/jq.ts` | The jq order, `unique`, `tostring`, `tonumber`, `//`, field reads and the major trim rule that `discover-alerts` and `classify-lines` share |
+| `src/jq.ts` | The jq order, `unique`, `tostring`, `tonumber`, `//`, field reads and the major trim rule that `discover-alerts`, `classify-lines` and the lockfile readers (`compareJq`) share |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
@@ -55,8 +55,9 @@ A handler may return a promise, and `run.ts` waits for it. A handler may also fa
 (`failedReport` in `src/cli/command.ts`). The report goes to stdout, the message goes to stderr,
 and the exit code is 1. `pr-status` does this, so a caller reads the same JSON on stdout when a
 URL failed.
-A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as the `failed`
-envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on stderr and exit 1.
+A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as
+the `failed` envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on
+stderr and exit 1.
 
 **The allow hook is a subcommand.** `hooks/hooks.json` registers a `PreToolUse` hook on `Bash`
 running `node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" allow-own-commands`, which reads the hook

@@ -597,7 +597,7 @@ describe('searchOpenPullRequests', () => {
     }
   }
 
-  // Pinning example, green when written. A search that fails with an empty
+  // Pin example. It passes when written. A search that fails with an empty
   // stderr has the detail `gh exited <status>`. The bash script keeps the empty
   // text there (`discover-alerts.sh:441`). The port keeps the status on
   // purpose: a report that says nothing is worse than one with the status.

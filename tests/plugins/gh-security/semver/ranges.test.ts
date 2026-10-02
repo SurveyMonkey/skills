@@ -421,13 +421,13 @@ describe('satisfies, where jq stops (#303)', () => {
     expect(() => satisfies('1.0.0', range)).toThrow()
   })
 
-  // Pinning example, green when written: `satisfies` already throws here,
+  // Pin example. It passes when written: `satisfies` already throws here,
   // because the empty version has no core.
   it('throws for an operator with no version', () => {
     expect(() => satisfies('1.0.0', '>=')).toThrow()
   })
 
-  // Pinning example, green when written: `"" | split("||")` is `[]`, so an
+  // Pin example. It passes when written: `"" | split("||")` is `[]`, so an
   // empty range has no alternative, and jq answers false.
   it('answers false for an empty range', () => {
     expect(satisfies('1.0.0', '')).toBe(false)

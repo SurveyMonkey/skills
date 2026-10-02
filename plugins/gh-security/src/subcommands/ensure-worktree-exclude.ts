@@ -158,8 +158,9 @@ const withLine = (text: string): string =>
  * Write the new exclude file beside the old one, and rename it over. The
  * rename is one step, so a reader sees the old file or the new file. The
  * temporary file is removed when a step after the open fails. When the open
- * itself fails, the path belongs to someone else, because `wx` refuses a
- * name that is taken. Nothing is removed then (issue #302).
+ * itself fails, this call created nothing, so it removes nothing. The cause
+ * can be a name that is taken, because `wx` refuses it, or an I/O error
+ * (issue #302).
  */
 const publish = (
   infoDir: string,

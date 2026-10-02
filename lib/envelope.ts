@@ -141,9 +141,11 @@ export const renderText = (envelope: Envelope<string>): Rendered =>
  * The status for a command that threw, in place of node's own crash.
  *
  * A command answers with an envelope for every outcome it decides. A throw
- * that reaches the entry point is a defect. Without this guard, node writes
+ * that reaches the entry point is a defect. Without a guard, node writes
  * a stack trace to stderr and exits with a status the contract never chose.
- * This guard writes one line, `<label>: <message>`, and answers
+ * The shipped CLI guards with `settle` in `src/cli/run.ts`, which gives the
+ * same text on stdout as the envelope. This guard writes one line,
+ * `<label>: <message>`, and answers
  * {@link EXIT_CODES}`.failed`. Any status the command settled on, or `null`,
  * passes through unchanged.
  *

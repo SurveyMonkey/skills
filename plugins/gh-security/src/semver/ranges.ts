@@ -135,12 +135,13 @@ export const evalToken = (token: string, version: string): boolean => {
  * (`>= 7.0.0, < 7.29.0`).
  *
  * It stops where jq stops (#303). jq reads each alternative and each
- * comparator, with no early exit. So a comparator that it cannot read stops
- * it, also after a match. An alternative with no comparator also stops it,
- * for example `>=0 ||`, and so does a range of white space only. This
- * function throws in those cases. An empty range has no alternative, and the
- * answer is false. `validate` and `apply_constraint` use this function, and
- * `rangeFacts` calls it only for a range that `rangeParseable` accepted.
+ * comparator, with no early exit. So an operator with no version stops it,
+ * also after a match. An alternative with no comparator also stops it, for
+ * example `>=0 ||`, and so does a range of white space only. This function
+ * throws in those cases. An empty range has no alternative, and the answer
+ * is false. The node verbs `validate` and `apply_constraint` use this
+ * function, and `rangeFacts` calls it only for a range that `rangeParseable`
+ * accepted.
  */
 export const satisfies = (version: string, range: string): boolean =>
   rangeAlternatives(range)
@@ -205,8 +206,9 @@ export const tokenParseable = (token: string): boolean => {
 /**
  * Can this range be read at all?
  *
- * {@link satisfies} answers false for a token it cannot parse, so a specifier
- * like `workspace:^`, `latest`, or a git URL would otherwise come back as a
+ * {@link satisfies} reads a token it cannot parse as a version of zero, and
+ * throws on an alternative with no comparator. So a specifier like
+ * `workspace:^`, `latest`, or a git URL would otherwise come back as a
  * confident "this version is not admitted" and be reported as a dependent
  * left behind. Unreadable is a third answer, and the callers return it rather
  * than guessing (review follow-up on issue #21).

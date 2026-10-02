@@ -34,9 +34,9 @@ type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
 
 /**
  * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
- * where jq stops (#303): on a comparator it cannot read, also after a match,
- * and on an alternative with no comparator. `apply_constraint` and the other
- * node verbs import this name from here.
+ * where jq stops (#303): on an operator with no version, also after a match,
+ * and on an alternative with no comparator. The placement, parent and
+ * lockfile helpers of `apply_constraint` import this name from here.
  */
 export const satisfiesAll = satisfies
 

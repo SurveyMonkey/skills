@@ -24,7 +24,7 @@
 //   - The script drops a null alert from the list. The port refuses it, with
 //     exit 1. A row below shows the two answers.
 //   - A search that fails with an empty stderr: the script keeps the empty
-//     text as the reason (`discover-alerts.sh:441`). The port says
+//     text as the error (`discover-alerts.sh:441`). The port says
 //     `gh exited <status>` (#302). `tests/lib/gh.test.ts` pins it.
 //   - The port refuses a package name that is not text, a target that is not
 //     `<owner>/<repo>`, and a second target. The unit tests hold them.
