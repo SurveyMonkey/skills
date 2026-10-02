@@ -200,15 +200,17 @@ export const budgetSpent = (installs: number): boolean => installs >= FIX_INSTAL
 /**
  * The entries of `other_line_moves` whose class is the one given. An entry
  * that is not an object is fatal: a move that cannot be read never lets the
- * run go on.
+ * run go on. Null or absent is no move, as with no baseline. A value that is
+ * neither a list nor null is one fatal move.
  */
-export const movesOf = (moves: unknown, kind: 'fatal' | 'benign_dedup'): unknown[] =>
-  Array.isArray(moves)
-    ? moves.filter((move) => {
-        const record = recordOf(move)
-        return record === null ? kind === 'fatal' : record.class === kind
-      })
-    : []
+export const movesOf = (moves: unknown, kind: 'fatal' | 'benign_dedup'): unknown[] => {
+  if (moves === null || moves === undefined) return []
+  if (!Array.isArray(moves)) return kind === 'fatal' ? [moves] : []
+  return moves.filter((move) => {
+    const record = recordOf(move)
+    return record === null ? kind === 'fatal' : record.class === kind
+  })
+}
 
 /** The widest shape that `written[]` holds. `mode` of the answer is never read. */
 export type Shape = 'bare' | 'direct' | 'scoped' | 'none'

@@ -491,7 +491,12 @@ const noOp = (run: Run, drift: boolean): Stop | CommandResult => {
     'resolved_versions',
   )
   if ('outcome' in field) return field
-  if (!Array.isArray(field.value) || field.value.length === 0) {
+  // jq `join` stops on an entry that is an object or a list.
+  if (
+    !Array.isArray(field.value) ||
+    field.value.length === 0 ||
+    field.value.some((version) => typeof version === 'object' && version !== null)
+  ) {
     return failPhase(
       'validate',
       `the fix install changed nothing and validate names no resolved version of ` +

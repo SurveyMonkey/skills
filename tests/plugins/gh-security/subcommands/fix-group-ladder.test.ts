@@ -332,13 +332,14 @@ describe('the moves on other lines', () => {
     expect(movesOf(['x', null, benign], 'benign_dedup')).toEqual([benign])
   })
 
-  it('reads null, as with no baseline, as no move', () => {
+  it('reads null, as with no baseline, and an absent value as no move', () => {
     expect(movesOf(null, 'fatal')).toEqual([])
+    expect(movesOf(undefined, 'fatal')).toEqual([])
   })
 
   // jq `.other_line_moves[]?` walks the values of an object, so the bash
   // stopped on an object that holds a fatal move.
-  it.fails('reads a value that is neither a list nor null as one fatal move', () => {
+  it('reads a value that is neither a list nor null as one fatal move', () => {
     const moves = { x: fatal }
     expect(movesOf(moves, 'fatal')).toEqual([moves])
     expect(movesOf('x', 'fatal')).toEqual(['x'])

@@ -531,7 +531,7 @@ describe('apply (phase 4)', () => {
     expect(answer.stderr).toContain('"class":"fatal"')
   })
 
-  it.fails('stops on an other_line_moves that is an object, and quotes it', async () => {
+  it('stops on an other_line_moves that is an object, and quotes it', async () => {
     const fatal = { major: 1, before: ['1.1.18'], after: [], status: 'vanished', class: 'fatal' }
     const w = await ready((s) => {
       s.validate = [validateAnswer(true, [], { x: fatal })]
@@ -1872,7 +1872,7 @@ describe('the empty diff', () => {
   })
 
   // jq `join` stops on an object or a list, and the bash failed the phase.
-  it.fails.each([
+  it.each([
     ['an object', {}],
     ['a list', ['4.17.21']],
   ])('refuses a no_op whose resolved_versions holds %s', async (_name, entry) => {

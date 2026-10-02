@@ -137,7 +137,14 @@
 //     that is not a list) is an `apply` failure at any place in the list.
 //     The bash could pass it when an earlier entry was a bare key.
 //   - An `other_line_moves` entry that is not an object is fatal, and the
-//     detail quotes it. The bash also stopped, and quoted no entry.
+//     detail quotes it. The bash stopped on a text or a number entry, and
+//     quoted no entry. It read a null entry as no move.
+//   - An `other_line_moves` that is neither a list nor null is one fatal
+//     move, quoted whole. The bash walked the values of an object, so it
+//     stopped only on an object that held a fatal move or a text. It read a
+//     text, a number or a boolean as no move.
+//   - A no-op whose `resolved_versions` holds an object or a list is a
+//     `validate` failure, as when jq `join` stopped in the bash.
 //   - An alert that is not an object has no range: `<unnumbered>`. The bash
 //     stopped in jq, and the detail named no alert.
 //   - The major of `highest_fixed_version` is read in base 10. The bash read

@@ -50,7 +50,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'fix-group': {
     description:
-      'Run one phase of the fix driver for one alert group: fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>] | fix-group classify --work <dir> | fix-group baseline --work <dir>',
+      'Run one phase of the fix driver for one alert group: fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>] | fix-group classify --work <dir> | fix-group baseline --work <dir> | fix-group apply --work <dir>',
     load: async () => (await import('../subcommands/fix-group.ts')).fixGroupCommand,
   },
   'merge-envelopes': {

@@ -99,7 +99,7 @@ describe('the fix driver entry', () => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
   })
 
-  it.fails('describes the usage fix-group apply --work <dir>', () => {
+  it('describes the usage fix-group apply --work <dir>', () => {
     expect(COMMANDS['fix-group']?.description).toContain('fix-group apply --work <dir>')
   })
 })
