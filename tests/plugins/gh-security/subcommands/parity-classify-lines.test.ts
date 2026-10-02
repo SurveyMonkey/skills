@@ -485,7 +485,7 @@ describe('classify-lines parity: --base-ref', () => {
   })
 })
 
-// The declared exception of #168 (ruling 3 on #168). On the lockfile, got
+// The declared exception of #168 (ruling 3). On the lockfile, got
 // 9.6.0 is below line 11, got 12.6.1 is above it, and the alert range covers
 // 9.6.0. The script answers `line_absent`. The port moves the group into
 // skipped, because its only fix crosses a major. Where every copy is below the
