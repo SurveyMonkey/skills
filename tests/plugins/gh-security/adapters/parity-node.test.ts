@@ -198,6 +198,14 @@ describe('the fixture set', () => {
     expect(accepted.map((fixture) => fixture.name)).toContain(name)
   })
 
+  // These fixtures were out until #50. Now each side must agree on them.
+  it.each(['pnpm-git-parent', 'pnpm-git-parent-copies'])(
+    'compares the git parent fixture %s',
+    (name) => {
+      expect(accepted.map((fixture) => fixture.name)).toContain(name)
+    },
+  )
+
   it('finds version pairs and range pairs to compare', () => {
     expect({ versions: versionPairs.length > 0, ranges: rangePairs.length > 0 }).toEqual({
       versions: true,

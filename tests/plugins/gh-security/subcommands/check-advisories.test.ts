@@ -511,6 +511,17 @@ describe('the four verdicts', () => {
     expect(await verdict('4.17.21', advisories)).toMatchObject({ verdict: 'safe' })
   })
 
+  it('is safe beside a withdrawn advisory with no range', async () => {
+    const advisories = [
+      ...LODASH,
+      advisory('GHSA-jjjj-5555-kkkk', {
+        withdrawn_at: '2024-01-01T00:00:00Z',
+        vulnerabilities: [vuln('lodash', null)],
+      }),
+    ]
+    expect(await verdict('4.17.21', advisories)).toMatchObject({ verdict: 'safe' })
+  })
+
   it('is vulnerable, and not unknown, when one range matched and another could not be read', async () => {
     const advisories = [
       advisory('GHSA-aaaa-1111-bbbb', {

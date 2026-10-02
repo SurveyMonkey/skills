@@ -405,6 +405,47 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
+  /** Copies of `parent` at the start of each section, each with its version of `ms`. */
+  const parentCopies =
+    (parent: string, ...copies: (readonly [string, string])[]): Setup =>
+    (dir) => {
+      const packages = copies.map(([pver]) => `  ${parent}@${pver}:\n    resolution: {}\n\n`)
+      const snapshots = copies.map(
+        ([pver, ms]) => `  ${parent}@${pver}:\n    dependencies:\n      ms: ${ms}\n\n`,
+      )
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      const edited = text
+        .replace('packages:\n\n', `packages:\n\n${packages.join('')}`)
+        .replace('snapshots:\n\n', `snapshots:\n\n${snapshots.join('')}`)
+      if (edited === text) throw new Error('the lockfile has no packages or snapshots section')
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), edited)
+    }
+
+  // `send` gets qualified keys too, but it has no git copy.
+  it('leaves a qualified parent with no git copy out of the detail (#50)', () => {
+    const send = parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'])
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], send),
+    ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
+
+  it('gives each refused parent its own git copies, in the order of the file (#50)', () => {
+    const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
+    const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
+    const setup = both(
+      parentCopies('debug', [debugGit, '2.1.2']),
+      parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
+    )
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], setup),
+    ).toBe(
+      gitParentRefusal('ms', [
+        ['send', [sendGit]],
+        ['debug', [debugGit, GIT_DEBUG]],
+      ]),
+    )
+  })
+
   it('refuses a git copy of the parent beside two registry copies (#50)', () => {
     const error = pnpmRefusalOf(
       'pnpm-git-parent',
