@@ -76,6 +76,19 @@ const renderReport = (result: FailedReport): Rendered => ({
 })
 
 /**
+ * The text of a thrown value. `String` throws for some values, such as an
+ * object with no prototype. For those, the text is the tag of the object.
+ */
+const textOf = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  try {
+    return String(error)
+  } catch {
+    return Object.prototype.toString.call(error)
+  }
+}
+
+/**
  * The result of a command, or the `failed` envelope when the load or the
  * handler throws (issue #302). A throw is a defect in the command. Without
  * this guard, node ends with a stack trace and an empty stdout, and a caller
@@ -90,7 +103,7 @@ const settle = async (
   try {
     return await attemptCommand()
   } catch (error) {
-    return failed(`${command}: ${error instanceof Error ? error.message : String(error)}`)
+    return failed(`${command}: ${textOf(error)}`)
   }
 }
 

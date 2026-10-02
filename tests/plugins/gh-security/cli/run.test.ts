@@ -208,7 +208,7 @@ describe('runCli', () => {
 
   // A thrown value with no prototype has no text: `String` throws on it. The
   // guard must still give the envelope, with the tag of the value as its text.
-  it.fails('renders a handler that throws a value with no prototype as the failed envelope', async () => {
+  it('renders a handler that throws a value with no prototype as the failed envelope', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
       throw Object.create(null)
     })
