@@ -454,6 +454,46 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     )
     expect(error).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
+
+  // Ruling 2 on #50 names each git copy, and a git URL can have no `@`. For
+  // a GitHub host, pnpm writes a codeload tarball (see the header of the
+  // pnpm-git-parent lockfile). For another host, it writes the `git+https`
+  // URL. A `file:` copy is also outside the registry.
+  const OTHER_COPIES = [
+    'git+https://git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    'https://codeload.github.com/example/debug/tar.gz/da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    'file:vendor/debug-4.3.4.tgz',
+  ]
+
+  /** The git copy of `debug` in the lockfile, moved to `version`. */
+  const gitCopyAt =
+    (version: string): Setup =>
+    (dir) => {
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      const moved = text.replaceAll(GIT_DEBUG, version)
+      if (moved === text) throw new Error('the lockfile has no git copy of debug')
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), moved)
+    }
+
+  it.fails.each(OTHER_COPIES)(
+    'refuses a copy at %s beside two registry copies (#50)',
+    (version) => {
+      const setup = gitCopyAt(version)
+      expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
+        gitParentRefusal('ms', [['debug', [version]]]),
+      )
+    },
+  )
+
+  it.fails.each(OTHER_COPIES)(
+    'writes the plain key for a copy at %s beside one registry copy (#50)',
+    (version) => {
+      const setup = both(gitCopyAt(version), registryCopies(['4.3.4', '2.1.3']))
+      const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+      expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+    },
+  )
+
   // The multiplicity gate reads the snapshot edges, not `packages:`.
   it('still writes qualified keys when the packages section is unreadable', () => {
     const dropPackages: Setup = (dir) => {
