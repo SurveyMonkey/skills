@@ -531,6 +531,20 @@ describe('apply (phase 4)', () => {
     expect(answer.stderr).toContain('"class":"fatal"')
   })
 
+  it.fails('stops on an other_line_moves that is an object, and quotes it', async () => {
+    const fatal = { major: 1, before: ['1.1.18'], after: [], status: 'vanished', class: 'fatal' }
+    const w = await ready((s) => {
+      s.validate = [validateAnswer(true, [], { x: fatal })]
+    })
+    const answer = await apply(w)
+    expect(pick(answer, 'status', 'phase')).toEqual({
+      exit: 3,
+      status: 'failure',
+      phase: 'validate',
+    })
+    expect(answer.stderr).toContain(JSON.stringify([{ x: fatal }]))
+  })
+
   // That class is the verdict of the adapter, and the run goes on (#105).
   it('proceeds when every cross-line move is benign_dedup', async () => {
     const benign = {
@@ -1855,6 +1869,23 @@ describe('the empty diff', () => {
       s.validate = [{ ...validateAnswer(true), resolved_versions: ['3.10.1', null, '4.17.21'] }]
     })
     expect(answer.json.resolved_version).toBe('3.10.1, , 4.17.21')
+  })
+
+  // jq `join` stops on an object or a list, and the bash failed the phase.
+  it.fails.each([
+    ['an object', {}],
+    ['a list', ['4.17.21']],
+  ])('refuses a no_op whose resolved_versions holds %s', async (_name, entry) => {
+    const { w, answer } = await empty(rv('4.17.21'), rv('4.17.21'), (s) => {
+      s.validate = [{ ...validateAnswer(true), resolved_versions: ['4.17.21', entry] }]
+    })
+    expect(pick(answer, 'status', 'phase')).toEqual({
+      exit: 3,
+      status: 'failure',
+      phase: 'validate',
+    })
+    expect(answer.stderr).toContain('no evidence')
+    expect(stateOf(w).action).toBeUndefined()
   })
 
   it('quotes an absent validate field in the no_op evidence as null', async () => {

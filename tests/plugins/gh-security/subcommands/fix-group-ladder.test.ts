@@ -335,6 +335,15 @@ describe('the moves on other lines', () => {
   it('reads null, as with no baseline, as no move', () => {
     expect(movesOf(null, 'fatal')).toEqual([])
   })
+
+  // jq `.other_line_moves[]?` walks the values of an object, so the bash
+  // stopped on an object that holds a fatal move.
+  it.fails('reads a value that is neither a list nor null as one fatal move', () => {
+    const moves = { x: fatal }
+    expect(movesOf(moves, 'fatal')).toEqual([moves])
+    expect(movesOf('x', 'fatal')).toEqual(['x'])
+    expect(movesOf(moves, 'benign_dedup')).toEqual([])
+  })
 })
 
 describe('the widest shape written', () => {
