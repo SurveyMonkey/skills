@@ -206,6 +206,20 @@ describe('runCli', () => {
     })
   })
 
+  // A thrown value with no prototype has no text: `String` throws on it. The
+  // guard must still give the envelope, with the tag of the value as its text.
+  it.fails('renders a handler that throws a value with no prototype as the failed envelope', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw Object.create(null)
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: [object Object]"}\n',
+      stderr: 'version: [object Object]\n',
+    })
+  })
+
   it('renders a load that throws as the failed envelope too', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockRejectedValue(new Error('no module'))
     const { io, written } = capturing()
