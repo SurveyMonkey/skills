@@ -73,6 +73,11 @@ requires the cwd to sit inside a **linked** worktree, which a primary checkout, 
 of one, a submodule (also a `.git` file), and a directory in no repository at all all fail. Specs
 fake a worktree with `fake_linked_worktree` (see `spec/spec_helper.sh`).
 The TypeScript port of the guard is `requireLinkedWorktree` in `plugins/gh-security/src/worktree.ts`.
+It also requires a `commondir` file in the gitdir. git writes this file for each linked worktree,
+and for no submodule. Thus the port refuses a submodule of a `git clone --separate-git-dir`
+superproject, which the text of the pointer cannot identify (#304). The bash script passes that
+case. The vitest helper `fakeLinkedWorktree` (`harness/fixtures.ts`) makes a real gitdir with a
+`commondir` file.
 It is a function, not a command. Each write verb of the adapter calls it in
 process, as its first statement (#222). In the node adapter, these are `install`
 (`src/adapters/node/install.ts`), `shim` (`src/adapters/node/shim.ts`) and `applyConstraint`

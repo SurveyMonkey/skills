@@ -7,7 +7,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_WORKTREE_GITDIR, FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
+import { defaultWorktreeGitdir, FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 
 // A committed specimen with a manifest worth reading back, used here for its
 // name only: nothing in this file is about what npm-cross-line contains.
@@ -71,6 +71,14 @@ describe('useFixture', () => {
     expect(() => statSync(fixture.path)).toThrow()
   })
 
+  it('removes the gitdir of a linked worktree copy on cleanup', () => {
+    const fixture = useFixture(FIXTURE, { gitShape: 'linked-worktree' })
+    const gitdir = defaultWorktreeGitdir(fixture.path)
+    expect(statSync(gitdir).isDirectory()).toBe(true)
+    fixture.cleanup()
+    expect(() => statSync(`${fixture.path}.main`)).toThrow()
+  })
+
   // Cleanup is what every example runs in a `finally`, so a second call has
   // to be a no-op rather than a failure that masks the example's own.
   it('tolerates a second cleanup', () => {
@@ -91,7 +99,9 @@ describe('the git shape a fixture can be given', () => {
     try {
       const dotGit = join(fixture.path, '.git')
       expect(statSync(dotGit).isFile()).toBe(true)
-      expect(readFileSync(dotGit, 'utf8')).toBe(`gitdir: ${DEFAULT_WORKTREE_GITDIR}\n`)
+      const gitdir = defaultWorktreeGitdir(fixture.path)
+      expect(readFileSync(dotGit, 'utf8')).toBe(`gitdir: ${gitdir}\n`)
+      expect(readFileSync(join(gitdir, 'commondir'), 'utf8')).toBe('../..\n')
     } finally {
       fixture.cleanup()
     }

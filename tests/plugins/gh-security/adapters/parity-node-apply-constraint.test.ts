@@ -431,7 +431,9 @@ const SPEC_CASES: readonly Case[] = [
   after(
     'a worktree of a repository under modules/',
     'yarn-berry',
-    pointer('/src/modules/app/.git/worktrees/fix'),
+    // A real gitdir with a `commondir` file, beside the copy: the
+    // TypeScript guard reads it (#304).
+    `mkdir -p ../src/modules/app/.git/worktrees/fix && printf '../..\\n' > ../src/modules/app/.git/worktrees/fix/commondir && ${pointer('../src/modules/app/.git/worktrees/fix')}`,
     ...LODASH,
   ),
   call('a linked worktree', 'yarn-berry', ...LODASH),

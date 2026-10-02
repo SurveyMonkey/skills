@@ -278,7 +278,7 @@ describe('requireLinkedWorktree parity', () => {
   })
 
   // Declared exception, #304 item 1: the script passes this submodule.
-  it.fails('differs on a submodule of a --separate-git-dir superproject (#304)', () => {
+  it('differs on a submodule of a --separate-git-dir superproject (#304)', () => {
     const submodule = separateGitDirSubmodule(scene())
     const { bash, typescript } = verdicts(submodule)
     expect(bash.status).toBe(0)

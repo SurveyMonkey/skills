@@ -215,7 +215,7 @@ describe('requireLinkedWorktree: real repositories', () => {
     )
   })
 
-  it.fails('refuses a submodule of a superproject cloned with --separate-git-dir (#304)', () => {
+  it('refuses a submodule of a superproject cloned with --separate-git-dir (#304)', () => {
     const { submodule } = separateGitDir(scene())
     const gitdir = gitdirOfPointer(submodule)
     expect(gitdir).toBe('../../../sepgit/modules/worktrees/foo')
@@ -292,7 +292,7 @@ describe('requireLinkedWorktree: pointers that are written by hand', () => {
 
   // #304 item 1. The pointer text reads as a linked worktree, but git wrote
   // no `commondir` into the gitdir. So it is no linked worktree.
-  it.fails.each([
+  it.each([
     ['a gitdir that does not exist', (_gitdir: string) => undefined],
     ['a gitdir with no commondir', (gitdir: string) => mkdirSync(gitdir, { recursive: true })],
     [

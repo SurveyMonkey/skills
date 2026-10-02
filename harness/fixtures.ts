@@ -33,11 +33,14 @@ import { join, resolve } from 'node:path'
 export const FIXTURES_ROOT = resolve(import.meta.dirname, '..', 'spec', 'fixtures')
 
 /**
- * The pointer `fake_linked_worktree` writes by default. The path does not
- * exist and is not meant to: what the cwd guard classifies is the shape of
- * `.git`, a file rather than a directory.
+ * The gitdir that `fakeLinkedWorktree` makes for `dir` by default. It is
+ * beside `dir`, not in it. `fake_linked_worktree` writes a pointer to a path
+ * that does not exist, but the TypeScript guard also requires the
+ * `commondir` file that git writes into the gitdir of a linked worktree
+ * (#304). So this gitdir is real.
  */
-export const DEFAULT_WORKTREE_GITDIR = '/elsewhere/.git/worktrees/fix'
+export const defaultWorktreeGitdir = (dir: string): string =>
+  join(`${dir}.main`, '.git', 'worktrees', 'fix')
 
 /**
  * Which `.git` a copy is given, if any.
@@ -63,8 +66,19 @@ export interface Fixture {
   readonly cleanup: () => void
 }
 
-/** Write the pointer file `git worktree add` leaves at a linked worktree root. */
-export const fakeLinkedWorktree = (dir: string, gitdir: string = DEFAULT_WORKTREE_GITDIR): void => {
+/**
+ * Write the pointer file `git worktree add` leaves at a linked worktree root.
+ * With no `gitdir`, also make the default gitdir, with its `commondir` file.
+ * A named `gitdir` is written as the pointer only.
+ */
+export const fakeLinkedWorktree = (dir: string, gitdir?: string): void => {
+  if (gitdir === undefined) {
+    const made = defaultWorktreeGitdir(dir)
+    mkdirSync(made, { recursive: true })
+    writeFileSync(join(made, 'commondir'), '../..\n')
+    writeFileSync(join(dir, '.git'), `gitdir: ${made}\n`)
+    return
+  }
   writeFileSync(join(dir, '.git'), `gitdir: ${gitdir}\n`)
 }
 
@@ -97,6 +111,7 @@ export const useFixture = (name: string, options: FixtureOptions = {}): Fixture 
     path,
     cleanup: () => {
       rmSync(path, { recursive: true, force: true })
+      rmSync(`${path}.main`, { recursive: true, force: true })
     },
   }
 }

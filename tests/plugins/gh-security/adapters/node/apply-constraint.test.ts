@@ -210,7 +210,14 @@ describe('mutating verbs run only in a linked worktree', () => {
     ['a linked worktree', undefined],
     [
       'a linked worktree of a repository under modules/',
-      pointer('/src/modules/app/.git/worktrees/fix'),
+      // A real gitdir with a `commondir` file (#304), beside the copy, where
+      // the cleanup of the fixture removes it.
+      (dir: string) => {
+        const gitdir = join(`${dir}.main`, 'src', 'modules', 'app', '.git', 'worktrees', 'fix')
+        mkdirSync(gitdir, { recursive: true })
+        writeFileSync(join(gitdir, 'commondir'), '../..\n')
+        pointer(gitdir)(dir)
+      },
     ],
   ])('proceeds in %s', (_where, setup) => {
     const { package: pkg, pm } = answer('yarn-berry', LODASH, setup)

@@ -9,8 +9,8 @@
 //
 // The guard finds the top of the enclosing repository by a walk up to the
 // first `.git`, then it classifies that `.git`. It reads files, and runs no
-// `git`. So it works when git is missing, and it needs no repository built
-// per example. These are the gitdir pointers that git writes:
+// `git`. So it works when git is missing, and a test can make each case from
+// plain files. These are the gitdir pointers that git writes:
 //
 //   .git is a directory                            primary checkout, refuse
 //   gitdir: /abs/main/.git/worktrees/wt            linked worktree, proceed
@@ -34,9 +34,15 @@
 // 14). A common dir under a `worktrees/` directory is before that `/.git/`,
 // so it is no marker. A bare common dir has no `/.git/`. So the guard refuses
 // its worktree under a `worktrees/<x>/modules/` path, in the safe direction.
+// When the probes see an unclear pointer, the guard refuses.
+//
 // The probes do not find a submodule whose superproject git dir has no
-// `/.git/` in its path (`--separate-git-dir`). When the probes see an unclear
-// pointer, the guard refuses.
+// `/.git/` in its path (`git clone --separate-git-dir`), when the path of the
+// submodule starts with `worktrees/`. So the guard also reads the gitdir: git
+// writes a `commondir` file into the gitdir of each linked worktree, and into
+// no gitdir of a submodule. A gitdir that reads as a worktree but has no
+// `commondir` file is refused (#304 item 1). The bash script does not do this
+// check. That is a declared parity exception.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from node
 // beyond `fs` and `path`.
@@ -103,6 +109,18 @@ const classify = (gitdir: string): Kind => {
     : 'worktree'
 }
 
+/**
+ * Whether the gitdir has a `commondir` file. A relative gitdir starts at
+ * `top`, the directory of the `.git` file, as git reads it.
+ */
+const hasCommondir = (top: string, gitdir: string): boolean => {
+  try {
+    return statSync(join(resolve(top, gitdir), 'commondir')).isFile()
+  } catch {
+    return false
+  }
+}
+
 /** The one reason the guard refuses at `top`, or `null` when `top` is a linked worktree. */
 const refusalFor = (directory: string, top: string): string | null => {
   const dotGit = join(top, '.git')
@@ -116,6 +134,9 @@ const refusalFor = (directory: string, top: string): string | null => {
   const kind = classify(gitdir)
   if (kind === 'submodule') return `this is a git submodule (its gitdir is ${gitdir})`
   if (kind === 'other') return `${top} is not a linked worktree (its gitdir is ${gitdir})`
+  if (!hasCommondir(top, gitdir)) {
+    return `${top} is not a linked worktree (its gitdir ${gitdir} has no commondir file)`
+  }
   return null
 }
 
