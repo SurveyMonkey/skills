@@ -273,7 +273,7 @@ describe('check-advisories parity: the verdict for a candidate version', () => {
 })
 
 describe('check-advisories parity: the declared exception of #304', () => {
-  it.fails('answers unknown for an advisory with a null range, where the script answers safe', async () => {
+  it('answers unknown for an advisory with a null range, where the script answers safe', async () => {
     const pages = PAGES()
     pages[0]?.push(advisory('GHSA-jjjj-5555-kkkk', { vulnerabilities: [vuln('lodash', null)] }))
     const given = args('lodash', { version: '4.17.21' })

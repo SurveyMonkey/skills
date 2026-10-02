@@ -298,7 +298,7 @@ describe('the listing', () => {
   })
 
   // #304 item 4. The script answers `safe` here.
-  it.fails('counts an advisory that has no range, so a version reads unknown (#304)', async () => {
+  it('counts an advisory that has no range, so a version reads unknown (#304)', async () => {
     const bare = { vulnerabilities: [{ package: { name: 'lodash', ecosystem: 'npm' } }] }
     expect(value(await check(['--version', '1.0.0', 'lodash'], [bare]))).toMatchObject({
       advisory_count: 1,
@@ -449,7 +449,7 @@ describe('the four verdicts', () => {
 
   // #304 item 4. An advisory entry with no range could not be evaluated. So
   // when no range matched, the verdict is `unknown`, never `safe`.
-  it.fails.each([
+  it.each([
     [
       'a null range',
       [advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', null)] })],

@@ -28,9 +28,10 @@
 // Verdicts, and why there are four:
 //   vulnerable    - at least one advisory range admits the version.
 //   safe          - advisories exist, every range was evaluated, none matched.
-//   unknown       - no range matched, but one could not be evaluated. It is
-//                   never safe, because the range that could not be evaluated
-//                   is where an unnoticed match would hide.
+//   unknown       - no range matched, but one could not be evaluated, or an
+//                   advisory entry has no range. It is never safe, because
+//                   the range that could not be evaluated is where an
+//                   unnoticed match would hide.
 //   no-advisories - the query succeeded and returned nothing for this
 //                   package. It is NOT a synonym for safe. A pin may exist
 //                   for a reason that is not security, and a misspelled name
@@ -38,9 +39,9 @@
 // With no `--version` the verdict is null, except `no-advisories` when the
 // query returned nothing.
 //
-// Carried over from the script: an advisory with no range gives no range to
-// evaluate. With `--version`, a package whose advisories all lack a range reads
-// as `safe`.
+// An advisory entry with no range gives no range to evaluate, and adds no
+// entry to `vulnerable_ranges` or `unevaluated_ranges`. With `--version`, it
+// makes the verdict `unknown` when no range matched (#304 item 4).
 //
 // A `range_facts` answer without `parseable` or `satisfied` is an error (ADR
 // 001). A verb that fails is not an error: its range is unevaluated, and the
@@ -77,6 +78,8 @@
 //     `parseable` of false is unevaluated, with no entry.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
+//   - With `--version`, an advisory entry with no range makes the verdict
+//     `unknown` when no range matched. The script answered `safe` (#304).
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -155,6 +158,8 @@ interface Listing {
   readonly withdrawn: number
   readonly advisories: JsonObject[]
   readonly ranges: string[]
+  /** An entry about the package has no range, so no version can be judged safe by it. */
+  readonly rangeless: boolean
 }
 
 /**
@@ -200,7 +205,12 @@ const listing = (
   const ranges = uniqueSorted(
     entries.flatMap((entry) => (entry.range === null ? [] : [entry.range])),
   )
-  return { withdrawn: about.length - kept.length, advisories, ranges }
+  return {
+    withdrawn: about.length - kept.length,
+    advisories,
+    ranges,
+    rangeless: entries.some((entry) => entry.range === null),
+  }
 }
 
 /** The error text of a failed verb: one line, cut, with no white space at the end. */
@@ -319,7 +329,7 @@ export const checkAdvisories = async (
   if (found.advisories.length === 0) verdict = 'no-advisories'
   else if (version !== null) {
     if (matchedRanges.length > 0) verdict = 'vulnerable'
-    else verdict = unevaluatedRanges.length > 0 ? 'unknown' : 'safe'
+    else verdict = unevaluatedRanges.length > 0 || found.rangeless ? 'unknown' : 'safe'
   }
   return ok({
     package: name,
