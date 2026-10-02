@@ -7,22 +7,25 @@
 //   2. Completeness: does any copy still match a `vulnerable` range?
 //   3. Collateral: did a copy on another major line move after `baseline`?
 //   4. Collateral by path: does a parent now get a copy that breaks its
-//      declared range across a major line?
+//      declared range (across a major, or below its floor), or a range that
+//      does not parse?
 //
 // The fourth question is new in the port (#170, a declared parity
 // exception). Question 3 compares the set of versions on each major. So it
 // cannot see a copy at a new path when the versions of each major stay the
 // same. npm applies a nested override to the whole subtree of its parent. So
-// a parent deep in that subtree can get a new nested copy on the fixed line,
-// and its own range is on another major. `parent_range_breaks` names each
-// such parent. It reads each declaration of the package in the npm lockfile,
-// and the copy that the declaration resolves. It checks only a copy at a
-// changed path: a path that the baseline does not have, or has at another
-// version. A range that does not parse is a break. A range whose floor is on
-// the major of the copy is no break, because an override moves a copy past a
-// range on its own line on purpose. The answer is null with no baseline, and
-// for pnpm and Yarn, whose lockfiles do not record a declared range and a
-// path for each copy. The root is not a parent. A break makes `ok` false.
+// a parent deep in that subtree can get a new nested copy on the fixed line.
+// The range of that parent can be on another major.
+//
+// `parent_range_breaks` names each such parent. It reads each declaration of
+// the package in the npm lockfile, and the copy that the declaration
+// resolves. It checks only a copy at a changed path. The baseline does not
+// have that path, or has another version there. A range that does not parse
+// is a break. A copy below the floor of its range is a break. A copy above a
+// range on its own major is no break: an override does that on purpose. The
+// answer is null with no baseline. It is also null for pnpm and Yarn. Their
+// lockfiles do not record a declared range and a path for each copy. The
+// root is not a parent. A break makes `ok` false.
 //
 // The verb refuses its options before it reads the lockfile, in the order of
 // node.sh. `--sibling-alerts` reclassifies a move as `benign_dedup` only for
@@ -44,9 +47,10 @@ import {
   rangeAlternatives,
   rangeFloorMajor,
   rangeParseable,
+  rangeTokens,
   satisfies,
 } from '../../semver/ranges.ts'
-import { coreAt, parseVersion, semverMax } from '../../semver/versions.ts'
+import { compareVersions, coreAt, parseVersion, semverMax } from '../../semver/versions.ts'
 import type { ResolvedVersionsAnswer, Tree, ValidateAnswer, ValidateOptions } from '../adapter.ts'
 import { attempt } from './attempt.ts'
 import type { NodeDetection } from './detect.ts'
@@ -332,12 +336,28 @@ const movesOf = (
 }
 
 /**
+ * True when the version is below each lower bound of the range: below the
+ * floor. The bounds are the tokens of `rangeFloorMajor`. A bound after `>`
+ * does not admit its own version.
+ */
+const belowFloor = (version: string, range: string): boolean =>
+  rangeTokens(range)
+    .filter((token) => !token.startsWith('<'))
+    .map((token) => ({ strict: /^>(?!=)/.test(token), bound: token.replace(/^[><=~^v]+/, '') }))
+    .filter(({ bound }) => /^[0-9]/.test(bound))
+    .every(({ strict, bound }) => {
+      const order = compareVersions(version, bound)
+      return order < 0 || (strict && order === 0)
+    })
+
+/**
  * Each declaration whose copy the fix changed, and whose range that copy
- * breaks across a major line (#170). A copy changed when the baseline has no
- * copy of the same version at its path. A break is a range that does not
- * parse, or one that the copy does not satisfy and whose floor is on another
- * major. A range whose floor is on the major of the copy is no break: an
- * override moves a copy past a range on its own line on purpose.
+ * breaks (#170). A copy changed when the baseline has no copy of the same
+ * version at its path. A range that does not parse is a break. A range that
+ * the copy does not satisfy is a break when its floor is on another major, or
+ * when it has no floor, such as `<5`. On the major of the copy, only a copy
+ * below the floor is a break. An override moves a copy above a range on its
+ * own line on purpose, but never below it.
  */
 const breaksOf = (baseline: readonly BaselineCopy[], edges: readonly Edge[]): readonly Break[] => {
   const before = new Set(baseline.map(({ version, path }) => JSON.stringify([path, version])))
@@ -347,7 +367,8 @@ const breaksOf = (baseline: readonly BaselineCopy[], edges: readonly Edge[]): re
       if (before.has(JSON.stringify([path, version]))) return []
       if (
         rangeParseable(range) &&
-        (satisfiesAll(version, range) || rangeFloorMajor(range) === majorOf(version))
+        (satisfiesAll(version, range) ||
+          (rangeFloorMajor(range) === majorOf(version) && !belowFloor(version, range)))
       ) {
         return []
       }

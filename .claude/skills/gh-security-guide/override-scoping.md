@@ -110,12 +110,13 @@ own `ok` keys on whether any entry's `class` is `"fatal"`, not on the array bein
 
 The set of versions on each major does not show a copy at a new path. An npm nested override
 applies to the whole subtree of its parent. So a parent deep in that subtree can get a new nested
-copy on the fixed line, while its own range is on another major, and no major line moves
+copy on the fixed line. Its own range can be on another major, and no major line moves
 ([#170](https://github.com/SurveyMonkey/skills/issues/170)). The TypeScript `validate` therefore
-also gives `parent_range_breaks`. It names each parent in the npm lockfile whose copy is at a
-changed path, and whose range that copy breaks across a major. A range that does not parse is
-also a break. A break makes `ok` false. The field is `null` with no baseline, and for pnpm and
-Yarn, because their lockfiles do not record a declared range and a path for each copy.
+also gives `parent_range_breaks`. It names each npm parent whose copy is at a changed path, and
+whose range that copy breaks. The copy is on another major, or below the floor of the range. A
+range that does not parse is also a break. A break makes `ok` false. The field is `null` with no
+baseline. It is also `null` for pnpm and Yarn. Their lockfiles do not record a declared range and
+a path for each copy.
 
 The parent list is the second route to the same damage. `why` has no `--line` and answers about
 the package as a whole, so `agents/fix-dependency.md` narrows to `declared_ranges --line`'s

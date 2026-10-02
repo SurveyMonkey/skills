@@ -38,7 +38,7 @@
 //
 // Declared exception of #170, a test of its own below: the port answers
 // `parent_range_breaks`, and fails on a copy at a changed path that breaks
-// the range of its parent across a major line. node.sh has no such check.
+// the range of its parent. node.sh has no such check.
 //
 // Declared exceptions of #304, where bash passes and the port refuses, each
 // a test of its own below:

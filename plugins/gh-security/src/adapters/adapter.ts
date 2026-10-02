@@ -264,7 +264,8 @@ type LineMove = {
 
 /**
  * A copy at a path that the fix changed, whose parent declares a range that
- * the copy breaks across a major line (#170). The path is new, or the
+ * the copy breaks (#170). The copy is on another major, or below the floor
+ * of the range, or the range does not parse. The path is new, or the
  * baseline had another version there.
  */
 type RangeBreak = {
@@ -303,7 +304,8 @@ export type ValidateAnswer = {
   readonly other_line_moves: readonly LineMove[] | null
   /**
    * Null when no baseline was given, or when the lockfile records no
-   * declared range for each copy (pnpm, Yarn). Else an array (#170).
+   * declared range and path for each copy (pnpm, Yarn). Else an array
+   * (#170). A null does not tell these two cases apart.
    */
   readonly parent_range_breaks: readonly RangeBreak[] | null
   /** The versions of all copies, unique and sorted as text. */

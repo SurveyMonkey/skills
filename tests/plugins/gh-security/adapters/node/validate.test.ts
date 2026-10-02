@@ -668,7 +668,7 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
   // npm writes `node_modules/browserify-rsa/node_modules/bn.js` at 5.0.0,
   // under the range `^5.2.1`. Here public-encrypt declares a range above its
   // copy at 4.12.5. `>4.12.5` does not admit its own bound.
-  it.fails.each(['^4.13.0', '>4.12.5'])(
+  it.each(['^4.13.0', '>4.12.5'])(
     'flags a new copy below the floor %j on its own major',
     (range) => {
       const tree = editedSpecimen((packages) =>
