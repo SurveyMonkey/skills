@@ -97,6 +97,7 @@ import {
   type JsonObject,
   type JsonValue,
   ok,
+  thrownText,
   unsupported,
 } from '../lib/envelope.ts'
 import { createGhClient, type GhClient, type GhClientOptions, GhError } from '../lib/gh.ts'
@@ -278,9 +279,7 @@ export const checkAdvisories = async (
     found = listing(all, name, ecosystem)
   } catch (error) {
     // Only a shape that this command cannot read throws here.
-    return failed(
-      `Failed to parse advisories for ${name} (${ecosystem}): ${(error as Error).message}`,
-    )
+    return failed(`Failed to parse advisories for ${name} (${ecosystem}): ${thrownText(error)}`)
   }
 
   const matched: string[] = []
