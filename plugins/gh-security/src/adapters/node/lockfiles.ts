@@ -59,6 +59,19 @@ export const resolvedVersions = (
   })
 }
 
+/**
+ * Each declaration of `pkg` with the copy that it resolves (#170), or null
+ * when the lockfile does not record it. Only the npm lockfile records a
+ * declared range and a path for each copy. The pnpm snapshots record only
+ * what a copy resolved, and a Yarn locator is not a path. It throws for a
+ * lockfile that the reader cannot read.
+ */
+export const declaredEdges = (
+  tree: Tree<NodeDetection>,
+  pkg: string,
+): readonly npm.Edge[] | null =>
+  tree.detection.pm === 'npm' ? npm.edges(lockfileOf(tree).text, pkg) : null
+
 /** `verb_resolution_map`. */
 export const resolutionMap = (tree: Tree<NodeDetection>): Envelope<ResolutionMapAnswer> =>
   attempt(() => {

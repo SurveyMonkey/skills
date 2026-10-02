@@ -36,6 +36,10 @@
 //     succeeded gives one. There, bash `shim` refuses with its own message,
 //     and the TypeScript caller gets the refusal of `detect`.
 //
+// Declared exception of #170, a test of its own below: the port answers
+// `parent_range_breaks`, and fails on a copy at a changed path that breaks
+// the range of its parent across a major line. node.sh has no such check.
+//
 // Declared exceptions of #304, where bash passes and the port refuses, each
 // a test of its own below:
 //
@@ -138,14 +142,18 @@ const refusalAgreement = (answer: BashResult, failure: Failure): string => {
 /**
  * 'agree', or the first disagreement in words, for `validate`. bash writes
  * the answer and exits 0 when `ok` is true, and exits 1 when it is false.
+ * `parent_range_breaks` is new in the port (#170), and node.sh has no such
+ * key. So the compare drops it. A break still sets `ok` to false, and where
+ * node.sh passes, that verdict differs.
  */
 const validateAgreement = (answer: BashResult, envelope: Envelope<ValidateAnswer>): string => {
   if (envelope.outcome !== 'ok') return refusalAgreement(answer, envelope)
+  const { parent_range_breaks: _breaks, ...shared } = envelope.value
   const status = envelope.value.ok ? 0 : 1
   if (answer.status !== status || answer.stdout === '') {
     return `bash exits ${answer.status} with "${answer.stderr.trim()}", TypeScript ok is ${envelope.value.ok}`
   }
-  const difference = firstDifference(JSON.parse(answer.stdout) as JsonValue, asJson(envelope.value))
+  const difference = firstDifference(JSON.parse(answer.stdout) as JsonValue, asJson(shared))
   return difference === null ? 'agree' : `they differ at ${difference}`
 }
 
@@ -782,6 +790,62 @@ describe('validate: the declared exceptions of #304', () => {
           "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19).",
       },
     })
+  })
+})
+
+describe('validate: the declared exception of #170', () => {
+  // The answer of `node.sh resolved_versions bn.js` on the lockfile from
+  // before the nested override of the specimen.
+  const BEFORE =
+    '{"pm":"npm","package":"bn.js","present":true,"count":3,"versions":[{"version":"4.12.5","path":"node_modules/asn1.js/node_modules/bn.js"},{"version":"4.12.5","path":"node_modules/public-encrypt/node_modules/bn.js"},{"version":"5.2.5","path":"node_modules/bn.js"}],"lockfile_entries":57}'
+  const ARGS = [
+    '--line',
+    '4',
+    '--vulnerable',
+    '< 4.12.3',
+    '--baseline',
+    BEFORE,
+    '--sibling-alerts',
+    '[]',
+    'bn.js',
+    '>=4.12.3 <5',
+  ]
+
+  it('bash passes the new nested copy, and the port flags it and fails', () => {
+    const dir = join(FIXTURES_ROOT, 'npm-new-nested-path')
+    const call = callOf(ARGS) as Call
+    const bash = runBash({ command: ADAPTER, args: ['validate', ...ARGS], cwd: dir })
+    const port = node.validate(treeOf(dir), call.pkg, call.range, call.options)
+    expect({
+      bash: { status: bash.status, ok: (JSON.parse(bash.stdout) as { ok: boolean }).ok },
+      port: port.outcome === 'ok' && { ok: port.value.ok, breaks: port.value.parent_range_breaks },
+    }).toEqual({
+      bash: { status: 0, ok: true },
+      port: {
+        ok: false,
+        breaks: [
+          {
+            parent: 'node_modules/browserify-rsa',
+            range: '^5.2.1',
+            path: 'node_modules/browserify-rsa/node_modules/bn.js',
+            version: '4.12.5',
+          },
+        ],
+      },
+    })
+  })
+
+  it('agrees on the same tree with no baseline', () => {
+    expect(
+      validateBoth(join(FIXTURES_ROOT, 'npm-new-nested-path'), [
+        '--line',
+        '4',
+        '--vulnerable',
+        '< 4.12.3',
+        'bn.js',
+        '>=4.12.3 <5',
+      ]),
+    ).toBe('agree')
   })
 })
 

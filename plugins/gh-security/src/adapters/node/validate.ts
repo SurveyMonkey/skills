@@ -1,11 +1,28 @@
 // `validate` for the node adapter, ported from `verb_validate` in node.sh
 // (#222). The bash there is the specification.
 //
-// The verb answers three questions (issues #19 and #83):
+// The verb answers four questions (issues #19, #83 and #170):
 //
 //   1. Constraint: does each copy on `line` satisfy `range`?
 //   2. Completeness: does any copy still match a `vulnerable` range?
 //   3. Collateral: did a copy on another major line move after `baseline`?
+//   4. Collateral by path: does a parent now get a copy that breaks its
+//      declared range across a major line?
+//
+// The fourth question is new in the port (#170, a declared parity
+// exception). Question 3 compares the set of versions on each major. So it
+// cannot see a copy at a new path when the versions of each major stay the
+// same. npm applies a nested override to the whole subtree of its parent. So
+// a parent deep in that subtree can get a new nested copy on the fixed line,
+// and its own range is on another major. `parent_range_breaks` names each
+// such parent. It reads each declaration of the package in the npm lockfile,
+// and the copy that the declaration resolves. It checks only a copy at a
+// changed path: a path that the baseline does not have, or has at another
+// version. A range that does not parse is a break. A range whose floor is on
+// the major of the copy is no break, because an override moves a copy past a
+// range on its own line on purpose. The answer is null with no baseline, and
+// for pnpm and Yarn, whose lockfiles do not record a declared range and a
+// path for each copy. The root is not a parent. A break makes `ok` false.
 //
 // The verb refuses its options before it reads the lockfile, in the order of
 // node.sh. `--sibling-alerts` reclassifies a move as `benign_dedup` only for
@@ -22,12 +39,18 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { type Envelope, failed } from '../../lib/envelope.ts'
-import { rangeAlternatives, satisfies } from '../../semver/ranges.ts'
+import type { Edge } from '../../lockfiles/npm.ts'
+import {
+  rangeAlternatives,
+  rangeFloorMajor,
+  rangeParseable,
+  satisfies,
+} from '../../semver/ranges.ts'
 import { coreAt, parseVersion, semverMax } from '../../semver/versions.ts'
 import type { ResolvedVersionsAnswer, Tree, ValidateAnswer, ValidateOptions } from '../adapter.ts'
 import { attempt } from './attempt.ts'
 import type { NodeDetection } from './detect.ts'
-import { resolvedVersions } from './lockfiles.ts'
+import { declaredEdges, resolvedVersions } from './lockfiles.ts'
 import { isRecord } from './manifest.ts'
 import { byText } from './parents.ts'
 
@@ -36,6 +59,11 @@ type Copy = ResolvedVersionsAnswer['versions'][number]
 type Sibling = { readonly major: number | null; readonly vulnerable_ranges: readonly string[] }
 
 type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
+
+type Break = NonNullable<ValidateAnswer['parent_range_breaks']>[number]
+
+/** A copy of the baseline. A path that is not text is null: no path matches it. */
+type BaselineCopy = { readonly version: string; readonly path: string | null }
 
 /**
  * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
@@ -94,19 +122,26 @@ const documentOf = (text: string): unknown => {
 }
 
 /**
- * The versions of a baseline that keeps the `resolved_versions` contract for
+ * The copies of a baseline that keeps the `resolved_versions` contract for
  * `pkg`, or null. An absent key reads as `undefined`, and that fails each
- * test here. So jq's `has` needs no test of its own.
+ * test here. So jq's `has` needs no test of its own. node.sh reads no path.
+ * Here a path that is not text is null, so each copy at that place counts as
+ * changed (#170).
  */
-const baselineVersions = (text: string, pkg: string): readonly string[] | null => {
+const baselineCopies = (text: string, pkg: string): readonly BaselineCopy[] | null => {
   const baseline = documentOf(text)
   if (!isRecord(baseline) || baseline.package !== pkg || !Array.isArray(baseline.versions)) {
     return null
   }
-  const versions = baseline.versions.map((entry: unknown) =>
-    isRecord(entry) ? entry.version : undefined,
+  const copies = baseline.versions.map((entry: unknown) =>
+    isRecord(entry) ? { version: entry.version, path: entry.path } : {},
   )
-  return versions.every((version) => typeof version === 'string') ? (versions as string[]) : null
+  return copies.every(({ version }) => typeof version === 'string')
+    ? copies.map(({ version, path }) => ({
+        version: version as string,
+        path: typeof path === 'string' ? path : null,
+      }))
+    : null
 }
 
 /**
@@ -179,7 +214,7 @@ type Inputs = {
   readonly line: number | null
   /** The vulnerable ranges: each line of each flag, unique and sorted. */
   readonly vulnerable: readonly string[]
-  readonly baseline: readonly string[] | null
+  readonly baseline: readonly BaselineCopy[] | null
   readonly siblings: readonly Sibling[] | null
   /** A sibling range does not parse. Each move is then `fatal`. */
   readonly siblingsUnreadable: boolean
@@ -195,7 +230,7 @@ const inputsOf = (
   range: string,
   options: ValidateOptions,
 ): { readonly inputs: Inputs } | { readonly refusal: string } => {
-  const baseline = options.baseline === null ? null : baselineVersions(options.baseline, pkg)
+  const baseline = options.baseline === null ? null : baselineCopies(options.baseline, pkg)
   if (options.baseline !== null && baseline === null) return { refusal: unusableBaseline(pkg) }
   // node.sh joins the flags with newlines, then splits the text at them.
   const vulnerable = uniqueSorted(
@@ -270,11 +305,11 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
  */
 const movesOf = (
   inputs: Inputs,
-  baseline: readonly string[],
+  baseline: readonly BaselineCopy[],
   copies: readonly Copy[],
 ): readonly Move[] => {
   const byMajor = new Map<number, string[]>()
-  for (const version of baseline) {
+  for (const { version } of baseline) {
     const major = majorOf(version)
     if (major !== inputs.line) byMajor.set(major, [...(byMajor.get(major) ?? []), version])
   }
@@ -296,8 +331,37 @@ const movesOf = (
     })
 }
 
+/**
+ * Each declaration whose copy the fix changed, and whose range that copy
+ * breaks across a major line (#170). A copy changed when the baseline has no
+ * copy of the same version at its path. A break is a range that does not
+ * parse, or one that the copy does not satisfy and whose floor is on another
+ * major. A range whose floor is on the major of the copy is no break: an
+ * override moves a copy past a range on its own line on purpose.
+ */
+const breaksOf = (baseline: readonly BaselineCopy[], edges: readonly Edge[]): readonly Break[] => {
+  const before = new Set(baseline.map(({ version, path }) => JSON.stringify([path, version])))
+  return edges
+    .flatMap(({ parent, range, path, version }): Break[] => {
+      if (path === null || version === null) return []
+      if (before.has(JSON.stringify([path, version]))) return []
+      if (
+        rangeParseable(range) &&
+        (satisfiesAll(version, range) || rangeFloorMajor(range) === majorOf(version))
+      ) {
+        return []
+      }
+      return [{ parent, range, path, version }]
+    })
+    .sort((a, b) => byText(a.path, b.path) || byText(a.parent, b.parent))
+}
+
 /** The answer, from the copies that `resolved_versions` found. It throws where jq stops. */
-const answerOf = (inputs: Inputs, resolved: ResolvedVersionsAnswer): ValidateAnswer => {
+const answerOf = (
+  inputs: Inputs,
+  resolved: ResolvedVersionsAnswer,
+  edges: readonly Edge[] | null,
+): ValidateAnswer => {
   const { line, lineText, range, vulnerable, baseline } = inputs
   const copies = resolved.versions.map(({ version, path }) => ({ version, path }))
   const inline = copies.filter(({ version }) => line === null || majorOf(version) === line)
@@ -310,13 +374,15 @@ const answerOf = (inputs: Inputs, resolved: ResolvedVersionsAnswer): ValidateAns
   })
   const unresolved = alerted.filter(({ below }) => !below).map(({ copy }) => copy)
   const moves = baseline === null ? null : movesOf(inputs, baseline, copies)
+  const breaks = baseline === null || edges === null ? null : breaksOf(baseline, edges)
   const linePresent = line === null || inline.length > 0
   return {
     ok:
       violations.length === 0 &&
       unresolved.length === 0 &&
       linePresent &&
-      (moves === null || moves.every((move) => move.class !== 'fatal')),
+      (moves === null || moves.every((move) => move.class !== 'fatal')) &&
+      (breaks === null || breaks.length === 0),
     package: resolved.package,
     range,
     line: lineText,
@@ -327,6 +393,7 @@ const answerOf = (inputs: Inputs, resolved: ResolvedVersionsAnswer): ValidateAns
     unresolved_alerts: unresolved,
     requires_major_bump: alerted.filter(({ below }) => below).map(({ copy }) => copy),
     other_line_moves: moves,
+    parent_range_breaks: breaks,
     resolved_versions: uniqueSorted(copies.map(({ version }) => version)),
   }
 }
@@ -349,5 +416,11 @@ export const validate = (
       `validate: '${pkg}' resolves to no versions in the lockfile. Nothing to validate.`,
     )
   }
-  return attempt(() => answerOf(read.inputs, resolved.value))
+  return attempt(() =>
+    answerOf(
+      read.inputs,
+      resolved.value,
+      read.inputs.baseline === null ? null : declaredEdges(tree, pkg),
+    ),
+  )
 }

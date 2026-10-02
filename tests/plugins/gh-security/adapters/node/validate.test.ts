@@ -492,30 +492,235 @@ describe('a within-major dedup of another line (#169)', () => {
 const BN_BASELINE =
   '{"pm":"npm","package":"bn.js","present":true,"count":3,"versions":[{"version":"4.12.5","path":"node_modules/asn1.js/node_modules/bn.js"},{"version":"4.12.5","path":"node_modules/public-encrypt/node_modules/bn.js"},{"version":"5.2.5","path":"node_modules/bn.js"}],"lockfile_entries":57}'
 
+const BN_ARGS = { line: '4', vulnerable: ['< 4.12.3'], siblingAlerts: '[]' }
+
+const RSA_PATH = 'node_modules/browserify-rsa/node_modules/bn.js'
+
+const RSA_BREAK = {
+  parent: 'node_modules/browserify-rsa',
+  range: '^5.2.1',
+  path: RSA_PATH,
+  version: '4.12.5',
+}
+
+/** A bn.js baseline with these copies, as `[path, version]`. */
+const bnBaseline = (...copies: readonly (readonly [string, string])[]) =>
+  JSON.stringify({
+    package: 'bn.js',
+    versions: copies.map(([path, version]) => ({ version, path })),
+  })
+
+/** The verdict and the breaks of `validate` on a tree. */
+const breaksIn = (tree: Tree<NodeDetection>, baseline: string | null) => {
+  const envelope = node.validate(
+    tree,
+    'bn.js',
+    '>=4.12.3 <5',
+    options({ ...BN_ARGS, baseline, siblingAlerts: baseline === null ? null : '[]' }),
+  )
+  if (envelope.outcome !== 'ok') throw new Error(`validate failed: ${envelope.error}`)
+  return { ok: envelope.value.ok, breaks: envelope.value.parent_range_breaks }
+}
+
+/** A copy of the #170 specimen with its lockfile edited. */
+const editedSpecimen = (edit: (packages: Record<string, Record<string, unknown>>) => void) => {
+  const fixture = useFixture('npm-new-nested-path')
+  onTestFinished(fixture.cleanup)
+  const lockPath = join(fixture.path, 'package-lock.json')
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+    packages: Record<string, Record<string, unknown>>
+  }
+  edit(lock.packages)
+  writeFileSync(lockPath, JSON.stringify(lock))
+  return treeAt(fixture.path)
+}
+
+const declare = (
+  packages: Record<string, Record<string, unknown>>,
+  key: string,
+  range: string,
+): void => {
+  packages[key] = {
+    ...packages[key],
+    dependencies: { ...(packages[key]?.dependencies as object), 'bn.js': range },
+  }
+}
+
 describe('a copy at a new path that breaks the range of its parent (#170)', () => {
-  it.fails('flags the new nested copy, and fails', () => {
+  it('flags the new nested copy, and fails', () => {
     const value = answer('npm-new-nested-path', 'bn.js', '>=4.12.3 <5', {
-      line: '4',
-      vulnerable: ['< 4.12.3'],
+      ...BN_ARGS,
       baseline: BN_BASELINE,
-      siblingAlerts: '[]',
     })
     expect({
       ok: value.ok,
       moves: value.other_line_moves,
-      breaks: (value as unknown as Record<string, unknown>).parent_range_breaks,
-    }).toEqual({
+      breaks: value.parent_range_breaks,
+    }).toEqual({ ok: false, moves: [], breaks: [RSA_BREAK] })
+  })
+
+  it.each([
+    [
+      'flags only the break when two new copies satisfy their parents',
+      bnBaseline(['node_modules/bn.js', '5.2.5']),
+      [RSA_BREAK],
+    ],
+    [
+      'flags a copy that changed version at a path of the baseline',
+      bnBaseline(
+        ['node_modules/asn1.js/node_modules/bn.js', '4.12.5'],
+        ['node_modules/public-encrypt/node_modules/bn.js', '4.12.5'],
+        [RSA_PATH, '5.2.5'],
+        ['node_modules/bn.js', '5.2.5'],
+      ),
+      [RSA_BREAK],
+    ],
+    [
+      'reads a baseline copy with no path as no path, so each copy counts as changed',
+      JSON.stringify({
+        package: 'bn.js',
+        versions: [{ version: '4.12.5' }, { version: '5.2.5', path: 5 }],
+      }),
+      [RSA_BREAK],
+    ],
+    [
+      'does not flag a break that the baseline already had at that path',
+      bnBaseline(
+        ['node_modules/asn1.js/node_modules/bn.js', '4.12.5'],
+        ['node_modules/public-encrypt/node_modules/bn.js', '4.12.5'],
+        [RSA_PATH, '4.12.5'],
+        ['node_modules/bn.js', '5.2.5'],
+      ),
+      [],
+    ],
+  ])('%s', (_name, baseline, breaks) => {
+    expect(breaksIn(treeOf('npm-new-nested-path'), baseline)).toEqual({
+      ok: breaks.length === 0,
+      breaks,
+    })
+  })
+
+  // The npm collapse of #83: each copy of minimatch now resolves the one
+  // brace-expansion 5.0.9 at the root. Two of them declare a range on major
+  // 1 or 2 (probed: `jq '.packages | to_entries[] |
+  // select(.value.dependencies["brace-expansion"])'` on the lockfile).
+  it('flags each parent of the collapsed npm specimen that declares another major', () => {
+    const value = answer('npm-cross-line-collapsed', 'brace-expansion', '>=5.0.9 <6', {
+      line: '5',
+      vulnerable: ['< 5.0.9'],
+      baseline:
+        '{"package":"brace-expansion","versions":[{"version":"5.0.5","path":"node_modules/brace-expansion"},{"version":"2.0.2","path":"node_modules/filelist/node_modules/brace-expansion"},{"version":"1.1.11","path":"node_modules/glob/node_modules/brace-expansion"}]}',
+    })
+    expect({ ok: value.ok, breaks: value.parent_range_breaks }).toEqual({
       ok: false,
-      moves: [],
       breaks: [
         {
-          parent: 'node_modules/browserify-rsa',
-          range: '^5.2.1',
-          path: 'node_modules/browserify-rsa/node_modules/bn.js',
-          version: '4.12.5',
+          parent: 'node_modules/filelist/node_modules/minimatch',
+          range: '^2.0.1',
+          path: 'node_modules/brace-expansion',
+          version: '5.0.9',
+        },
+        {
+          parent: 'node_modules/glob/node_modules/minimatch',
+          range: '^1.1.7',
+          path: 'node_modules/brace-expansion',
+          version: '5.0.9',
         },
       ],
     })
+  })
+
+  it('answers null when no baseline is given', () => {
+    expect(breaksIn(treeOf('npm-new-nested-path'), null)).toEqual({ ok: true, breaks: null })
+  })
+
+  it.each([
+    ['pnpm-dedup-within-major', JS_YAML_BASELINES['pnpm-dedup-within-major']],
+    ['yarn-multi-major', '{"package":"undici","versions":[{"version":"7.27.2"}]}'],
+  ])(
+    'answers null on %s, whose lockfile records no declared range for a copy',
+    (name, baseline) => {
+      const pkg = name.startsWith('pnpm') ? 'js-yaml' : 'undici'
+      const envelope = node.validate(
+        treeOf(name),
+        pkg,
+        '>=1.0.0',
+        options({ line: name.startsWith('pnpm') ? '4' : '7', vulnerable: ['< 1.0.0'], baseline }),
+      )
+      expect(envelope.outcome === 'ok' && envelope.value.parent_range_breaks).toBeNull()
+    },
+  )
+
+  it('does not flag a new copy past a range on its own major, which an override does on purpose', () => {
+    const tree = editedSpecimen((packages) =>
+      declare(packages, 'node_modules/public-encrypt', '4.11.0'),
+    )
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
+
+  it.each(['latest', '', 'npm:other@^5.0.0'])(
+    'flags a new copy whose parent declares the range %j, which does not parse',
+    (range) => {
+      const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', range))
+      expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+        ok: false,
+        breaks: [
+          {
+            parent: 'node_modules/asn1.js',
+            range,
+            path: 'node_modules/asn1.js/node_modules/bn.js',
+            version: '4.12.5',
+          },
+          RSA_BREAK,
+        ],
+      })
+    },
+  )
+
+  it('flags a range that the copy breaks with no floor, such as <4', () => {
+    const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', '<4'))
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks).toEqual([
+      {
+        parent: 'node_modules/asn1.js',
+        range: '<4',
+        path: 'node_modules/asn1.js/node_modules/bn.js',
+        version: '4.12.5',
+      },
+      RSA_BREAK,
+    ])
+  })
+
+  it('sorts two parents of one copy by the parent', () => {
+    const tree = editedSpecimen((packages) => {
+      packages['node_modules/browserify-rsa/node_modules/zz'] = {
+        version: '1.0.0',
+        dependencies: { 'bn.js': '^5.0.0' },
+      }
+      packages['node_modules/browserify-rsa/node_modules/aa'] = {
+        version: '1.0.0',
+        dependencies: { 'bn.js': '^5.0.0' },
+      }
+    })
+    expect(
+      breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks?.map(
+        ({ parent }) => parent,
+      ),
+    ).toEqual([
+      'node_modules/browserify-rsa',
+      'node_modules/browserify-rsa/node_modules/aa',
+      'node_modules/browserify-rsa/node_modules/zz',
+    ])
+  })
+
+  it('skips a declaration that resolves no copy', () => {
+    const tree = editedSpecimen((packages) => {
+      packages['node_modules/lonely'] = { version: '1.0.0', dependencies: { 'bn.js': '^6.0.0' } }
+      delete packages['node_modules/bn.js']
+    })
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks).toEqual([RSA_BREAK])
   })
 })
 
@@ -586,6 +791,7 @@ describe('the verdicts of the constraint and completeness checks', () => {
       unresolved_alerts: [],
       requires_major_bump: [],
       other_line_moves: null,
+      parent_range_breaks: null,
       resolved_versions: ['5.29.0', '6.24.1', '7.27.2'],
     })
   })
@@ -603,6 +809,7 @@ describe('the verdicts of the constraint and completeness checks', () => {
       unresolved_alerts: [],
       requires_major_bump: [],
       other_line_moves: null,
+      parent_range_breaks: null,
       resolved_versions: ['5.29.0', '6.24.1', '7.27.2'],
     })
   })

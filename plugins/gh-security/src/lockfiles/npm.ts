@@ -7,6 +7,10 @@
 // under. The two differ only for an `npm:` alias, which records the real name
 // in `.name` (#44, #46).
 //
+// `edges` is the walk of `npm_copy_rows` with the path of each copy too.
+// node.sh has no such reader. `validate` reads it for `parent_range_breaks`
+// (#170), and `copies` is a view of it.
+//
 // This file ships. It imports nothing outside the plugin.
 
 import {
@@ -170,34 +174,60 @@ const prefixes = (path: string): readonly string[] => {
 const candidates = (path: string, key: string): readonly string[] =>
   prefixes(path).map((prefix) => `${prefix === '' ? '' : `${prefix}/`}${NODE_MODULES}${key}`)
 
+/** One declaration of a package, and the copy that npm resolves for it. */
+export type Edge = {
+  /** The `.packages` key of the entry that declares the package. */
+  readonly parent: string
+  readonly parentVersion: string | null
+  /** The declared range, without an `npm:${pkg}@` prefix. */
+  readonly range: string
+  /** The key of the first candidate on the walk up that has a version, or null. */
+  readonly path: string | null
+  /** The version of that candidate, or null. */
+  readonly version: string | null
+}
+
 /**
- * `npm_copy_rows`: one row for each key that declares `pkg`, by the name or
- * by an `npm:${pkg}@` alias. The three blocks of each copy merge first, and
- * a later block wins a key. `resolved` is the version of the first candidate
- * on the walk up that has one. The root is not a parent.
+ * Each key that declares `pkg`, by the name or by an `npm:${pkg}@` alias,
+ * with the copy that npm resolves for it. The three blocks of each copy merge
+ * first, and a later block wins a key. The copy is the first candidate on the
+ * walk up that has a version. The root is not a parent.
  */
-export const copies = (text: string, pkg: string): readonly Copy[] => {
+export const edges = (text: string, pkg: string): readonly Edge[] => {
   const entries = entriesOf(text)
   const byKey = new Map(entries.map((entry) => [entry.key, entry.value]))
   const alias = `npm:${pkg}@`
-  return declaringEntries(entries).flatMap(({ entry: { key: path, value }, declared }) =>
-    Object.entries(declared).flatMap(([key, specifier]): Copy[] => {
+  return declaringEntries(entries).flatMap(({ entry: { key: parent, value }, declared }) =>
+    Object.entries(declared).flatMap(([key, specifier]): Edge[] => {
       if (typeof specifier !== 'string') return []
       if (key !== pkg && !specifier.startsWith(alias)) return []
-      const resolved = candidates(path, key)
-        .map((candidate) => textOf(byKey.get(candidate)?.version))
-        .find((version) => version !== null)
+      const found = candidates(parent, key)
+        .map((path) => ({ path, version: textOf(byKey.get(path)?.version) }))
+        .find(({ version }) => version !== null)
       return [
         {
-          parent: installedName(path),
-          parent_version: textOf(value.version),
+          parent,
+          parentVersion: textOf(value.version),
           range: key === pkg ? specifier : specifier.slice(alias.length),
-          resolved: resolved ?? null,
+          path: found?.path ?? null,
+          version: found?.version ?? null,
         },
       ]
     }),
   )
 }
+
+/**
+ * `npm_copy_rows`: one row for each key that declares `pkg`, from
+ * {@link edges}. `resolved` is the version of the copy that npm resolves.
+ */
+export const copies = (text: string, pkg: string): readonly Copy[] =>
+  edges(text, pkg).map(({ parent, parentVersion, range, version }) => ({
+    parent: installedName(parent),
+    parent_version: parentVersion,
+    range,
+    resolved: version,
+  }))
 
 /**
  * Each copy that declares `pkg` in `dependencies`, `optionalDependencies` or

@@ -262,6 +262,21 @@ type LineMove = {
   readonly class: 'fatal' | 'benign_dedup'
 }
 
+/**
+ * A copy at a path that the fix changed, whose parent declares a range that
+ * the copy breaks across a major line (#170). The path is new, or the
+ * baseline had another version there.
+ */
+type RangeBreak = {
+  /** The lockfile key of the parent that declares the package. */
+  readonly parent: string
+  /** The range that the parent declares. */
+  readonly range: string
+  /** The lockfile key of the copy that the parent resolves. */
+  readonly path: string
+  readonly version: string
+}
+
 /** The `validate` answer. */
 export type ValidateAnswer = {
   /**
@@ -286,6 +301,11 @@ export type ValidateAnswer = {
   readonly requires_major_bump: readonly AlertedCopy[]
   /** Null when no baseline was given, and an array when one was. */
   readonly other_line_moves: readonly LineMove[] | null
+  /**
+   * Null when no baseline was given, or when the lockfile records no
+   * declared range for each copy (pnpm, Yarn). Else an array (#170).
+   */
+  readonly parent_range_breaks: readonly RangeBreak[] | null
   /** The versions of all copies, unique and sorted as text. */
   readonly resolved_versions: readonly string[]
 }
