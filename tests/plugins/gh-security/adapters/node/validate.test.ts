@@ -663,6 +663,32 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
 
   // `^4.0.0 || latest` admits 4.12.5 on its first alternative, and its floor
   // is on major 4. So only the parse test makes it a break.
+  // A copy below the floor of a range on its own major is a break. Real npm
+  // 11 output: with the override `{"browserify-rsa": {"bn.js": "5.0.0"}}`,
+  // npm writes `node_modules/browserify-rsa/node_modules/bn.js` at 5.0.0,
+  // under the range `^5.2.1`. Here public-encrypt declares a range above its
+  // copy at 4.12.5. `>4.12.5` does not admit its own bound.
+  it.fails.each(['^4.13.0', '>4.12.5'])(
+    'flags a new copy below the floor %j on its own major',
+    (range) => {
+      const tree = editedSpecimen((packages) =>
+        declare(packages, 'node_modules/public-encrypt', range),
+      )
+      expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+        ok: false,
+        breaks: [
+          RSA_BREAK,
+          {
+            parent: 'node_modules/public-encrypt',
+            range,
+            path: 'node_modules/public-encrypt/node_modules/bn.js',
+            version: '4.12.5',
+          },
+        ],
+      })
+    },
+  )
+
   it.each(['latest', '', 'npm:other@^5.0.0', '^4.0.0 || latest'])(
     'flags a new copy whose parent declares the range %j, which does not parse',
     (range) => {
