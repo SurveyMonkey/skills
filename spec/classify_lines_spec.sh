@@ -868,7 +868,7 @@ STUB_EOF
   # classification against origin/<default_branch>, excludes the checkout
   # when it fails, and keeps a requires_major_bump group in `skipped`.
   # tests/plugins/gh-security/subcommands/prepare-checkout.test.ts has those
-  # examples.
+  # examples. SKILL.md still states them in prose, with no pin, until #237.
   Describe 'the SKILL.md prose that consumes the classification'
     SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
 

@@ -27,7 +27,7 @@ grammar:
 # pin: mechanical, retired by <script>
 ```
 
-where `<script>` is one of the five successor scripts named in issue #193 that have not landed:
+where `<script>` is one of the five successor scripts named in issue #193 whose pins are still open:
 `preflight-repo.sh`, `build-dispatches.sh`, `reap-batch.sh`, `summarize-run.sh`,
 `pr-status.sh --env-prefix`. The other two, `prepare-checkout.sh` and `merge-envelopes.sh`, are
 the TypeScript commands `prepare-checkout` and `merge-envelopes` (#227), and their pins are gone.

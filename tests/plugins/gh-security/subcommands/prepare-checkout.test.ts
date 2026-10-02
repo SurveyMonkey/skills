@@ -13,12 +13,12 @@
 // for ssh (`GIT_SSH_COMMAND`) serves that URL from the bare origin on disk.
 // Git itself still runs the probe, the fetch and the worktree for real.
 //
-// A recording runner stands in only where the example is about the argv that
-// reaches a child (the `--env-prefix` wrap), or about a child that fails on
-// demand (the probe retry, a failed fetch). It runs the real git for each
-// other call.
+// A stand-in runner is used in two cases only. One is an example about the
+// argv that gets to a child (the `--env-prefix` wrap). The other is a child
+// that fails on demand (the probe retry, a failed fetch). The stand-in runs
+// the real git for each other call.
 //
-// The expected values are written by hand from the contract on #227. The
+// I wrote the expected values by hand from the contract on #227. The
 // repository names are fictitious, and the package names are public.
 //
 // Each example that retires a prose pin (#197, ruling 7 of round 5) names
@@ -180,7 +180,7 @@ const context = (w: World, args: readonly string[]): CommandContext => ({
   commandNames: [],
 })
 
-/** The answer of the command, with `gh` answering from `replies`. */
+/** The answer of the command. `gh` gives the answers in `replies`. */
 const prepare = (
   w: World,
   args: readonly string[],

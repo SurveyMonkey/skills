@@ -7,8 +7,8 @@
 // (`fdb1544^:plugins/gh-security/scripts/common/discover-alerts.sh:563-576`)
 // on `app.json`, `api.json` and `web.json`. That capture has a tie at each
 // sort key, a full tie, and code point order in `package` and `major_line`.
-// The other expected values are written by hand from the contract in the
-// header of the command, and the names in them are fictitious.
+// I wrote the other expected values by hand from the contract in the header
+// of the command. The names in them are fictitious.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

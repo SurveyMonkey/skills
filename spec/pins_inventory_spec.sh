@@ -26,7 +26,7 @@ Describe 'the prose pin inventory (issue #197)'
   SPEC_DIR="$SHELLSPEC_PROJECT_ROOT/spec"
   PINS="$SPEC_DIR/PINS.md"
 
-  # The successor scripts issue #193 names that have not landed. The other
+  # The successor scripts issue #193 names whose pins are still open. The other
   # two, prepare-checkout.sh and merge-envelopes.sh, landed as TypeScript
   # commands in #227, and their pins went with them. Not a superset from
   # elsewhere in the repo: a marker naming a real script this list omits is
@@ -64,7 +64,7 @@ pr-status.sh --env-prefix'
     done
   }
 
-  It 'names one of the five #193 successor scripts that have not landed on every mechanical marker'
+  It 'names, on every mechanical marker, one of the five #193 successors with open pins'
     When call unrecognized_successors
     The output should equal ''
   End

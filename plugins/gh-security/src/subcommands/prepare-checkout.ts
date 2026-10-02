@@ -4,21 +4,23 @@
 // of phases 1 and 2 of the `resolve-alerts` skill. The contract is on #227.
 //
 // One checkout for each call (#193, Constraints). `classify-lines` fetches,
-// and the pull request search uses an API with a rate limit. So one call for
-// the whole workspace could hit the ten-minute limit of the Bash tool, and
-// each checkout is then its own unit of exclusion.
+// and the pull request search uses an API with a rate limit. One call for the
+// whole workspace could then go past the ten-minute limit of the Bash tool.
+// Also, each checkout is then its own unit of exclusion.
 //
-// The steps, in this order. Each step is a ported command, and each runs in
-// process. This command never starts itself as a child.
+// The steps, in this order. Steps 1, 3 and 4 are ported commands that run in
+// process. Step 2 starts `git`. This command never starts itself as a child.
 //   1. `detect-scope <root>` gives `nwo` and `default_branch`.
 //   2. The namespace probe: `git -C <root> ls-remote --heads origin
 //      refs/heads/fix`. A branch named `fix` on the remote stops each `fix/*`
 //      push (#123). A hit gives the `flat` branch style, and no output gives
-//      `slash`. The full refname matters: git matches the whole ref, so
-//      `topic/fix` is not a hit. A failed attempt gets one retry. An attempt
-//      fails when git exits non-zero, and also when it exits 0 with output
-//      that is not a `refs/heads/fix` line. The empty output of a failed
-//      probe is never read as `slash`. The inverse collision, a remote
+//      `slash`. The full refname matters: git matches a pattern against the
+//      tail of a ref, from its start or from a `/`. So `fix` matches
+//      `refs/heads/topic/fix`, and `refs/heads/fix` does not. A failed
+//      attempt gets one retry. An attempt fails when git exits non-zero, and
+//      when its output pipe failed. It also fails when git exits 0 and a
+//      line of its output is not a `refs/heads/fix` line. The empty output
+//      of a failed probe is never read as `slash`. The inverse collision, a remote
 //      branch `fix/dependabot-<package>-<line>x/<more>`, is not probed. A
 //      push that it stops fails that one group.
 //   3. `discover-alerts <nwo>`, with `--branch-style flat` after a hit. The
@@ -30,9 +32,12 @@
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (#193, `env-prefix.md`). It goes to each step, so each child of each step
-// runs under it: the `git` and `gh` calls of `detect-scope`, the probe, the
-// `gh` calls of `discover-alerts`, and the `git` calls of `classify-lines`.
-// Nothing here names a tool, or looks for one.
+// runs under it. These children are:
+//   - the `git` and `gh` calls of `detect-scope`,
+//   - the probe,
+//   - the `gh` calls of `discover-alerts`,
+//   - the `git` calls of `classify-lines`.
+// Nothing here names an environment tool, or looks for one.
 //
 // Output, for a checkout that is kept: `{checkout, nwo, default_branch,
 // branch_style, actionable, skipped, classify_errors}`. The three lists are
@@ -49,14 +54,18 @@
 //                                        error of `detect-scope`.
 //   branch namespace probe failed twice  `stderr` is the stderr of the
 //                                        second attempt, as git wrote it.
+//                                        When git wrote none, it is the
+//                                        start failure, the exit status or
+//                                        signal, the pipe failure, or the
+//                                        output that is not a hit.
 //   discover-alerts failed, or           a stage of the pipeline failed.
 //   classify-lines failed                `stderr` is the error of that stage.
 // No reason is a guess at a cause, such as "origin unreachable". A failed
 // probe can come from auth, from a wrong prefix, or from a remote that is
 // not there, and the stderr says which.
 //
-// The command fails, with exit 1, for a bad command line, for a `<root>`
-// that is not a directory, and for a `<root>` that is in no git repository.
+// The command fails, with exit 1, in three cases: a bad command line, a
+// `<root>` that is not a directory, and a `<root>` in no git repository.
 // `discover-repos` gives none of these, so they are not exclusions.
 //
 // Differences from the contract on #227, each an addition:
@@ -140,8 +149,8 @@ const probeOf = (result: RunResult): Probe => {
 
 /**
  * The handler. The `gh` client factory, the runner, the registry, the
- * current directory and the signals are parameters, and each goes to the
- * steps that use it.
+ * current directory and the signals are parameters. Each goes to the steps
+ * that use it.
  */
 export const prepareCheckout = async (
   context: CommandContext,

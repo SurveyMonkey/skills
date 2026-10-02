@@ -98,11 +98,11 @@ example green. A batch-wide regression is exactly the mutation a bare total cann
 
 The fix: pin each site where it lives, one example per site with an anchored `rule_in` pattern, so
 the failure names the site. Better still, the flag selection is mechanical, so it belongs in a
-script and the pin is deleted when that script lands (issues #193 and #197). That is what
-happened: the `prepare-checkout` command selects the flag now, and its successor example is
-`gives the flat style, and flat names in both lists, when origin has a branch fix` in
-`tests/plugins/gh-security/subcommands/prepare-checkout.test.ts`. It asserts each `branch_name`
-in both lists.
+script and the pin is deleted when that script lands (issues #193 and #197). #227 did that. The
+`prepare-checkout` command selects the flag, and SKILL.md uses the command after #237. The
+successor example is in `tests/plugins/gh-security/subcommands/prepare-checkout.test.ts`:
+`gives the flat style, and flat names in both lists, when origin has a branch fix`. It asserts
+each `branch_name` in both lists.
 
 ### An alternation that matched nothing on macOS
 

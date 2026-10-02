@@ -5,9 +5,9 @@
 // `combine_results` (`fdb1544^:plugins/gh-security/scripts/common/discover-alerts.sh:562`).
 //
 // Input: one or more files. Each file holds one answer of `prepare-checkout`,
-// a kept checkout or an excluded one. The input is files and not stdin,
-// because a command with a redirection cannot get approval before it runs
-// (`cli.md`).
+// a kept checkout or an excluded one. The input is files and not stdin. The
+// allow hook gives no decision for a command with a redirection (`cli.md`).
+// So that command gets the usual permission prompt.
 //
 // Output: `{checkouts, excluded, actionable, skipped}`.
 //   checkouts   for each kept checkout, in the order of the files:
@@ -25,18 +25,23 @@
 // A group keeps every field that it has. Each group has its own `repo`, so
 // no group loses its repository in the merge.
 //
-// The command fails, with exit 1, when there is no file, when a file cannot
-// be read, when a file is not JSON, and when a file does not have one of the
-// two shapes of `prepare-checkout`. It also fails when a
-// `max_epss_percentile` is not a number, because jq's `-(x)` stops there.
+// The command fails, with exit 1, in these cases:
+//   - there is no file,
+//   - this command cannot read a file,
+//   - a file is not JSON,
+//   - a file does not have one of the two shapes of `prepare-checkout`, or
+//     has a field that `prepare-checkout` never gives,
+//   - a `max_epss_percentile` is not a number, because jq's `-(x)` stops
+//     there.
 //
 // Differences from `combine_results`:
+//   - The input is files. `combine_results` read stdin.
 //   - The input is the answers of `prepare-checkout`, and not of
 //     `discover-alerts`. So `checkouts` and `excluded` are new. Without them,
 //     the merge loses the default branch and the branch style of each
 //     checkout, and the name of each excluded checkout.
-//   - Each input must have the shape of `prepare-checkout`. jq read any
-//     object with lists in `actionable` and `skipped`.
+//   - Each input must have the shape of `prepare-checkout`, with no other
+//     field. jq read any object with lists in `actionable` and `skipped`.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says.
 //

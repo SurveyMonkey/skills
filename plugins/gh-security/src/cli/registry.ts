@@ -50,7 +50,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'merge-envelopes': {
     description:
-      'Merge the prepare-checkout answers of several checkouts, and rank all their groups: merge-envelopes <envelope.json>...',
+      'Merge the prepare-checkout answers of one or more checkouts, and rank all their groups: merge-envelopes <envelope.json>...',
     load: async () => (await import('../subcommands/merge-envelopes.ts')).mergeEnvelopesCommand,
   },
   'pr-status': {

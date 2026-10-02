@@ -12,9 +12,11 @@
 # it, retries it once, excludes the checkout on a second failure, and passes
 # `--branch-style flat` to discovery after a hit.
 # tests/plugins/gh-security/subcommands/prepare-checkout.test.ts has those
-# examples. The scheme itself is in discover-alerts --branch-style
-# (tests/plugins/gh-security/subcommands/discover-alerts.test.ts) and in the
-# notice hook (spec/notice_scan_spec.sh). This file keeps the prose that is
+# examples. SKILL.md still states the probe in prose, with no pin, until #237
+# makes the skill call the command. The scheme itself is in discover-alerts
+# --branch-style (tests/plugins/gh-security/subcommands/discover-alerts.test.ts),
+# in classify-lines --branch-style, and in the notice hook
+# (spec/notice_scan_spec.sh). This file keeps the prose that is
 # not code: the phase 7 summary, and the fix agent, which uses the branch
 # name as it is.
 
@@ -24,7 +26,7 @@ Describe 'the branch-namespace preflight (issue #123)'
 
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
-  Describe 'the probe in SKILL.md'
+  Describe 'the flat scheme in the SKILL.md summary'
     # pin: mechanical, retired by summarize-run.sh
     It 'reports every flat-scheme repo in the phase 7 summary'
       When call phrase_in "$SKILL" 'name every repo whose batch ran under the flat branch scheme'
