@@ -1,0 +1,10 @@
+{
+  "name": "demo-git-parent-copies",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "agent-base": "6.0.2",
+    "debug": "git+ssh://git@git.example.com/example/debug.git#4.3.4",
+    "finalhandler": "1.1.2"
+  }
+}

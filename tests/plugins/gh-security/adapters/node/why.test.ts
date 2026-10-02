@@ -300,6 +300,12 @@ describe('why, with the raw text given', () => {
     expect(answer.outcome === 'ok' && answer.value.parents).toEqual(['debug'])
   })
 
+  // #50: bash names the parents `debug` and `debug@git+ssh://git`.
+  it('names a pnpm git parent and its registry copies as one parent', async () => {
+    const answer = await node.why(tree('pnpm-git-parent-copies'), 'ms', { raw: '' })
+    expect(answer.outcome === 'ok' && answer.value.parents).toEqual(['debug'])
+  })
+
   it('names an npm alias parent', async () => {
     const answer = await node.why(tree('npm-alias'), 'lodash', { raw: '' })
     expect(answer.outcome === 'ok' && answer.value.parents).toEqual(['alias-parent', 'dupe-parent'])

@@ -38,6 +38,11 @@
 //     `resolved_versions` without `apply_constraint`. Other parity files
 //     cover those verbs.
 //
+// Declared exception (#50, ruling 2), a case of its own below: a pnpm parent
+// with a git copy beside two registry copies. bash writes keys qualified by
+// the registry versions, which miss the git copy. The port refuses, and
+// writes nothing. Beside one registry copy, both sides write the plain key.
+//
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There
 // the check is the refusal alone.
@@ -1248,8 +1253,30 @@ const odd: readonly Case[] = [
   ),
 ]
 
+/** The git parent of #50: beside one registry copy, and beside two. */
+const GIT_PARENT_AGREES = call(
+  'a git parent beside one registry copy',
+  'pnpm-git-parent',
+  'ms',
+  '^2.1.3',
+  'debug',
+)
+const GIT_PARENT_REFUSED = call(
+  'a git parent beside two registry copies',
+  'pnpm-git-parent-copies',
+  'ms',
+  '>=2.1.3 <3',
+  'debug',
+)
+
 /** The cases whose bash side runs before the examples, at the same time. */
-const ALL_CASES: readonly Case[] = [...SPEC_CASES, ...generated, ...odd]
+const ALL_CASES: readonly Case[] = [
+  ...SPEC_CASES,
+  ...generated,
+  ...odd,
+  GIT_PARENT_AGREES,
+  GIT_PARENT_REFUSED,
+]
 
 /** The time limit of the bash side of all cases together. */
 const BASH_TIMEOUT_MS = 590_000
@@ -1271,6 +1298,30 @@ describe('apply_constraint parity on the odd cases', () => {
     'agrees on %s: %s',
     (_fixture, _title, testCase) => {
       expect(outcomeOf(testCase)).toMatchObject(AGREE)
+    },
+    CASE_TIMEOUT_MS,
+  )
+})
+
+describe('apply_constraint parity on a git parent (#50)', () => {
+  it(
+    'agrees beside one registry copy',
+    () => {
+      expect(outcomeOf(GIT_PARENT_AGREES)).toMatchObject(AGREE)
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  // The declared exception of ruling 2 on #50.
+  it.fails(
+    'differs beside two registry copies: bash writes, and the port refuses and writes nothing',
+    () => {
+      const outcome = outcomeOf(GIT_PARENT_REFUSED)
+      expect(outcome.answer.startsWith('bash answered: ')).toBe(true)
+      expect({ wrote: outcome.wrote, treesDiffer: outcome.tree !== null }).toEqual({
+        wrote: false,
+        treesDiffer: true,
+      })
     },
     CASE_TIMEOUT_MS,
   )

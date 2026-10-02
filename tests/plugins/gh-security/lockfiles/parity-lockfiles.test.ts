@@ -5,8 +5,8 @@
 //
 // The fixture set is discovered, not listed, so a new specimen joins this run
 // with nothing to remember. Each fixture goes to the reader of the lockfile
-// that `detect_raw` picks first. Two fixtures are out, and DECLARED below
-// names each with its reason.
+// that `detect_raw` picks first. One fixture is out, and DECLARED below
+// names it with its reason.
 //
 // `parents` is not here. No node.sh verb returns it, so the unit tests prove
 // it. The `why` and `declared_ranges` verbs put the parents in their
@@ -46,10 +46,8 @@ const FORMATS: readonly { pm: string; lockfile: string; reader: Reader }[] = [
 ]
 
 const DECLARED: Readonly<Record<string, string>> = {
-  // The #50 fix. bash splits a snapshots key on its last `@`, so it names the
-  // git parent `debug@git+ssh://git`. The module names it `debug`. The two
-  // must differ here, and the unit test holds the expected value.
-  'pnpm-git-parent': 'declared divergence: #50',
+  // `pnpm-git-parent` is not out. The #50 difference is in the name of a
+  // parent, which these verbs do not answer (parity-node-tree.test.ts).
   // A Yarn Classic lockfile. `detect` refuses it with exit 3 before any
   // parser runs, and detection is not in these modules.
   'yarn-classic': 'refused by detect, not by a parser',

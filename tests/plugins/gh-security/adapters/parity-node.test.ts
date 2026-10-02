@@ -19,11 +19,11 @@
 // the environment of this process, and the TypeScript side reads PATH from
 // that same environment.
 //
-// Declared out, each with its reason:
-//
-//   - `pnpm-git-parent`, for `resolved_versions` and `resolution_map` only.
-//     This is the #50 divergence. The lockfile unit tests hold its expected
-//     value.
+// No fixture is out. `pnpm-git-parent` was, as the #50
+// divergence. But bash and the port agree on its `resolved_versions` and
+// `resolution_map`: the git copy is no registry copy on either side. The #50
+// divergence is in the name of the parent, which parity-node-tree.test.ts
+// declares, and in the `apply_constraint` refusal of ruling 2 on #50.
 //
 // Declared divergence in the exit status: where jq itself stops, bash exits
 // with jq's own status 5, and writes jq's own message. That status is not
@@ -54,10 +54,6 @@ const ENV = { PATH: process.env.PATH }
 
 /** The status jq exits with when its program stops with an error. */
 const JQ_ERROR = 5
-
-const DECLARED: Readonly<Record<string, string>> = {
-  'pnpm-git-parent': 'declared divergence: #50',
-}
 
 // The names an `npm:` alias installs a copy under. They are not keys of the
 // map, and `resolved_versions` must answer for them too (ADR 001, "One
@@ -142,7 +138,7 @@ const treeOf = (dir: string): Tree<NodeDetection> => {
 type Accepted = Fixture & { readonly map: BashResult }
 
 const accepted: Accepted[] = fixtures
-  .filter(({ name, detected }) => detected.status === 0 && !(name in DECLARED))
+  .filter(({ detected }) => detected.status === 0)
   .map((fixture) => ({ ...fixture, map: bash(fixture.dir, 'resolution_map') }))
 
 /** The map that bash answers, or none when bash refuses the lockfile. */
@@ -196,10 +192,6 @@ describe('the fixture set', () => {
       'yarn-classic': statuses.get('yarn-classic'),
       'no-lockfile': statuses.get('no-lockfile'),
     }).toEqual({ npm: true, pnpm: true, yarn: true, bun: 3, 'yarn-classic': 3, 'no-lockfile': 1 })
-  })
-
-  it.each(Object.keys(DECLARED))('still carries the declared fixture %s', (name) => {
-    expect(existsSync(join(FIXTURES_ROOT, name))).toBe(true)
   })
 
   it.each(Object.keys(ALIAS_KEYS))('still accepts the alias fixture %s', (name) => {

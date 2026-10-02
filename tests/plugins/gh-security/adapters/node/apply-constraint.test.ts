@@ -131,6 +131,31 @@ const refusalOf = (fixture: string, args: readonly string[], setup?: Setup): str
   return envelope.error
 }
 
+/**
+ * The error of a pnpm refusal that comes before the first write: the manifest
+ * and the lockfile after it are the files before it.
+ */
+const pnpmRefusalOf = (fixture: string, args: readonly string[], setup?: Setup): string => {
+  const dir = copyOf(fixture, setup)
+  const files = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']
+  const before = files.map((file) => readOptional(dir, file))
+  const envelope = node.applyConstraint(treeAt(dir), requestOf(args))
+  if (envelope.outcome === 'ok') throw new Error('apply_constraint answered ok')
+  expect(files.map((file) => readOptional(dir, file))).toEqual(before)
+  return envelope.error
+}
+
+/** The version of the git copy of `debug` in the pnpm-git-parent fixtures. */
+const GIT_DEBUG =
+  'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
+
+/** The refusal of #50, written by hand from ruling 2. */
+const gitParentRefusal = (
+  pkg: string,
+  parents: readonly (readonly [string, readonly string[]])[],
+): string =>
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches its git copy (issue #50). Detail: ${JSON.stringify(parents.map(([parent, git_versions]) => ({ parent, git_versions })))}. Nothing was written. The remedy is a registry version for the git dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
+
 const readOptional = (dir: string, file: string): string | null => {
   try {
     return textAt(dir, file)
@@ -307,8 +332,10 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   })
 
   // node.sh names this git copy `debug@git+ssh://git`, so no parent `debug`
-  // reads it. The port drops its edge too (#50). Each expected value is the
-  // answer of node.sh on the same copy.
+  // reads it. The port drops its edge too (#50). Each expected key is the
+  // answer of node.sh on the same copy. Ruling 2 on #50: where the keys of
+  // `debug` must be version-qualified, the port refuses instead, because no
+  // qualified key matches the git copy.
   /**
    * Copies of `debug` beside the git copy, each with its version of `ms`. A
    * copy with the version '' has the snapshot key `debug`, with no version.
@@ -332,14 +359,6 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   it.each([
     ['one registry copy', [['4.3.4', '2.1.3']], { 'debug>ms': '^2.1.3' }],
     [
-      'two registry copies',
-      [
-        ['4.3.4', '2.1.2'],
-        ['2.6.9', '2.0.0'],
-      ],
-      { 'debug@2.6.9>ms': '^2.1.3', 'debug@4.3.4>ms': '^2.1.3' },
-    ],
-    [
       'two registry copies and a copy with no version',
       [
         ['4.3.4', '2.1.2'],
@@ -357,6 +376,43 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(pnpmOverrides(manifest)).toEqual(keys)
   })
 
+  // #50 asks for the git parent through `why` and then `apply_constraint`.
+  // `why` names the parent; the call scopes `ms` to the parents it names.
+  const parentsByWhy = async (fixture: string): Promise<readonly string[]> => {
+    const answered = await node.why(treeAt(join(FIXTURES_ROOT, fixture)), 'ms', { raw: '' })
+    if (answered.outcome !== 'ok') throw new Error(`why failed: ${answered.error}`)
+    return answered.value.parents
+  }
+
+  it('scopes through the parent that why names, with one registry copy, by the plain key', async () => {
+    const parents = await parentsByWhy('pnpm-git-parent')
+    expect(parents).toEqual(['debug'])
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', ...parents])
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+  })
+
+  it.fails('refuses the parent that why names, beside two registry copies, and writes nothing (#50)', async () => {
+    const parents = await parentsByWhy('pnpm-git-parent-copies')
+    expect(parents).toEqual(['debug'])
+    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])).toBe(
+      gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
+
+  it.fails('names each refused parent, and only the parents with a git copy (#50)', () => {
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'finalhandler', 'debug']),
+    ).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
+
+  it.fails('refuses a git copy of the parent beside two registry copies (#50)', () => {
+    const error = pnpmRefusalOf(
+      'pnpm-git-parent',
+      ['ms', '^2.1.3', 'debug'],
+      registryCopies(['4.3.4', '2.1.2'], ['2.6.9', '2.0.0']),
+    )
+    expect(error).toBe(gitParentRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
   // The multiplicity gate reads the snapshot edges, not `packages:`.
   it('still writes qualified keys when the packages section is unreadable', () => {
     const dropPackages: Setup = (dir) => {
