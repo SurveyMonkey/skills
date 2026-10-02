@@ -122,6 +122,13 @@ const probeOf = (result: RunResult): Probe => {
     const status = result.status === null ? `on ${result.signal}` : result.status
     return { stderr: `git exited ${status}` }
   }
+  // A failed pipe can cut the output short, also on exit 0 (`lib/process.ts`).
+  const broke = result.streamErrors[0]
+  if (broke !== undefined) {
+    return {
+      stderr: `the output of git ls-remote could not be read: ${broke.code}, ${broke.message}`,
+    }
+  }
   const lines = result.stdout.split('\n').filter((line) => line !== '')
   if (lines.length === 0) return { style: 'slash' }
   if (lines.every((line) => HIT.test(line))) return { style: 'flat' }

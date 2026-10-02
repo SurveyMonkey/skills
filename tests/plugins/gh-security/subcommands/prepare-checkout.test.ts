@@ -478,7 +478,7 @@ describe('the branch namespace probe', SLOW, () => {
     })
   })
 
-  it.fails('excludes the checkout after two attempts whose output could not be read', async () => {
+  it('excludes the checkout after two attempts whose output could not be read', async () => {
     const w = world()
     const work = checkout(w, 'app')
     // A failed pipe can cut the output short on exit 0 (`lib/process.ts`).
