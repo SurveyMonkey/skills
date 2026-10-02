@@ -238,7 +238,7 @@ describe('failedOnThrow', () => {
   })
 
   // A throw with no text must not make the guard throw (#302).
-  it.fails('writes the tag of a thrown value that has no prototype', async () => {
+  it('writes the tag of a thrown value that has no prototype', async () => {
     const err = recorder()
     await expect(
       failedOnThrow(Promise.reject(Object.create(null)), 'gh-security', err),
@@ -246,7 +246,7 @@ describe('failedOnThrow', () => {
     expect(err.text).toEqual(['gh-security: [object Object]\n'])
   })
 
-  it.fails('writes a fixed text when even the tag cannot be read', async () => {
+  it('writes a fixed text when even the tag cannot be read', async () => {
     const { proxy, revoke } = Proxy.revocable({}, {})
     revoke()
     const err = recorder()

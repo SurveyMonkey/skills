@@ -138,16 +138,35 @@ export const renderText = (envelope: Envelope<string>): Rendered =>
     : renderFailure(envelope)
 
 /**
+ * The text of a thrown value. Each read of the value can throw: the message of
+ * an `Error` can be a getter, `String` fails for an object with no prototype,
+ * and a revoked proxy fails every read. So the text falls back in two steps,
+ * to the tag of the value (`[object Object]`), and then to a fixed text. This
+ * function never throws (#302).
+ */
+export const thrownText = (error: unknown): string => {
+  try {
+    return String(error instanceof Error ? error.message : error)
+  } catch {
+    try {
+      return Object.prototype.toString.call(error)
+    } catch {
+      return 'a thrown value with no text'
+    }
+  }
+}
+
+/**
  * The status for a command that threw, in place of node's own crash.
  *
  * A command answers with an envelope for every outcome it decides. A throw
  * that reaches the entry point is a defect. Without a guard, node writes
  * a stack trace to stderr and exits with a status the contract never chose.
- * The shipped CLI guards with `settle` in `src/cli/run.ts`, which gives the
- * same text on stdout as the envelope. This guard writes one line,
- * `<label>: <message>`, and answers
- * {@link EXIT_CODES}`.failed`. Any status the command settled on, or `null`,
- * passes through unchanged.
+ * The shipped CLI does not call this function. `settle` in `src/cli/run.ts`
+ * renders a throw as the `failed` envelope on stdout, and as the same line on
+ * stderr. This function writes only the stderr line, `<label>: <message>`,
+ * and answers {@link EXIT_CODES}`.failed`. Any status the command settled on,
+ * or `null`, passes through unchanged.
  *
  * The writer is structural, so this file still imports nothing.
  */
@@ -157,7 +176,7 @@ export const failedOnThrow = async <T>(
   err: { write(text: string): unknown },
 ): Promise<T | typeof EXIT_CODES.failed> =>
   pending.catch((error: unknown) => {
-    err.write(`${label}: ${error instanceof Error ? error.message : String(error)}\n`)
+    err.write(`${label}: ${thrownText(error)}\n`)
     return EXIT_CODES.failed
   })
 

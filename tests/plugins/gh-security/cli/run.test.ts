@@ -222,7 +222,7 @@ describe('runCli', () => {
 
   // The text of a thrown value can itself throw. The guard must not: it gives
   // the tag of the value, and a fixed text when even the tag cannot be read.
-  it.fails('renders an Error whose message getter throws as the failed envelope', async () => {
+  it('renders an Error whose message getter throws as the failed envelope', async () => {
     const thrown = Object.defineProperty(new Error('x'), 'message', {
       get() {
         throw new Error('getter')
@@ -239,7 +239,7 @@ describe('runCli', () => {
     })
   })
 
-  it.fails('renders a thrown value with a message that is a symbol as its text', async () => {
+  it('renders a thrown value with a message that is a symbol as its text', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
       throw Object.assign(new Error('x'), { message: Symbol('tag') })
     })
@@ -248,7 +248,7 @@ describe('runCli', () => {
     expect(written().stdout).toBe('{"error":"version: Symbol(tag)"}\n')
   })
 
-  it.fails('renders a revoked proxy as the failed envelope, with a fixed text', async () => {
+  it('renders a revoked proxy as the failed envelope, with a fixed text', async () => {
     const { proxy, revoke } = Proxy.revocable({}, {})
     revoke()
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
