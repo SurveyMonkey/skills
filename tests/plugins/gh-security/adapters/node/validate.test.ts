@@ -695,8 +695,10 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
   // 11 output: with the override `{"browserify-rsa": {"bn.js": "5.0.0"}}`,
   // npm writes `node_modules/browserify-rsa/node_modules/bn.js` at 5.0.0,
   // under the range `^5.2.1`. Here public-encrypt declares a range above its
-  // copy at 4.12.5. `>4.12.5` does not admit its own bound.
-  it.each(['^4.13.0', '>4.12.5'])(
+  // copy at 4.12.5. `>4.12.5` does not admit its own bound. A `<` comparator
+  // is no floor, so the floor of `<4.12.0 || >=4.13.0` is 4.13.0. That fails
+  // closed: npm admits no 4.12.x version there.
+  it.each(['^4.13.0', '>4.12.5', '<4.12.0 || >=4.13.0'])(
     'flags a new copy below the floor %j on its own major',
     (range) => {
       const tree = editedSpecimen((packages) =>
