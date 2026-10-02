@@ -123,6 +123,8 @@ describe('the parent that a violation path names', () => {
     ['node_modules/a/node_modules/koa/node_modules/lodash', 'koa'],
     ['node_modules/koa/node_modules/@scope/pkg', 'koa'],
     ['packages/app/node_modules/lodash', 'app'],
+    // A scoped parent at the start of a path that is not an npm install path.
+    ['@a/b/node_modules/lodash', '@a/b'],
   ])('reads %s as %s', (path, parent) => {
     expect(parentOf(path)).toBe(parent)
   })
@@ -205,14 +207,22 @@ describe('step 1: the parents of the violating copies', () => {
   })
 
   it.each([
-    ['pnpm', ['lodash@4.17.20', '@babel/traverse@7.23.0', 'lodash@4.17.20']],
-    ['Yarn Berry', ['lodash@npm:4.17.20', '@babel/traverse@npm:7.23.0', 'lodash@npm:4.17.20']],
-  ])('says that step 1 cannot run on %s paths, which name the copy', (_pm, paths) => {
+    [
+      'pnpm',
+      ['lodash@4.17.20', '@babel/traverse@7.23.0', 'lodash@4.17.20'],
+      ['@babel/traverse@7.23.0', 'lodash@4.17.20'],
+    ],
+    [
+      'Yarn Berry',
+      ['lodash@npm:4.17.20', '@babel/traverse@npm:7.23.0', 'lodash@npm:4.17.20'],
+      ['@babel/traverse@npm:7.23.0', 'lodash@npm:4.17.20'],
+    ],
+  ])('says that step 1 cannot run on %s paths, which name the copy', (_pm, paths, unique) => {
     expect(parentDerivation(paths, [], [], 'lodash')).toEqual({
       parents: [],
       paths_naming_a_parent: 0,
       paths_naming_only_the_copy: 3,
-      opaque_paths: [...new Set(paths)].sort(),
+      opaque_paths: unique,
       possible: false,
       reason: REASON,
     })
@@ -227,6 +237,15 @@ describe('step 1: the parents of the violating copies', () => {
         'lodash',
       ),
     ).toMatchObject({ paths_naming_a_parent: 1, paths_naming_only_the_copy: 1, possible: true })
+  })
+
+  // jq `test("(^|/)node_modules/")`: the segment must start the path or follow a slash.
+  it('reads a path where node_modules is part of a longer name as one that names the copy', () => {
+    expect(parentDerivation(['foonode_modules/lodash'], [], [], 'lodash')).toMatchObject({
+      paths_naming_a_parent: 0,
+      paths_naming_only_the_copy: 1,
+      possible: false,
+    })
   })
 })
 
@@ -338,6 +357,9 @@ describe('the widest shape written', () => {
     ['a pnpm key outside overrides', [at(['pnpm', 'other', 'lodash'])], 'scoped'],
     ['a pnpm key of another depth', [at(['pnpm', 'overrides'])], 'scoped'],
     ['an entry with no path', [{ value: 'x' }], 'scoped'],
+    // jq `.parent == null` is false for the empty text and for false.
+    ['a top-level key whose parent is empty text', [at(['overrides', 'lodash'], '')], 'scoped'],
+    ['a top-level key whose parent is false', [at(['overrides', 'lodash'], false)], 'scoped'],
     ['nothing', [], 'none'],
     [
       'a bare key beside a nested key',
@@ -362,6 +384,8 @@ describe('the widest shape written', () => {
     ['an entry that is not an object', ['x']],
     ['a path that is text', [at('overrides.lodash')]],
     ['a path that is an object', [at({ 0: 'overrides' })]],
+    // jq `.path[0]` stops on false.
+    ['a path that is false', [at(false)]],
   ])('cannot classify %s', (_name, written) => {
     expect(widestShape(written)).toBeNull()
   })
@@ -422,6 +446,21 @@ describe('the versions of the line', () => {
     ).toEqual(['4', '4.17.10', '4.17.9'])
   })
 
+  // The line must start the version: 14.0.0 and 3.4.1 are not on the line 4.
+  it('selects only a version that starts with the line', () => {
+    expect(
+      lineVersions(
+        answer([
+          { version: '14.0.0' },
+          { version: '3.4.1' },
+          { version: '4.0.0' },
+          { version: '24.1.0' },
+        ]),
+        '4',
+      ),
+    ).toEqual(['4.0.0'])
+  })
+
   it('gives the empty list for a line with no copy', () => {
     expect(lineVersions(answer([{ version: '3.10.1' }]), '4')).toEqual([])
   })
@@ -446,6 +485,8 @@ describe('the empty diff (#146)', () => {
     [true, ['4.17.20'], ['4.17.21'], 'lockfile_refresh'],
     [true, ['4.17.15', '4.17.20'], ['4.17.21'], 'lockfile_refresh'],
     [true, ['4.17.21'], ['4.17.20', '4.17.21'], 'lockfile_refresh'],
+    // The bash compares the two lists as whole texts, so a longer one differs.
+    [true, ['4.17.21'], ['4.17.21', '4.17.22'], 'lockfile_refresh'],
     [true, ['4.17.20', '4.17.21'], ['4.17.20', '4.17.21'], 'no_op'],
     [true, [], ['4.17.21'], 'disagree'],
     [false, ['4.17.21'], [], 'disagree'],

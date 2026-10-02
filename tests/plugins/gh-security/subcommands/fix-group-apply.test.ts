@@ -417,6 +417,19 @@ describe('the command', () => {
 })
 
 describe('apply (phase 4)', () => {
+  // jq `$validate.requires_major_bump // []`.
+  it('answers an empty requires_major_bump when validate gives none', async () => {
+    const passed = validateAnswer(true)
+    delete passed.requires_major_bump
+    const w = await ready((s) => {
+      s.validate = [passed]
+    })
+    expect(pick(await apply(w), 'requires_major_bump')).toEqual({
+      exit: 0,
+      requires_major_bump: [],
+    })
+  })
+
   it('reaches a scoped-override success on the ordinary path', async () => {
     const answer = await apply(await ready())
     expect(pick(answer, 'status', 'step', 'action', 'override_scope', 'bare_override')).toEqual({
@@ -501,6 +514,21 @@ describe('apply (phase 4)', () => {
     expect(answer.stderr).toContain('"class":"fatal"')
     expect(answer.stderr).toContain('Narrowing the key is not the remedy')
     expect(answer.stderr).toContain(`Entries apply_constraint wrote: ${JSON.stringify(SCOPED)}`)
+  })
+
+  // The check does not read `ok`: a fatal move stops a validate that passed.
+  it('stops on a fatal cross-line move when validate says ok', async () => {
+    const fatal = { major: 1, before: ['1.1.18'], after: [], status: 'vanished', class: 'fatal' }
+    const w = await ready((s) => {
+      s.validate = [validateAnswer(true, [], [fatal])]
+    })
+    const answer = await apply(w)
+    expect(pick(answer, 'status', 'phase')).toEqual({
+      exit: 3,
+      status: 'failure',
+      phase: 'validate',
+    })
+    expect(answer.stderr).toContain('"class":"fatal"')
   })
 
   // That class is the verdict of the adapter, and the run goes on (#105).
@@ -1126,6 +1154,24 @@ describe('the remediation ladder', () => {
     expect(answer.status).toBe(3)
   })
 
+  // The check comes at each failed validate, not only at the first.
+  it('fails on line_present false after step 1', async () => {
+    const w = await ready((s) => {
+      s.validate = [
+        validateAnswer(false, at('node_modules/koa/node_modules/lodash')),
+        { ...validateAnswer(false), line_present: false, checked: 0 },
+      ]
+    })
+    const answer = await apply(w)
+    expect(pick(answer, 'status', 'phase')).toEqual({
+      exit: 3,
+      status: 'failure',
+      phase: 'validate',
+    })
+    expect(answer.stderr).toContain('line_present is false')
+    expect(callsOf(w, 'apply')).toHaveLength(2)
+  })
+
   it('reads a line_present of the text false the same way, and quotes an absent requires_major_bump as null', async () => {
     const answer = validateAnswer(false)
     answer.line_present = 'false'
@@ -1237,6 +1283,23 @@ describe('the remediation ladder', () => {
     })
   })
 
+  // jq `.declared.parents_other_lines // []` reads false as no list.
+  it('reads a parents_other_lines of false as no other line', async () => {
+    const w = await ready((s) => {
+      s.validate = [
+        validateAnswer(false, at('node_modules/koa/node_modules/lodash')),
+        validateAnswer(true),
+      ]
+    })
+    editState(w, (state) => {
+      ;(state.declared as Json).parents_other_lines = false
+    })
+    expect(pick(await apply(w), 'applied_parents')).toEqual({
+      exit: 0,
+      applied_parents: ['express', 'koa'],
+    })
+  })
+
   it.each([
     ['a declared answer that is not an object', (state: Json) => (state.declared = 'x')],
     [
@@ -1268,8 +1331,20 @@ describe('the remediation ladder', () => {
     expect({
       action: answer.json.action,
       applied_parents: answer.json.applied_parents,
-      step1: (answer.json.parent_derivation as Json).possible,
-    }).toEqual({ action: 'bare-override', applied_parents: ['express', 'koa'], step1: true })
+      step1: answer.json.parent_derivation,
+    }).toEqual({
+      action: 'bare-override',
+      applied_parents: ['express', 'koa'],
+      // The derivation of step 1, not of the validate after it.
+      step1: {
+        parents: ['koa'],
+        paths_naming_a_parent: 1,
+        paths_naming_only_the_copy: 0,
+        opaque_paths: [],
+        possible: true,
+        reason: null,
+      },
+    })
     expect(callsOf(w, 'apply')).toEqual([
       { pkg: 'lodash', range: '>=4.17.21 <5', parents: ['express'], tightenBare: false },
       { pkg: 'lodash', range: '>=4.17.21 <5', parents: ['express', 'koa'], tightenBare: false },
