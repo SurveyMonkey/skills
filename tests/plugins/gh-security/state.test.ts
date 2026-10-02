@@ -301,6 +301,10 @@ describe('loadDriverState', () => {
     )
   })
 
+  it('reads a major_line of more than one digit', () => {
+    expect(unwrap(loadDriverState(work({ ...SETUP, major_line: '10' }))).majorLine).toBe('10')
+  })
+
   // setup writes digits only. A major line of other text goes into a regex
   // and a number, so a load refuses it too.
   it.each(['0x10', '1e1', ' 4', '4.x'])('refuses a major_line of %j', (value) => {

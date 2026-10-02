@@ -648,6 +648,29 @@ describe('the state that a later phase reads', () => {
     },
   )
 
+  // A later phase refuses these through the command too, before any child.
+  it.each([
+    ['major_line', '4|3'],
+    ['env_prefix', 7],
+  ])('refuses a %s of %j before any git call or verb', async (key, value) => {
+    const w = await afterSetup()
+    editState(w, (state) => {
+      state[key] = value
+    })
+    const answer = await baseline(w)
+    expect(answer.status).toBe(1)
+    expect(answer.stderr).toContain(`no usable value for '${key}'`)
+    expect(existsSync(join(w.pmDir, 'install.n'))).toBe(false)
+  })
+
+  // setup writes a major_line that is a JSON number as text, so a later
+  // phase reads it.
+  it('reads the major_line that setup wrote from a JSON number', async () => {
+    const w = await afterSetup(undefined, { ...GROUP, major_line: 4 })
+    expect(stateOf(w).major_line).toBe('4')
+    expect((await classify(w)).status).toBe(0)
+  })
+
   it('refuses a state whose ecosystem has no adapter', async () => {
     const w = await afterSetup()
     editState(w, (state) => {
