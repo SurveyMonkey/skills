@@ -574,6 +574,59 @@ describe('the line statuses', () => {
   })
 })
 
+/** A discovery group with one alert, and the sibling lines of its package. */
+const alerted = (pkg: string, line: string, range: string, siblings: readonly unknown[] = []) =>
+  group(pkg, line, {
+    alerts: [{ vulnerable_range: range, fixed_in: `${line}.0.0` }],
+    sibling_alerts: siblings,
+  })
+
+/** The status of each group, with the real registry on a lockfile specimen. */
+const realStatuses = async (fixture: string, groups: readonly Group[]) => {
+  const result = await classifyLines(
+    context(['--repo-root', join(FIXTURES_ROOT, fixture)], envelope(groups)),
+    run,
+    selectAdapter,
+    '/',
+  )
+  const out = answerIn(result)
+  return {
+    actionable: out.actionable.map(
+      (entry) => `${entry.package}@${entry.major_line}:${entry.line_status}`,
+    ),
+    skipped: out.skipped.map((entry) => `${entry.package}@${entry.major_line}:${entry.reason}`),
+    errors: out.classify_errors,
+  }
+}
+
+// #168. The four field shapes of the issue, on a real `npm install
+// --package-lock-only` lockfile (npm 11.19.0): each package resolves one copy,
+// below the line of its group, and the alert range of the group covers it.
+// The port already moves each group into skipped before dispatch.
+describe('the own-line shapes of #168', () => {
+  it('moves each group whose only copy is below its line into skipped', async () => {
+    expect(
+      await realStatuses('npm-major-bump-sole', [
+        alerted('deepmerge-ts', '8', '< 8.0.0'),
+        alerted('nodemailer', '8', '< 8.0.0', [{ major: 9, vulnerable_ranges: ['< 9.0.1'] }]),
+        alerted('nodemailer', '9', '< 9.0.1', [{ major: 8, vulnerable_ranges: ['< 8.0.0'] }]),
+        alerted('marked', '4', '< 4.0.10'),
+        alerted('got', '11', '< 11.8.5'),
+      ]),
+    ).toEqual({
+      actionable: [],
+      skipped: [
+        'deepmerge-ts@8:requires major version bump',
+        'nodemailer@8:requires major version bump',
+        'nodemailer@9:requires major version bump',
+        'marked@4:requires major version bump',
+        'got@11:requires major version bump',
+      ],
+      errors: [],
+    })
+  })
+})
+
 describe('the collision check (#132)', () => {
   const check = async (pkg: string, line: string, spec: StandInSpec = {}) => {
     const out = await answer(envelope([group(pkg, line)]), ['--repo-root', SOME_ROOT], spec)

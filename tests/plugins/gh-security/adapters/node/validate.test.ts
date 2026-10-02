@@ -416,6 +416,72 @@ describe('the sibling alerts', () => {
   })
 })
 
+// #169: the field shape, a within-major dedup of js-yaml 3.x during a fix of
+// the 4.x line, with two majors in one lockfile. Each specimen is real output
+// of `npm install --package-lock-only` (npm 11.19.0) or `pnpm install
+// --lockfile-only` (pnpm 10.34.5). Before the fix, an override held the copy
+// of gray-matter at 3.15.0. The fix then let it dedup onto 3.15.2, which the
+// baseline already held. Each baseline is the answer of `node.sh
+// resolved_versions js-yaml` on the lockfile from before the fix. The port has
+// no defect here: node.sh and the port answer `benign_dedup` for this shape.
+// A sibling alert on the moved major keeps the move `fatal`, as #105 decided.
+const JS_YAML_BASELINES = {
+  'npm-dedup-within-major':
+    '{"pm":"npm","package":"js-yaml","present":true,"count":3,"versions":[{"version":"3.15.0","path":"node_modules/gray-matter/node_modules/js-yaml"},{"version":"3.15.2","path":"node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml"},{"version":"4.1.0","path":"node_modules/js-yaml"}],"lockfile_entries":24}',
+  'pnpm-dedup-within-major':
+    '{"pm":"pnpm","package":"js-yaml","present":true,"count":3,"versions":[{"version":"3.15.0","path":"js-yaml@3.15.0"},{"version":"3.15.2","path":"js-yaml@3.15.2"},{"version":"4.1.0","path":"js-yaml@4.1.0"}],"lockfile_entries":23}',
+} as const
+
+const MOVED_3X = {
+  major: 3,
+  before: ['3.15.0', '3.15.2'],
+  after: ['3.15.2'],
+  status: 'moved',
+}
+
+describe('a within-major dedup of another line (#169)', () => {
+  const dedupOf = (name: keyof typeof JS_YAML_BASELINES, siblingAlerts: string) => {
+    const value = answer(name, 'js-yaml', '>=4.1.1 <5', {
+      line: '4',
+      vulnerable: ['< 4.1.1'],
+      baseline: JS_YAML_BASELINES[name],
+      siblingAlerts,
+    })
+    return { ok: value.ok, moves: value.other_line_moves }
+  }
+
+  it.each([
+    ['npm-dedup-within-major', '[]'],
+    ['pnpm-dedup-within-major', '[]'],
+    ['npm-dedup-within-major', '[{"major":null,"vulnerable_ranges":["< 3.14.2"]}]'],
+    ['pnpm-dedup-within-major', '[{"major":5,"vulnerable_ranges":[">= 5.0.0, < 5.0.1"]}]'],
+  ] as const)('classifies the dedup on %s with siblings %s as benign', (name, siblings) => {
+    expect(dedupOf(name, siblings)).toEqual({
+      ok: true,
+      moves: [{ ...MOVED_3X, class: 'benign_dedup' }],
+    })
+  })
+
+  it.each([
+    [
+      'a sibling alert on major 3 whose range misses',
+      '[{"major":3,"vulnerable_ranges":["< 3.14.2"]}]',
+    ],
+    [
+      'a sibling range that matches the version that left',
+      '[{"major":null,"vulnerable_ranges":["< 3.15.1"]}]',
+    ],
+  ])('keeps the dedup fatal under npm and pnpm with %s', (_name, siblings) => {
+    expect([
+      dedupOf('npm-dedup-within-major', siblings),
+      dedupOf('pnpm-dedup-within-major', siblings),
+    ]).toEqual([
+      { ok: false, moves: [{ ...MOVED_3X, class: 'fatal' }] },
+      { ok: false, moves: [{ ...MOVED_3X, class: 'fatal' }] },
+    ])
+  })
+})
+
 const CROSS_BASELINE = JSON.stringify({
   package: 'brace-expansion',
   versions: [{ version: '1.1.11' }, { version: '2.0.2' }, { version: '5.0.5' }],

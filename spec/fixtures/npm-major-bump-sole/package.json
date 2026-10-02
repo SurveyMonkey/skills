@@ -1,0 +1,11 @@
+{
+  "name": "demo-npm-major-bump-sole-copy",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "deepmerge-ts": "7.1.6",
+    "got": "9.6.0",
+    "marked": "1.2.9",
+    "nodemailer": "7.0.13"
+  }
+}
