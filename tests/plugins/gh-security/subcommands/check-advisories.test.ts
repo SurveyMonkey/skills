@@ -570,6 +570,10 @@ describe('the four verdicts', () => {
     ['null', null, 'null'],
     ['the word true', 'true', '"true"'],
     ['the number 1', 1, '1'],
+    ['the number 0', 0, '0'],
+    ['an empty string', '', '""'],
+    ['an object', { yes: true }, '{"yes":true}'],
+    ['an array', [true], '[true]'],
   ])(
     'records a parseable of %s in adapter_errors, and never reads the range as safe',
     async (_name, parseable, shown) => {

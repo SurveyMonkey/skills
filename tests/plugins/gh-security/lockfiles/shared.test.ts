@@ -1,6 +1,7 @@
 // The shared helpers of the lockfile readers, in the order of jq (#303).
-// `uniqueCopies` is `unique_by(.version + .path)` of node.sh, and the order of
-// `uniqueParents` and `groupResolutions` is the order of jq's `sort`.
+// `uniqueCopies` is `unique_by(.version + .path)` of node.sh. The parents and
+// the resolutions are `sort -u` there, so their order is the order of jq only
+// in the C locale, which is also the code point order.
 //
 // jq sorts text by code point. JavaScript's `<` sorts by UTF-16 unit, so a
 // character above U+FFFF (a surrogate pair) lands before U+E000 to U+FFFF.
@@ -24,6 +25,17 @@ describe('uniqueCopies', () => {
       { version: '1.0.0', path: '\u{1F600}' },
     ]
     expect(uniqueCopies(copies).map(({ path }) => path)).toEqual(['\uffff', '\u{1F600}'])
+  })
+
+  it('sorts by the version first, and then by the path', () => {
+    const copies = [
+      { version: '2.0.0', path: 'a' },
+      { version: '1.0.0', path: 'b' },
+    ]
+    expect(uniqueCopies(copies)).toEqual([
+      { version: '1.0.0', path: 'b' },
+      { version: '2.0.0', path: 'a' },
+    ])
   })
 
   it('keeps one copy for each key, in text order', () => {
