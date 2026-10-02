@@ -1,7 +1,7 @@
 // `gh-security prepare-checkout [--env-prefix <prefix>] <root>`: resolve one
 // checkout, and discover and classify its alert groups. This is the contract
 // of #193 and #227, built here and not ported. It does the per-checkout part
-// of phases 1 and 2 of the `resolve-alerts` skill. The contract is on #227.
+// of phases 1 and 2 of the `resolve-alerts` skill.
 //
 // One checkout for each call (#193, Constraints). `classify-lines` fetches,
 // and the pull request search uses an API with a rate limit. One call for the
@@ -15,20 +15,22 @@
 //      refs/heads/fix`. A branch named `fix` on the remote stops each `fix/*`
 //      push (#123). A hit gives the `flat` branch style, and no output gives
 //      `slash`. The full refname matters: git matches a pattern against the
-//      tail of a ref, from its start or from a `/`. So `fix` matches
-//      `refs/heads/topic/fix`, and `refs/heads/fix` does not. A failed
-//      attempt gets one retry. An attempt fails when git exits non-zero, and
-//      when its output pipe failed. It also fails when git exits 0 and a
-//      line of its output is not a `refs/heads/fix` line. The empty output
-//      of a failed probe is never read as `slash`. The inverse collision, a remote
-//      branch `fix/dependabot-<package>-<line>x/<more>`, is not probed. A
-//      push that it stops fails that one group.
+//      tail of a ref, from its start or from a `/`. So the pattern `fix`
+//      matches `refs/heads/topic/fix`. The pattern `refs/heads/fix` does
+//      not, but it matches `refs/heads/topic/refs/heads/fix`. That line is
+//      not a hit, so the attempt fails. A failed attempt gets one retry. An
+//      attempt fails when git exits non-zero, and when a pipe of git failed.
+//      It also fails when git exits 0 and a line of its output is not a
+//      `refs/heads/fix` line. The empty output of a failed probe is never
+//      read as `slash`. The inverse collision, a remote branch
+//      `fix/dependabot-<package>-<line>x/<more>`, is not probed. A push that
+//      it stops fails that one group.
 //   3. `discover-alerts <nwo>`, with `--branch-style flat` after a hit. The
 //      style belongs to this checkout, and not to a batch.
 //   4. `classify-lines --repo-root <root> --base-ref origin/<default_branch>`
 //      on the output of step 3. The base ref is not optional: it reads the
 //      tree that the fix agents branch from, and not the working tree of the
-//      user (#158). Routing is the first step of `classify-lines`.
+//      user (#158). The route is the first step of `classify-lines`.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (#193, `env-prefix.md`). It goes to each step, so each child of each step
@@ -52,12 +54,14 @@
 //                                        GitHub read of `detect-scope`
 //                                        failed. `stderr` is empty, or the
 //                                        error of `detect-scope`.
-//   branch namespace probe failed twice  `stderr` is the stderr of the
-//                                        second attempt, as git wrote it.
-//                                        When git wrote none, it is the
-//                                        start failure, the exit status or
-//                                        signal, the pipe failure, or the
-//                                        output that is not a hit.
+//   branch namespace probe failed twice  `stderr` is the text of the
+//                                        second attempt. On a non-zero
+//                                        exit, it is the stderr as git
+//                                        wrote it. When git wrote none, it
+//                                        is the start failure, or the exit
+//                                        status or signal. On exit 0, it is
+//                                        the pipe failure, or the output
+//                                        that is not a hit.
 //   discover-alerts failed, or           a stage of the pipeline failed.
 //   classify-lines failed                `stderr` is the error of that stage.
 // No reason is a guess at a cause, such as "origin unreachable". A failed
@@ -66,13 +70,20 @@
 //
 // The command fails, with exit 1, in three cases: a bad command line, a
 // `<root>` that is not a directory, and a `<root>` in no git repository.
-// `discover-repos` gives none of these, so they are not exclusions.
+// `discover-repos` gives none of these, so they are not exclusions. A prefix
+// that cannot start also stops the git calls of step 1. `detect-scope` then
+// finds no repository, so that prefix gives the third failure.
 //
-// Differences from the contract on #227, each an addition:
-//   - `classify_errors` is in the answer of a kept checkout. Without it, a
-//     failed adapter read has no record.
-//   - `checkout` is in the answer of an excluded checkout, because phase 2
-//     reports each excluded checkout by name.
+// Differences from the contract on #227:
+//   - Addition: `classify_errors` is in the answer of a kept checkout.
+//     Without it, a failed adapter read has no record.
+//   - Addition: `checkout` is in the answer of an excluded checkout, because
+//     phase 2 reports each excluded checkout by name.
+//   - A failed pipe of git also fails a probe attempt, on exit 0 too. The
+//     contract names only a non-zero exit and output that is not a hit.
+//   - On exit 0, the `stderr` of a probe exclusion is the text above, and
+//     not the stderr of git. git can write a warning on success, and the
+//     cause is then the output.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -134,12 +145,11 @@ const probeOf = (result: RunResult): Probe => {
     const status = result.status === null ? `on ${result.signal}` : result.status
     return { stderr: `git exited ${status}` }
   }
-  // A failed pipe can cut the output short, also on exit 0 (`lib/process.ts`).
+  // A failed pipe can cut the output short, also on exit 0. The list holds
+  // the errors of all three pipes (`lib/process.ts`).
   const broke = result.streamErrors[0]
   if (broke !== undefined) {
-    return {
-      stderr: `the output of git ls-remote could not be read: ${broke.code}, ${broke.message}`,
-    }
+    return { stderr: `a pipe of git ls-remote failed: ${broke.code}, ${broke.message}` }
   }
   const lines = result.stdout.split('\n').filter((line) => line !== '')
   if (lines.length === 0) return { style: 'slash' }

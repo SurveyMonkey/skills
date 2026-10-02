@@ -26,6 +26,7 @@
 // no group loses its repository in the merge.
 //
 // The command fails, with exit 1, in these cases:
+//   - a bad command line, such as an option,
 //   - there is no file,
 //   - this command cannot read a file,
 //   - a file is not JSON,

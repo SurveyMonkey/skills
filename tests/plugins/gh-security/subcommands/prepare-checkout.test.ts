@@ -13,16 +13,17 @@
 // for ssh (`GIT_SSH_COMMAND`) serves that URL from the bare origin on disk.
 // Git itself still runs the probe, the fetch and the worktree for real.
 //
-// A stand-in runner is used in two cases only. One is an example about the
-// argv that gets to a child (the `--env-prefix` wrap). The other is a child
-// that fails on demand (the probe retry, a failed fetch). The stand-in runs
-// the real git for each other call.
+// Three kinds of example use a stand-in runner. One checks the argv that
+// gets to a child (the `--env-prefix` wrap), and its runner also answers each
+// `gh` call. One needs a child that fails on demand (the probe retry, a
+// failed fetch). One needs a probe answer that the fixture git cannot give
+// (a sha-256 hit). Each stand-in runs the real git for each other call.
 //
 // I wrote the expected values by hand from the contract on #227. The
 // repository names are fictitious, and the package names are public.
 //
-// Each example that retires a prose pin (#197, ruling 7 of round 5) names
-// the pin in a `pin:` comment above it, with the `It` title of the pin.
+// Each example that retires a prose pin (#197, ruling 7 of round 5 on #227)
+// names the pin in a `pin:` comment above it, with the `It` title of the pin.
 import {
   chmodSync,
   mkdirSync,
@@ -489,7 +490,7 @@ describe('the branch namespace probe', SLOW, () => {
         checkout: work,
         excluded: true,
         reason: 'branch namespace probe failed twice',
-        stderr: 'the output of git ls-remote could not be read: EIO, read EIO',
+        stderr: 'a pipe of git ls-remote failed: EIO, read EIO',
       },
     })
   })
