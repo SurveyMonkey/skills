@@ -631,7 +631,7 @@ describe('the own-line shapes of #168', () => {
   // and one copy is above it, so the group was `line_absent`. The alert range
   // covers 9.6.0, and no patch is on major 9. So the only fix moves 9.6.0 to
   // another major, and `validate` then fails on the vanished line 9.
-  it.fails('moves a group whose alert covers a copy below the line, with no patch on its major, into skipped', async () => {
+  it('moves a group whose alert covers a copy below the line, with no patch on its major, into skipped', async () => {
     expect(
       await realStatuses('npm-major-bump-below-above', [
         alerted('got', '11', '< 11.8.5'),
@@ -662,6 +662,99 @@ describe('the own-line shapes of #168', () => {
     expect(
       await realStatuses('npm-major-bump-below-above', [alerted('got', '12', '< 12.1.0')]),
     ).toEqual({ actionable: ['got@12:resolved'], skipped: [], errors: [] })
+  })
+
+  it.each([
+    ['no alerts', group('got', '11')],
+    ['an alert with no range', group('got', '11', { alerts: [{ vulnerable_range: null }] })],
+  ])('keeps a group with %s as line_absent, because nothing covers a copy', async (_n, entry) => {
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toEqual({
+      actionable: ['got@11:line_absent'],
+      skipped: [],
+      errors: [],
+    })
+  })
+
+  it('skips an alert with no range, and reads the next alert', async () => {
+    const entry = group('got', '11', {
+      alerts: [{ vulnerable_range: null }, { vulnerable_range: '< 11.8.5' }],
+      sibling_alerts: [],
+    })
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toMatchObject({
+      skipped: ['got@11:requires major version bump'],
+    })
+  })
+
+  const SKIPPED = '; own-range check skipped'
+
+  const BROKEN: readonly (readonly [string, Group, string])[] = [
+    ['alerts that are not a list', { alerts: 'x' }, `alerts is not a list of objects${SKIPPED}`],
+    [
+      'an alert that is not an object',
+      { alerts: [1] },
+      `alerts is not a list of objects${SKIPPED}`,
+    ],
+    [
+      'a range that is not text',
+      { alerts: [{ vulnerable_range: 5 }] },
+      `an alert vulnerable_range is not text: 5${SKIPPED}`,
+    ],
+    [
+      'an empty range, which range_facts refuses',
+      { alerts: [{ vulnerable_range: '' }] },
+      'range_facts requires a range and a version',
+    ],
+    [
+      'a range that does not parse',
+      { alerts: [{ vulnerable_range: 'latest' }] },
+      `range_facts could not read 'latest' for 9.6.0: {"range":"latest","version":"9.6.0","parseable":false,"satisfied":null,"pinned":null,"floor_major":null,"majors_ahead":null}${SKIPPED}`,
+    ],
+    ...[undefined, null, 'x', [9], [{ major: '9' }], [{ major: 9.5 }], [{ major: -1 }], [null]].map(
+      (siblings) =>
+        [
+          `sibling alerts of ${JSON.stringify(siblings)}`,
+          { alerts: [{ vulnerable_range: '< 11.8.5' }], sibling_alerts: siblings },
+          `sibling_alerts is not a list of {major} objects${SKIPPED}`,
+        ] as const,
+    ),
+  ]
+
+  it.each(BROKEN)('reads %s as a broken read: unknown, and named', async (_name, fields, error) => {
+    expect(await realStatuses('npm-major-bump-below-above', [group('got', '11', fields)])).toEqual({
+      actionable: ['got@11:unknown'],
+      skipped: [],
+      errors: [{ adapter: 'node', package: 'got', error }],
+    })
+  })
+
+  it.each([
+    ['a satisfied that is null', ok({ parseable: true, satisfied: null })],
+    ['an answer that is null', ok(null)],
+  ])('reads a range_facts with %s as a broken read', async (_name, reply) => {
+    const adapter = { ...node, rangeFacts: () => reply } as Adapter<NodeDetection>
+    const route: typeof selectAdapter = (ecosystem, manifest = null) => {
+      const real = selectAdapter(ecosystem, manifest)
+      return real.supported ? { ...real, adapter } : real
+    }
+    const result = await classifyLines(
+      context(
+        ['--repo-root', join(FIXTURES_ROOT, 'npm-major-bump-below-above')],
+        envelope([alerted('got', '11', '< 11.8.5')]),
+      ),
+      run,
+      route,
+      '/',
+    )
+    const out = answerIn(result)
+    expect({
+      status: out.actionable.map((entry) => entry.line_status),
+      errors: out.classify_errors.map((entry) => entry.error),
+    }).toEqual({
+      status: ['unknown'],
+      errors: [
+        `range_facts could not read '< 11.8.5' for 9.6.0: ${JSON.stringify(reply.outcome === 'ok' ? reply.value : null)}${SKIPPED}`,
+      ],
+    })
   })
 })
 
