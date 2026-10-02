@@ -236,4 +236,21 @@ describe('failedOnThrow', () => {
     await expect(failedOnThrow(Promise.reject('bare'), 'gh-security', err)).resolves.toBe(1)
     expect(err.text).toEqual(['gh-security: bare\n'])
   })
+
+  // A throw with no text must not make the guard throw (#302).
+  it.fails('writes the tag of a thrown value that has no prototype', async () => {
+    const err = recorder()
+    await expect(
+      failedOnThrow(Promise.reject(Object.create(null)), 'gh-security', err),
+    ).resolves.toBe(1)
+    expect(err.text).toEqual(['gh-security: [object Object]\n'])
+  })
+
+  it.fails('writes a fixed text when even the tag cannot be read', async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+    const err = recorder()
+    await expect(failedOnThrow(Promise.reject(proxy), 'gh-security', err)).resolves.toBe(1)
+    expect(err.text).toEqual(['gh-security: a thrown value with no text\n'])
+  })
 })
