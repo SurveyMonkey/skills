@@ -674,7 +674,7 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
   })
 
   // Each range has its floor on major 4 at or below 4.12.5, and does not
-  // admit 4.12.5. So the copy is above the range on its own major. Probe:
+  // admit 4.12.5. So the copy is at or above the floor on its own major. Probe:
   // npm 11's semver gives `satisfies('4.12.5', range)` false, and
   // `minVersion(range)` 4.0.1, 4.11.0, 4.0.0 and 4.11.0. A `>` bound below
   // the copy admits it. The bound loses its `~`, `^` or `v` before compare.
