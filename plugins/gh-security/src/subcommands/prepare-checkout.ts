@@ -90,7 +90,7 @@ const FIX_REF = 'refs/heads/fix'
 const HIT = /^[0-9a-f]{40,64}\trefs\/heads\/fix$/
 
 /** The reasons of the four exclusion causes. */
-export const REASONS = {
+const REASONS = {
   noOrigin: 'no usable origin',
   noDefaultBranch: 'no resolvable default branch',
   probeFailed: 'branch namespace probe failed twice',
@@ -117,7 +117,10 @@ const probeOf = (result: RunResult): Probe => {
   if (result.status !== 0) {
     if (result.stderr !== '') return { stderr: result.stderr }
     const start = result.startFailure
-    return { stderr: start === null ? `git exited ${result.status}` : start.message }
+    if (start !== null) return { stderr: start.message }
+    // A signal leaves no status (`lib/process.ts`).
+    const status = result.status === null ? `on ${result.signal}` : result.status
+    return { stderr: `git exited ${status}` }
   }
   const lines = result.stdout.split('\n').filter((line) => line !== '')
   if (lines.length === 0) return { style: 'slash' }

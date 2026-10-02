@@ -401,6 +401,11 @@ describe('the branch namespace probe', SLOW, () => {
       'git exited 2',
     ],
     [
+      'the signal, when a signal stopped git',
+      [answer({ status: null, signal: 'SIGKILL' }), answer({ status: null, signal: 'SIGTERM' })],
+      'git exited on SIGTERM',
+    ],
+    [
       'the start failure, when git did not start',
       [
         answer({ status: 127 }),
