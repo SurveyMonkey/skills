@@ -26,10 +26,10 @@
 //     resolved              a copy has the major `major_line`.
 //     requires_major_bump   the package is present, no copy is on the line,
 //                           and `compare_versions` puts every copy below
-//                           `<line>.0.0`. Also (#168): no copy is on the
-//                           line, and an alert range of the group covers a
-//                           copy below it, and no sibling alert has the
-//                           major of that copy (own-range check, below).
+//                           `<line>.0.0`. Also (#168): the own-range check
+//                           (below) finds a copy below the line that an
+//                           alert range covers, with no sibling alert on
+//                           the major of that copy.
 //     line_absent           present, no copy on the line, at least one copy
 //                           at or above it, and no copy that the own-range
 //                           check finds.
@@ -41,16 +41,22 @@
 //                           contract, `present` is false, `major_line` is
 //                           `none`, or the group has no `package`.
 //
-// **The own-range check** (#168, ruling 3 of round 5) runs only for a group
-// with copies on both sides of its line. It reads `vulnerable_range` of each
-// alert of the group, and asks the adapter's `range_facts` if the range
-// covers each copy below the line. An alert with no range adds nothing. A
-// covered copy needs a patch on its own major. A sibling alert on that major
-// has one, and the group of that line owns the copy. With no such sibling,
-// the only fix moves the copy to another major, and `validate` then fails on
-// the line that vanished. So the group needs a major bump. A broken read
-// (`alerts`, a range, `range_facts` or `sibling_alerts`) makes the group
+// **The own-range check** (ruling 3 on #168) runs only for a group with copies
+// on both sides of its line. It reads `vulnerable_range` of each alert
+// of the group. For each copy below the line, it asks the adapter's
+// `range_facts` if the range covers that copy. An alert with no range adds
+// nothing. A covered copy needs a patch on its own major. A sibling alert on
+// that major has one, and the group of that line owns the copy. With no such
+// sibling, the only fix moves the copy to another major. `validate` then
+// fails on the line that vanished. So the group needs a major bump. A broken
+// read (`alerts`, a range, `range_facts` or `sibling_alerts`) makes the group
 // `unknown`, and `classify_errors[]` names it.
+//
+// The sibling test is wide. A sibling alert can be for another advisory,
+// whose patch does not fix the alert of this group. A sibling alert carries
+// no advisory id, so the check cannot see this. The group then stays
+// `line_absent`. Its fix moves the copy to another major, and `validate`
+// fails on it. So the error is a wasted dispatch, never a pass.
 //
 // `requires_major_bump` groups move into `skipped` with the reason
 // `requires major version bump` (#101), and `cross_line_collision` groups with
