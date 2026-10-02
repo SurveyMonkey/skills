@@ -34,6 +34,9 @@ process and start no child. The command `prepare-checkout` takes `--env-prefix` 
 each step: `detect-scope`, the namespace probe, `discover-alerts` and `classify-lines`. So each
 `git` and `gh` child of each step runs under it. The command `merge-envelopes` starts no child and
 takes no `--env-prefix`.
+The ported command `fix-group setup` takes `--env-prefix` and records it
+in the state. Each phase wraps its `git` calls with it, and the package-manager calls that its
+adapter verbs start.
 
 The failure class this guards against is manager-agnostic: per-directory environment tools load
 through interactive shell hooks that non-interactive tool shells never run, so a bare `gh`, `git`,

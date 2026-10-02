@@ -14,6 +14,13 @@ up to ~17 minutes total) and the remediation ladder needs a seam where judgment 
 agent. The subcommands, the exit-code contract and the option surface are stated once, in the
 script's own header (`common/fix-group.sh:1-76`); restating them here is how the two drift.
 
+The TypeScript port is `gh-security fix-group <phase>`, one phase at a time (#232). The header of
+`src/subcommands/fix-group.ts` states the contract of each phase that is ported, and each
+difference from the script. Each phase has its own module, `fix-group-<phase>.ts`. The phases
+read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
+`setup` writes. Until the port is complete, the agent calls the script for each step. A state
+file that one of the two writes is not for the other.
+
 What that header does not say, and what belongs here:
 
 - **The state file is the only thing that survives between steps**, so anything a later step needs

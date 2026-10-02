@@ -17,12 +17,13 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `lib/env-prefix.ts` | The `env_prefix` seam |
 | `lib/git.ts` | Git calls: `runGit`, `gitOut`, `gitOk`, `gitLines`, and repository queries |
 | `lib/gh.ts` | The typed `gh` client |
-| `src/state.ts` | The fix driver's state file, typed |
+| `src/state.ts` | The fix driver's state file, typed. `loadDriverState` reads the keys that `fix-group setup` writes |
 | `src/jq.ts` | The jq order, `unique`, `tostring`, `tonumber`, `//`, field reads and the major trim rule that `discover-alerts`, `classify-lines`, the lockfile readers and the node verbs (`compareJq`) share |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), preflight, scoring, rendering, the drivers |
+| `src/subcommands/fix-group*.ts` | The fix driver. `fix-group.ts` is the command and its contract. `fix-group-setup.ts`, `fix-group-classify.ts` and `fix-group-baseline.ts` are the phases that are ported. `fix-group-common.ts` has what the phases share |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
 
@@ -57,6 +58,8 @@ in process. It calls their exported handlers, and never starts this CLI as a chi
 may also fail with a report (`failedReport` in `src/cli/command.ts`). The report goes to stdout,
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
 same JSON on stdout when a URL failed.
+A report can also name exit 2 or 3. `fix-group` uses them for its own contract: exit 3
+is a failed phase, and exit 2 is a decision that goes back to the agent.
 A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as
 the `failed` envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on
 stderr and exit 1.
