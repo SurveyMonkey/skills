@@ -13,6 +13,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { orElse, uniqueJq } from '../jq.ts'
+import type { JsonValue } from '../lib/envelope.ts'
 
 /**
  * The fix installs of one run, across each `apply` of the run. One `apply`
@@ -204,7 +205,10 @@ export const budgetSpent = (installs: number): boolean => installs >= FIX_INSTAL
  * run go on. Null or absent is no move, as with no baseline. A value that is
  * neither a list nor null is one fatal move.
  */
-export const movesOf = (moves: unknown, kind: 'fatal' | 'benign_dedup'): unknown[] => {
+export const movesOf = (
+  moves: JsonValue | undefined,
+  kind: 'fatal' | 'benign_dedup',
+): JsonValue[] => {
   if (moves === null || moves === undefined) return []
   if (!Array.isArray(moves)) return kind === 'fatal' ? [moves] : []
   return moves.filter((move) => {

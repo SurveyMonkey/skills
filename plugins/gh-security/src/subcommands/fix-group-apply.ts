@@ -358,6 +358,8 @@ const ladder = async (run: Run): Promise<Stop | null> => {
           'and needs a human-driven session.',
       )
     } else {
+      // A new kind of rung does not compile here until it has its own branch.
+      rung satisfies { readonly kind: 'judgment' }
       return needsJudgment('validate_failed_after_ladder', {
         validate,
         written: run.answer.written as JsonValue,
@@ -657,7 +659,7 @@ const finish = async (run: Run, observationsFirst: JsonValue[]): Promise<Command
     observations_pre_fix: observationsFirst,
     requires_major_bump: orElse(validate.requires_major_bump, []) as JsonValue,
     other_line_moves: fieldOf(validate, 'other_line_moves') as JsonValue,
-    benign_moves: movesOf(validate.other_line_moves, 'benign_dedup') as JsonValue[],
+    benign_moves: movesOf(validate.other_line_moves, 'benign_dedup'),
   })
 }
 
