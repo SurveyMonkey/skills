@@ -236,6 +236,24 @@ describe('the refusals', () => {
     )
   })
 
+  it.fails.each([
+    [
+      'an exclusion that also has groups',
+      { checkout: '/w', excluded: true, reason: 'r', stderr: '', actionable: KEPT.actionable },
+      'actionable is not a field of an excluded checkout',
+    ],
+    [
+      'a kept checkout with another field',
+      { ...KEPT, git_remote: 'x' },
+      'git_remote is not a field of a kept checkout',
+    ],
+  ])('refuses %s, and drops no group', (_name, answer, problem) => {
+    const dir = filesOf({ 'x.json': JSON.stringify(answer) })
+    expect(merge(['x.json'], dir)).toEqual(
+      failed(`x.json is not an answer of prepare-checkout: ${problem}`),
+    )
+  })
+
   it.each([
     ['null', null],
     ['text', '0.5'],

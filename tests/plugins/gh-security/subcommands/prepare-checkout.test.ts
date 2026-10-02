@@ -478,6 +478,35 @@ describe('the branch namespace probe', SLOW, () => {
     })
   })
 
+  it.fails('excludes the checkout after two attempts whose output could not be read', async () => {
+    const w = world()
+    const work = checkout(w, 'app')
+    // A failed pipe can cut the output short on exit 0 (`lib/process.ts`).
+    const broken = answer({ streamErrors: [{ code: 'EIO', message: 'read EIO' }] })
+    expect(await prepare(w, [work], REPLIES, probing(...twice(broken)))).toEqual({
+      outcome: 'ok',
+      value: {
+        checkout: work,
+        excluded: true,
+        reason: 'branch namespace probe failed twice',
+        stderr: 'the output of git ls-remote could not be read: EIO, read EIO',
+      },
+    })
+  })
+
+  it.fails('reads an object name of 41 digits as output that is not a hit', async () => {
+    const w = world()
+    const work = checkout(w, 'app')
+    const line = `${'a'.repeat(41)}\trefs/heads/fix\n`
+    const result = value(
+      await prepare(w, [work], REPLIES, probing(...twice(answer({ stdout: line })))),
+    )
+    expect([result.reason, result.stderr]).toEqual([
+      'branch namespace probe failed twice',
+      `git ls-remote gave output that is not a refs/heads/fix line: ${line}`,
+    ])
+  })
+
   it('excludes a checkout whose origin answers no repository, with the words of git', async () => {
     const w = world()
     const work = checkout(w, 'app', { origin: 'git@github.com:octo/gone.git' })
@@ -658,6 +687,17 @@ describe('the command line', SLOW, () => {
     ['two checkouts', ['/work/app', '/work/api']],
   ])('refuses %s, because one call is one checkout', async (_name, roots) => {
     expect(await prepare(world(), roots, {})).toEqual(failed(USAGE))
+  })
+
+  it.fails('gives the prefix to each step as one word, so no step refuses it', async () => {
+    const w = world()
+    const work = checkout(w, 'app')
+    // A step that read `-x` as an option refused its command line, and that
+    // came back as an exclusion with exit 0.
+    const result = await prepare(w, ['--env-prefix=-x', work])
+    expect(result?.outcome === 'failed' && result.error).toBe(
+      `prepare-checkout: not a git checkout: ${work}`,
+    )
   })
 
   it('refuses a root that is not a directory', async () => {
