@@ -290,8 +290,9 @@ export const checkAdvisories = async (
         )
       }
       if (typeof facts.parseable !== 'boolean') {
-        // A range is readable or it is not (ADR 001). Any other value is a
-        // broken answer, and it goes into `adapter_errors` (issue #302).
+        // A range is readable or it is not: `parseable` is a boolean in
+        // `RangeFactsAnswer`. Any other value is a broken answer, and it goes
+        // into `adapter_errors` (issue #302).
         adapterErrors.push({
           range,
           status: 1,

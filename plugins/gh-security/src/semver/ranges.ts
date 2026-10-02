@@ -25,11 +25,11 @@ export type RangeFacts = {
 
 // `[[:space:]]` as Oniguruma reads it in jq: the Unicode White_Space set, which
 // is more than ASCII (#303). It is spelled out rather than written `\s`,
-// because `\s` in JavaScript also matches U+FEFF, which jq does not. The set
-// came from `jq -nc '[range(0;65536) | select([.] | implode |
-// test("^[[:space:]]$"))]'` on jq 1.8.1. The comma joins it wherever a range
-// is tokenized, because a GitHub advisory separates comparators with one
-// (">= 7.0.0, < 7.29.0").
+// because `\s` in JavaScript also matches U+FEFF, which jq does not, and it
+// lacks U+0085, which jq does match. The set came from
+// `jq -nc '[range(0;65536) | select([.] | implode | test("^[[:space:]]$"))]'`
+// on jq 1.8.1. The comma joins it wherever a range is tokenized, because a
+// GitHub advisory separates comparators with one (">= 7.0.0, < 7.29.0").
 const SPACE =
   ' \\t\\n\\v\\f\\r\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 const OPERATOR_SPACE = new RegExp(`([<>=~^]+)[${SPACE}]+`, 'g')
@@ -135,13 +135,13 @@ export const evalToken = (token: string, version: string): boolean => {
  * (`>= 7.0.0, < 7.29.0`).
  *
  * It stops where jq stops (#303). jq reads each alternative and each
- * comparator, with no early exit. So an operator with no version stops it,
- * also after a match. An alternative with no comparator also stops it, for
- * example `>=0 ||`, and so does a range of white space only. This function
- * throws in those cases. An empty range has no alternative, and the answer
- * is false. The node verbs `validate` and `apply_constraint` use this
- * function, and `rangeFacts` calls it only for a range that `rangeParseable`
- * accepted.
+ * comparator, with no early exit. So a comparator with no version, such as a
+ * bare `>=`, `^`, `=` or `v`, stops it, also after a match. An alternative
+ * with no comparator also stops it, for example `>=0 ||`, and so does a range
+ * of white space only. This function throws in those cases. An empty range
+ * has no alternative, and the answer is false. The node verbs `validate` and
+ * `apply_constraint` use this function, and `rangeFacts` calls it only for a
+ * range that `rangeParseable` accepted.
  */
 export const satisfies = (version: string, range: string): boolean =>
   rangeAlternatives(range)

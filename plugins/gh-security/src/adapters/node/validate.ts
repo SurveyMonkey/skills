@@ -34,7 +34,7 @@ type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
 
 /**
  * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
- * where jq stops (#303): on an operator with no version, also after a match,
+ * where jq stops (#303): on a comparator with no version, also after a match,
  * and on an alternative with no comparator. The placement, parent and
  * lockfile helpers of `apply_constraint` import this name from here.
  */
@@ -60,10 +60,7 @@ const rangeOk = (range: string): boolean => {
 /** `major_of` of node.sh: the first core number, or 0. It throws for an empty version. */
 const majorOf = (version: string): number => coreAt(parseVersion(version).core, 0)
 
-/**
- * Unique, and sorted as text. jq sorts by code point, so the order differs
- * only for a character above U+FFFF.
- */
+/** Unique, and sorted by code point, as jq sorts. */
 const uniqueSorted = (values: readonly string[]): string[] => [...new Set(values)].sort(byText)
 
 // jq reads a byte order mark at the start of its input. `JSON.parse` does not.

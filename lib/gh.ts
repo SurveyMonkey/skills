@@ -22,7 +22,7 @@
 // file's suite drives each failure in-process, with no `gh` on the machine.
 //
 // **One parity exception:** a `gh` that fails with an empty stderr gives the
-// detail `gh exited <status>` when it exits. The bash it replaces gave the empty text
+// detail `gh exited <status>`. The bash it replaces gave the empty text
 // (`discover-alerts.sh:441`). The port keeps the status on purpose (#302).
 //
 // This file ships. It imports nothing outside the plugin, and stays inside
@@ -210,7 +210,7 @@ const filter = (name: string, value: string | number | undefined): string[] =>
  *   5. The signal, or the status, when stderr is empty.
  *
  * Parity exception, #302 (ruling 9). For an empty stderr the answer is
- * `gh exited <status>` when it exits. The bash script keeps the empty text for the same
+ * `gh exited <status>`. The bash script keeps the empty text for the same
  * failure (`discover-alerts.sh:441`, `pr_err`). The port names the status,
  * because a skip with an empty `error` tells a reader nothing.
  */

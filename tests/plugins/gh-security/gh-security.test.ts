@@ -68,9 +68,9 @@ describe("a command's result", () => {
 
 describe('a command that throws', () => {
   // #302 item 1. `classify-lines` reads stdin with `readFileSync`, and a
-  // directory on fd 0 makes that read throw EISDIR. No command throws on any
-  // argument, so the input is the stdin. `run` cannot hand the child a
-  // directory, so this spawns the child itself.
+  // directory on fd 0 makes that read throw EISDIR. No argument that the tests
+  // try makes a command throw, so the input is the stdin. `run` cannot hand
+  // the child a directory, so this spawns the child itself.
   it('writes the failed envelope to stdout, the message to stderr, and exits 1', () => {
     const directory = openSync(tmpdir(), 'r')
     try {
