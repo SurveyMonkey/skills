@@ -348,7 +348,7 @@ describe('tokenParseable', () => {
   // true. `=^1.0.0` against 1.0.0, `>=~1.2.3` against 0.0.1 and `<=~2.0.0`
   // against 3.0.0 give false, and `>^1` against 0.0.1 gives true. Each is a
   // misread, so here each token is unreadable. A declared parity exception.
-  it.fails.each([['<^5.0.0'], ['=^1.0.0'], ['>=~1.2.3'], ['<=~2.0.0'], ['>^1'], ['<~5.0.0']])(
+  it.each([['<^5.0.0'], ['=^1.0.0'], ['>=~1.2.3'], ['<=~2.0.0'], ['>^1'], ['<~5.0.0']])(
     'reads %s, a comparator and then a caret or tilde, as unreadable (#304)',
     (token) => {
       expect(tokenParseable(token)).toBe(false)

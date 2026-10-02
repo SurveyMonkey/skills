@@ -6,6 +6,10 @@
 // npm's semver, which is documented on `rangeFacts` below and is deliberate
 // rather than pending.
 //
+// One declared parity exception (#304 item 2): a token with a comparator and
+// then a `^` or `~`, such as `<^5.0.0`, is unreadable here. jq reads it as a
+// version with major 0. See `tokenParseable`.
+//
 // This file ships. It imports nothing outside the plugin and stays inside the
 // erasable subset (no `enum`, no parameter properties, no namespaces),
 // because node strips the types rather than compiling them (ADR 012).
@@ -196,10 +200,16 @@ export const rangeAlternatives = (range: string): string[][] =>
  * stricter on purpose: an advisory range is copied verbatim from the API and
  * a wildcard there means the tokenizer misread it, while a manifest
  * legitimately declares `*`.
+ *
+ * One operator at most: a comparator, or a `^` or `~`. jq strips a
+ * comparator and then a `^` or `~`, so it reads `<^5.0.0` as parseable. Its
+ * evaluator then reads that token as `<0.0.0`. Here the token is unreadable
+ * (#304 item 2, a declared parity exception). This changes no token that jq
+ * reads right.
  */
 export const tokenParseable = (token: string): boolean => {
   if (wildcardExpand(token) !== null) return true
-  const bare = token.replace(/^(>=|<=|>|<|=)/, '').replace(/^[~^]/, '')
+  const bare = token.replace(/^(>=|<=|>|<|=|~|\^)/, '')
   return /^[v=]*[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(bare)
 }
 

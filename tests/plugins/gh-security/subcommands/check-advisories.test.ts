@@ -451,7 +451,7 @@ describe('the four verdicts', () => {
   // answers `safe` for 4.0.0 (probe, jq 1.8.1: `node.sh range_facts
   // '<^5.0.0' 4.0.0` gives parseable true and satisfied false). The range is
   // unreadable here, so the verdict is `unknown`.
-  it.fails('is unknown, and never safe, for a comparator and then a caret (#304)', async () => {
+  it('is unknown, and never safe, for a comparator and then a caret (#304)', async () => {
     const advisories = [
       advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', '<^5.0.0')] }),
     ]

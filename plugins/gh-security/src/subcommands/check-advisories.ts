@@ -81,6 +81,9 @@
 //     `cli.md` says. The script wrote the JSON on stderr.
 //   - With `--version`, an advisory entry with no range makes the verdict
 //     `unknown` when no range matched. The script answered `safe` (#304).
+//   - A range with a comparator and then a `^` or `~`, such as `<^5.0.0`, is
+//     unreadable, so it is unevaluated. The script read it as `<0.0.0`, and
+//     could answer `safe` (#304 item 2).
 //
 // This file ships. It imports nothing outside the plugin.
 
