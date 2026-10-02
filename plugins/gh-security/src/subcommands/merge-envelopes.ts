@@ -73,8 +73,26 @@ interface Answer {
   readonly value: JsonObject
 }
 
+/** The fields of each answer of `prepare-checkout`. */
+const KEPT_FIELDS = [
+  'checkout',
+  'nwo',
+  'default_branch',
+  'branch_style',
+  'actionable',
+  'skipped',
+  'classify_errors',
+]
+const EXCLUDED_FIELDS = ['checkout', 'excluded', 'reason', 'stderr']
+
+/** The first field of `value` that is not in `fields`, or undefined. */
+const otherField = (value: JsonObject, fields: readonly string[]): string | undefined =>
+  Object.keys(value).find((name) => !fields.includes(name))
+
 /** Why a value is not a kept checkout, or null when it is one. */
 const keptProblem = (value: JsonObject): string | null => {
+  const other = otherField(value, KEPT_FIELDS)
+  if (other !== undefined) return `${other} is not a field of a kept checkout`
   for (const name of ['checkout', 'nwo', 'default_branch']) {
     if (typeof value[name] !== 'string') return `${name} is not text`
   }
@@ -90,6 +108,8 @@ const keptProblem = (value: JsonObject): string | null => {
 /** Why a value is not an excluded checkout, or null when it is one. */
 const excludedProblem = (value: JsonObject): string | null => {
   if (value.excluded !== true) return 'excluded is not true'
+  const other = otherField(value, EXCLUDED_FIELDS)
+  if (other !== undefined) return `${other} is not a field of an excluded checkout`
   for (const name of ['checkout', 'reason', 'stderr']) {
     if (typeof value[name] !== 'string') return `${name} is not text`
   }

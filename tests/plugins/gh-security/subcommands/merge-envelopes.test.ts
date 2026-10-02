@@ -236,7 +236,7 @@ describe('the refusals', () => {
     )
   })
 
-  it.fails.each([
+  it.each([
     [
       'an exclusion that also has groups',
       { checkout: '/w', excluded: true, reason: 'r', stderr: '', actionable: KEPT.actionable },
