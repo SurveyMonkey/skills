@@ -447,6 +447,22 @@ describe('the four verdicts', () => {
     })
   })
 
+  // #304 item 2 on this path. jq reads `<^5.0.0` as `<0.0.0`, so the script
+  // answers `safe` for 4.0.0 (probe, jq 1.8.1: `node.sh range_facts
+  // '<^5.0.0' 4.0.0` gives parseable true and satisfied false). The range is
+  // unreadable here, so the verdict is `unknown`.
+  it.fails('is unknown, and never safe, for a comparator and then a caret (#304)', async () => {
+    const advisories = [
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', '<^5.0.0')] }),
+    ]
+    expect(await verdict('4.0.0', advisories)).toMatchObject({
+      verdict: 'unknown',
+      matched_ranges: [],
+      unevaluated_ranges: ['<^5.0.0'],
+      adapter_errors: [],
+    })
+  })
+
   // #304 item 4. An advisory entry with no range could not be evaluated. So
   // when no range matched, the verdict is `unknown`, never `safe`.
   it.each([
