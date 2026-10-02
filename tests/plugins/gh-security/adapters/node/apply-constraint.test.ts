@@ -522,7 +522,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   // copy of the parent has `ms` on another major line, the plain key moves
   // that copy across its line. node.sh writes `debug@4.3.4>ms` here for a
   // URL with no `@`, and the plain key for a URL with an `@` (#50).
-  it.fails.each([GIT_DEBUG, ...OTHER_COPIES])(
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
     'refuses the plain key when a copy at %s has ms on another line (#50)',
     (version) => {
       const setup = both(gitChildAt('1.0.0'), copyAt(version), registryCopies(['4.3.4', '2.1.3']))
@@ -536,7 +536,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   // copy is not. No registry copy is on the line, so no key is qualified, and
   // the plain key would move both registry copies. node.sh writes a key that
   // names the URL, or the plain key for a URL with an `@` (#50).
-  it.fails.each([GIT_DEBUG, ...OTHER_COPIES])(
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
     'refuses the plain key when a copy at %s is the one copy on the line (#50)',
     (version) => {
       const setup = both(copyAt(version), registryCopies(['2.6.9', '1.0.0'], ['3.0.0', '1.1.0']))

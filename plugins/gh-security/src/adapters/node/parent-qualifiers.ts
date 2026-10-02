@@ -157,6 +157,13 @@ export type QualifierQuery = {
   readonly manifest: unknown
 }
 
+/** The major line of a child version, as `qual_result` reads it, or null when it has none. */
+const lineOf = (cver: unknown): string | null => {
+  // jq stops on an empty major, as `test` does on a value that is not a text.
+  const major = split(trimStart(cver, 'v'), '.')[0]
+  return test(major, /^[0-9]+$/) ? (major as string) : null
+}
+
 /** `qual_result`, for one parent that the lockfile resolves at more than one version. */
 const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   const { location, target } = query
@@ -164,11 +171,7 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   const read = edges.filter(({ pver }) => pver !== MISSING)
   if (unique(read.map(({ pver }) => pver)).length <= 1) return null
   const unreadable = edges.some(({ pver }) => pver === MISSING)
-  const rows = read.map(({ pver, cver }) => {
-    // jq stops on an empty major, as `test` does on a value that is not a text.
-    const major = split(trimStart(cver, 'v'), '.')[0]
-    return { pver, cm: test(major, /^[0-9]+$/) ? (major as string) : null }
-  })
+  const rows = read.map(({ pver, cver }) => ({ pver, cm: lineOf(cver) }))
   const onLine = unique(
     rows.filter(({ cm }) => target === '' || cm === null || cm === target).map(({ pver }) => pver),
   )
@@ -306,5 +309,52 @@ export const outsideRegistryRefusal = (
   if (detail.length === 0) return null
   return failed(
     `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
+  )
+}
+
+/**
+ * The pnpm parents of `pkg` with a copy whose `pkg` is on a major line other
+ * than `target`. A copy from outside the registry counts too. As in
+ * `qual_result`, a child with no readable line counts as on the line. With
+ * no `target`, no copy is off the line.
+ */
+export const pnpmParentsOffLine = (
+  text: string,
+  pkg: string,
+  target: string,
+): ReadonlySet<string> =>
+  new Set(
+    pnpm
+      .scan(text, pkg)
+      .edges.filter(({ version }) => {
+        const line = lineOf(version ?? MISSING)
+        return target !== '' && line !== null && line !== target
+      })
+      .map(({ parent }) => parent.name),
+  )
+
+/**
+ * The second refusal of #50. A pnpm parent of the call keeps the plain key,
+ * and it has a copy from outside the registry. pnpm applies the plain key to
+ * each copy of the parent. So where a copy of the parent has `pkg` on another
+ * major line, the plain key moves that copy across its line. The detail names
+ * each such parent, in the order of the call, with the versions of its copies
+ * from outside the registry.
+ */
+export const plainKeyRefusal = (
+  parents: readonly string[],
+  qualifiers: Qualifiers,
+  outside: ReadonlyMap<string, readonly string[]>,
+  offLine: ReadonlySet<string>,
+  pkg: string,
+): Failure | null => {
+  const detail = [...new Set(parents)].flatMap((parent) => {
+    const versions = outside.get(parent)
+    if (versions === undefined || qualifiers.has(parent) || !offLine.has(parent)) return []
+    return [{ parent, versions_outside_registry: versions }]
+  })
+  if (detail.length === 0) return null
+  return failed(
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail keeps the plain '<parent>>${pkg}' key, and pnpm applies that key to each copy of the parent. A copy of the parent has '${pkg}' on another major line, so the key would move that copy across its line (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, so that a key can name each copy of the parent.`,
   )
 }

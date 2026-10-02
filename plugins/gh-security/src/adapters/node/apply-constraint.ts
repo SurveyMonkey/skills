@@ -67,8 +67,10 @@ import {
   bareConflict,
   npmEdges,
   outsideRegistryRefusal,
+  plainKeyRefusal,
   pnpmCopiesOutsideRegistry,
   pnpmEdges,
+  pnpmParentsOffLine,
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
@@ -207,12 +209,16 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       ),
     )
     // A qualified key misses a copy of its parent from outside the registry
-    // (#50, ruling 2).
-    const refusal =
-      pnpmLock === null
-        ? null
-        : outsideRegistryRefusal(qualifiers, pnpmCopiesOutsideRegistry(pnpmLock, pkg), pkg)
-    if (refusal !== null) throw new Error(refusal.error)
+    // (#50, ruling 2). A plain key can move such a parent's copy across its
+    // line (#50).
+    if (pnpmLock !== null) {
+      const outside = pnpmCopiesOutsideRegistry(pnpmLock, pkg)
+      const offLine = pnpmParentsOffLine(pnpmLock, pkg, targetOf(range))
+      const refusal =
+        outsideRegistryRefusal(qualifiers, outside, pkg) ??
+        plainKeyRefusal(parents, qualifiers, outside, offLine, pkg)
+      if (refusal !== null) throw new Error(refusal.error)
+    }
   }
   if (location === 'overrides' && qualifiers.size > 0) {
     const conflict = bareConflict(qualifiers, placements, manifest, pkg, range)
