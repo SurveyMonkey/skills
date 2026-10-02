@@ -663,6 +663,18 @@ describe('a copy at a new path that breaks the range of its parent (#170)', () =
 
   // `^4.0.0 || latest` admits 4.12.5 on its first alternative, and its floor
   // is on major 4. So only the parse test makes it a break.
+  // The floor is the lowest bound. 4.12.5 is above 4.0.0, and only in a gap
+  // between the two alternatives, so it is no break.
+  it('does not flag a new copy above the floor, in a gap of the range on its own major', () => {
+    const tree = editedSpecimen((packages) =>
+      declare(packages, 'node_modules/public-encrypt', '>=4.0.0 <4.12.0 || >=4.13.0'),
+    )
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
+
   // A copy below the floor of a range on its own major is a break. Real npm
   // 11 output: with the override `{"browserify-rsa": {"bn.js": "5.0.0"}}`,
   // npm writes `node_modules/browserify-rsa/node_modules/bn.js` at 5.0.0,
