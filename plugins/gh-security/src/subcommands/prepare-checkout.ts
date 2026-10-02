@@ -162,7 +162,9 @@ export const prepareCheckout = async (
   }
 
   const rawPrefix = options['env-prefix']
-  const prefixArgs = rawPrefix === '' ? [] : ['--env-prefix', rawPrefix]
+  // One word, so that a step never reads a prefix that starts with `-` as an
+  // option of its own.
+  const prefixArgs = rawPrefix === '' ? [] : [`--env-prefix=${rawPrefix}`]
   const stage = (args: readonly string[], input = ''): CommandContext => ({
     ...context,
     args: [...prefixArgs, ...args],

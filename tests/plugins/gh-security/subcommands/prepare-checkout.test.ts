@@ -689,7 +689,7 @@ describe('the command line', SLOW, () => {
     expect(await prepare(world(), roots, {})).toEqual(failed(USAGE))
   })
 
-  it.fails('gives the prefix to each step as one word, so no step refuses it', async () => {
+  it('gives the prefix to each step as one word, so no step refuses it', async () => {
     const w = world()
     const work = checkout(w, 'app')
     // A step that read `-x` as an option refused its command line, and that
