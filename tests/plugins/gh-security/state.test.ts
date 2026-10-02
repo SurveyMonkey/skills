@@ -294,7 +294,7 @@ describe('loadDriverState', () => {
 
   // A prefix of another type is not "no prefix": the run would go on under
   // the wrong account. The bash passed the text on, and the call failed.
-  it.fails.each([7, ['env', 'A=1'], {}])('refuses a prefix that is %j', (value) => {
+  it.each([7, ['env', 'A=1'], {}])('refuses a prefix that is %j', (value) => {
     const envelope = loadDriverState(work({ ...SETUP, env_prefix: value }))
     expect(envelope.outcome === 'failed' && envelope.error).toContain(
       "no usable value for 'env_prefix'",
@@ -303,7 +303,7 @@ describe('loadDriverState', () => {
 
   // setup writes digits only. A major line of other text goes into a regex
   // and a number, so a load refuses it too.
-  it.fails.each(['0x10', '1e1', ' 4', '4.x'])('refuses a major_line of %j', (value) => {
+  it.each(['0x10', '1e1', ' 4', '4.x'])('refuses a major_line of %j', (value) => {
     const envelope = loadDriverState(work({ ...SETUP, major_line: value }))
     expect(envelope.outcome === 'failed' && envelope.error).toContain(
       "no usable value for 'major_line'",

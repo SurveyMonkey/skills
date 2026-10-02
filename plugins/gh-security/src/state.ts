@@ -215,38 +215,59 @@ export interface DriverState {
   readonly envPrefix: string | null
 }
 
-/** The required keys, in the order that `load_state` read them. */
-const DRIVER_KEYS = [
-  ['repo_root', 'repoRoot'],
-  ['default_branch', 'defaultBranch'],
-  ['branch_name', 'branchName'],
-  ['adapter', 'adapter'],
-  ['ecosystem', 'ecosystem'],
-  ['scorer', 'scorer'],
-  ['worktree', 'worktree'],
-  ['package', 'package'],
-  ['major_line', 'majorLine'],
-] as const
+/** A field of {@link DriverState} that a required key fills. */
+type DriverField = Exclude<keyof DriverState, 'state' | 'envPrefix'>
+
+/**
+ * Each field and its required key, in the order that `load_state` read
+ * them, then `ecosystem`, which only the port requires. The record type
+ * makes the compiler find a field with no key.
+ */
+const DRIVER_KEYS: Readonly<Record<DriverField, string>> = {
+  repoRoot: 'repo_root',
+  defaultBranch: 'default_branch',
+  branchName: 'branch_name',
+  adapter: 'adapter',
+  scorer: 'scorer',
+  worktree: 'worktree',
+  package: 'package',
+  majorLine: 'major_line',
+  ecosystem: 'ecosystem',
+}
 
 /**
  * Load the state of a work directory, and read each key that every phase
  * needs. The first key that has no usable value is the failure. So a phase
  * never starts with an empty path, which `git -C ""` reads as the current
  * directory (#18).
+ *
+ * `major_line` must be digits, as `setup` checks. Other text goes into a
+ * regex and a number. An `env_prefix` that is not text is a failure: "no
+ * prefix" would run each call under the wrong account.
  */
 export const loadDriverState = (workDir: string): Envelope<DriverState> => {
   const loaded = loadState(workDir)
   if (loaded.outcome !== 'ok') return loaded
   const state = loaded.value
-  const fields: Record<string, string> = {}
-  for (const [key, field] of DRIVER_KEYS) {
+  const fields: Partial<Record<DriverField, string>> = {}
+  for (const [field, key] of Object.entries(DRIVER_KEYS) as [DriverField, string][]) {
     const value = readString(state, key)
     if (value.outcome !== 'ok') return value
     fields[field] = value.value
   }
-  return ok({
-    ...(fields as Omit<DriverState, 'state' | 'envPrefix'>),
-    state,
-    envPrefix: readOptionalString(state, 'env_prefix'),
-  })
+  const read = fields as Record<DriverField, string>
+  if (!/^[0-9]+$/.test(read.majorLine)) {
+    return failed(
+      `the state file at ${state.path} has no usable value for 'major_line': ` +
+        `expected digits, found ${JSON.stringify(read.majorLine)}.`,
+    )
+  }
+  const prefix = readOptionalValue(state, 'env_prefix')
+  if (prefix !== null && typeof prefix !== 'string') {
+    return failed(
+      `the state file at ${state.path} has no usable value for 'env_prefix': ` +
+        `expected text, found ${JSON.stringify(prefix)}.`,
+    )
+  }
+  return ok({ ...read, state, envPrefix: prefix === '' ? null : prefix })
 }
