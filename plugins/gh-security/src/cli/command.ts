@@ -53,8 +53,8 @@ export type CommandResult = Envelope<JsonValue> | FailedReport | undefined
  *
  * The exit status is 1 unless the report names another. The fix driver
  * (`fix-group`) has a contract of its own on top of ADR 001. It exits 3 for
- * a failure of a phase, with a report (#232). Exit 2, for a decision that
- * goes back to the agent, is for `apply`, which a later layer ports. A
+ * a failure of a phase, with a report (#232). `apply` exits 2 for a
+ * decision that goes back to the agent (`needs_judgment`). A
  * report with no `exitCode` key exits 1, so a report of `pr-status` keeps
  * its shape.
  */

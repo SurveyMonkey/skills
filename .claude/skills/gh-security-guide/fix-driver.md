@@ -17,7 +17,9 @@ script's own header (`common/fix-group.sh:1-76`), and for the port in the header
 
 The TypeScript port is `gh-security fix-group <phase>`, one phase at a time (#232). The header of
 `src/subcommands/fix-group.ts` states the contract of each ported phase, and each
-difference from the script. Each phase has its own module, `fix-group-<phase>.ts`. The phases
+difference from the script. Each phase has its own module, `fix-group-<phase>.ts`. The
+decisions of `apply` (the range, the ladder and its stops, the widest shape, the empty diff) are
+pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
 `setup` writes. Until the port is complete, the agent calls the script for each step. A state
 file that one of the two writes is not for the other.
