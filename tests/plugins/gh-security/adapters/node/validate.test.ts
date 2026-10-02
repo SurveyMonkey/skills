@@ -482,6 +482,43 @@ describe('a within-major dedup of another line (#169)', () => {
   })
 })
 
+// #170: the field shape, on real output of `npm install --package-lock-only`
+// (npm 11.19.0). The fix of the bn.js 4.x line wrote the nested override
+// `{"public-encrypt": {"bn.js": ">=4.12.3 <5"}}`. npm applies it to the whole
+// subtree of public-encrypt. So browserify-rsa, which declares `^5.2.1`, got a
+// new nested copy at 4.12.5. The 5.x line keeps 5.2.5, so no line moved. The
+// baseline is the answer of `node.sh resolved_versions bn.js` on the lockfile
+// from before the override.
+const BN_BASELINE =
+  '{"pm":"npm","package":"bn.js","present":true,"count":3,"versions":[{"version":"4.12.5","path":"node_modules/asn1.js/node_modules/bn.js"},{"version":"4.12.5","path":"node_modules/public-encrypt/node_modules/bn.js"},{"version":"5.2.5","path":"node_modules/bn.js"}],"lockfile_entries":57}'
+
+describe('a copy at a new path that breaks the range of its parent (#170)', () => {
+  it.fails('flags the new nested copy, and fails', () => {
+    const value = answer('npm-new-nested-path', 'bn.js', '>=4.12.3 <5', {
+      line: '4',
+      vulnerable: ['< 4.12.3'],
+      baseline: BN_BASELINE,
+      siblingAlerts: '[]',
+    })
+    expect({
+      ok: value.ok,
+      moves: value.other_line_moves,
+      breaks: (value as unknown as Record<string, unknown>).parent_range_breaks,
+    }).toEqual({
+      ok: false,
+      moves: [],
+      breaks: [
+        {
+          parent: 'node_modules/browserify-rsa',
+          range: '^5.2.1',
+          path: 'node_modules/browserify-rsa/node_modules/bn.js',
+          version: '4.12.5',
+        },
+      ],
+    })
+  })
+})
+
 const CROSS_BASELINE = JSON.stringify({
   package: 'brace-expansion',
   versions: [{ version: '1.1.11' }, { version: '2.0.2' }, { version: '5.0.5' }],
