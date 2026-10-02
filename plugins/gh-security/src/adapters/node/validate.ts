@@ -14,6 +14,11 @@
 // `detect`. The verdict is `ok` in the answer: node.sh writes the answer and
 // exits 1 when `ok` is false.
 //
+// Two declared parity exceptions (#304), where node.sh passes and this verb
+// refuses. An alert range with a comparator and then a `^` or `~`, such as
+// `<^5.0.0`, is unreadable (item 2). A `--line` whose `--vulnerable` flags
+// hold only newlines has no alert range (item 3).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { type Envelope, failed } from '../../lib/envelope.ts'
@@ -44,8 +49,14 @@ export const satisfiesAll = satisfies
 // that parses. A wildcard is not accepted here. `range_facts` accepts it.
 const STRICT_TOKEN = /^[v=]*[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
 
+/**
+ * One operator at most: a comparator, or a `^` or `~`. node.sh strips a
+ * comparator and then a `^` or `~`, so it passes `<^5.0.0`, which jq reads
+ * as `<0.0.0` and which matches nothing. Here that token is unreadable, and
+ * the range is refused (#304 item 2, a declared parity exception).
+ */
 const tokenOk = (token: string): boolean =>
-  STRICT_TOKEN.test(token.replace(/^(>=|<=|>|<|=)/, '').replace(/^[~^]/, ''))
+  STRICT_TOKEN.test(token.replace(/^(>=|<=|>|<|=|~|\^)/, ''))
 
 /** `range_ok` of node.sh: the strict parse of an advisory range. */
 const rangeOk = (range: string): boolean => {
@@ -186,6 +197,11 @@ const inputsOf = (
   const vulnerable = uniqueSorted(
     options.vulnerable.flatMap((text) => text.split('\n')).filter((text) => text !== ''),
   )
+  // node.sh tests the raw text of the flags for the line guard. So flags that
+  // hold only newlines pass it, and the completeness check then has no range.
+  // Here the guard also tests the ranges after the split (#304 item 3, a
+  // declared parity exception).
+  if (options.line !== null && vulnerable.length === 0) return { refusal: LINE_NEEDS_VULNERABLE }
   const badRange = vulnerable.find((text) => !rangeOk(text))
   if (badRange !== undefined) return { refusal: unreadableRange(badRange) }
   const siblings = options.siblingAlerts === null ? null : siblingsOf(options.siblingAlerts)

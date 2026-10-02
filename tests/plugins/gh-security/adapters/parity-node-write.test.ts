@@ -715,7 +715,6 @@ describe('validate parity on the generated cases', () => {
     [['--line', '1.5', '--vulnerable', NOHIT]],
     [['--line', '07', '--vulnerable', NOHIT]],
     [['--line', '9', '--vulnerable', NOHIT]],
-    [['--line', '7', '--vulnerable', '\n']],
     [['--line', '7', '--vulnerable', '< 1.0.0\n>= 7.27.0']],
     [['--line', '7', '--vulnerable', '>= 7.27.0', '--vulnerable', '>= 7.27.0']],
     [['--line', '7', '--vulnerable', NOHIT, '--baseline', '']],
@@ -763,7 +762,7 @@ describe('validate: the declared exceptions of #304', () => {
     }
   }
 
-  it.fails('bash passes the alert range <^7.0.0, and the port refuses it (item 2)', () => {
+  it('bash passes the alert range <^7.0.0, and the port refuses it (item 2)', () => {
     expect(both(['--line', '6', '--vulnerable', '<^7.0.0', 'undici', '>=6.0.0 <7'])).toEqual({
       bash: { status: 0, ok: true },
       typescript: {
@@ -774,7 +773,7 @@ describe('validate: the declared exceptions of #304', () => {
     })
   })
 
-  it.fails('bash passes a line whose alert flag is only a newline, and the port refuses it (item 3)', () => {
+  it('bash passes a line whose alert flag is only a newline, and the port refuses it (item 3)', () => {
     expect(both(['--line', '7', '--vulnerable', '\n', 'undici', '>=7.0.0 <8'])).toEqual({
       bash: { status: 0, ok: true },
       typescript: {

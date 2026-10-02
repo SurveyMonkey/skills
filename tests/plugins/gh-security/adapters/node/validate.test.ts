@@ -229,7 +229,7 @@ describe('the alert ranges', () => {
   // '>=6.0.0 <7'` on yarn-multi-major answers `ok: true`, and `'<7.0.0'`
   // answers `ok: false` with 6.24.1 unresolved (node.sh, probed). The port
   // refuses a comparator with a `^` or `~` after it.
-  it.fails.each(['<^7.0.0', '>=^5.0.0', '<~6', '>=~1.2.3', '=^1.0.0', '< 1.0.0 || <^7.0.0'])(
+  it.each(['<^7.0.0', '>=^5.0.0', '<~6', '>=~1.2.3', '=^1.0.0', '< 1.0.0 || <^7.0.0'])(
     'refuses the range %j, a comparator and then a caret or a tilde (#304)',
     (range) => {
       expect(refusal(MULTI, 'undici', '>=6.0.0 <7', { line: '6', vulnerable: [range] })).toEqual({
@@ -242,7 +242,7 @@ describe('the alert ranges', () => {
   // #304 item 3. node.sh tests the raw text of the flags, so a flag that
   // holds only newlines passes its line guard, and the completeness check
   // then has no range. The port tests the ranges after the split.
-  it.fails.each([[['\n']], [['\n\n']], [['\n', '\n']]])(
+  it.each([[['\n']], [['\n\n']], [['\n', '\n']]])(
     'refuses a line whose alert flags %j hold only newlines (#304)',
     (vulnerable) => {
       expect(refusal(MULTI, 'undici', '>=7.0.0 <8', { line: '7', vulnerable })).toEqual({
