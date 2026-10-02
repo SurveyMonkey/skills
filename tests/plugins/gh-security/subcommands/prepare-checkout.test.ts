@@ -104,6 +104,8 @@ interface Shape {
   readonly origin?: string | null
   /** A directory name that is not the repository name. */
   readonly dir?: string
+  /** Work on the checkout while its origin is still the bare path. */
+  readonly before?: (work: string) => void
 }
 
 /** A checkout with the npm-v3 lockfile on its default branch. */
@@ -115,6 +117,7 @@ const checkout = (w: World, name: string, shape: Shape = {}): string => {
     w.fixtures.branch(work, branch)
     w.fixtures.push(work, branch)
   }
+  shape.before?.(work)
   if (shape.origin === null) w.fixtures.removeOrigin(work)
   else {
     const url = shape.origin ?? `git@github.com:octo/${name}.git`
@@ -215,6 +218,12 @@ const answer = (fields: Partial<RunResult>): RunResult => ({
   ...fields,
 })
 
+/** The same answer for both attempts of the probe. */
+const twice = (result: RunResult): RunResult[] => [result, result]
+
+/** An object name of a sha-1 repository. */
+const SHA = 'a'.repeat(40)
+
 const isProbe = (args: readonly string[]): boolean => args.includes('ls-remote')
 
 /**
@@ -300,6 +309,33 @@ describe('a checkout that is kept', SLOW, () => {
       'requires major version bump',
     ])
   })
+
+  it('classifies the tree of the default branch that GitHub names', async () => {
+    const w = world()
+    // On trunk, express is at 5.1.0, so its 5.x line is resolved there and
+    // not on main.
+    const trunk = (work: string) => {
+      w.fixtures.git(work, 'checkout', '-q', '-b', 'trunk')
+      const lockfile = join(work, 'package-lock.json')
+      writeFileSync(
+        lockfile,
+        readFileSync(lockfile, 'utf8').replace('"version": "4.18.2"', '"version": "5.1.0"'),
+      )
+      w.fixtures.git(work, 'commit', '-qam', 'express 5')
+      w.fixtures.push(work, 'trunk')
+      w.fixtures.git(work, 'checkout', '-q', 'main')
+    }
+    const work = checkout(w, 'app', { before: trunk })
+    const replies = { ...REPLIES, viewDefaultBranch: { name: 'trunk' } }
+    const result = value(await prepare(w, [work], replies))
+    expect([result.default_branch, rows(result, 'actionable')]).toEqual([
+      'trunk',
+      [
+        ['express', 'fix/dependabot-express-5x', 'resolved'],
+        ['sha.js', 'fix/dependabot-sha.js-2x', 'resolved'],
+      ],
+    ])
+  })
 })
 
 describe('the branch namespace probe', SLOW, () => {
@@ -374,7 +410,7 @@ describe('the branch namespace probe', SLOW, () => {
     },
   )
 
-  it('reads two hit lines in the shape of a sha-256 repository as a hit', async () => {
+  it('reads a hit line in the shape of a sha-256 repository as a hit', async () => {
     const w = world()
     const work = checkout(w, 'app')
     const line = `${'a'.repeat(64)}\trefs/heads/fix\n`
@@ -417,6 +453,16 @@ describe('the branch namespace probe', SLOW, () => {
       'the output, when git answered with a line that is not the ref',
       [answer({ stdout: 'odd\n' }), answer({ stdout: 'odd\n' })],
       'git ls-remote gave output that is not a refs/heads/fix line: odd\n',
+    ],
+    [
+      'the output, when a hit line comes with another line',
+      twice(answer({ stdout: `banner\n${SHA}\trefs/heads/fix\n` })),
+      `git ls-remote gave output that is not a refs/heads/fix line: banner\n${SHA}\trefs/heads/fix\n`,
+    ],
+    [
+      'the output, when the line names another ref',
+      twice(answer({ stdout: `${SHA}\trefs/heads/fix-later\n` })),
+      `git ls-remote gave output that is not a refs/heads/fix line: ${SHA}\trefs/heads/fix-later\n`,
     ],
   ])('excludes the checkout after two failed attempts, with %s', async (_name, probes, stderr) => {
     const w = world()
@@ -470,14 +516,15 @@ describe('the exclusion causes', SLOW, () => {
   it('excludes a checkout whose default branch GitHub did not give, with the error', async () => {
     const w = world()
     const work = checkout(w, 'app')
-    const replies = { viewDefaultBranch: ghFails('HTTP 404: Not Found') }
+    const said = "GraphQL: Could not resolve to a Repository with the name 'octo/app'. (repository)"
+    const replies = { viewDefaultBranch: ghFails(said) }
     expect(await prepare(w, [work], replies)).toEqual({
       outcome: 'ok',
       value: {
         checkout: work,
         excluded: true,
         reason: 'no resolvable default branch',
-        stderr: 'could not read the default branch of octo/app from GitHub: HTTP 404: Not Found',
+        stderr: `could not read the default branch of octo/app from GitHub: ${said}`,
       },
     })
   })
@@ -616,6 +663,14 @@ describe('the command line', SLOW, () => {
   it('refuses a root that is not a directory', async () => {
     expect(await prepare(world(), ['missing'], {})).toEqual(
       failed('prepare-checkout: not a directory: missing'),
+    )
+  })
+
+  it('refuses a root that is a file', async () => {
+    const w = world()
+    writeFileSync(join(w.root, 'file'), '')
+    expect(await prepare(w, ['file'], {})).toEqual(
+      failed('prepare-checkout: not a directory: file'),
     )
   })
 
