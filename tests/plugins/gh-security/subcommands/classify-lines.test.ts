@@ -625,6 +625,44 @@ describe('the own-line shapes of #168', () => {
       errors: [],
     })
   })
+
+  // The shape that the port dispatched: got 9.6.0 under package-json, and
+  // got 12.6.1 at the root, on a real npm lockfile. No copy is on line 11,
+  // and one copy is above it, so the group was `line_absent`. The alert range
+  // covers 9.6.0, and no patch is on major 9. So the only fix moves 9.6.0 to
+  // another major, and `validate` then fails on the vanished line 9.
+  it.fails('moves a group whose alert covers a copy below the line, with no patch on its major, into skipped', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [
+        alerted('got', '11', '< 11.8.5'),
+        alerted('got', '11', '< 11.8.5', [{ major: null, vulnerable_ranges: ['< 1.0.0'] }]),
+      ]),
+    ).toEqual({
+      actionable: [],
+      skipped: ['got@11:requires major version bump', 'got@11:requires major version bump'],
+      errors: [],
+    })
+  })
+
+  it.each([
+    ['an alert range that misses the copy below', alerted('got', '11', '>= 10.0.0, < 11.8.5')],
+    [
+      'a sibling alert on the major of the copy below',
+      alerted('got', '11', '< 11.8.5', [{ major: 9, vulnerable_ranges: ['< 9.6.1'] }]),
+    ],
+  ])('keeps the group actionable as line_absent with %s', async (_name, entry) => {
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toEqual({
+      actionable: ['got@11:line_absent'],
+      skipped: [],
+      errors: [],
+    })
+  })
+
+  it('keeps a group with a copy on its line resolved, when its alert also covers a copy below', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [alerted('got', '12', '< 12.1.0')]),
+    ).toEqual({ actionable: ['got@12:resolved'], skipped: [], errors: [] })
+  })
 })
 
 describe('the collision check (#132)', () => {
