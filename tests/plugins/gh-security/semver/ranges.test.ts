@@ -478,6 +478,27 @@ describe('the white space of a range (#303)', () => {
     expect(satisfies('0.1.0', '>= 0.5')).toBe(false)
   })
 
+  // jq probe: `jq -nc '">=\u2003 0.5" | gsub("(?<op>[<>=~^]+)[[:space:]]+"; .op)'`
+  // gives `>=0.5` for every code point of the set, so each one is dropped
+  // after an operator.
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'drops the wide space U+%s after an operator',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(rangeAlternatives(`>=${space}0.5`)).toEqual([['>=0.5']])
+    },
+  )
+
+  // jq probe: `jq -nc '[">=1\u2003<2" | splits("[[:space:],|]+")]'` splits at
+  // each code point of the set, and `||` and `,` split as well.
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'flattens a range at the wide space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(rangeTokens(`>=1${space}<2`)).toEqual(['>=1', '<2'])
+    },
+  )
+
   it('flattens a range with wide spaces into its tokens', () => {
     expect(rangeTokens('>=1 ||　<2\u0085')).toEqual(['>=1', '<2'])
   })
