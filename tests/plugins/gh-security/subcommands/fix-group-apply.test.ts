@@ -1872,6 +1872,18 @@ describe('the empty diff', () => {
     expect(answer.json.resolved_version).toBe('3.10.1, , 4.17.21')
   })
 
+  // jq `["3.10.1", 4, true] | join(", ")` gives the text of each value.
+  it('joins a resolved version that is a number or a boolean as its text', async () => {
+    const { answer } = await empty(rv('4.17.21'), rv('4.17.21'), (s) => {
+      s.validate = [{ ...validateAnswer(true), resolved_versions: ['3.10.1', 4, true] }]
+    })
+    expect(pick(answer, 'status', 'resolved_version')).toEqual({
+      exit: 0,
+      status: 'no_op',
+      resolved_version: '3.10.1, 4, true',
+    })
+  })
+
   // jq `join` stops on an object or a list, and the bash failed the phase.
   it.each([
     ['an object', {}],
