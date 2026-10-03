@@ -63,7 +63,8 @@ const emit = (io: Io, rendered: Rendered): ExitCode => {
 
 /**
  * A failure that carries a report writes the report to stdout and the
- * message to stderr, with exit 1. A caller reads the same JSON on stdout
+ * message to stderr, with the exit status of the report (1 unless the
+ * command gave another). A caller reads the same JSON on stdout
  * whether the command passed or failed. Any other result renders as the
  * envelope says.
  */
@@ -73,7 +74,7 @@ const render = (result: Exclude<CommandResult, undefined>): Rendered =>
 const renderReport = (result: FailedReport): Rendered => ({
   stdout: JSON.stringify(result.report),
   stderr: result.error,
-  exitCode: EXIT_CODES.failed,
+  exitCode: result.exitCode ?? EXIT_CODES.failed,
 })
 
 /**
@@ -100,7 +101,8 @@ const settle = async (
  * exit codes come from the envelope the handler returned, through
  * `exitCodeFor`, so a verb that is not implemented stays exit 2 and an
  * unsupported toolchain stays exit 3 rather than collapsing into a generic
- * failure. A failed report is the one exception: it is always exit 1.
+ * failure. A failed report is the one exception: it exits with the status
+ * that it carries.
  */
 export const runCli = async (
   argv: readonly string[],

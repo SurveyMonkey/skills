@@ -14,6 +14,7 @@ import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts
 import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
 import { discoverAlertsCommand } from '#gh-security/subcommands/discover-alerts.ts'
 import { discoverReposCommand } from '#gh-security/subcommands/discover-repos.ts'
+import { fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { pluginFile } from '#harness/paths.ts'
@@ -39,6 +40,7 @@ describe('the registry', () => {
       "import('../subcommands/discover-alerts.ts')",
       "import('../subcommands/discover-repos.ts')",
       "import('../subcommands/ensure-worktree-exclude.ts')",
+      "import('../subcommands/fix-group.ts')",
       "import('../subcommands/merge-envelopes.ts')",
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/prepare-checkout.ts')",
@@ -81,5 +83,19 @@ describe('the discovery entries', () => {
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
+  })
+})
+
+describe('the fix driver entry', () => {
+  it('loads the handler of fix-group', async () => {
+    expect(await COMMANDS['fix-group']?.load()).toBe(fixGroupCommand)
+  })
+
+  it.each([
+    'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>]',
+    'fix-group classify --work <dir>',
+    'fix-group baseline --work <dir>',
+  ])('describes the usage %s', (usage) => {
+    expect(COMMANDS['fix-group']?.description).toContain(usage)
   })
 })

@@ -50,18 +50,32 @@ export type CommandResult = Envelope<JsonValue> | FailedReport | undefined
  * reports and fails (`pr-status`) needs a caller to read its report on
  * stdout, with exit 1. `run.ts` writes the report to stdout and the
  * message to stderr.
+ *
+ * The exit status is 1 unless the report names another. The fix driver
+ * (`fix-group`) has a contract of its own on top of ADR 001. It exits 3 for
+ * a failure of a phase, with a report (#232). Exit 2, for a decision that
+ * goes back to the agent, is for `apply`, which a later layer ports. A
+ * report with no `exitCode` key exits 1, so a report of `pr-status` keeps
+ * its shape.
  */
 export interface FailedReport {
   readonly outcome: 'failed'
   readonly error: string
   readonly report: JsonValue
+  readonly exitCode?: ReportExitCode
 }
 
-export const failedReport = (error: string, report: JsonValue): FailedReport => ({
-  outcome: 'failed',
-  error,
-  report,
-})
+/** The statuses other than 1 that a failed report can exit with. */
+export type ReportExitCode = 2 | 3
+
+export const failedReport = (
+  error: string,
+  report: JsonValue,
+  exitCode?: ReportExitCode,
+): FailedReport =>
+  exitCode === undefined
+    ? { outcome: 'failed', error, report }
+    : { outcome: 'failed', error, report, exitCode }
 
 /**
  * A handler answers at once, or with a promise. A command that runs `gh` or

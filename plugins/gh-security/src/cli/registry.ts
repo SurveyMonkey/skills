@@ -48,6 +48,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/ensure-worktree-exclude.ts')).ensureWorktreeExcludeCommand,
   },
+  'fix-group': {
+    description:
+      'Run one phase of the fix driver for one alert group: fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>] | fix-group classify --work <dir> | fix-group baseline --work <dir>',
+    load: async () => (await import('../subcommands/fix-group.ts')).fixGroupCommand,
+  },
   'merge-envelopes': {
     description:
       'Merge the prepare-checkout answers of one or more checkouts, and rank all their groups: merge-envelopes <envelope.json>...',
