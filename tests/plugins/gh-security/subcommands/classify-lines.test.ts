@@ -574,6 +574,204 @@ describe('the line statuses', () => {
   })
 })
 
+/** A discovery group with one alert, and the sibling lines of its package. */
+const alerted = (pkg: string, line: string, range: string, siblings: readonly unknown[] = []) =>
+  group(pkg, line, {
+    alerts: [{ vulnerable_range: range, fixed_in: `${line}.0.0` }],
+    sibling_alerts: siblings,
+  })
+
+/** The status of each group, with the real registry on a lockfile specimen. */
+const realStatuses = async (fixture: string, groups: readonly Group[]) => {
+  const result = await classifyLines(
+    context(['--repo-root', join(FIXTURES_ROOT, fixture)], envelope(groups)),
+    run,
+    selectAdapter,
+    '/',
+  )
+  const out = answerIn(result)
+  return {
+    actionable: out.actionable.map(
+      (entry) => `${entry.package}@${entry.major_line}:${entry.line_status}`,
+    ),
+    skipped: out.skipped.map((entry) => `${entry.package}@${entry.major_line}:${entry.reason}`),
+    errors: out.classify_errors,
+  }
+}
+
+// #168. The four field shapes of the issue, on a real `npm install
+// --package-lock-only` lockfile (npm 11.19.0): each package resolves one copy,
+// below the line of its group, and the alert range of the group covers it.
+// The port already moves each group into skipped before dispatch.
+describe('the own-line shapes of #168', () => {
+  it('moves each group whose only copy is below its line into skipped', async () => {
+    expect(
+      await realStatuses('npm-major-bump-sole', [
+        alerted('deepmerge-ts', '8', '< 8.0.0'),
+        alerted('nodemailer', '8', '< 8.0.0', [{ major: 9, vulnerable_ranges: ['< 9.0.1'] }]),
+        alerted('nodemailer', '9', '< 9.0.1', [{ major: 8, vulnerable_ranges: ['< 8.0.0'] }]),
+        alerted('marked', '4', '< 4.0.10'),
+        alerted('got', '11', '< 11.8.5'),
+      ]),
+    ).toEqual({
+      actionable: [],
+      skipped: [
+        'deepmerge-ts@8:requires major version bump',
+        'nodemailer@8:requires major version bump',
+        'nodemailer@9:requires major version bump',
+        'marked@4:requires major version bump',
+        'got@11:requires major version bump',
+      ],
+      errors: [],
+    })
+  })
+
+  // The shape that the port dispatched: got 9.6.0 under package-json, and
+  // got 12.6.1 at the root, on a real npm lockfile. No copy is on line 11,
+  // and one copy is above it, so the group was `line_absent`. The alert range
+  // covers 9.6.0, and no patch is on major 9. So the only fix moves 9.6.0 to
+  // another major, and `validate` then fails on the vanished line 9.
+  it('moves a group whose alert covers a copy below the line, with no patch on its major, into skipped', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [
+        alerted('got', '11', '< 11.8.5'),
+        alerted('got', '11', '< 11.8.5', [{ major: null, vulnerable_ranges: ['< 1.0.0'] }]),
+        alerted('got', '11', '< 11.8.5', [{ major: 0, vulnerable_ranges: ['< 0.5.0'] }]),
+      ]),
+    ).toEqual({
+      actionable: [],
+      skipped: [
+        'got@11:requires major version bump',
+        'got@11:requires major version bump',
+        'got@11:requires major version bump',
+      ],
+      errors: [],
+    })
+  })
+
+  it.each([
+    ['an alert range that misses the copy below', alerted('got', '11', '>= 10.0.0, < 11.8.5')],
+    [
+      'a sibling alert on the major of the copy below',
+      alerted('got', '11', '< 11.8.5', [{ major: 9, vulnerable_ranges: ['< 9.6.1'] }]),
+    ],
+  ])('keeps the group actionable as line_absent with %s', async (_name, entry) => {
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toEqual({
+      actionable: ['got@11:line_absent'],
+      skipped: [],
+      errors: [],
+    })
+  })
+
+  it('keeps a group with a copy on its line resolved, when its alert also covers a copy below', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [alerted('got', '12', '< 12.1.0')]),
+    ).toEqual({ actionable: ['got@12:resolved'], skipped: [], errors: [] })
+  })
+
+  it.each([
+    ['no alerts', group('got', '11')],
+    ['an alert with no range', group('got', '11', { alerts: [{ vulnerable_range: null }] })],
+  ])('keeps a group with %s as line_absent, because nothing covers a copy', async (_n, entry) => {
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toEqual({
+      actionable: ['got@11:line_absent'],
+      skipped: [],
+      errors: [],
+    })
+  })
+
+  // got 9.6.0 and 12.6.1 are both above line 8. With no copy below the line,
+  // the check does not run, so alerts that it cannot read give no error.
+  it('does not run the own-range check for a group with no copy below its line', async () => {
+    expect(
+      await realStatuses('npm-major-bump-below-above', [group('got', '8', { alerts: 'x' })]),
+    ).toEqual({ actionable: ['got@8:line_absent'], skipped: [], errors: [] })
+  })
+
+  it('skips an alert with no range, and reads the next alert', async () => {
+    const entry = group('got', '11', {
+      alerts: [{ vulnerable_range: null }, { vulnerable_range: '< 11.8.5' }],
+      sibling_alerts: [],
+    })
+    expect(await realStatuses('npm-major-bump-below-above', [entry])).toMatchObject({
+      skipped: ['got@11:requires major version bump'],
+    })
+  })
+
+  const SKIPPED = '; own-range check skipped'
+
+  const BROKEN: readonly (readonly [string, Group, string])[] = [
+    ['alerts that are not a list', { alerts: 'x' }, `alerts is not a list of objects${SKIPPED}`],
+    [
+      'an alert that is not an object',
+      { alerts: [1] },
+      `alerts is not a list of objects${SKIPPED}`,
+    ],
+    [
+      'a range that is not text',
+      { alerts: [{ vulnerable_range: 5 }] },
+      `an alert vulnerable_range is not text: 5${SKIPPED}`,
+    ],
+    [
+      'an empty range, which range_facts refuses',
+      { alerts: [{ vulnerable_range: '' }] },
+      'range_facts requires a range and a version',
+    ],
+    [
+      'a range that does not parse',
+      { alerts: [{ vulnerable_range: 'latest' }] },
+      `range_facts could not read 'latest' for 9.6.0: {"range":"latest","version":"9.6.0","parseable":false,"satisfied":null,"pinned":null,"floor_major":null,"majors_ahead":null}${SKIPPED}`,
+    ],
+    ...[undefined, null, 'x', [9], [{ major: '9' }], [{ major: 9.5 }], [{ major: -1 }], [null]].map(
+      (siblings) =>
+        [
+          `sibling alerts of ${JSON.stringify(siblings)}`,
+          { alerts: [{ vulnerable_range: '< 11.8.5' }], sibling_alerts: siblings },
+          `sibling_alerts is not a list of {major} objects${SKIPPED}`,
+        ] as const,
+    ),
+  ]
+
+  it.each(BROKEN)('reads %s as a broken read: unknown, and named', async (_name, fields, error) => {
+    expect(await realStatuses('npm-major-bump-below-above', [group('got', '11', fields)])).toEqual({
+      actionable: ['got@11:unknown'],
+      skipped: [],
+      errors: [{ adapter: 'node', package: 'got', error }],
+    })
+  })
+
+  it.each([
+    ['a satisfied that is null', ok({ parseable: true, satisfied: null })],
+    ['an answer that is null', ok(null)],
+    ['a parseable of false with a satisfied of true', ok({ parseable: false, satisfied: true })],
+  ])('reads a range_facts with %s as a broken read', async (_name, reply) => {
+    const adapter = { ...node, rangeFacts: () => reply } as Adapter<NodeDetection>
+    const route: typeof selectAdapter = (ecosystem, manifest = null) => {
+      const real = selectAdapter(ecosystem, manifest)
+      return real.supported ? { ...real, adapter } : real
+    }
+    const result = await classifyLines(
+      context(
+        ['--repo-root', join(FIXTURES_ROOT, 'npm-major-bump-below-above')],
+        envelope([alerted('got', '11', '< 11.8.5')]),
+      ),
+      run,
+      route,
+      '/',
+    )
+    const out = answerIn(result)
+    expect({
+      status: out.actionable.map((entry) => entry.line_status),
+      errors: out.classify_errors.map((entry) => entry.error),
+    }).toEqual({
+      status: ['unknown'],
+      errors: [
+        `range_facts could not read '< 11.8.5' for 9.6.0: ${JSON.stringify(reply.outcome === 'ok' ? reply.value : null)}${SKIPPED}`,
+      ],
+    })
+  })
+})
+
 describe('the collision check (#132)', () => {
   const check = async (pkg: string, line: string, spec: StandInSpec = {}) => {
     const out = await answer(envelope([group(pkg, line)]), ['--repo-root', SOME_ROOT], spec)

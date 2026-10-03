@@ -29,6 +29,8 @@
 //     same, and the rows compare it.
 //   - Empty stdin gives exit 0 and no JSON in the pipeline. The port refuses
 //     it. A row below shows the two answers.
+//   - The own-range check of the port (#168). A row at the end shows the two
+//     answers.
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -480,5 +482,42 @@ describe('classify-lines parity: --base-ref', () => {
     const { sandbox, work, worktrees } = repository()
     await expectBothRefuse(ONE, ['--repo-root', work, '--base-ref', 'origin/we"ird'], sandbox)
     expect(worktrees()).toBe(1)
+  })
+})
+
+// The declared exception of #168 (ruling 3). On the lockfile, got
+// 9.6.0 is below line 11, got 12.6.1 is above it, and the alert range covers
+// 9.6.0. The script answers `line_absent`. The port moves the group into
+// skipped, because its only fix crosses a major. Where every copy is below the
+// line, the two agree.
+describe('classify-lines: the declared exception of #168', () => {
+  const GOT_11 = envelope([
+    group('got', '11', {
+      alerts: [{ vulnerable_range: '< 11.8.5' }],
+      sibling_alerts: [],
+    }),
+  ])
+
+  it('gives line_absent in the script and requires_major_bump in the port', async () => {
+    const answers = await withFixture('npm-major-bump-below-above', async (root) => {
+      const bash = bashSide(GOT_11, ['--repo-root', root])
+      const port = answerOf(await typescriptSide(GOT_11, ['--repo-root', root]))
+      return { bash: JSON.parse(bash.stdout) as { [key: string]: JsonValue }, port: port.json }
+    })
+    expect({
+      bash: statuses(answers.bash),
+      port: statuses(answers.port as { [key: string]: JsonValue }),
+    }).toEqual({
+      bash: ['got@11:line_absent'],
+      port: ['got@11:requires_major_bump'],
+    })
+  })
+
+  it('agrees where every copy is below the line', async () => {
+    const input = envelope([
+      group('got', '11', { alerts: [{ vulnerable_range: '< 11.8.5' }], sibling_alerts: [] }),
+      group('marked', '4', { alerts: [{ vulnerable_range: '< 4.0.10' }], sibling_alerts: [] }),
+    ])
+    await withFixture('npm-major-bump-sole', (root) => expectSame(input, ['--repo-root', root]))
   })
 })

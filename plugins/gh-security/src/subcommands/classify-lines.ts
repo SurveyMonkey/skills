@@ -26,9 +26,13 @@
 //     resolved              a copy has the major `major_line`.
 //     requires_major_bump   the package is present, no copy is on the line,
 //                           and `compare_versions` puts every copy below
-//                           `<line>.0.0`.
-//     line_absent           present, no copy on the line, and at least one
-//                           copy at or above it.
+//                           `<line>.0.0`. Also (#168): the own-range check
+//                           (below) finds a copy below the line that an
+//                           alert range covers, with no sibling alert on
+//                           the major of that copy.
+//     line_absent           present, no copy on the line, at least one copy
+//                           at or above it, and no copy that the own-range
+//                           check finds.
 //     cross_line_collision  resolved, but the lines of the package share a
 //                           parent in a shape that no override key can
 //                           separate (below). `collision_parents` names them.
@@ -36,6 +40,23 @@
 //                           or `compare_versions` read failed or broke its
 //                           contract, `present` is false, `major_line` is
 //                           `none`, or the group has no `package`.
+//
+// **The own-range check** (ruling 3 on #168) runs only for a group with copies
+// on both sides of its line. It reads `vulnerable_range` of each alert
+// of the group. For each copy below the line, it asks the adapter's
+// `range_facts` if the range covers that copy. An alert with no range adds
+// nothing. A covered copy needs a patch on its own major. A sibling alert on
+// that major has one, and the group of that line owns the copy. With no such
+// sibling, the only fix moves the copy to another major. `validate` then
+// fails on the line that vanished. So the group needs a major bump. A broken
+// read (`alerts`, a range, `range_facts` or `sibling_alerts`) makes the group
+// `unknown`, and `classify_errors[]` names it.
+//
+// The sibling test is wide. A sibling alert can be for another advisory,
+// whose patch does not fix the alert of this group. A sibling alert carries
+// no advisory id, so the check cannot see this. The group then stays
+// `line_absent`. Its fix moves the copy to another major, and `validate`
+// fails on it. So the error is a wasted dispatch, never a pass.
 //
 // `requires_major_bump` groups move into `skipped` with the reason
 // `requires major version bump` (#101), and `cross_line_collision` groups with
@@ -129,6 +150,9 @@
 //     is. The script escaped it for one read and not for the other.
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says. The script wrote the JSON on stderr.
+//   - The own-range check is new (#168, a declared parity exception). The
+//     script gives `line_absent` to each group with a copy at or above its
+//     line, and has no such check.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -458,6 +482,66 @@ const resolvedOf = (value: unknown): Resolved | null => {
   return { ok: true, present: value.present, versions, majors }
 }
 
+/**
+ * The status of a `line_absent` group that has copies below its line (#168).
+ * It is `requires_major_bump` when an alert range of the group covers a copy
+ * below the line, and no sibling alert has the major of that copy. Else it
+ * stays `line_absent`. A read that breaks gives the error, and the caller
+ * makes the group `unknown`.
+ */
+const ownRangeStatus = (
+  adapter: Adapter<NodeDetection>,
+  group: JsonObject,
+  below: readonly string[],
+): 'line_absent' | 'requires_major_bump' | { readonly error: string } => {
+  const skipped = '; own-range check skipped'
+  const alerts = orElse(group.alerts, [])
+  if (!Array.isArray(alerts) || !alerts.every(isRecord)) {
+    return { error: `alerts is not a list of objects${skipped}` }
+  }
+  const ranges: string[] = []
+  for (const alert of alerts) {
+    const range = orElse(alert.vulnerable_range, null)
+    if (range === null) continue
+    if (typeof range !== 'string') {
+      return { error: `an alert vulnerable_range is not text: ${JSON.stringify(range)}${skipped}` }
+    }
+    ranges.push(range)
+  }
+  const covered: string[] = []
+  for (const version of below) {
+    for (const range of ranges) {
+      const answer = adapter.rangeFacts(range, version)
+      if (answer.outcome !== 'ok') return { error: answer.error }
+      const facts: Record<string, unknown> = isRecord(answer.value) ? answer.value : {}
+      if (facts.parseable !== true || typeof facts.satisfied !== 'boolean') {
+        return {
+          error: `range_facts could not read '${range}' for ${version}: ${JSON.stringify(answer.value)}${skipped}`,
+        }
+      }
+      if (facts.satisfied) covered.push(version)
+    }
+  }
+  if (covered.length === 0) return 'line_absent'
+  const siblings = group.sibling_alerts
+  const usable =
+    Array.isArray(siblings) &&
+    siblings.every(
+      (sibling) =>
+        isRecord(sibling) &&
+        (sibling.major === null || (Number.isInteger(sibling.major) && Number(sibling.major) >= 0)),
+    )
+  if (!usable) return { error: `sibling_alerts is not a list of {major} objects${skipped}` }
+  // A sibling alert has a patch on its own major. A copy on such a major
+  // belongs to that line, and the group of that line can fix it.
+  const patched: readonly unknown[] = (siblings as { major: number | null }[]).flatMap(
+    ({ major }) => (major === null ? [] : [String(major)]),
+  )
+  return covered.some((version) => !patched.includes(majorOf(version)))
+    ? 'requires_major_bump'
+    : 'line_absent'
+}
+
 /** The classification, with every adapter read in process. */
 const classify = (
   read: {
@@ -582,6 +666,7 @@ const classify = (
       if (majors.includes(line)) status = 'resolved'
       else {
         status = 'requires_major_bump'
+        const below: string[] = []
         for (const version of chomp(entry.versions.join('\n')).split('\n')) {
           const answer = adapter.compareVersions(version, `${line}.0.0`)
           const result: unknown =
@@ -589,7 +674,8 @@ const classify = (
           // A JSON number is finite. A NaN or an infinity from the adapter is
           // a broken answer, and JSON text cannot show it, so the error names it.
           if (typeof result === 'number' && Number.isFinite(result)) {
-            if (result >= 0 && status !== 'unknown') status = 'line_absent'
+            if (result < 0) below.push(version)
+            else if (status !== 'unknown') status = 'line_absent'
             continue
           }
           status = 'unknown'
@@ -600,6 +686,14 @@ const classify = (
               ? `compare_versions broke its contract (ADR 001): ${typeof result === 'number' ? `result ${result}` : JSON.stringify(answer.value)}`
               : answer.error,
           )
+        }
+        if (status === 'line_absent' && below.length > 0) {
+          const verdict = ownRangeStatus(adapter, group, below)
+          if (typeof verdict === 'string') status = verdict
+          else {
+            status = 'unknown'
+            note(name, pkg, verdict.error)
+          }
         }
       }
     }

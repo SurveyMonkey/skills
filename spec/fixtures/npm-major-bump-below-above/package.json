@@ -1,0 +1,9 @@
+{
+  "name": "demo-npm-major-bump-below-and-above",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "got": "12.6.1",
+    "package-json": "6.5.0"
+  }
+}

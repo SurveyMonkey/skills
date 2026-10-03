@@ -416,6 +416,382 @@ describe('the sibling alerts', () => {
   })
 })
 
+// #169: the field shape, a within-major dedup of js-yaml 3.x during a fix of
+// the 4.x line, with two majors in one lockfile. Each specimen is real output
+// of `npm install --package-lock-only` (npm 11.19.0) or `pnpm install
+// --lockfile-only` (pnpm 10.34.5). Before the fix, an override held the copy
+// of gray-matter at 3.15.0. The fix then let it dedup onto 3.15.2, which the
+// baseline already held. Each baseline is the answer of `node.sh
+// resolved_versions js-yaml` on the lockfile from before the fix. The port has
+// no defect here: node.sh and the port answer `benign_dedup` for this shape.
+// A sibling alert on the moved major keeps the move `fatal`, as #105 decided.
+const JS_YAML_BASELINES = {
+  'npm-dedup-within-major':
+    '{"pm":"npm","package":"js-yaml","present":true,"count":3,"versions":[{"version":"3.15.0","path":"node_modules/gray-matter/node_modules/js-yaml"},{"version":"3.15.2","path":"node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml"},{"version":"4.1.0","path":"node_modules/js-yaml"}],"lockfile_entries":24}',
+  'pnpm-dedup-within-major':
+    '{"pm":"pnpm","package":"js-yaml","present":true,"count":3,"versions":[{"version":"3.15.0","path":"js-yaml@3.15.0"},{"version":"3.15.2","path":"js-yaml@3.15.2"},{"version":"4.1.0","path":"js-yaml@4.1.0"}],"lockfile_entries":23}',
+} as const
+
+const MOVED_3X = {
+  major: 3,
+  before: ['3.15.0', '3.15.2'],
+  after: ['3.15.2'],
+  status: 'moved',
+}
+
+describe('a within-major dedup of another line (#169)', () => {
+  const dedupOf = (name: keyof typeof JS_YAML_BASELINES, siblingAlerts: string) => {
+    const value = answer(name, 'js-yaml', '>=4.1.1 <5', {
+      line: '4',
+      vulnerable: ['< 4.1.1'],
+      baseline: JS_YAML_BASELINES[name],
+      siblingAlerts,
+    })
+    return { ok: value.ok, moves: value.other_line_moves }
+  }
+
+  it.each([
+    ['npm-dedup-within-major', '[]'],
+    ['pnpm-dedup-within-major', '[]'],
+    ['npm-dedup-within-major', '[{"major":null,"vulnerable_ranges":["< 3.14.2"]}]'],
+    ['pnpm-dedup-within-major', '[{"major":5,"vulnerable_ranges":[">= 5.0.0, < 5.0.1"]}]'],
+  ] as const)('classifies the dedup on %s with siblings %s as benign', (name, siblings) => {
+    expect(dedupOf(name, siblings)).toEqual({
+      ok: true,
+      moves: [{ ...MOVED_3X, class: 'benign_dedup' }],
+    })
+  })
+
+  it.each([
+    [
+      'a sibling alert on major 3 whose range misses',
+      '[{"major":3,"vulnerable_ranges":["< 3.14.2"]}]',
+    ],
+    [
+      'a sibling range that matches the version that left',
+      '[{"major":null,"vulnerable_ranges":["< 3.15.1"]}]',
+    ],
+  ])('keeps the dedup fatal under npm and pnpm with %s', (_name, siblings) => {
+    expect([
+      dedupOf('npm-dedup-within-major', siblings),
+      dedupOf('pnpm-dedup-within-major', siblings),
+    ]).toEqual([
+      { ok: false, moves: [{ ...MOVED_3X, class: 'fatal' }] },
+      { ok: false, moves: [{ ...MOVED_3X, class: 'fatal' }] },
+    ])
+  })
+})
+
+// #170: the field shape, on real output of `npm install --package-lock-only`
+// (npm 11.19.0). The fix of the bn.js 4.x line wrote the nested override
+// `{"public-encrypt": {"bn.js": ">=4.12.3 <5"}}`. npm applies it to the whole
+// subtree of public-encrypt. So browserify-rsa, which declares `^5.2.1`, got a
+// new nested copy at 4.12.5. The 5.x line keeps 5.2.5, so no line moved. The
+// baseline is the answer of `node.sh resolved_versions bn.js` on the lockfile
+// from before the override.
+const BN_BASELINE =
+  '{"pm":"npm","package":"bn.js","present":true,"count":3,"versions":[{"version":"4.12.5","path":"node_modules/asn1.js/node_modules/bn.js"},{"version":"4.12.5","path":"node_modules/public-encrypt/node_modules/bn.js"},{"version":"5.2.5","path":"node_modules/bn.js"}],"lockfile_entries":57}'
+
+const BN_ARGS = { line: '4', vulnerable: ['< 4.12.3'], siblingAlerts: '[]' }
+
+const RSA_PATH = 'node_modules/browserify-rsa/node_modules/bn.js'
+
+const RSA_BREAK = {
+  parent: 'node_modules/browserify-rsa',
+  range: '^5.2.1',
+  path: RSA_PATH,
+  version: '4.12.5',
+}
+
+/** A bn.js baseline with these copies, as `[path, version]`. */
+const bnBaseline = (...copies: readonly (readonly [string, string])[]) =>
+  JSON.stringify({
+    package: 'bn.js',
+    versions: copies.map(([path, version]) => ({ version, path })),
+  })
+
+/** The verdict and the breaks of `validate` on a tree. */
+const breaksIn = (tree: Tree<NodeDetection>, baseline: string | null) => {
+  const envelope = node.validate(
+    tree,
+    'bn.js',
+    '>=4.12.3 <5',
+    options({ ...BN_ARGS, baseline, siblingAlerts: baseline === null ? null : '[]' }),
+  )
+  if (envelope.outcome !== 'ok') throw new Error(`validate failed: ${envelope.error}`)
+  return { ok: envelope.value.ok, breaks: envelope.value.parent_range_breaks }
+}
+
+/** A copy of the #170 specimen with its lockfile edited. */
+const editedSpecimen = (edit: (packages: Record<string, Record<string, unknown>>) => void) => {
+  const fixture = useFixture('npm-new-nested-path')
+  onTestFinished(fixture.cleanup)
+  const lockPath = join(fixture.path, 'package-lock.json')
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+    packages: Record<string, Record<string, unknown>>
+  }
+  edit(lock.packages)
+  writeFileSync(lockPath, JSON.stringify(lock))
+  return treeAt(fixture.path)
+}
+
+const declare = (
+  packages: Record<string, Record<string, unknown>>,
+  key: string,
+  range: string,
+): void => {
+  packages[key] = {
+    ...packages[key],
+    dependencies: { ...(packages[key]?.dependencies as object), 'bn.js': range },
+  }
+}
+
+describe('a copy at a new path that breaks the range of its parent (#170)', () => {
+  it('flags the new nested copy, and fails', () => {
+    const value = answer('npm-new-nested-path', 'bn.js', '>=4.12.3 <5', {
+      ...BN_ARGS,
+      baseline: BN_BASELINE,
+    })
+    expect({
+      ok: value.ok,
+      moves: value.other_line_moves,
+      breaks: value.parent_range_breaks,
+    }).toEqual({ ok: false, moves: [], breaks: [RSA_BREAK] })
+  })
+
+  it.each([
+    [
+      'flags only the break when two new copies satisfy their parents',
+      bnBaseline(['node_modules/bn.js', '5.2.5']),
+      [RSA_BREAK],
+    ],
+    [
+      'flags a copy that changed version at a path of the baseline',
+      bnBaseline(
+        ['node_modules/asn1.js/node_modules/bn.js', '4.12.5'],
+        ['node_modules/public-encrypt/node_modules/bn.js', '4.12.5'],
+        [RSA_PATH, '5.2.5'],
+        ['node_modules/bn.js', '5.2.5'],
+      ),
+      [RSA_BREAK],
+    ],
+    [
+      'reads a baseline copy with no path as no path, so each copy counts as changed',
+      JSON.stringify({
+        package: 'bn.js',
+        versions: [{ version: '4.12.5' }, { version: '5.2.5', path: 5 }],
+      }),
+      [RSA_BREAK],
+    ],
+    [
+      'does not flag a break that the baseline already had at that path',
+      bnBaseline(
+        ['node_modules/asn1.js/node_modules/bn.js', '4.12.5'],
+        ['node_modules/public-encrypt/node_modules/bn.js', '4.12.5'],
+        [RSA_PATH, '4.12.5'],
+        ['node_modules/bn.js', '5.2.5'],
+      ),
+      [],
+    ],
+  ])('%s', (_name, baseline, breaks) => {
+    expect(breaksIn(treeOf('npm-new-nested-path'), baseline)).toEqual({
+      ok: breaks.length === 0,
+      breaks,
+    })
+  })
+
+  // The npm collapse of #83: each copy of minimatch now resolves the one
+  // brace-expansion 5.0.9 at the root. Two of them declare a range on major
+  // 1 or 2 (probed: `jq '.packages | to_entries[] |
+  // select(.value.dependencies["brace-expansion"])'` on the lockfile).
+  it('flags each parent of the collapsed npm specimen that declares another major', () => {
+    const value = answer('npm-cross-line-collapsed', 'brace-expansion', '>=5.0.9 <6', {
+      line: '5',
+      vulnerable: ['< 5.0.9'],
+      baseline:
+        '{"package":"brace-expansion","versions":[{"version":"5.0.5","path":"node_modules/brace-expansion"},{"version":"2.0.2","path":"node_modules/filelist/node_modules/brace-expansion"},{"version":"1.1.11","path":"node_modules/glob/node_modules/brace-expansion"}]}',
+    })
+    expect({ ok: value.ok, breaks: value.parent_range_breaks }).toEqual({
+      ok: false,
+      breaks: [
+        {
+          parent: 'node_modules/filelist/node_modules/minimatch',
+          range: '^2.0.1',
+          path: 'node_modules/brace-expansion',
+          version: '5.0.9',
+        },
+        {
+          parent: 'node_modules/glob/node_modules/minimatch',
+          range: '^1.1.7',
+          path: 'node_modules/brace-expansion',
+          version: '5.0.9',
+        },
+      ],
+    })
+  })
+
+  it('answers null when no baseline is given', () => {
+    expect(breaksIn(treeOf('npm-new-nested-path'), null)).toEqual({ ok: true, breaks: null })
+  })
+
+  it.each([
+    ['pnpm-dedup-within-major', JS_YAML_BASELINES['pnpm-dedup-within-major']],
+    ['yarn-multi-major', '{"package":"undici","versions":[{"version":"7.27.2"}]}'],
+  ])(
+    'answers null on %s, whose lockfile records no declared range for a copy',
+    (name, baseline) => {
+      const pkg = name.startsWith('pnpm') ? 'js-yaml' : 'undici'
+      const envelope = node.validate(
+        treeOf(name),
+        pkg,
+        '>=1.0.0',
+        options({ line: name.startsWith('pnpm') ? '4' : '7', vulnerable: ['< 1.0.0'], baseline }),
+      )
+      expect(envelope.outcome === 'ok' && envelope.value.parent_range_breaks).toBeNull()
+    },
+  )
+
+  it('does not flag a new copy past a range on its own major, which an override does on purpose', () => {
+    const tree = editedSpecimen((packages) =>
+      declare(packages, 'node_modules/public-encrypt', '4.11.0'),
+    )
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
+
+  // The floor is the lowest bound. 4.12.5 is above 4.0.0, and only in a gap
+  // between the two alternatives, so it is no break.
+  it('does not flag a new copy above the floor, in a gap of the range on its own major', () => {
+    const tree = editedSpecimen((packages) =>
+      declare(packages, 'node_modules/public-encrypt', '>=4.0.0 <4.12.0 || >=4.13.0'),
+    )
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
+
+  // Each range has its floor on major 4 at or below 4.12.5, and does not
+  // admit 4.12.5. So the copy is at or above the floor on its own major. Probe:
+  // npm 11's semver gives `satisfies('4.12.5', range)` false, and
+  // `minVersion(range)` 4.0.1, 4.11.0, 4.0.0 and 4.11.0. A `>` bound below
+  // the copy admits it. The bound loses its `~`, `^` or `v` before compare.
+  it.each(['>4.0.0 <4.12.0 || >=4.13.0', '~4.11.0', '^4.0.0 <4.12.0', 'v4.11.0'])(
+    'does not flag a new copy at or above the floor %j on its own major',
+    (range) => {
+      const tree = editedSpecimen((packages) =>
+        declare(packages, 'node_modules/public-encrypt', range),
+      )
+      expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+        ok: false,
+        breaks: [RSA_BREAK],
+      })
+    },
+  )
+
+  // A copy below the floor of a range on its own major is a break. Real npm
+  // 11 output: with the override `{"browserify-rsa": {"bn.js": "5.0.0"}}`,
+  // npm writes `node_modules/browserify-rsa/node_modules/bn.js` at 5.0.0,
+  // under the range `^5.2.1`. Here public-encrypt declares a range above its
+  // copy at 4.12.5. `>4.12.5` does not admit its own bound. A `<` comparator
+  // is no floor, so the floor of `<4.12.0 || >=4.13.0` is 4.13.0. That fails
+  // closed: npm admits no 4.12.x version there.
+  it.each(['^4.13.0', '>4.12.5', '<4.12.0 || >=4.13.0'])(
+    'flags a new copy below the floor %j on its own major',
+    (range) => {
+      const tree = editedSpecimen((packages) =>
+        declare(packages, 'node_modules/public-encrypt', range),
+      )
+      expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+        ok: false,
+        breaks: [
+          RSA_BREAK,
+          {
+            parent: 'node_modules/public-encrypt',
+            range,
+            path: 'node_modules/public-encrypt/node_modules/bn.js',
+            version: '4.12.5',
+          },
+        ],
+      })
+    },
+  )
+
+  // `^4.0.0 || latest` admits 4.12.5 on its first alternative, and its floor
+  // is on major 4. So only the parse test makes it a break.
+  it.each(['latest', '', 'npm:other@^5.0.0', '^4.0.0 || latest'])(
+    'flags a new copy whose parent declares the range %j, which does not parse',
+    (range) => {
+      const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', range))
+      expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+        ok: false,
+        breaks: [
+          {
+            parent: 'node_modules/asn1.js',
+            range,
+            path: 'node_modules/asn1.js/node_modules/bn.js',
+            version: '4.12.5',
+          },
+          RSA_BREAK,
+        ],
+      })
+    },
+  )
+
+  it('does not flag a new copy that satisfies a range whose floor is on another major', () => {
+    const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', '>=3'))
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5']))).toEqual({
+      ok: false,
+      breaks: [RSA_BREAK],
+    })
+  })
+
+  it('flags a range that the copy breaks with no floor, such as <4', () => {
+    const tree = editedSpecimen((packages) => declare(packages, 'node_modules/asn1.js', '<4'))
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks).toEqual([
+      {
+        parent: 'node_modules/asn1.js',
+        range: '<4',
+        path: 'node_modules/asn1.js/node_modules/bn.js',
+        version: '4.12.5',
+      },
+      RSA_BREAK,
+    ])
+  })
+
+  it('sorts two parents of one copy by the parent', () => {
+    const tree = editedSpecimen((packages) => {
+      packages['node_modules/browserify-rsa/node_modules/zz'] = {
+        version: '1.0.0',
+        dependencies: { 'bn.js': '^5.0.0' },
+      }
+      packages['node_modules/browserify-rsa/node_modules/aa'] = {
+        version: '1.0.0',
+        dependencies: { 'bn.js': '^5.0.0' },
+      }
+    })
+    expect(
+      breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks?.map(
+        ({ parent }) => parent,
+      ),
+    ).toEqual([
+      'node_modules/browserify-rsa',
+      'node_modules/browserify-rsa/node_modules/aa',
+      'node_modules/browserify-rsa/node_modules/zz',
+    ])
+  })
+
+  it('skips a declaration that resolves no copy', () => {
+    const tree = editedSpecimen((packages) => {
+      packages['node_modules/lonely'] = { version: '1.0.0', dependencies: { 'bn.js': '^6.0.0' } }
+      delete packages['node_modules/bn.js']
+    })
+    expect(breaksIn(tree, bnBaseline(['node_modules/bn.js', '5.2.5'])).breaks).toEqual([RSA_BREAK])
+  })
+})
+
 const CROSS_BASELINE = JSON.stringify({
   package: 'brace-expansion',
   versions: [{ version: '1.1.11' }, { version: '2.0.2' }, { version: '5.0.5' }],
@@ -483,6 +859,7 @@ describe('the verdicts of the constraint and completeness checks', () => {
       unresolved_alerts: [],
       requires_major_bump: [],
       other_line_moves: null,
+      parent_range_breaks: null,
       resolved_versions: ['5.29.0', '6.24.1', '7.27.2'],
     })
   })
@@ -500,6 +877,7 @@ describe('the verdicts of the constraint and completeness checks', () => {
       unresolved_alerts: [],
       requires_major_bump: [],
       other_line_moves: null,
+      parent_range_breaks: null,
       resolved_versions: ['5.29.0', '6.24.1', '7.27.2'],
     })
   })

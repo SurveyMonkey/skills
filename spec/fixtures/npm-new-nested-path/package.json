@@ -1,0 +1,14 @@
+{
+  "name": "demo-npm-new-nested-path",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "bn.js": "^5.2.1",
+    "public-encrypt": "4.0.3"
+  },
+  "overrides": {
+    "public-encrypt": {
+      "bn.js": ">=4.12.3 <5"
+    }
+  }
+}
