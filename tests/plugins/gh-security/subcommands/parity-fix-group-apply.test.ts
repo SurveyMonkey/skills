@@ -32,6 +32,9 @@
 // records the `ecosystem` that routes it.
 //
 // Declared differences, not compared:
+//   - The `validate` answer of the port carries `parent_range_breaks` (#170),
+//     which `node.sh` does not write. The compare drops that key from the
+//     port side, wherever it is in an answer or in the state.
 //   - The port takes no `--adapter`. The route is the `ecosystem` of the
 //     group, through the registry.
 //   - The words on stderr. Each failure row compares the JSON on stdout,
@@ -185,6 +188,18 @@ const stateOf = (w: World): JsonValue => {
   const { adapter: _adapter, ecosystem: _ecosystem, ...rest } = JSON.parse(text) as Group
   return rest
 }
+
+/** A value without the `parent_range_breaks` key (#170), at any depth. */
+const withoutRangeBreaks = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(withoutRangeBreaks)
+    : typeof value === 'object' && value !== null
+      ? Object.fromEntries(
+          Object.entries(value)
+            .filter(([key]) => key !== 'parent_range_breaks')
+            .map(([key, entry]) => [key, withoutRangeBreaks(entry)]),
+        )
+      : value
 
 /** Remove what a side made, so the other side starts from the same place. */
 const reset = (w: World): void => {
@@ -348,6 +363,6 @@ const ROWS: readonly Row[] = [
 describe('fix-group apply against fix-group.sh', () => {
   it.each(ROWS.map((row) => [row.name, row] as const))('%s', async (_name, row) => {
     const { bash, typescript } = await sides(row)
-    expect(typescript).toEqual(bash)
+    expect(withoutRangeBreaks(typescript)).toEqual(bash)
   })
 })
