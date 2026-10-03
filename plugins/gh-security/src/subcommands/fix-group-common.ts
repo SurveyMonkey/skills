@@ -1,7 +1,7 @@
 // What the phases of `fix-group` share: the outcome of a failed phase, the
-// git and package-manager runners under the prefix, the adapter route, and
-// the rules for the drift commit. The contract is in the header of
-// `fix-group.ts`.
+// git and package-manager runners under the prefix, the adapter route, the
+// rules for the drift commit, and the install with its one retry. The
+// contract is in the header of `fix-group.ts`.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -29,8 +29,8 @@ export interface FixGroupDeps {
  */
 export const DRIFT_SUBJECT = 'chore(deps): refresh lockfile (control install, no manifest change)'
 
-/** The phase names of an exit 3 that `setup`, `classify` and `baseline` give. */
-export type FailedPhase = 'worktree' | 'classify' | 'baseline'
+/** The phase names of an exit 3. `apply` gives `apply` and `validate`. */
+export type FailedPhase = 'worktree' | 'classify' | 'baseline' | 'apply' | 'validate'
 
 /**
  * Exit 3: a terminal failure of one phase, `fail_phase` in the bash. The
@@ -176,3 +176,53 @@ export const porcelainPaths = (porcelain: string): string[] =>
       const arrow = path.lastIndexOf(' -> ')
       return arrow === -1 ? path : path.slice(arrow + ' -> '.length)
     })
+
+/**
+ * The failures that one more install can clear: a connection that timed
+ * out, was reset, or could not resolve a name this time. Not `ENOTFOUND`,
+ * which is usually a wrong registry host, and not the bare `request to ...
+ * failed`, which npm also writes for a certificate or a proxy refusal. The
+ * match is for each line, as `grep` matches.
+ */
+const REGISTRY_TIMEOUT =
+  /ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|network timeout|Timeout awaiting|registry.*timed? ?out/i
+
+/** The line that pnpm 11 writes when it does not read the `pnpm` field (#159). */
+const PNPM_FIELD_IGNORED = 'The "pnpm" field in package.json is no longer read by pnpm'
+
+/** What one install, with its one retry, said. */
+export interface InstallRun {
+  readonly ok: boolean
+  /** stdout, a newline, then stderr, as the bash captured them. */
+  readonly output: string
+  readonly retried: boolean
+  readonly signals: readonly string[]
+}
+
+/** One install. A failure of the verb itself is a failed install with its message. */
+const installOnce = async (loaded: Loaded): Promise<{ ok: boolean; output: string }> => {
+  const tree = loaded.tree()
+  const answer =
+    tree.outcome === 'ok'
+      ? await loaded.adapter.install(tree.value, { run: loaded.pm, env: loaded.env })
+      : tree
+  if (answer.outcome !== 'ok') return { ok: false, output: `\n${answer.error}` }
+  const { stdout, stderr } = answer.value
+  return { ok: answer.value.ok, output: `${chomp(stdout)}\n${chomp(stderr)}` }
+}
+
+/**
+ * The install, with one retry for a failure that has the shape of a registry
+ * timeout, and no retry for any other failure (#122). The control install
+ * of `baseline` and each fix install of `apply` run through it.
+ */
+export const runInstall = async (loaded: Loaded): Promise<InstallRun> => {
+  let run = await installOnce(loaded)
+  let retried = false
+  if (!run.ok && REGISTRY_TIMEOUT.test(run.output)) {
+    retried = true
+    run = await installOnce(loaded)
+  }
+  const signals = run.output.includes(PNPM_FIELD_IGNORED) ? ['pnpm_field_no_longer_read'] : []
+  return { ...run, retried, signals }
+}
