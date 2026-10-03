@@ -13,10 +13,12 @@
 // restores the tree between the two runs. So a refusal that names a path
 // names the same path on each side.
 //
-// The directory is a scratch copy of a fixture, with the `.git` pointer file
-// of a linked worktree, as `use_fixture` makes it. The guard of each side
-// reads that file and runs no git. A second describe runs the guard cases in
-// real repositories that harness/git.ts builds.
+// The directory is a scratch copy of a fixture. `fakeLinkedWorktree` gives it
+// the `.git` pointer file of a linked worktree. It also makes a real gitdir
+// beside it, with a `commondir` file. The guard of each side reads these
+// files and runs no git. Only the TypeScript guard reads `commondir` (#304
+// item 1). A second describe runs the guard cases in real repositories that
+// harness/git.ts builds.
 //
 // Three kinds of case run:
 //
@@ -37,6 +39,18 @@
 //   - The examples that run `detect`, `list_pins`, `validate` or
 //     `resolved_versions` without `apply_constraint`. Other parity files
 //     cover those verbs.
+//
+// Declared exception (#50, ruling 2), a case of its own below: a pnpm parent
+// with a git copy beside two registry copies. bash writes keys qualified by
+// the registry versions, which miss the git copy. The port refuses, and
+// writes nothing. Beside one registry copy, both sides write the plain key.
+// That is true for a git URL with an `@`. For another copy from outside the
+// registry, such as a `git+https` URL, bash keeps the edge. Beside two
+// registry copies, the port refuses it in the same way. Beside one registry
+// copy, the port writes the plain key, and bash writes a qualified key for
+// each copy. Where a copy has the package on another major line, the port
+// refuses the plain key too (#50). No fixture has such a copy as a parent,
+// so the unit tests hold these cases.
 //
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There
@@ -431,7 +445,9 @@ const SPEC_CASES: readonly Case[] = [
   after(
     'a worktree of a repository under modules/',
     'yarn-berry',
-    pointer('/src/modules/app/.git/worktrees/fix'),
+    // A real gitdir with a `commondir` file, beside the copy: the
+    // TypeScript guard reads it (#304).
+    `mkdir -p ../src/modules/app/.git/worktrees/fix && printf '../..\\n' > ../src/modules/app/.git/worktrees/fix/commondir && ${pointer('../src/modules/app/.git/worktrees/fix')}`,
     ...LODASH,
   ),
   call('a linked worktree', 'yarn-berry', ...LODASH),
@@ -1246,8 +1262,30 @@ const odd: readonly Case[] = [
   ),
 ]
 
+/** The git parent of #50: beside one registry copy, and beside two. */
+const GIT_PARENT_AGREES = call(
+  'a git parent beside one registry copy',
+  'pnpm-git-parent',
+  'ms',
+  '^2.1.3',
+  'debug',
+)
+const GIT_PARENT_REFUSED = call(
+  'a git parent beside two registry copies',
+  'pnpm-git-parent-copies',
+  'ms',
+  '>=2.1.3 <3',
+  'debug',
+)
+
 /** The cases whose bash side runs before the examples, at the same time. */
-const ALL_CASES: readonly Case[] = [...SPEC_CASES, ...generated, ...odd]
+const ALL_CASES: readonly Case[] = [
+  ...SPEC_CASES,
+  ...generated,
+  ...odd,
+  GIT_PARENT_AGREES,
+  GIT_PARENT_REFUSED,
+]
 
 /** The time limit of the bash side of all cases together. */
 const BASH_TIMEOUT_MS = 590_000
@@ -1269,6 +1307,30 @@ describe('apply_constraint parity on the odd cases', () => {
     'agrees on %s: %s',
     (_fixture, _title, testCase) => {
       expect(outcomeOf(testCase)).toMatchObject(AGREE)
+    },
+    CASE_TIMEOUT_MS,
+  )
+})
+
+describe('apply_constraint parity on a git parent (#50)', () => {
+  it(
+    'agrees beside one registry copy',
+    () => {
+      expect(outcomeOf(GIT_PARENT_AGREES)).toMatchObject(AGREE)
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  // The declared exception of ruling 2 on #50.
+  it(
+    'differs beside two registry copies: bash writes, and the port refuses and writes nothing',
+    () => {
+      const outcome = outcomeOf(GIT_PARENT_REFUSED)
+      expect(outcome.answer.startsWith('bash answered: ')).toBe(true)
+      expect({ wrote: outcome.wrote, treesDiffer: outcome.tree !== null }).toEqual({
+        wrote: false,
+        treesDiffer: true,
+      })
     },
     CASE_TIMEOUT_MS,
   )

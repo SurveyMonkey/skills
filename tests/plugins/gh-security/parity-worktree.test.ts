@@ -9,8 +9,15 @@
 //
 // The script reads `$PWD`. The paths here are real paths, so `$PWD` and the
 // directory that the function is given are the same string.
+//
+// Declared exception (#304 item 1): the function also requires a `commondir`
+// file in the gitdir of a linked worktree, and the script does not. So a
+// submodule at a `worktrees/` path of a superproject cloned with
+// `--separate-git-dir`, which the script passes, is refused by the function.
+// A hand-written pointer that reads as a worktree gets a `commondir`. So that
+// row compares only how each side reads the pointer text.
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { requireLinkedWorktree } from '#gh-security/worktree.ts'
@@ -45,12 +52,45 @@ const withSubmodule = ({ fixtures, root }: Scene, name = 'main') => {
   return { main, submodule: join(main, 'sub') }
 }
 
-/** A `.git` file that git itself never writes, in a directory of its own. */
+/**
+ * A `.git` file that git itself never writes, in a directory of its own.
+ * `/abs` goes under the scene, and a gitdir in the scene gets a `commondir`
+ * file, as git writes for a linked worktree (#304).
+ */
 const pointer = ({ root }: Scene, content: string): string => {
   const directory = join(root, 'hand-written')
   mkdirSync(directory)
-  writeFileSync(join(directory, '.git'), content)
+  const text = content.replaceAll('gitdir: /abs', `gitdir: ${root}/abs`)
+  writeFileSync(join(directory, '.git'), text)
+  const gitdir = resolve(directory, text.slice('gitdir: '.length).split('\n', 1).join(''))
+  if (text.startsWith('gitdir: ') && gitdir.startsWith(`${root}/`)) {
+    mkdirSync(gitdir, { recursive: true })
+    writeFileSync(join(gitdir, 'commondir'), '../..\n')
+  }
   return directory
+}
+
+/**
+ * A submodule at `worktrees/foo` of a superproject cloned with
+ * `--separate-git-dir`. Its gitdir has no `/.git/` (#304 item 1).
+ */
+const separateGitDirSubmodule = ({ fixtures, root }: Scene): string => {
+  const source = fixtures.create(join(root, 'source'))
+  const origin = fixtures.createAt(root, 'origin')
+  fixtures.git(origin, ...ALLOW_FILE, 'submodule', 'add', '--quiet', source, 'worktrees/foo')
+  fixtures.git(origin, 'commit', '--quiet', '-m', 'add the submodule')
+  const superproject = join(root, 'super')
+  fixtures.git(
+    root,
+    'clone',
+    '--quiet',
+    '--separate-git-dir',
+    join(root, 'sepgit'),
+    origin,
+    superproject,
+  )
+  fixtures.git(superproject, ...ALLOW_FILE, 'submodule', 'update', '--init', '--quiet')
+  return join(superproject, 'worktrees', 'foo')
 }
 
 type Build = (scene: Scene) => string
@@ -235,6 +275,17 @@ describe('requireLinkedWorktree parity', () => {
     expect(typescript.outcome === 'failed' && typescript.error).toContain(
       '/worktrees/wt/modules/worktrees/foo)',
     )
+  })
+
+  // Declared exception, #304 item 1: the script passes this submodule.
+  it('differs on a submodule of a --separate-git-dir superproject (#304)', () => {
+    const submodule = separateGitDirSubmodule(scene())
+    const { bash, typescript } = verdicts(submodule)
+    expect(bash.status).toBe(0)
+    expect(typescript).toEqual({
+      outcome: 'failed',
+      error: `refusing to run here: ${submodule} is not a linked worktree (its gitdir ../../../sepgit/modules/worktrees/foo has no commondir file). Create the fix worktree with git worktree add and run the command as: cd <worktree> && <command>.`,
+    })
   })
 
   it('agrees on the message when the caller names a context', () => {

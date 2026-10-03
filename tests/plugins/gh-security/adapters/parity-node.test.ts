@@ -19,11 +19,10 @@
 // the environment of this process, and the TypeScript side reads PATH from
 // that same environment.
 //
-// Declared out, each with its reason:
-//
-//   - `pnpm-git-parent`, for `resolved_versions` and `resolution_map` only.
-//     This is the #50 divergence. The lockfile unit tests hold its expected
-//     value.
+// No fixture is out. On `pnpm-git-parent` and `pnpm-git-parent-copies`,
+// bash and the port agree on `resolved_versions` and `resolution_map`. The
+// #50 differences are the name of a git parent (parity-node-tree.test.ts)
+// and the refusal of ruling 2 (parity-node-apply-constraint.test.ts).
 //
 // Declared divergence in the exit status: where jq itself stops, bash exits
 // with jq's own status 5, and writes jq's own message. That status is not
@@ -54,10 +53,6 @@ const ENV = { PATH: process.env.PATH }
 
 /** The status jq exits with when its program stops with an error. */
 const JQ_ERROR = 5
-
-const DECLARED: Readonly<Record<string, string>> = {
-  'pnpm-git-parent': 'declared divergence: #50',
-}
 
 // The names an `npm:` alias installs a copy under. They are not keys of the
 // map, and `resolved_versions` must answer for them too (ADR 001, "One
@@ -142,7 +137,7 @@ const treeOf = (dir: string): Tree<NodeDetection> => {
 type Accepted = Fixture & { readonly map: BashResult }
 
 const accepted: Accepted[] = fixtures
-  .filter(({ name, detected }) => detected.status === 0 && !(name in DECLARED))
+  .filter(({ detected }) => detected.status === 0)
   .map((fixture) => ({ ...fixture, map: bash(fixture.dir, 'resolution_map') }))
 
 /** The map that bash answers, or none when bash refuses the lockfile. */
@@ -198,13 +193,17 @@ describe('the fixture set', () => {
     }).toEqual({ npm: true, pnpm: true, yarn: true, bun: 3, 'yarn-classic': 3, 'no-lockfile': 1 })
   })
 
-  it.each(Object.keys(DECLARED))('still carries the declared fixture %s', (name) => {
-    expect(existsSync(join(FIXTURES_ROOT, name))).toBe(true)
-  })
-
   it.each(Object.keys(ALIAS_KEYS))('still accepts the alias fixture %s', (name) => {
     expect(accepted.map((fixture) => fixture.name)).toContain(name)
   })
+
+  // Each side must agree on the git parent fixtures of #50.
+  it.each(['pnpm-git-parent', 'pnpm-git-parent-copies'])(
+    'compares the git parent fixture %s',
+    (name) => {
+      expect(accepted.map((fixture) => fixture.name)).toContain(name)
+    },
+  )
 
   it('finds version pairs and range pairs to compare', () => {
     expect({ versions: versionPairs.length > 0, ranges: rangePairs.length > 0 }).toEqual({

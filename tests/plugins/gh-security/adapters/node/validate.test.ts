@@ -223,9 +223,42 @@ describe('the alert ranges', () => {
     })
   })
 
-  it('passes the line guard with a flag that holds only a newline, as node.sh does', () => {
-    const value = answer(MULTI, 'undici', '>=7.0.0 <8', { line: '7', vulnerable: ['\n'] })
-    expect({ ok: value.ok, checked: value.checked }).toEqual({ ok: true, checked: 1 })
+  // #304 item 2. node.sh strips a comparator and then a `^` or `~`, so its
+  // token check passes `<^7.0.0`. jq then reads it as `<0.0.0`, which
+  // matches nothing: `validate --line 6 --vulnerable '<^7.0.0' undici
+  // '>=6.0.0 <7'` on yarn-multi-major answers `ok: true`, and `'<7.0.0'`
+  // answers `ok: false` with 6.24.1 unresolved (node.sh, probed). The port
+  // refuses a comparator with a `^` or `~` after it.
+  it.each(['<^7.0.0', '>=^5.0.0', '<~6', '>=~1.2.3', '=^1.0.0', '< 1.0.0 || <^7.0.0'])(
+    'refuses the range %j, a comparator and then a caret or a tilde (#304)',
+    (range) => {
+      expect(refusal(MULTI, 'undici', '>=6.0.0 <7', { line: '6', vulnerable: [range] })).toEqual({
+        outcome: 'failed',
+        error: `validate: --vulnerable range '${range}' is not a parseable version range. Copy the alert's vulnerable_range verbatim; an unreadable range would silently mark every resolved copy as not vulnerable.`,
+      })
+    },
+  )
+
+  // #304 item 3. node.sh tests the raw text of the flags, so a flag that
+  // holds only newlines passes its line guard, and the completeness check
+  // then has no range. The port tests the ranges after the split.
+  it.each([[['\n']], [['\n\n']], [['\n', '\n']]])(
+    'refuses a line whose alert flags %j hold only newlines (#304)',
+    (vulnerable) => {
+      expect(refusal(MULTI, 'undici', '>=7.0.0 <8', { line: '7', vulnerable })).toEqual({
+        outcome: 'failed',
+        error:
+          "validate: --line requires at least one --vulnerable range. Pass every distinct vulnerable_range from the group's alerts; without them the completeness check has nothing to check and would pass a partial fix (issue #19).",
+      })
+    },
+  )
+
+  it('answers with no line and a flag that holds only a newline, as with no flag', () => {
+    const value = answer(MULTI, 'undici', '>=5.0.0', { vulnerable: ['\n'] })
+    expect({ ok: value.ok, unresolved_alerts: value.unresolved_alerts }).toEqual({
+      ok: true,
+      unresolved_alerts: [],
+    })
   })
 })
 

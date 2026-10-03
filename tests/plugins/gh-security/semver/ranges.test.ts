@@ -339,6 +339,32 @@ describe('tokenParseable', () => {
   ])('reads %s as parseable=%s', (token, expected) => {
     expect(tokenParseable(token)).toBe(expected)
   })
+
+  // #304 item 2 on the `range_facts` path. jq strips a comparator and then a
+  // `^` or `~`, so it calls these tokens parseable. Its evaluator then reads
+  // the bound as a version with major 0: `<^5.0.0` is `<0.0.0`. Probe, jq
+  // 1.8.1: `node.sh range_facts '<^5.0.0' 4.0.0` gives parseable true and
+  // satisfied false, and `node.sh range_facts '<5.0.0' 4.0.0` gives satisfied
+  // true. `=^1.0.0` against 1.0.0, `>=~1.2.3` against 0.0.1 and `<=~2.0.0`
+  // against 3.0.0 give false, and `>^1` against 0.0.1 gives true. Each is a
+  // misread, so here each token is unreadable. A declared parity exception.
+  it.each([['<^5.0.0'], ['=^1.0.0'], ['>=~1.2.3'], ['<=~2.0.0'], ['>^1'], ['<~5.0.0']])(
+    'reads %s, a comparator and then a caret or tilde, as unreadable (#304)',
+    (token) => {
+      expect(tokenParseable(token)).toBe(false)
+    },
+  )
+
+  // One operator, then `v` or `=`, as the version allows. jq reads each one
+  // right, and so does the port. Probe, jq 1.8.1: `node.sh range_facts
+  // '^=1.0.0' 1.5.0`, `'~v1.2.3' 1.2.9`, `'>=v1.2.3' 1.2.3`, `'>==1.0.0'
+  // 1.0.0` and `'~=1.2.3' 1.2.9` each give parseable true and satisfied true.
+  it.each([['^=1.0.0'], ['~v1.2.3'], ['>=v1.2.3'], ['>==1.0.0'], ['~=1.2.3']])(
+    'still reads %s as parseable',
+    (token) => {
+      expect(tokenParseable(token)).toBe(true)
+    },
+  )
 })
 
 describe('rangeParseable', () => {

@@ -297,12 +297,13 @@ describe('the listing', () => {
     expect(value(await check(['lodash'], [bare])).verdict).toBeNull()
   })
 
-  it('counts an advisory that has no range, so a version reads safe', async () => {
+  // #304 item 4. The script answers `safe` here.
+  it('counts an advisory that has no range, so a version reads unknown (#304)', async () => {
     const bare = { vulnerabilities: [{ package: { name: 'lodash', ecosystem: 'npm' } }] }
     expect(value(await check(['--version', '1.0.0', 'lodash'], [bare]))).toMatchObject({
       advisory_count: 1,
       vulnerable_ranges: [],
-      verdict: 'safe',
+      verdict: 'unknown',
     })
   })
 
@@ -444,6 +445,97 @@ describe('the four verdicts', () => {
       unevaluated_ranges: ['see vendor advisory'],
       adapter_errors: [],
     })
+  })
+
+  // #304 item 2 on this path. jq reads `<^5.0.0` as `<0.0.0`, so the script
+  // answers `safe` for 4.0.0 (probe, jq 1.8.1: `node.sh range_facts
+  // '<^5.0.0' 4.0.0` gives parseable true and satisfied false). The range is
+  // unreadable here, so the verdict is `unknown`.
+  it('is unknown, and never safe, for a comparator and then a caret (#304)', async () => {
+    const advisories = [
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', '<^5.0.0')] }),
+    ]
+    expect(await verdict('4.0.0', advisories)).toMatchObject({
+      verdict: 'unknown',
+      matched_ranges: [],
+      unevaluated_ranges: ['<^5.0.0'],
+      adapter_errors: [],
+    })
+  })
+
+  // #304 item 4. An advisory entry with no range could not be evaluated. So
+  // when no range matched, the verdict is `unknown`, never `safe`.
+  it.each([
+    [
+      'a null range',
+      [advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', null)] })],
+    ],
+    [
+      'two null ranges',
+      [
+        advisory('GHSA-aaaa-1111-bbbb', {
+          vulnerabilities: [vuln('lodash', null), vuln('lodash', null, '1.0.0')],
+        }),
+      ],
+    ],
+    [
+      'a missing range',
+      [
+        advisory('GHSA-aaaa-1111-bbbb', {
+          vulnerabilities: [{ package: { name: 'lodash', ecosystem: 'npm' } }],
+        }),
+      ],
+    ],
+    [
+      'a null range beside ranges that do not match',
+      [...LODASH, advisory('GHSA-jjjj-5555-kkkk', { vulnerabilities: [vuln('lodash', null)] })],
+    ],
+  ])('is unknown, and never safe, for an advisory with %s (#304)', async (_name, advisories) => {
+    expect(await verdict('4.17.21', advisories)).toMatchObject({
+      verdict: 'unknown',
+      matched_ranges: [],
+      unevaluated_ranges: [],
+      adapter_errors: [],
+    })
+  })
+
+  it('is vulnerable, and not unknown, when one range matched beside an advisory with no range', async () => {
+    const advisories = [
+      ...LODASH,
+      advisory('GHSA-jjjj-5555-kkkk', { vulnerabilities: [vuln('lodash', null)] }),
+    ]
+    expect(await verdict('4.17.20', advisories)).toMatchObject({
+      verdict: 'vulnerable',
+      matched_ranges: ['< 4.17.21'],
+    })
+  })
+
+  it('answers no verdict for an advisory with a null range and no version', async () => {
+    const advisories = [
+      advisory('GHSA-aaaa-1111-bbbb', { vulnerabilities: [vuln('lodash', null)] }),
+    ]
+    expect(value(await check(['lodash'], advisories)).verdict).toBeNull()
+  })
+
+  it('is safe beside an advisory with no range for another package', async () => {
+    const advisories = [
+      ...LODASH,
+      advisory('GHSA-jjjj-5555-kkkk', {
+        vulnerabilities: [vuln('lodash', '< 1.0.0'), vuln('lodash-es', null)],
+      }),
+    ]
+    expect(await verdict('4.17.21', advisories)).toMatchObject({ verdict: 'safe' })
+  })
+
+  it('is safe beside a withdrawn advisory with no range', async () => {
+    const advisories = [
+      ...LODASH,
+      advisory('GHSA-jjjj-5555-kkkk', {
+        withdrawn_at: '2024-01-01T00:00:00Z',
+        vulnerabilities: [vuln('lodash', null)],
+      }),
+    ]
+    expect(await verdict('4.17.21', advisories)).toMatchObject({ verdict: 'safe' })
   })
 
   it('is vulnerable, and not unknown, when one range matched and another could not be read', async () => {

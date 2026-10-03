@@ -16,6 +16,14 @@
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
+// Declared parity exceptions (#50, ruling 2). A pnpm parent can have a copy
+// from outside the registry, such as a git copy. Where the keys of that
+// parent must be version-qualified, the port refuses. Where it keeps the
+// plain key and a copy has the package on another major line, the port also
+// refuses. node.sh writes keys in both cases. Beside one registry copy on
+// the line, the port writes the plain key. For a URL with no `@`, node.sh
+// writes a qualified key for each copy there.
+//
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
 // package.json, then package-lock.json. As in node.sh, a later step can
@@ -61,7 +69,11 @@ import { writePass } from './override-pass.ts'
 import {
   bareConflict,
   npmEdges,
+  outsideRegistryRefusal,
+  plainKeyRefusal,
+  pnpmCopiesOutsideRegistry,
   pnpmEdges,
+  pnpmParentsOffLine,
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
@@ -189,10 +201,9 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   }
   let qualifiers: Qualifiers = new Map()
   if (location !== 'resolutions' && parents.length > 0) {
-    const edges =
-      location === 'pnpm.overrides'
-        ? pnpmEdges(readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8'), pkg)
-        : npmEdges(npmLock(), pkg)
+    const pnpmLock =
+      location === 'pnpm.overrides' ? readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8') : null
+    const edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
     qualifiers = orStop(
       qualifiersOf(
         { location, edges, parents, target: targetOf(range), manifest },
@@ -200,6 +211,17 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
         pkg,
       ),
     )
+    // A qualified key misses a copy of its parent from outside the registry
+    // (#50, ruling 2). A plain key can move such a parent's copy across its
+    // line (#50).
+    if (pnpmLock !== null) {
+      const outside = pnpmCopiesOutsideRegistry(pnpmLock, pkg)
+      const offLine = pnpmParentsOffLine(pnpmLock, pkg, targetOf(range))
+      const refusal =
+        outsideRegistryRefusal(qualifiers, outside, pkg) ??
+        plainKeyRefusal(parents, outside, offLine, pkg)
+      if (refusal !== null) throw new Error(refusal.error)
+    }
   }
   if (location === 'overrides' && qualifiers.size > 0) {
     const conflict = bareConflict(qualifiers, placements, manifest, pkg, range)

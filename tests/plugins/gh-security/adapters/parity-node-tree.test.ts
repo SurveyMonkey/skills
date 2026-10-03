@@ -24,8 +24,10 @@
 // Declared out of `why` and `declared_ranges`, each with its reason. The
 // unit tests hold the TypeScript answer for each:
 //
-//   - `pnpm-git-parent`: the #50 divergence. bash names the parent
-//     `debug@git+ssh://git`, and the TypeScript reader names it `debug`.
+//   - `pnpm-git-parent` and `pnpm-git-parent-copies`: the #50 divergence.
+//     bash names the parent `debug@git+ssh://git`, and the TypeScript reader
+//     names it `debug`. The refusal of ruling 2 on #50 is in
+//     parity-node-apply-constraint.test.ts.
 //   - `npm-v1`: bash reads no parents from a lockfileVersion 1 lockfile and
 //     answers with none. The TypeScript reader refuses that lockfile, as
 //     `resolved_versions` does on both sides. Zero parents from a lockfile
@@ -64,7 +66,8 @@ const WHY_TIMEOUT_MS = 60_000
 const JQ_ERROR = 5
 
 const DECLARED: Readonly<Record<string, string>> = {
-  'pnpm-git-parent': 'declared divergence: #50',
+  'pnpm-git-parent': 'declared divergence: #50, the name of a git parent',
+  'pnpm-git-parent-copies': 'declared divergence: #50, the name of a git parent',
   'npm-v1': 'declared divergence: bash reads no parents from lockfileVersion 1',
 }
 

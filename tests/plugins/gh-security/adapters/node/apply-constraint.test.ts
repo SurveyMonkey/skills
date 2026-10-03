@@ -131,6 +131,38 @@ const refusalOf = (fixture: string, args: readonly string[], setup?: Setup): str
   return envelope.error
 }
 
+/**
+ * The error of a pnpm refusal that comes before the first write: the manifest
+ * and the lockfile after it are the files before it.
+ */
+const pnpmRefusalOf = (fixture: string, args: readonly string[], setup?: Setup): string => {
+  const dir = copyOf(fixture, setup)
+  const files = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']
+  const before = files.map((file) => readOptional(dir, file))
+  const envelope = node.applyConstraint(treeAt(dir), requestOf(args))
+  if (envelope.outcome === 'ok') throw new Error('apply_constraint answered ok')
+  expect(files.map((file) => readOptional(dir, file))).toEqual(before)
+  return envelope.error
+}
+
+/** The version of the git copy of `debug` in the pnpm-git-parent fixtures. */
+const GIT_DEBUG =
+  'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
+
+/** The refusal of #50, written by hand from ruling 2. */
+const outsideRegistryRefusal = (
+  pkg: string,
+  parents: readonly (readonly [string, readonly string[]])[],
+): string =>
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
+
+/** The second refusal of #50: the plain key would move a copy across its major line. */
+const plainKeyRefusal = (
+  pkg: string,
+  parents: readonly (readonly [string, readonly string[]])[],
+): string =>
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail keeps the plain '<parent>>${pkg}' key, and pnpm applies that key to each copy of the parent. A copy of the parent has '${pkg}' on another major line, so the key would move that copy across its line (issue #50). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, so that a key can name each copy of the parent.`
+
 const readOptional = (dir: string, file: string): string | null => {
   try {
     return textAt(dir, file)
@@ -210,7 +242,14 @@ describe('mutating verbs run only in a linked worktree', () => {
     ['a linked worktree', undefined],
     [
       'a linked worktree of a repository under modules/',
-      pointer('/src/modules/app/.git/worktrees/fix'),
+      // A real gitdir with a `commondir` file (#304), beside the copy, where
+      // the cleanup of the fixture removes it.
+      (dir: string) => {
+        const gitdir = join(`${dir}.main`, 'src', 'modules', 'app', '.git', 'worktrees', 'fix')
+        mkdirSync(gitdir, { recursive: true })
+        writeFileSync(join(gitdir, 'commondir'), '../..\n')
+        pointer(gitdir)(dir)
+      },
     ],
   ])('proceeds in %s', (_where, setup) => {
     const { package: pkg, pm } = answer('yarn-berry', LODASH, setup)
@@ -300,8 +339,10 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   })
 
   // node.sh names this git copy `debug@git+ssh://git`, so no parent `debug`
-  // reads it. The port drops its edge too (#50). Each expected value is the
-  // answer of node.sh on the same copy.
+  // reads it. The port drops its edge too (#50). Each expected key is the
+  // answer of node.sh on the same copy. Ruling 2 on #50: where the keys of
+  // `debug` must be version-qualified, the port refuses instead, because no
+  // qualified key matches the git copy.
   /**
    * Copies of `debug` beside the git copy, each with its version of `ms`. A
    * copy with the version '' has the snapshot key `debug`, with no version.
@@ -325,14 +366,6 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   it.each([
     ['one registry copy', [['4.3.4', '2.1.3']], { 'debug>ms': '^2.1.3' }],
     [
-      'two registry copies',
-      [
-        ['4.3.4', '2.1.2'],
-        ['2.6.9', '2.0.0'],
-      ],
-      { 'debug@2.6.9>ms': '^2.1.3', 'debug@4.3.4>ms': '^2.1.3' },
-    ],
-    [
       'two registry copies and a copy with no version',
       [
         ['4.3.4', '2.1.2'],
@@ -348,6 +381,211 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       registryCopies(...copies),
     )
     expect(pnpmOverrides(manifest)).toEqual(keys)
+  })
+
+  // #50 asks for the git parent through `why` and then `apply_constraint`.
+  // `why` names the parent; the call scopes `ms` to the parents it names.
+  const parentsByWhy = async (fixture: string): Promise<readonly string[]> => {
+    const answered = await node.why(treeAt(join(FIXTURES_ROOT, fixture)), 'ms', { raw: '' })
+    if (answered.outcome !== 'ok') throw new Error(`why failed: ${answered.error}`)
+    return answered.value.parents
+  }
+
+  it('scopes through the parent that why names, with one registry copy, by the plain key', async () => {
+    const parents = await parentsByWhy('pnpm-git-parent')
+    expect(parents).toEqual(['debug'])
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', ...parents])
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+  })
+
+  it('refuses the parent that why names, beside two registry copies, and writes nothing (#50)', async () => {
+    const parents = await parentsByWhy('pnpm-git-parent-copies')
+    expect(parents).toEqual(['debug'])
+    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])).toBe(
+      outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
+
+  it('names each refused parent, and only the parents with a git copy (#50)', () => {
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'finalhandler', 'debug']),
+    ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
+
+  /** Copies of `parent` at the start of each section, each with its version of `ms`. */
+  const parentCopies =
+    (parent: string, ...copies: (readonly [string, string])[]): Setup =>
+    (dir) => {
+      const packages = copies.map(([pver]) => `  ${parent}@${pver}:\n    resolution: {}\n\n`)
+      const snapshots = copies.map(
+        ([pver, ms]) => `  ${parent}@${pver}:\n    dependencies:\n      ms: ${ms}\n\n`,
+      )
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      const edited = text
+        .replace('packages:\n\n', `packages:\n\n${packages.join('')}`)
+        .replace('snapshots:\n\n', `snapshots:\n\n${snapshots.join('')}`)
+      if (edited === text) throw new Error('the lockfile has no packages or snapshots section')
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), edited)
+    }
+
+  // `send` gets qualified keys too, but it has no git copy.
+  it('leaves a qualified parent with no git copy out of the detail (#50)', () => {
+    const send = parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'])
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], send),
+    ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
+
+  it('gives each refused parent its own git copies, in the order of the file (#50)', () => {
+    const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
+    const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
+    const setup = both(
+      parentCopies('debug', [debugGit, '2.1.2']),
+      parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
+    )
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], setup),
+    ).toBe(
+      outsideRegistryRefusal('ms', [
+        ['send', [sendGit]],
+        ['debug', [debugGit, GIT_DEBUG]],
+      ]),
+    )
+  })
+
+  // The order of the call, not of the file: here `debug` comes first in the
+  // call, and `send` first in the file.
+  it('gives the refused parents in the order of the call (#50)', () => {
+    const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
+    const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
+    const setup = both(
+      parentCopies('debug', [debugGit, '2.1.2']),
+      parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
+    )
+    expect(
+      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug', 'send'], setup),
+    ).toBe(
+      outsideRegistryRefusal('ms', [
+        ['debug', [debugGit, GIT_DEBUG]],
+        ['send', [sendGit]],
+      ]),
+    )
+  })
+
+  it('refuses a git copy of the parent beside two registry copies (#50)', () => {
+    const error = pnpmRefusalOf(
+      'pnpm-git-parent',
+      ['ms', '^2.1.3', 'debug'],
+      registryCopies(['4.3.4', '2.1.2'], ['2.6.9', '2.0.0']),
+    )
+    expect(error).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
+  })
+
+  // Ruling 2 on #50 names each git copy, and a git URL can have no `@`. The
+  // specifier sets the shape. For `github:`, pnpm writes a codeload tarball.
+  // A `git+https` specifier can give a URL with no `@`. A `file:` copy is
+  // also outside the registry.
+  const OTHER_COPIES = [
+    'git+https://git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    'https://codeload.github.com/example/debug/tar.gz/da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    'file:vendor/debug-4.3.4.tgz',
+  ]
+
+  /** The git copy of `debug` in the lockfile, moved to `version`. */
+  const gitCopyAt =
+    (version: string): Setup =>
+    (dir) => {
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      const moved = text.replaceAll(GIT_DEBUG, version)
+      if (moved === text) throw new Error('the lockfile has no git copy of debug')
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), moved)
+    }
+
+  it.each(OTHER_COPIES)('refuses a copy at %s beside two registry copies (#50)', (version) => {
+    const setup = gitCopyAt(version)
+    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
+      outsideRegistryRefusal('ms', [['debug', [version]]]),
+    )
+  })
+
+  it.each(OTHER_COPIES)(
+    'writes the plain key for a copy at %s beside one registry copy (#50)',
+    (version) => {
+      const setup = both(gitCopyAt(version), registryCopies(['4.3.4', '2.1.3']))
+      const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+      expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+    },
+  )
+
+  /** The `ms` of the git copy of `debug`, moved to `version`. Run it before `gitCopyAt`. */
+  const gitChildAt =
+    (version: string): Setup =>
+    (dir) => {
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      const from = `  debug@${GIT_DEBUG}:\n    dependencies:\n      ms: 2.1.2\n`
+      const moved = text.replace(
+        from,
+        `  debug@${GIT_DEBUG}:\n    dependencies:\n      ms: ${version}\n`,
+      )
+      if (moved === text) throw new Error('the lockfile has no git copy of debug with ms 2.1.2')
+      writeFileSync(join(dir, 'pnpm-lock.yaml'), moved)
+    }
+
+  /** The git copy of `debug` at `version`, or as the fixture has it. */
+  const copyAt = (version: string): Setup =>
+    version === GIT_DEBUG ? () => undefined : gitCopyAt(version)
+
+  // The plain key reaches each copy of the parent. A real pnpm 10.34.5 run
+  // gave this: with `debug>ms` in the overrides, `pnpm install
+  // --lockfile-only` moved the `ms` of a codeload copy of `debug`. So where a
+  // copy of the parent has `ms` on another major line, the plain key moves
+  // that copy across its line. node.sh writes `debug@4.3.4>ms` here for a
+  // URL with no `@`, and the plain key for a URL with an `@` (#50).
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
+    'refuses the plain key when a copy at %s has ms on another line (#50)',
+    (version) => {
+      const setup = both(gitChildAt('1.0.0'), copyAt(version), registryCopies(['4.3.4', '2.1.3']))
+      expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+        plainKeyRefusal('ms', [['debug', [version]]]),
+      )
+    },
+  )
+
+  // Here the copy from outside the registry is on the line, and each registry
+  // copy is not. No registry copy is on the line, so no key is qualified, and
+  // the plain key would move both registry copies. node.sh writes a key that
+  // names the URL, or the plain key for a URL with an `@` (#50).
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
+    'refuses the plain key when a copy at %s is the one copy on the line (#50)',
+    (version) => {
+      const setup = both(copyAt(version), registryCopies(['2.6.9', '1.0.0'], ['3.0.0', '1.1.0']))
+      expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+        plainKeyRefusal('ms', [['debug', [version]]]),
+      )
+    },
+  )
+
+  // A range with no floor has no line, so no copy is off the line.
+  it('writes the plain key for a range with no floor beside a git copy on another line (#50)', () => {
+    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3']))
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '<3', 'debug'], setup)
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '<3' })
+  })
+
+  // A child with no readable line counts as on the line, as in `qual_result`.
+  it('writes the plain key when the ms of the git copy has no readable line (#50)', () => {
+    const setup = both(gitChildAt('link:vendor/ms'), registryCopies(['4.3.4', '2.1.3']))
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+    expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
+  })
+
+  // A qualified parent with a git copy gets the first refusal, also when a
+  // copy is off the line.
+  it('gives the qualified-key refusal before the plain-key refusal (#50)', () => {
+    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3'], ['2.6.9', '1.0.0']))
+    expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+      outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
   })
 
   // The multiplicity gate reads the snapshot edges, not `packages:`.

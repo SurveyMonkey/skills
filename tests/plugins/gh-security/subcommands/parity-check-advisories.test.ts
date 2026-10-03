@@ -27,6 +27,10 @@
 //     unevaluated (ruling 12 on #225). The unit tests hold it, because the
 //     real adapter never gives one. A `parseable` that is not true or false
 //     is the same case (#302).
+//
+// Declared exception, compared below: with `--version`, an advisory entry with
+// a null range gives the verdict `unknown` in the port, where no range
+// matched. The script answers `safe` (#304 item 4).
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -265,6 +269,25 @@ describe('check-advisories parity: the verdict for a candidate version', () => {
       args('lodash', { version: '4.17.21' }),
     )) as Record<string, unknown>
     expect(answer.adapter_errors).toEqual([])
+  })
+})
+
+describe('check-advisories parity: the declared exception of #304', () => {
+  it('answers unknown for an advisory with a null range, where the script answers safe', async () => {
+    const pages = PAGES()
+    pages[0]?.push(advisory('GHSA-jjjj-5555-kkkk', { vulnerabilities: [vuln('lodash', null)] }))
+    const given = args('lodash', { version: '4.17.21' })
+    const bash = bashSide({ pages }, given.bash)
+    const typescript = answerOf(await typescriptSide({ pages }, given.typescript))
+    expect(bash.status).toBe(0)
+    expect((JSON.parse(bash.stdout) as Record<string, unknown>).verdict).toBe('safe')
+    expect(typescript.json).toMatchObject({ verdict: 'unknown', advisory_count: 4 })
+    expect(
+      firstDifference(
+        { ...(JSON.parse(bash.stdout) as Record<string, JsonValue>), verdict: 'unknown' },
+        typescript.json as JsonValue,
+      ),
+    ).toBe(null)
   })
 })
 

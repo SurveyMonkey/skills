@@ -30,6 +30,16 @@
 // A parent with one version keeps the bare key. Yarn keys stay bare, so this
 // pass does not run for yarn.
 //
+// A pnpm parent can also have a copy from outside the registry. Examples are
+// a git URL, a codeload tarball and a `file:` path. No key qualified by a
+// registry version matches that copy. So where the keys of that parent must
+// be version-qualified, the call refuses before any write (#50, ruling 2).
+// The plain key reaches each copy of the parent. So with one registry copy,
+// the plain key covers the other copy too. Where a copy has the package on
+// another major line, the plain key moves it across that line, and the call
+// refuses (#50). Both refusals are declared parity exceptions. For the
+// writes of node.sh, see `pnpmEdges`.
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { type Failure, failed } from '../../lib/envelope.ts'
@@ -49,6 +59,14 @@ type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: un
 const MISSING = '-'
 
 /**
+ * A parent version from outside the registry (#50). A registry version starts
+ * with a digit, as `parent.version` of the pnpm reader does. A git URL, with
+ * or without an `@`, a codeload tarball and a `file:` path do not.
+ */
+const isOutsideRegistry = (parentVersion: string | null): parentVersion is string =>
+  parentVersion !== null && !/^[0-9]/.test(parentVersion)
+
+/**
  * The edges of pnpm, from `pnpm_edge_rows`. A child version that does not
  * start with a digit is `-` here. node.sh keeps its text, and reads no
  * major from it unless it starts with `v` and then a digit. pnpm writes no
@@ -57,18 +75,41 @@ const MISSING = '-'
  * The parent name ends at its first `@` here, and at its last `@` in
  * node.sh (#50). The two differ only for a parent version with an `@`, for
  * example a `git+ssh://git@` copy. node.sh gives that copy a different
- * parent name, so no parent of the call matches it. The port drops its
- * edge, as node.sh does in effect.
+ * parent name, so no parent of the call matches it.
+ *
+ * The port drops the edge of each copy from outside the registry. For a
+ * version with an `@`, node.sh does this in effect. For another version,
+ * such as a `git+https` URL, node.sh keeps the edge. Then it can write a key
+ * that names the URL: a declared parity exception (#50).
+ * `pnpmCopiesOutsideRegistry` keeps these copies for the refusals of #50.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpm
     .scan(text, pkg)
-    .edges.filter(({ parentVersion }) => parentVersion?.includes('@') !== true)
+    .edges.filter(({ parentVersion }) => !isOutsideRegistry(parentVersion))
     .map(({ parent, parentVersion, version }) => ({
       parent: parent.name,
       pver: parentVersion ?? MISSING,
       cver: version ?? MISSING,
     }))
+
+/** The versions from outside the registry of each pnpm parent of `pkg`, in the order of the file. */
+export const pnpmCopiesOutsideRegistry = (
+  text: string,
+  pkg: string,
+): ReadonlyMap<string, readonly string[]> => {
+  const copies = pnpm
+    .scan(text, pkg)
+    .edges.flatMap(({ parent, parentVersion }) =>
+      isOutsideRegistry(parentVersion) ? [{ name: parent.name, version: parentVersion }] : [],
+    )
+  return new Map(
+    copies.map(({ name }) => [
+      name,
+      copies.filter((copy) => copy.name === name).map(({ version }) => version),
+    ]),
+  )
+}
 
 /** The edges of npm, from `npm_copy_rows`. */
 export const npmEdges = (lock: NpmLock, pkg: string): readonly Edge[] =>
@@ -119,6 +160,13 @@ export type QualifierQuery = {
   readonly manifest: unknown
 }
 
+/** The major line of a child version, as `qual_result` reads it, or null when it has none. */
+const lineOf = (cver: unknown): string | null => {
+  // jq stops on an empty major, as `test` does on a value that is not a text.
+  const major = split(trimStart(cver, 'v'), '.')[0]
+  return test(major, /^[0-9]+$/) ? (major as string) : null
+}
+
 /** `qual_result`, for one parent that the lockfile resolves at more than one version. */
 const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   const { location, target } = query
@@ -126,11 +174,7 @@ const verdictOf = (query: QualifierQuery, parent: string): Verdict | null => {
   const read = edges.filter(({ pver }) => pver !== MISSING)
   if (unique(read.map(({ pver }) => pver)).length <= 1) return null
   const unreadable = edges.some(({ pver }) => pver === MISSING)
-  const rows = read.map(({ pver, cver }) => {
-    // jq stops on an empty major, as `test` does on a value that is not a text.
-    const major = split(trimStart(cver, 'v'), '.')[0]
-    return { pver, cm: test(major, /^[0-9]+$/) ? (major as string) : null }
-  })
+  const rows = read.map(({ pver, cver }) => ({ pver, cm: lineOf(cver) }))
   const onLine = unique(
     rows.filter(({ cm }) => target === '' || cm === null || cm === target).map(({ pver }) => pver),
   )
@@ -246,5 +290,74 @@ export const bareConflict = (
   }
   return failed(
     `apply_constraint: a pre-existing bare override for '${pkg}' under a parent this call must version-qualify pins a DIFFERENT major line: ${render(detail, null)}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+  )
+}
+
+/**
+ * The refusal of #50 (ruling 2): a pnpm parent that this call qualifies has a
+ * copy from outside the registry, such as a git copy. No key qualified by a
+ * registry version matches that copy, so the fix would leave it as it is. The
+ * detail names each such parent, in the order of the call, with the versions
+ * of those copies.
+ */
+export const outsideRegistryRefusal = (
+  qualifiers: Qualifiers,
+  outside: ReadonlyMap<string, readonly string[]>,
+  pkg: string,
+): Failure | null => {
+  const detail = [...qualifiers.keys()].flatMap((parent) => {
+    const versions = outside.get(parent)
+    return versions === undefined ? [] : [{ parent, versions_outside_registry: versions }]
+  })
+  if (detail.length === 0) return null
+  return failed(
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
+  )
+}
+
+/**
+ * The pnpm parents of `pkg` with a copy whose `pkg` is on a major line other
+ * than `target`. A copy from outside the registry counts too. As in
+ * `qual_result`, a child with no readable line counts as on the line. With
+ * no `target`, no copy is off the line.
+ */
+export const pnpmParentsOffLine = (
+  text: string,
+  pkg: string,
+  target: string,
+): ReadonlySet<string> =>
+  new Set(
+    pnpm
+      .scan(text, pkg)
+      .edges.filter(({ version }) => {
+        const line = lineOf(version ?? MISSING)
+        return target !== '' && line !== null && line !== target
+      })
+      .map(({ parent }) => parent.name),
+  )
+
+/**
+ * The second refusal of #50. A pnpm parent of the call keeps the plain key,
+ * and it has a copy from outside the registry. pnpm applies the plain key to
+ * each copy of the parent. So where a copy of the parent has `pkg` on another
+ * major line, the plain key moves that copy across its line. The detail names
+ * each such parent, in the order of the call, with the versions of its copies
+ * from outside the registry. The call runs it after `outsideRegistryRefusal`,
+ * which refuses first each qualified parent with such a copy.
+ */
+export const plainKeyRefusal = (
+  parents: readonly string[],
+  outside: ReadonlyMap<string, readonly string[]>,
+  offLine: ReadonlySet<string>,
+  pkg: string,
+): Failure | null => {
+  const detail = [...new Set(parents)].flatMap((parent) => {
+    const versions = outside.get(parent)
+    if (versions === undefined || !offLine.has(parent)) return []
+    return [{ parent, versions_outside_registry: versions }]
+  })
+  if (detail.length === 0) return null
+  return failed(
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail keeps the plain '<parent>>${pkg}' key, and pnpm applies that key to each copy of the parent. A copy of the parent has '${pkg}' on another major line, so the key would move that copy across its line (issue #50). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, so that a key can name each copy of the parent.`,
   )
 }
