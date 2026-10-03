@@ -4,6 +4,8 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import { compareJq } from '../jq.ts'
+
 /** The package manager a reader names in a refusal. */
 export type Pm = 'npm' | 'pnpm' | 'yarn'
 
@@ -94,8 +96,14 @@ export const guarded = (pm: Pm, coverage: Coverage): Coverage => {
   return coverage
 }
 
-// Code unit order, which is the order of jq's `sort` for these names.
-const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
+/**
+ * The order of text: by code point, as jq's `sort`, `unique` and `keys` order
+ * it (#303). It is also the order of `sort -u` in the C locale, because the
+ * UTF-8 bytes of text sort as its code points do. The order of UTF-16 units
+ * differs above U+FFFF. node.sh does not set the locale, so its `sort -u`
+ * follows this order only in the C locale.
+ */
+export const byText = (a: string, b: string): number => compareJq(a, b)
 
 /** `unique_by(.version + .path)`: one copy per key, sorted by that key. */
 export const uniqueCopies = (copies: readonly ResolvedCopy[]): readonly ResolvedCopy[] =>

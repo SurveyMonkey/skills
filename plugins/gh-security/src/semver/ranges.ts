@@ -23,11 +23,15 @@ export type RangeFacts = {
   readonly majors_ahead: number | null
 }
 
-// `[[:space:]]` as Oniguruma reads it, spelled out rather than written `\s`,
-// which in JavaScript also matches Unicode separators the jq original never
-// did. The comma joins it wherever a range is tokenized, because a GitHub
-// advisory separates comparators with one (">= 7.0.0, < 7.29.0").
-const SPACE = ' \\t\\n\\v\\f\\r'
+// `[[:space:]]` as Oniguruma reads it in jq: the Unicode White_Space set, which
+// is more than ASCII (#303). It is spelled out rather than written `\s`,
+// because `\s` in JavaScript also matches U+FEFF, which jq does not, and it
+// lacks U+0085, which jq does match. The set came from
+// `jq -nc '[range(0;65536) | select([.] | implode | test("^[[:space:]]$"))]'`
+// on jq 1.8.1. The comma joins it wherever a range is tokenized, because a
+// GitHub advisory separates comparators with one (">= 7.0.0, < 7.29.0").
+const SPACE =
+  ' \\t\\n\\v\\f\\r\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 const OPERATOR_SPACE = new RegExp(`([<>=~^]+)[${SPACE}]+`, 'g')
 const TOKEN_SEPARATOR = new RegExp(`[${SPACE},]+`)
 const FLAT_TOKEN_SEPARATOR = new RegExp(`[${SPACE},|]+`)
@@ -130,18 +134,27 @@ export const evalToken = (token: string, version: string): boolean => {
  * already present in real manifests, and GitHub advisory syntax
  * (`>= 7.0.0, < 7.29.0`).
  *
- * It stops at the first answer, and it reads an alternative with no
- * comparator as a match. jq reads each comparator, and stops on such an
- * alternative or on a comparator that it cannot read. `validate` needs the
- * jq answer for a range that it did not parse first. So
- * `src/adapters/node/validate.ts` does not call this function.
+ * It stops where jq stops (#303). jq reads each alternative and each
+ * comparator, with no early exit. So a comparator with no version, such as a
+ * bare `>=`, `^`, `=` or `v`, stops it, also after a match. An alternative
+ * with no comparator also stops it, for example `>=0 ||`, and so does a range
+ * of white space only. This function throws in those cases. An empty range
+ * has no alternative, and the answer is false. The node verbs `validate` and
+ * `apply_constraint` use this function, and `rangeFacts` calls it only for a
+ * range that `rangeParseable` accepted.
  */
 export const satisfies = (version: string, range: string): boolean =>
-  splitLiteral(tightenOperators(range), '||').some((alternative) =>
-    nonEmpty(alternative.split(TOKEN_SEPARATOR))
-      .flatMap(expandToken)
-      .every((token) => evalToken(token, version)),
-  )
+  rangeAlternatives(range)
+    .map((tokens) => {
+      if (tokens.length === 0) {
+        throw new Error(`the range '${range}' has an alternative with no comparator`)
+      }
+      return tokens
+        .flatMap(expandToken)
+        .map((token) => evalToken(token, version))
+        .every(Boolean)
+    })
+    .some(Boolean)
 
 /**
  * Every comparator token in a range, with the `||` groups flattened, for the
@@ -193,8 +206,9 @@ export const tokenParseable = (token: string): boolean => {
 /**
  * Can this range be read at all?
  *
- * {@link satisfies} answers false for a token it cannot parse, so a specifier
- * like `workspace:^`, `latest`, or a git URL would otherwise come back as a
+ * {@link satisfies} reads a token it cannot parse as a version of zero, and
+ * throws on an alternative with no comparator. So a specifier like
+ * `workspace:^`, `latest`, or a git URL would otherwise come back as a
  * confident "this version is not admitted" and be reported as a dependent
  * left behind. Unreadable is a third answer, and the callers return it rather
  * than guessing (review follow-up on issue #21).

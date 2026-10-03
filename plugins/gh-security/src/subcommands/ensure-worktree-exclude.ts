@@ -25,8 +25,10 @@
 
 import { randomBytes } from 'node:crypto'
 import {
-  chmodSync,
+  closeSync,
+  fchmodSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -62,6 +64,9 @@ const STALE_LOCK_MS = 60_000
 
 /** The mode that git gives a new exclude file. */
 const NEW_FILE_MODE = 0o644
+
+/** The end of the temporary file name. A test replaces it, to meet a name that is taken. */
+const randomSuffix = (): string => randomBytes(4).toString('hex')
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -152,14 +157,32 @@ const withLine = (text: string): string =>
 /**
  * Write the new exclude file beside the old one, and rename it over. The
  * rename is one step, so a reader sees the old file or the new file. The
- * temporary file is removed when a step fails.
+ * temporary file is removed when a step after the open fails. When the open
+ * itself fails, this call created nothing, so it removes nothing. The cause
+ * can be a name that is taken, because `wx` refuses it, or an I/O error
+ * (issue #302).
  */
-const publish = (infoDir: string, exclude: string, existing: Existing): boolean => {
-  const temporary = join(infoDir, `.exclude.${randomBytes(4).toString('hex')}`)
+const publish = (
+  infoDir: string,
+  exclude: string,
+  existing: Existing,
+  suffix: () => string,
+): boolean => {
+  const temporary = join(infoDir, `.exclude.${suffix()}`)
+  let fd: number
   try {
-    writeFileSync(temporary, withLine(existing.text), { flag: 'wx', encoding: 'latin1' })
-    // After the write, because the mode of a new file follows the umask.
-    chmodSync(temporary, existing.mode)
+    fd = openSync(temporary, 'wx', existing.mode)
+  } catch {
+    return false
+  }
+  try {
+    try {
+      writeFileSync(fd, withLine(existing.text), 'latin1')
+      // After the write, because the mode of a new file follows the umask.
+      fchmodSync(fd, existing.mode)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(temporary, exclude)
     return true
   } catch {
@@ -177,6 +200,7 @@ export const ensureWorktreeExclude = async (
   repoRoot: string,
   env: Readonly<Record<string, string | undefined>>,
   timing: LockTiming,
+  suffix: () => string = randomSuffix,
 ): Promise<Envelope<JsonObject>> => {
   if (statOrNull(repoRoot)?.isDirectory() !== true) {
     return failed(`repo_root does not exist: ${repoRoot}`)
@@ -202,7 +226,7 @@ export const ensureWorktreeExclude = async (
     if (hasLine(exclude)) return report('already-present')
     const existing = readExisting(exclude)
     if (existing.outcome !== 'ok') return existing
-    return publish(infoDir, exclude, existing.value)
+    return publish(infoDir, exclude, existing.value, suffix)
       ? report('added')
       : failed(`cannot publish ${exclude}`)
   } finally {

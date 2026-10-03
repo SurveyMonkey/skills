@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { type Envelope, failed } from '../../lib/envelope.ts'
 import * as npm from '../../lockfiles/npm.ts'
 import * as pnpm from '../../lockfiles/pnpm.ts'
-import type { Copy, Parent } from '../../lockfiles/shared.ts'
+import { byText, type Copy, type Parent } from '../../lockfiles/shared.ts'
 import * as yarn from '../../lockfiles/yarn.ts'
 import type { ParentsAnswer, Tree } from '../adapter.ts'
 import { attempt } from './attempt.ts'
@@ -34,10 +34,9 @@ export const lockfileText = ({ root, detection }: Tree<NodeDetection>): string =
 /** The reader for the manager that the detection names. */
 export const readerOf = ({ detection }: Tree<NodeDetection>): Reader => READERS[detection.pm]
 
-// Code unit order. For these names, it is the order of jq's `unique` and
-// `keys`, and of `sort -u` in the C locale. node.sh does not set the locale,
-// so the order of its `sort -u` is the same only in the C locale.
-export const byText = (a: string, b: string): number => Number(a > b) - Number(a < b)
+// The one order of text, defined in `src/lockfiles/shared.ts` and exported
+// from here for the verbs that already import it from this file (#303).
+export { byText }
 
 /** The names of the parents, each once, sorted as text. */
 export const namesOf = (found: readonly Parent[]): readonly string[] =>

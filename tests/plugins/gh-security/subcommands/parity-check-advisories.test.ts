@@ -25,7 +25,8 @@
 //     puts them in as they are. The rows use plain names.
 //   - The port treats a parseable range with a non-boolean `satisfied` as
 //     unevaluated (ruling 12 on #225). The unit tests hold it, because the
-//     real adapter never gives one.
+//     real adapter never gives one. A `parseable` that is not true or false
+//     is the same case (#302).
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 

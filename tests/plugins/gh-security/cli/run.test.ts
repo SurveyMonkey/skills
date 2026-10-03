@@ -180,6 +180,104 @@ describe('runCli', () => {
     expect(written()).toEqual({ stdout: '{"error":"no"}\n', stderr: 'no\n' })
   })
 
+  // #302 item 1. A throw is a defect in the command, and the caller reads
+  // stdout as the contract: it gets the ADR 001 failed envelope, exit 1.
+  it('renders a handler that throws as the failed envelope, with exit 1', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw new Error('boom')
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: boom"}\n',
+      stderr: 'version: boom\n',
+    })
+  })
+
+  it('renders a handler that rejects with a non-Error as its text', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () =>
+      Promise.reject('plain text'),
+    )
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: plain text"}\n',
+      stderr: 'version: plain text\n',
+    })
+  })
+
+  // A thrown value with no prototype has no text: `String` throws on it. The
+  // guard must still give the envelope, with the tag of the value as its text.
+  it('renders a handler that throws a value with no prototype as the failed envelope', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw Object.create(null)
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: [object Object]"}\n',
+      stderr: 'version: [object Object]\n',
+    })
+  })
+
+  // The text of a thrown value can itself throw. The guard must not: it gives
+  // the tag of the value, and a fixed text when even the tag cannot be read.
+  it('renders an Error whose message getter throws as the failed envelope', async () => {
+    const thrown = Object.defineProperty(new Error('x'), 'message', {
+      get() {
+        throw new Error('getter')
+      },
+    })
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw thrown
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: [object Error]"}\n',
+      stderr: 'version: [object Error]\n',
+    })
+  })
+
+  it('renders a thrown value with a message that is a symbol as its text', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw Object.assign(new Error('x'), { message: Symbol('tag') })
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written().stdout).toBe('{"error":"version: Symbol(tag)"}\n')
+  })
+
+  it('renders a revoked proxy as the failed envelope, with a fixed text', async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw proxy
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written().stdout).toBe('{"error":"version: a thrown value with no text"}\n')
+  })
+
+  it('renders a value with no prototype by its tag', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => {
+      throw Object.assign(Object.create(null), { [Symbol.toStringTag]: 'Tagged' })
+    })
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written().stdout).toBe('{"error":"version: [object Tagged]"}\n')
+  })
+
+  it('renders a load that throws as the failed envelope too', async () => {
+    vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockRejectedValue(new Error('no module'))
+    const { io, written } = capturing()
+    expect(await runCli(['version'], {}, io)).toBe(1)
+    expect(written()).toEqual({
+      stdout: '{"error":"version: no module"}\n',
+      stderr: 'version: no module\n',
+    })
+  })
+
   it('loads pr-status through the registry, and renders its report with exit 1', async () => {
     const { io, written } = capturing()
     expect(await runCli(['pr-status', 'not-a-url'], {}, io)).toBe(1)

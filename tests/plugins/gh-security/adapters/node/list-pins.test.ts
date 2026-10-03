@@ -232,6 +232,25 @@ describe('list_pins on each override location', () => {
     ).toEqual({ manifest: ['b-pkg', 'left-pad'], keys: ['undici', 'form-data', 'js-yaml', 'ws'] })
   })
 
+  // #303 item 3.
+  // jq sorts text by code point. JavaScript's `<` sorts by UTF-16 unit, so a
+  // character above U+FFFF (a surrogate pair) lands before U+E000 to U+FFFF.
+  // Probe, jq 1.8.1:
+  //   jq -nc '["\ud83d\ude00", "\uffff", "\ue000"] | sort'
+  //     -> ["\ue000","\uffff","\ud83d\ude00"]
+  //   jq -nc '{"\ud83d\ude00-pkg":"1","\uffff-pkg":"1","a":"1"} | keys'
+  //     -> ["a","\uffff-pkg","\ud83d\ude00-pkg"]
+  it('sorts the keys of pnpm.overrides by code point, as jq `keys` does', () => {
+    const { root, detection } = copyOf('pnpm11-workspace-overrides')
+    put(root, ['pnpm', 'overrides'], { '\u{1F600}-pkg': '1', '\uffff-pkg': '1', a: '1' })
+    const answer = node.listPins({ root, detection })
+    expect(answer.outcome === 'ok' && answer.value.manifest_pnpm_overrides).toEqual([
+      'a',
+      '\uffff-pkg',
+      '\u{1F600}-pkg',
+    ])
+  })
+
   // The detection names pnpm-workspace.yaml (pnpm 11), and the file has no block.
   it('reads no block, and drops pnpm.overrides of package.json, when the workspace file has none', () => {
     const { root } = copyOf('pnpm-cross-line')

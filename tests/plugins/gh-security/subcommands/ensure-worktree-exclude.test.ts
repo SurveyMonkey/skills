@@ -137,6 +137,28 @@ describe('ensureWorktreeExclude: the change', () => {
     expect(statSync(exclude).mode & 0o777).toBe(0o600)
   })
 
+  // The open applies the umask to the mode, so a mode that has bits the umask
+  // removes is set again after the write. With umask 022, 0o666 opens as 0o644.
+  it('keeps a mode that the umask would narrow', async () => {
+    const { repo, exclude, ensure } = setup()
+    writeFileSync(exclude, 'build/\n')
+    chmodSync(exclude, 0o666)
+    await ensure(repo)
+    expect(statSync(exclude).mode & 0o777).toBe(0o666)
+  })
+
+  // Each publish opens one descriptor, and it must close it. Where `/dev/fd`
+  // lists the open descriptors, many publishes must not leave any open.
+  it.skipIf(!existsSync('/dev/fd'))('closes the descriptor of the temporary file', async () => {
+    const { repo, exclude, ensure } = setup()
+    const before = readdirSync('/dev/fd').length
+    for (let round = 0; round < 30; round += 1) {
+      writeFileSync(exclude, 'build/\n')
+      await ensure(repo)
+    }
+    expect(readdirSync('/dev/fd').length - before).toBeLessThan(5)
+  })
+
   it('reports already-present, and writes nothing, when the line is there', async () => {
     const { repo, exclude, ensure } = setup()
     writeFileSync(exclude, 'build/\n.claude/worktrees/\n')
@@ -350,6 +372,19 @@ describe('ensureWorktreeExclude: the refusals', () => {
     mkdirSync(exclude)
     expect(await ensure(repo)).toEqual({ outcome: 'failed', error: `cannot publish ${exclude}` })
     expect(readdirSync(info).filter((name) => name.startsWith('.exclude'))).toEqual([])
+  })
+
+  // #302 item 2. The open of the temporary file uses `wx`, so a file at that
+  // name stays and the open fails. The cleanup must then leave that file.
+  it('leaves a file that already has the temporary name, and refuses', async () => {
+    const { sandbox, repo, info, exclude } = setup()
+    const taken = join(info, '.exclude.taken')
+    writeFileSync(taken, 'not ours\n')
+    expect(await ensureWorktreeExclude(repo, sandbox.env, LOCK_TIMING, () => 'taken')).toEqual({
+      outcome: 'failed',
+      error: `cannot publish ${exclude}`,
+    })
+    expect(readFileSync(taken, 'utf8')).toBe('not ours\n')
   })
 
   it.skipIf(!notRoot)(

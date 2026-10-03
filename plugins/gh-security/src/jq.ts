@@ -1,7 +1,9 @@
 // The parts of jq that the discovery scripts read alerts and lines with, as
 // functions. `discover-alerts` and `classify-lines` are ports of two jq
 // programs. Each sorts, groups and trims as jq does, so each uses these
-// functions, and the two ports give the same order and the same text.
+// functions, and the two ports give the same order and the same text. The
+// lockfile readers and the node verbs use `compareJq` through `byText` in
+// `src/lockfiles/shared.ts`.
 //
 // The probes for each rule ran against jq 1.8.1. CI runs jq 1.7. Where the
 // two versions read a value differently, the comment says so.
@@ -21,7 +23,8 @@ const typeRank = (value: unknown): number => {
 /**
  * jq's order of two JSON values: null, false, true, numbers, strings, arrays,
  * then objects. Text is in the order of its UTF-8 bytes, which is the order
- * of its code points. JavaScript's own `<` compares UTF-16 units, which puts
+ * of its code points. `byText` in `src/lockfiles/shared.ts` uses this order
+ * for strings (#303). JavaScript's own `<` compares UTF-16 units, which puts
  * a character above U+FFFF before U+E000 to U+FFFF. Arrays compare entry by
  * entry, and then by length. Objects compare their sorted keys first, and
  * then their values in key order.

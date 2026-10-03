@@ -17,7 +17,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { type Envelope, failed } from '../../lib/envelope.ts'
-import { evalToken, expandToken, rangeAlternatives } from '../../semver/ranges.ts'
+import { rangeAlternatives, satisfies } from '../../semver/ranges.ts'
 import { coreAt, parseVersion, semverMax } from '../../semver/versions.ts'
 import type { ResolvedVersionsAnswer, Tree, ValidateAnswer, ValidateOptions } from '../adapter.ts'
 import { attempt } from './attempt.ts'
@@ -33,24 +33,12 @@ type Sibling = { readonly major: number | null; readonly vulnerable_ranges: read
 type Move = NonNullable<ValidateAnswer['other_line_moves']>[number]
 
 /**
- * jq's `satisfies`, with the two places where jq stops. jq reads each
- * alternative and each comparator. So a comparator that it cannot read stops
- * it, also after a match. An alternative with no comparator also stops it.
- * `satisfies` in `src/semver/ranges.ts` answers in both cases. A constraint
- * like `>=0 ||` would pass there. `applyConstraint` uses this function too.
+ * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
+ * where jq stops (#303): on a comparator with no version, also after a match,
+ * and on an alternative with no comparator. The placement, parent and
+ * lockfile helpers of `apply_constraint` import this name from here.
  */
-export const satisfiesAll = (version: string, range: string): boolean =>
-  rangeAlternatives(range)
-    .map((tokens) => {
-      if (tokens.length === 0) {
-        throw new Error(`validate: the range '${range}' has an alternative with no comparator`)
-      }
-      return tokens
-        .flatMap(expandToken)
-        .map((token) => evalToken(token, version))
-        .every(Boolean)
-    })
-    .some(Boolean)
+export const satisfiesAll = satisfies
 
 // `token_ok` of node.sh: a comparator with a known operator and a version
 // that parses. A wildcard is not accepted here. `range_facts` accepts it.
@@ -72,10 +60,7 @@ const rangeOk = (range: string): boolean => {
 /** `major_of` of node.sh: the first core number, or 0. It throws for an empty version. */
 const majorOf = (version: string): number => coreAt(parseVersion(version).core, 0)
 
-/**
- * Unique, and sorted as text. jq sorts by code point, so the order differs
- * only for a character above U+FFFF.
- */
+/** Unique, and sorted by code point, as jq sorts. */
 const uniqueSorted = (values: readonly string[]): string[] => [...new Set(values)].sort(byText)
 
 // jq reads a byte order mark at the start of its input. `JSON.parse` does not.

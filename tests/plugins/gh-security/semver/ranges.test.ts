@@ -396,3 +396,141 @@ describe('rangeFloorMajor', () => {
     expect(rangeFloorMajor(range)).toBe(expected)
   })
 })
+
+// #303 items 1 and 2. Each expected value is the answer of the jq original.
+// The probe loads the library from node.sh, and then calls one function:
+//
+//   SEMVER_JQ=$(awk '/^SEMVER_JQ=/{f=1;next} /^JQLIB/{f=0} f' \
+//     plugins/gh-security/scripts/ecosystems/node.sh)
+//   jq -nc --arg v 1.0.0 --arg r '>=0 ||' "$SEMVER_JQ"' satisfies($v; $r)'
+//   jq -nc --arg r $'>=1 ||　<2' "$SEMVER_JQ"' $r | range_alternatives'
+//
+// jq 1.8.1 gave these answers. `[[:space:]]` is the Unicode White_Space set:
+// 9 to 13, 32, 133, 160, 5760, 8192 to 8202, 8232, 8233, 8239, 8287 and
+// 12288. This list came from
+// `jq -nc '[range(0;65536) | select([.] | implode | test("^[[:space:]]$"))]'`.
+describe('satisfies, where jq stops (#303)', () => {
+  // Every row: jq stops with an error, for example "Cannot iterate over null".
+  it.each([
+    ['an empty alternative after a match', '>=0 ||'],
+    ['an empty alternative before a match', '|| >=0'],
+    ['an empty alternative between two', '>=0 || || >=0'],
+    ['a range of white space only', ' '],
+  ])('throws for %s', (_shape, range) => {
+    expect(() => satisfies('1.0.0', range)).toThrow(/has an alternative with no comparator/)
+  })
+
+  // jq reads each comparator, so the bad one stops it after a match, and also
+  // when an earlier comparator of the same alternative is already false.
+  // Probe, jq 1.8.1: each of these gives "split input and separator must be
+  // strings", with 1.0.0 as the version.
+  it.each([
+    ['an operator with no version after a match', '>=0.5 || >='],
+    ['an operator with no version after a failed comparator', '<0.5 >='],
+    ['a caret with no version', '^'],
+    ['a tilde with no version', '~'],
+    ['an equal sign with no version', '='],
+    ['a bare v', 'v'],
+  ])('throws for %s', (_shape, range) => {
+    expect(() => satisfies('1.0.0', range)).toThrow(/is not a version this adapter can read/)
+  })
+
+  // Pin example. It passes when written: `satisfies` already throws here,
+  // because the empty version has no core.
+  it('throws for an operator with no version', () => {
+    expect(() => satisfies('1.0.0', '>=')).toThrow()
+  })
+
+  // Pin example. It passes when written: `"" | split("||")` is `[]`, so an
+  // empty range has no alternative, and jq answers false.
+  it('answers false for an empty range', () => {
+    expect(satisfies('1.0.0', '')).toBe(false)
+  })
+})
+
+describe('the white space of a range (#303)', () => {
+  const ASCII_SPACES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20]
+  const WIDE_SPACES = [
+    0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+    0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+  ]
+  // Zero width and format characters that Oniguruma does not count as space.
+  // Next to each edge of the set, too. Probe, jq 1.8.1: none of these is
+  // `[[:space:]]`.
+  const NOT_SPACES = [
+    0x86, 0x9f, 0xa1, 0x180e, 0x1681, 0x1fff, 0x200b, 0x200c, 0x202a, 0x205e, 0x2060, 0x3001,
+    0xfeff,
+  ]
+  const at = (code: number) => String.fromCodePoint(code)
+
+  // jq: `>=0.5<C><2` against 3.0.0 is false when C splits the range into
+  // `>=0.5` and `<2`.
+  it.each(ASCII_SPACES.map((code) => [code.toString(16)]))(
+    'splits a range at the ASCII space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(satisfies('3.0.0', `>=0.5${space}<2`)).toBe(false)
+    },
+  )
+
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'splits a range at the wide space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(satisfies('3.0.0', `>=0.5${space}<2`)).toBe(false)
+    },
+  )
+
+  // jq: the same range is true when C is no space: one token, `>=0.5C<2`,
+  // whose version reads as 0.0 after the first dot.
+  it.each(NOT_SPACES.map((code) => [code.toString(16)]))('does not split at U+%s', (hex) => {
+    const character = at(Number.parseInt(hex, 16))
+    expect(satisfies('3.0.0', `>=0.5${character}<2`)).toBe(true)
+  })
+
+  // A character that is no space stays in the token after an operator and in
+  // the flat split. Probe, jq 1.8.1: `">=\ufeff0.5" | gsub("(?<o>[<>=~^]+)[[:space:]]+"; "\(.o)")`
+  // keeps the character, and `[">=1\ufeff<2" | splits("[[:space:],|]+")]` is one token.
+  it.each(NOT_SPACES.map((code) => [code.toString(16)]))(
+    'keeps U+%s after an operator, and in the flat split',
+    (hex) => {
+      const character = at(Number.parseInt(hex, 16))
+      expect(rangeAlternatives(`>=${character}0.5`)).toEqual([[`>=${character}0.5`]])
+      expect(rangeTokens(`>=1${character}<2`)).toEqual([`>=1${character}<2`])
+    },
+  )
+
+  it('splits the alternatives and the comparators at the wide spaces together', () => {
+    expect(rangeAlternatives('>=1 ||　<2\u0085')).toEqual([['>=1'], ['<2']])
+  })
+
+  it('drops a wide space after an operator, as jq does', () => {
+    expect(rangeAlternatives('>= 1')).toEqual([['>=1']])
+    expect(satisfies('0.1.0', '>= 0.5')).toBe(false)
+  })
+
+  // jq probe: `jq -nc '">=\u2003 0.5" | gsub("(?<op>[<>=~^]+)[[:space:]]+"; .op)'`
+  // gives `>=0.5` for every code point of the set, so each one is dropped
+  // after an operator.
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'drops the wide space U+%s after an operator',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(rangeAlternatives(`>=${space}0.5`)).toEqual([['>=0.5']])
+    },
+  )
+
+  // jq probe: `jq -nc '[">=1\u2003<2" | splits("[[:space:],|]+")]'` splits at
+  // each code point of the set, and `||` and `,` split as well.
+  it.each(WIDE_SPACES.map((code) => [code.toString(16)]))(
+    'flattens a range at the wide space U+%s',
+    (hex) => {
+      const space = at(Number.parseInt(hex, 16))
+      expect(rangeTokens(`>=1${space}<2`)).toEqual(['>=1', '<2'])
+    },
+  )
+
+  it('flattens a range with wide spaces into its tokens', () => {
+    expect(rangeTokens('>=1 ||　<2\u0085')).toEqual(['>=1', '<2'])
+  })
+})
