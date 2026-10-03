@@ -44,7 +44,8 @@
 // `fix/dependabot-<package>-<line>x` (`slash`, the default) or
 // `fix-dependabot-<package>-<line>x` (`flat`). A line of `none` ends in
 // `-unfixed`. A remote with a branch named `fix` refuses every `fix/*` push
-// (#123). The caller probes the remote and gives the style.
+// (#123). The caller probes the remote and gives the style. That caller is
+// `prepare-checkout`, after #237 makes `resolve-alerts` use it.
 //
 // **The open pull request check** asks GitHub, for each group with a fix, if
 // an open pull request has one of these heads:

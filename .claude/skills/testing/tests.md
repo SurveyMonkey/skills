@@ -81,7 +81,7 @@ a `should include`, passes either way.
 ### A count pin a batch-wide regression survives
 
 `spec/resolve_alerts_branch_style_spec.sh`, `maps a refs/heads/fix hit onto --branch-style flat at
-every consuming site`.
+every consuming site`, until #227 removed it.
 
 ```sh
 It 'maps a refs/heads/fix hit onto --branch-style flat at every consuming site'
@@ -98,7 +98,11 @@ example green. A batch-wide regression is exactly the mutation a bare total cann
 
 The fix: pin each site where it lives, one example per site with an anchored `rule_in` pattern, so
 the failure names the site. Better still, the flag selection is mechanical, so it belongs in a
-script and the pin is deleted when that script lands (issues #193 and #197).
+script and the pin is deleted when that script lands (issues #193 and #197). #227 did that. The
+`prepare-checkout` command selects the flag, and SKILL.md uses the command after #237. The
+successor example is in `tests/plugins/gh-security/subcommands/prepare-checkout.test.ts`:
+`gives the flat style, and flat names in both lists, when origin has a branch fix`. It asserts
+each `branch_name` in both lists.
 
 ### An alternation that matched nothing on macOS
 

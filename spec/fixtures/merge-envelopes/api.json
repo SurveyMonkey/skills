@@ -1,0 +1,49 @@
+{
+  "checkout": "/work/api",
+  "nwo": "octo/api",
+  "default_branch": "trunk",
+  "branch_style": "flat",
+  "actionable": [
+    {
+      "package": "qs",
+      "ecosystem": "npm",
+      "major_line": "6",
+      "max_severity": "critical",
+      "max_epss_percentile": 0.1,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix/dependabot-qs-6x"
+    },
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "major_line": "4",
+      "max_severity": "high",
+      "max_epss_percentile": 0.5,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix/dependabot-lodash-4x"
+    }
+  ],
+  "skipped": [
+    {
+      "package": "debug",
+      "ecosystem": "npm",
+      "major_line": "none",
+      "max_severity": "low",
+      "max_epss_percentile": 0,
+      "alert_count": 1,
+      "repo": "octo/api",
+      "branch_name": "fix-dependabot-debug-unfixed",
+      "reason": "no fix available"
+    }
+  ],
+  "classify_errors": [
+    {
+      "adapter": "node",
+      "package": "ms",
+      "error": "resolved_versions failed",
+      "base_ref": "origin/trunk"
+    }
+  ]
+}

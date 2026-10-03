@@ -14,6 +14,8 @@ import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts
 import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
 import { discoverAlertsCommand } from '#gh-security/subcommands/discover-alerts.ts'
 import { discoverReposCommand } from '#gh-security/subcommands/discover-repos.ts'
+import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
+import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -37,7 +39,9 @@ describe('the registry', () => {
       "import('../subcommands/discover-alerts.ts')",
       "import('../subcommands/discover-repos.ts')",
       "import('../subcommands/ensure-worktree-exclude.ts')",
+      "import('../subcommands/merge-envelopes.ts')",
       "import('../subcommands/pr-status.ts')",
+      "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
     ])
@@ -52,6 +56,8 @@ describe('the discovery entries', () => {
     ['detect-scope', detectScopeCommand],
     ['discover-alerts', discoverAlertsCommand],
     ['discover-repos', discoverReposCommand],
+    ['merge-envelopes', mergeEnvelopesCommand],
+    ['prepare-checkout', prepareCheckoutCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
   })
@@ -71,6 +77,8 @@ describe('the discovery entries', () => {
       'discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] [--stdin] <owner/repo>',
     ],
     ['discover-repos', 'discover-repos [<path>]'],
+    ['merge-envelopes', 'merge-envelopes <envelope.json>...'],
+    ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
   })

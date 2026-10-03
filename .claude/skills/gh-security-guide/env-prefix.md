@@ -30,7 +30,10 @@ with it. The ported command `detect-scope` takes `--env-prefix` and wraps its `g
 with it. The ported command `discover-repos` runs `git` and takes no `--env-prefix`. The ported
 command `discover-alerts` takes `--env-prefix` and wraps its `gh` calls with it. The ported command
 `classify-lines` takes `--env-prefix` and wraps its `git` calls with it. Its adapter verbs run in
-process and start no child.
+process and start no child. The command `prepare-checkout` takes `--env-prefix` and gives it to
+each step: `detect-scope`, the namespace probe, `discover-alerts` and `classify-lines`. So each
+`git` and `gh` child of each step runs under it. The command `merge-envelopes` starts no child and
+takes no `--env-prefix`.
 
 The failure class this guards against is manager-agnostic: per-directory environment tools load
 through interactive shell hooks that non-interactive tool shells never run, so a bare `gh`, `git`,
