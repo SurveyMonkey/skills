@@ -17,6 +17,9 @@
 // fill. A returned envelope has no subshell to be lost in, so there is one
 // reader and there is deliberately no unchecked sibling to reach for.
 //
+// `fix-group` reads the keys that `setup` wrote through `loadDriverState`,
+// the port of `load_state`. Each later phase calls it first.
+//
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs` and `path`.
 
@@ -152,9 +155,9 @@ export const readString = (state: StateFile, path: string): Envelope<string> => 
 }
 
 /**
- * The same read for a key whose empty value is legitimate, `env_prefix` being
- * the one the drivers have. Anything that is not a non-empty string is `null`,
- * which for this seam means "bare", the ordinary single-login case.
+ * The same read for a key whose empty value is legitimate. Anything that is
+ * not a non-empty string is `null`. Do not use it for `env_prefix`: there a
+ * value that is not text is a failure, and `loadDriverState` refuses it.
  */
 export const readOptionalString = (state: StateFile, path: string): string | null => {
   const value = at(state.data, path)
@@ -171,3 +174,101 @@ export const readOptionalString = (state: StateFile, path: string): string | nul
  */
 export const writeKey = (state: StateFile, key: string, value: JsonValue): Envelope<StateFile> =>
   writeObject(state.path, { ...state.data, [key]: value })
+
+/**
+ * A list of strings that the state can carry. `install_signals` is the one
+ * that the drivers have. An absent or null key is the empty list. Any other
+ * value is a failure, because the union that a later step writes from it
+ * would be wrong. The bash read `.install_signals // []`, which also took
+ * `false` as the empty list, and a list of other values as it was.
+ */
+export const readOptionalStrings = (state: StateFile, path: string): Envelope<string[]> => {
+  const value = readOptionalValue(state, path) ?? []
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+    return failed(
+      `the state file at ${state.path} has no usable value for '${path}': ` +
+        `expected a list of strings, found ${JSON.stringify(value)}.`,
+    )
+  }
+  return ok(value as string[])
+}
+
+/**
+ * The keys that `fix-group setup` writes and that each later phase reads
+ * before it does anything else: the port of `load_state`. The state file
+ * itself comes with them, so that a phase can write to it.
+ */
+export interface DriverState {
+  readonly state: StateFile
+  readonly repoRoot: string
+  readonly defaultBranch: string
+  readonly branchName: string
+  /** The name of the adapter. The route comes from `ecosystem`. */
+  readonly adapter: string
+  /** The advisory ecosystem of the group, which the registry routes. */
+  readonly ecosystem: string
+  readonly scorer: string
+  readonly worktree: string
+  readonly package: string
+  /** The major line, as the text that `setup` wrote. `loadDriverState` checks that it is digits. */
+  readonly majorLine: string
+  /** The prefix as `setup` wrote it. An absent, null or empty value is null: no prefix. */
+  readonly envPrefix: string | null
+}
+
+/** A field of {@link DriverState} that a required key fills. */
+type DriverField = Exclude<keyof DriverState, 'state' | 'envPrefix'>
+
+/**
+ * Each field and its required key, in the order that `load_state` read
+ * them, then `ecosystem`, which only the port requires. The record type
+ * makes the compiler find a field with no key.
+ */
+const DRIVER_KEYS: Readonly<Record<DriverField, string>> = {
+  repoRoot: 'repo_root',
+  defaultBranch: 'default_branch',
+  branchName: 'branch_name',
+  adapter: 'adapter',
+  scorer: 'scorer',
+  worktree: 'worktree',
+  package: 'package',
+  majorLine: 'major_line',
+  ecosystem: 'ecosystem',
+}
+
+/**
+ * Load the state of a work directory, and read each key that every phase
+ * needs. The first key that has no usable value is the failure. So a phase
+ * never starts with an empty path, which `git -C ""` reads as the current
+ * directory (#18).
+ *
+ * `major_line` must be digits, as `setup` checks. Other text goes into a
+ * regex and a number. An `env_prefix` that is not text is a failure: "no
+ * prefix" would run each call under the wrong account.
+ */
+export const loadDriverState = (workDir: string): Envelope<DriverState> => {
+  const loaded = loadState(workDir)
+  if (loaded.outcome !== 'ok') return loaded
+  const state = loaded.value
+  const fields: Partial<Record<DriverField, string>> = {}
+  for (const [field, key] of Object.entries(DRIVER_KEYS) as [DriverField, string][]) {
+    const value = readString(state, key)
+    if (value.outcome !== 'ok') return value
+    fields[field] = value.value
+  }
+  const read = fields as Record<DriverField, string>
+  if (!/^[0-9]+$/.test(read.majorLine)) {
+    return failed(
+      `the state file at ${state.path} has no usable value for 'major_line': ` +
+        `expected digits, found ${JSON.stringify(read.majorLine)}.`,
+    )
+  }
+  const prefix = readOptionalValue(state, 'env_prefix')
+  if (prefix !== null && typeof prefix !== 'string') {
+    return failed(
+      `the state file at ${state.path} has no usable value for 'env_prefix': ` +
+        `expected text, found ${JSON.stringify(prefix)}.`,
+    )
+  }
+  return ok({ ...read, state, envPrefix: prefix === '' ? null : prefix })
+}

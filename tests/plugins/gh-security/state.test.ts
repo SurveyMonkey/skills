@@ -13,8 +13,10 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { unwrap } from '#gh-security/lib/envelope.ts'
 import {
   createState,
+  loadDriverState,
   loadState,
   readOptionalString,
+  readOptionalStrings,
   readOptionalValue,
   readString,
   readValue,
@@ -208,5 +210,137 @@ describe('the optional readers', () => {
     ['a value', { observations_first: [{ kind: 'peer' }] }, [{ kind: 'peer' }]],
   ])('readOptionalValue reads %s as %j', (_shape, data, expected) => {
     expect(readOptionalValue(loaded(data), 'observations_first')).toEqual(expected)
+  })
+})
+
+describe('readOptionalStrings', () => {
+  const loaded = (data: object) => {
+    const work = scratch()
+    writeFileSync(join(work, 'state.json'), JSON.stringify(data))
+    return unwrap(loadState(work))
+  }
+
+  // The bash read was `.install_signals // []`: absence is the empty list.
+  it.each([
+    ['an absent key', {}, []],
+    ['an explicit null', { install_signals: null }, []],
+    ['a list', { install_signals: ['pnpm_field_no_longer_read'] }, ['pnpm_field_no_longer_read']],
+  ])('reads %s as %j', (_shape, data, expected) => {
+    expect(unwrap(readOptionalStrings(loaded(data), 'install_signals'))).toEqual(expected)
+  })
+
+  it.each([
+    ['a string', 'pnpm_field_no_longer_read'],
+    ['a list that holds a number', ['a', 1]],
+    ['an object', { a: 1 }],
+  ])('refuses %s', (_shape, value) => {
+    const envelope = readOptionalStrings(loaded({ install_signals: value }), 'install_signals')
+    expect(envelope.outcome === 'failed' && envelope.error).toContain("'install_signals'")
+  })
+})
+
+describe('loadDriverState', () => {
+  const SETUP = {
+    repo_root: '/r',
+    default_branch: 'main',
+    branch_name: 'fix/dependabot-lodash-4x',
+    adapter: 'node',
+    ecosystem: 'npm',
+    scorer: '/s/score-merge-risk.sh',
+    worktree: '/r/.claude/worktrees/fix-dependabot-lodash-4x/fix',
+    package: 'lodash',
+    major_line: '4',
+    env_prefix: '',
+  }
+  const work = (data: object | string): string => {
+    const dir = scratch()
+    writeFileSync(join(dir, 'state.json'), typeof data === 'string' ? data : JSON.stringify(data))
+    return dir
+  }
+
+  // The first of the three outcomes: a value for every key.
+  it('reads every key that setup wrote', () => {
+    const loaded = unwrap(loadDriverState(work(SETUP)))
+    expect({ ...loaded, state: undefined }).toEqual({
+      state: undefined,
+      repoRoot: '/r',
+      defaultBranch: 'main',
+      branchName: 'fix/dependabot-lodash-4x',
+      adapter: 'node',
+      ecosystem: 'npm',
+      scorer: '/s/score-merge-risk.sh',
+      worktree: '/r/.claude/worktrees/fix-dependabot-lodash-4x/fix',
+      package: 'lodash',
+      majorLine: '4',
+      envPrefix: null,
+    })
+  })
+
+  it('reads a prefix that setup wrote', () => {
+    expect(unwrap(loadDriverState(work({ ...SETUP, env_prefix: 'env A=1' }))).envPrefix).toBe(
+      'env A=1',
+    )
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['empty', ''],
+  ])('reads a prefix that is %s as no prefix', (_shape, value) => {
+    const data: Record<string, unknown> = { ...SETUP, env_prefix: value }
+    if (value === undefined) delete data.env_prefix
+    expect(unwrap(loadDriverState(work(data))).envPrefix).toBeNull()
+  })
+
+  // A prefix of another type is not "no prefix": the run would go on under
+  // the wrong account. The bash passed the text on, and the call failed.
+  it.each([7, ['env', 'A=1'], {}])('refuses a prefix that is %j', (value) => {
+    const envelope = loadDriverState(work({ ...SETUP, env_prefix: value }))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(
+      "no usable value for 'env_prefix'",
+    )
+  })
+
+  it('reads a major_line of more than one digit', () => {
+    expect(unwrap(loadDriverState(work({ ...SETUP, major_line: '10' }))).majorLine).toBe('10')
+  })
+
+  // setup writes digits only. A major line of other text goes into a regex
+  // and a number, so a load refuses it too.
+  it.each(['0x10', '1e1', ' 4', '4.x'])('refuses a major_line of %j', (value) => {
+    const envelope = loadDriverState(work({ ...SETUP, major_line: value }))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(
+      "no usable value for 'major_line'",
+    )
+  })
+
+  // The second: a file that could not be read. A zero-byte file is what a
+  // crashed setup left.
+  it.each([
+    ['zero-byte', ''],
+    ['truncated', '{"repo_root": "'],
+    ['not an object', '[]'],
+  ])('refuses a %s state file', (_shape, text) => {
+    const envelope = loadDriverState(work(text))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain('state.json')
+  })
+
+  // The third: a key that is absent, null or empty. Each key is a path, a
+  // ref or a name that a git call or a route is built from.
+  it.each(
+    Object.keys(SETUP)
+      .filter((key) => key !== 'env_prefix')
+      .flatMap((key) => [
+        [key, 'absent', undefined],
+        [key, 'null', null],
+        [key, 'empty', ''],
+      ]),
+  )('refuses a state whose %s is %s', (key, _shape, value) => {
+    const data: Record<string, unknown> = { ...SETUP, [key as string]: value }
+    if (value === undefined) delete data[key as string]
+    const envelope = loadDriverState(work(data))
+    expect(envelope.outcome === 'failed' && envelope.error).toContain(
+      `no usable value for '${key}'`,
+    )
   })
 })

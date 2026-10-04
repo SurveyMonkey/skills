@@ -170,6 +170,23 @@ describe('runCli', () => {
     })
   })
 
+  // The fix driver's contract (#232): exit 2 hands a decision back to the
+  // agent, and exit 3 is a failed phase. Each has a report on stdout.
+  it.each([2, 3] as const)(
+    'writes the report with the exit status %i that the report carries',
+    async (status) => {
+      vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () =>
+        failedReport('fix-group: worktree failure: no', { status: 'failure' }, status),
+      )
+      const { io, written } = capturing()
+      expect(await runCli(['version'], {}, io)).toBe(status)
+      expect(written()).toEqual({
+        stdout: '{"status":"failure"}\n',
+        stderr: 'fix-group: worktree failure: no\n',
+      })
+    },
+  )
+
   it('still renders a plain failure as the error envelope on stdout and stderr', async () => {
     vi.spyOn(COMMANDS.version as CommandEntry, 'load').mockResolvedValue(async () => ({
       outcome: 'failed',
