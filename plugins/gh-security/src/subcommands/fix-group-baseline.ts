@@ -11,7 +11,6 @@ import { orElse, uniqueJq } from '../jq.ts'
 import { failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
 import { readOptionalStrings, type StateFile, writeKey } from '../state.ts'
 import {
-  chomp,
   DRIFT_SUBJECT,
   driftPathAllowed,
   failPhase,
@@ -19,56 +18,8 @@ import {
   outputOf,
   porcelainPaths,
   promisedField,
+  runInstall,
 } from './fix-group-common.ts'
-
-/**
- * The failures that one more install can clear: a connection that timed
- * out, was reset, or could not resolve a name this time. Not `ENOTFOUND`,
- * which is usually a wrong registry host, and not the bare `request to ...
- * failed`, which npm also writes for a certificate or a proxy refusal. The
- * match is for each line, as `grep` matches.
- */
-const REGISTRY_TIMEOUT =
-  /ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|network timeout|Timeout awaiting|registry.*timed? ?out/i
-
-/** The line that pnpm 11 writes when it does not read the `pnpm` field (#159). */
-const PNPM_FIELD_IGNORED = 'The "pnpm" field in package.json is no longer read by pnpm'
-
-/** What one install, with its one retry, said. */
-interface InstallRun {
-  readonly ok: boolean
-  /** stdout, a newline, then stderr, as the bash captured them. */
-  readonly output: string
-  readonly retried: boolean
-  readonly signals: readonly string[]
-}
-
-/** One install. A failure of the verb itself is a failed install with its message. */
-const installOnce = async (loaded: Loaded): Promise<{ ok: boolean; output: string }> => {
-  const tree = loaded.tree()
-  const answer =
-    tree.outcome === 'ok'
-      ? await loaded.adapter.install(tree.value, { run: loaded.pm, env: loaded.env })
-      : tree
-  if (answer.outcome !== 'ok') return { ok: false, output: `\n${answer.error}` }
-  const { stdout, stderr } = answer.value
-  return { ok: answer.value.ok, output: `${chomp(stdout)}\n${chomp(stderr)}` }
-}
-
-/**
- * The install, with one retry for a failure that has the shape of a registry
- * timeout, and no retry for any other failure (#122).
- */
-const runInstall = async (loaded: Loaded): Promise<InstallRun> => {
-  let run = await installOnce(loaded)
-  let retried = false
-  if (!run.ok && REGISTRY_TIMEOUT.test(run.output)) {
-    retried = true
-    run = await installOnce(loaded)
-  }
-  const signals = run.output.includes(PNPM_FIELD_IGNORED) ? ['pnpm_field_no_longer_read'] : []
-  return { ...run, retried, signals }
-}
 
 /** `resolved_versions` of the package, or the failure of the phase. */
 const resolved = (
