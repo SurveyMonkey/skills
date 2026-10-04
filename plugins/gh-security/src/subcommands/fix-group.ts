@@ -1,6 +1,6 @@
 // `gh-security fix-group <phase>`: the driver for one dependency-fix group.
 // This is the port of `scripts/common/fix-group.sh` (#232), one phase at a
-// time. These four phases are ported:
+// time. These five phases are ported:
 //
 //   fix-group setup    --group-json <file> --repo-root <path>
 //                      --default-branch <name>
@@ -8,19 +8,23 @@
 //   fix-group classify --work <dir>
 //   fix-group baseline --work <dir>
 //   fix-group apply    --work <dir>
+//   fix-group score    --work <dir>
 //
-// `score` comes in a later layer of #232. `cleanup` stays in the bash, and
-// #234 ports it (round 5 ruling 5 on #232). Until then the agent calls
-// `fix-group.sh` for all six steps.
+// `cleanup` stays in the bash, and #234 ports it (round 5 ruling 5 on #232).
+// Until then the agent calls `fix-group.sh` for all six steps.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
 // The state file is the only thing that goes from one step to the next.
 //
-// Contract, for these four phases:
+// Contract, for these five phases:
 //   exit 0  {"status":"ok","step":"setup|classify|baseline|apply", ...}
 //           an intermediate step completed.
 //           {"status":"no_op", ...}  terminal: nothing to fix (`apply`).
+//           {"status":"ready_for_pr", ...}  terminal: hand to phase 6. Only
+//           `score` gives it. It has the package, the action, the risk
+//           report, the written entries, the observations and the validate
+//           report.
 //   exit 2  {"status":"needs_judgment","decision_point":"...",
 //            "evidence":{...}}  only from `apply`: a branch that the tree
 //           cannot decide. It fails closed, and never guesses. stderr has
@@ -31,7 +35,12 @@
 //   exit 3  {"status":"failure","phase":"worktree|classify|baseline|apply|
 //            validate","detail":"..."}  a terminal failure. The agent
 //           copies it to its result block. stderr has `fix-group: <phase>
-//           failure: <detail>`.
+//           failure: <detail>`. `score` gives only `validate`. The causes
+//           are a verb that fails after the fix, a promised field that is
+//           absent, a version that cannot be compared, and a why capture
+//           that cannot be written. They are also a scorer that fails or has
+//           no usable report, and a stored or scored value of the wrong
+//           type (see the differences below).
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
 //
@@ -68,6 +77,25 @@
 //             `written[]` labels the fix. `fix-group-ladder.ts` has each
 //             decision as a pure function.
 //
+//   score     refuses a run that has no action, and a run that `apply` ended
+//             as a no-op. It reads `resolved_versions`, `why` and
+//             `declared_ranges --line` again, after the fix. The state keeps
+//             the first as `post_fix` and the last as `declared_post`. The
+//             `why` answer goes to
+//             `<work>/why-<package_path>.json`. `--before` is the lowest
+//             version on the line in the baseline, or in the pre-drift
+//             snapshot for a lockfile refresh. It is not given when that
+//             snapshot has `present` other than the text `true`. It is not
+//             given when it has no version on the line (#76). `--after` is the
+//             lowest version on the line after the fix, and it is never
+//             empty. The scorer runs in the worktree with `--package`,
+//             `--after`, `--adapter`, `--why-json`, `--override-scope`, an
+//             optional `--before`, and one `--declared-range` for each
+//             range, or `none`. The state keeps its `risk` report. Then the
+//             stored `apply_result`, `validate`, parent list, `drift_commit`
+//             and `observations_first` are read. One that is absent or null
+//             stops the phase with exit 1, after the scorer has run.
+//
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `setup` records (env-prefix.md). The prefix sets no
 // directory: git gets `-C <dir>` after the prefix, and a verb gives its
@@ -94,7 +122,20 @@
 //     verb.
 //   - `--scorer` stays, for `score` (round 5 ruling 4 on #232). Without it,
 //     the state names the bash scorer in this plugin,
-//     `scripts/common/score-merge-risk.sh`.
+//     `scripts/common/score-merge-risk.sh`. `score` runs it as a child
+//     process, under the prefix, with the worktree as its directory. Until
+//     #233 ports it, a TypeScript command calls a bash script here.
+//   - The scorer calls the adapter again, as a bash script. `score` gives it
+//     `--adapter` with the path of `scripts/ecosystems/node.sh` in this
+//     plugin. The state has the name of the adapter and not a path. The
+//     registry has no other adapter, so the node script is the one that
+//     exists. A second adapter needs a map from its name to its script.
+//   - `score` runs `why` through the package manager under the prefix, and
+//     the other verbs in process, as the other phases do. The scorer starts
+//     the bash adapter itself. That child inherits the environment that the
+//     prefix sets, and has no prefix of its own.
+//   - A scorer that does not start fails the phase with the text of node's
+//     error. The bash gave the text of the shell.
 //   - A bad command line is exit 1 with `{"error": ...}` in node's words. The
 //     bash printed the shell's text for an absent value, and no JSON.
 //   - `setup` refuses a group that is JSON but not an object, with its own
@@ -157,6 +198,44 @@
 //     list, it stopped in jq, and the detail named no alert.
 //   - The major of `highest_fixed_version` is read in base 10. The bash read
 //     a zero at the start as octal.
+//   - `score` reads `action`, `override_scope` and `bare_override` as text.
+//     The bash gave the text of a number or a boolean (`5`, `true`) to the
+//     report, and for `override_scope` also to the scorer. It also gave the
+//     text of a list or an object. Each other value is exit 1 here. A key
+//     with no text, or `null`, is exit 1 in both.
+//   - `score` writes the why capture through a temporary file, and renames
+//     it. The bash wrote the file in place.
+//   - The why capture is the answer as one line of JSON. The bash wrote the
+//     text of the adapter, which has indents. The scorer reads both alike.
+//   - `ranges` of the post-fix `declared_ranges` must be null or a list of
+//     text. The bash read a text, a number, `true` and `false` as an empty
+//     list. It read each value of an object, and `null` or a number in a
+//     list as the text of the value. It read a list in a list as the lines
+//     of its indented JSON. Here each of these is a `validate` failure. A
+//     range with a newline is one flag for each line, in both.
+//   - `parents_read` must be null, `false` or a list when `ranges` is empty.
+//     The bash gave `length` of a text (its characters), of a number (its
+//     absolute value) and of an object (its keys), and stopped on `true`.
+//     Here each of these is a `validate` failure.
+//   - The report of the scorer must hold one JSON object that has `band`.
+//     The bash also passed two JSON values in a row, and then stopped at the
+//     write of the state with exit 1. Here that is a `validate` failure. A
+//     number in the report is written as node reads it, so `1.0` is `1`.
+//   - `factors` of the report must be null or a list of objects and nulls.
+//     The bash read a text, a number, `true` and `false` as no factors. It
+//     read each value of an object as a factor. It stopped in jq, with exit
+//     5 and no JSON, on a list that holds a text, a number, a boolean or a
+//     list. Here each of these is a `validate` failure.
+//   - The stored `apply_result` and `validate` must be objects. The bash
+//     stopped in jq, with exit 5 and no JSON, on any other value. A
+//     `benign_moves` entry that is not an object is not kept here. The bash
+//     stopped in jq on a number, a text, a boolean or a list. It read the
+//     values of an `other_line_moves` object, and this gives no entry. `apply`
+//     stops on each of these shapes, so only an edited state has one.
+//   - `score` reads `install_signals` as `baseline` does. The bash passed a
+//     text, or a list of other values, to the report.
+//   - A state with neither `applied_parents` nor `eligible_parents` gives the
+//     key `'applied_parents // eligible_parents'`, with no dot at the start.
 //   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The
 //     worktree is the workspace of the run, as in the bash, which has no
 //     trap. `cleanup` removes it. The guard for a crashed run stops the next
@@ -174,14 +253,15 @@ import { apply } from './fix-group-apply.ts'
 import { baseline } from './fix-group-baseline.ts'
 import { classify } from './fix-group-classify.ts'
 import { type FixGroupDeps, loadPhase } from './fix-group-common.ts'
+import { score } from './fix-group-score.ts'
 import { setup } from './fix-group-setup.ts'
 
 export type { FixGroupDeps } from './fix-group-common.ts'
 
-const USAGE = 'usage: gh-security fix-group <setup|classify|baseline|apply> [options]'
+const USAGE = 'usage: gh-security fix-group <setup|classify|baseline|apply|score> [options]'
 
 /** The phases after `setup`. Each reads the state that `--work` names. */
-const PHASES = { classify, baseline, apply } as const
+const PHASES = { classify, baseline, apply, score } as const
 
 /** The handler. The runner and the registry are parameters. */
 export const fixGroup = async (
@@ -194,7 +274,7 @@ export const fixGroup = async (
   if (!Object.hasOwn(PHASES, phase)) {
     return failed(
       `fix-group: '${phase}' is not a phase of this command. It ports setup, classify, ` +
-        'baseline and apply; score and cleanup still run in fix-group.sh.',
+        'baseline, apply and score; cleanup still runs in fix-group.sh.',
     )
   }
   const parsed = parseArguments(args, { work: { type: 'string', default: '' } })
@@ -202,7 +282,7 @@ export const fixGroup = async (
   if (parsed.value.work === '') return failed(`${phase}: --work is required`)
   const loaded = loadPhase(parsed.value.work, context.env, deps)
   if (loaded.outcome !== 'ok') return loaded
-  return PHASES[phase as keyof typeof PHASES](loaded.value)
+  return PHASES[phase as keyof typeof PHASES](loaded.value, parsed.value.work)
 }
 
 export const fixGroupCommand: CommandHandler = (context) =>

@@ -95,11 +95,9 @@ describe('the fix driver entry', () => {
     'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>]',
     'fix-group classify --work <dir>',
     'fix-group baseline --work <dir>',
+    'fix-group apply --work <dir>',
+    'fix-group score --work <dir>',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
-  })
-
-  it('describes the usage fix-group apply --work <dir>', () => {
-    expect(COMMANDS['fix-group']?.description).toContain('fix-group apply --work <dir>')
   })
 })

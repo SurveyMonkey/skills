@@ -21,8 +21,9 @@ difference from the script. Each phase has its own module, `fix-group-<phase>.ts
 decisions of `apply` (the range, the ladder and its stops, the widest shape, the empty diff) are
 pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
-`setup` writes. Until the port is complete, the agent calls the script for each step. A state
-file that one of the two writes is not for the other.
+`setup` writes. `setup`, `classify`, `baseline`, `apply` and `score` are ported. `cleanup` is
+not (#234), and the agent still calls the script for each step. `score` runs the bash scorer as a
+child process until #233 ports it. A state file that one of the two writes is not for the other.
 
 What that header does not say, and what belongs here:
 
