@@ -90,6 +90,8 @@ const standIn = (spec: StandIn) => {
     viewPullRequest: () => Promise.reject(new Error('not asked')),
     viewDefaultBranch: () => Promise.reject(new Error('not asked')),
     listAdvisories: () => Promise.reject(new Error('not asked')),
+    createLabel: () => Promise.reject(new Error('not asked')),
+    createPullRequest: () => Promise.reject(new Error('not asked')),
     listDependabotAlerts: async () => {
       const alerts = spec.alerts ?? ALERTS
       if (alerts instanceof Error) throw alerts

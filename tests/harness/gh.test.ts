@@ -170,3 +170,50 @@ it('throws and names each endpoint of discover-alerts when nothing is registered
     'gh mock: no reply registered for searchOpenPullRequests',
   )
 })
+
+// The write endpoints of `render-pr` (#233).
+const NEW_LABEL = {
+  repository: 'octo/app',
+  name: 'security',
+  color: 'D93F0B',
+  description: 'Security fix',
+}
+const NEW_PULL = {
+  repository: 'octo/app',
+  head: 'fix/x',
+  labels: ['security'],
+  title: 't',
+  bodyFile: '/w/body.md',
+}
+
+it('answers createLabel and createPullRequest with the reply registered for each', async () => {
+  const label = { created: false }
+  const pull = { url: 'https://github.com/octo/app/pull/7' }
+  const client = createGhMock({ createLabel: label, createPullRequest: pull })
+
+  await expect(client.createLabel(NEW_LABEL)).resolves.toBe(label)
+  await expect(client.createPullRequest(NEW_PULL)).resolves.toBe(pull)
+})
+
+it('fails each write endpoint on its own fail switch', async () => {
+  const client = createGhMock({
+    createLabel: ghFails('HTTP 403: Resource not accessible'),
+    createPullRequest: { url: 'https://github.com/octo/app/pull/7' },
+  })
+
+  await expect(client.createLabel(NEW_LABEL)).rejects.toThrow('HTTP 403: Resource not accessible')
+  await expect(client.createPullRequest(NEW_PULL)).resolves.toEqual({
+    url: 'https://github.com/octo/app/pull/7',
+  })
+})
+
+it('throws and names each write endpoint when nothing is registered', async () => {
+  const client = createGhMock()
+
+  await expect(client.createLabel(NEW_LABEL)).rejects.toThrow(
+    'gh mock: no reply registered for createLabel',
+  )
+  await expect(client.createPullRequest(NEW_PULL)).rejects.toThrow(
+    'gh mock: no reply registered for createPullRequest',
+  )
+})
