@@ -18,9 +18,11 @@
 // Output: `{"markdown": "..."}`. A command can only write JSON (`run.ts`).
 //   - one table for each repository, in the order of first appearance. The
 //     columns are the URL, the band, the check state and the merge state.
+//     Error entries whose url is not a PR URL have one table of their own,
+//     "not a pull request URL", in the same order.
 //   - for a repository with more than one PR, a paragraph that names them
-//     together. This command counts them in the reports: each entry is a PR
-//     that the run opened. It reads no dispatch plan.
+//     together. This command counts them in the reports: each entry with a PR
+//     URL is a PR that the run opened. It reads no dispatch plan.
 //   - a footnote for each state that the tables show, on what that state is
 //     worth. The footnotes of the "what that check state is worth" list of
 //     phase 8 are the behaviour.
@@ -180,7 +182,7 @@ const bandsOf = (value: JsonValue, given: string): Map<string, string | null> | 
 }
 
 /** Text that is safe inside a table cell. */
-const cell = (text: string): string => text.replaceAll('|', '\\|').replace(/\r?\n/g, ' ')
+const cell = (text: string): string => text.replaceAll('|', '\\|').replace(/\r\n?|\n/g, ' ')
 
 const checksCell = (entry: Read): string => {
   if (entry.checks === 'pending') {
@@ -199,7 +201,7 @@ const rowOf = (entry: Entry, band: string | null | undefined): string => {
   const shown = band ?? NOT_SCORED
   return entry.error === undefined
     ? `| ${entry.url} | ${shown} | ${checksCell(entry)} | ${cell(mergeCell(entry))} |`
-    : `| ${entry.url} | ${shown} | not read: ${cell(entry.error)} | - |`
+    : `| ${cell(entry.url)} | ${shown} | not read: ${cell(entry.error)} | - |`
 }
 
 /** The paragraph for a repository that the run opened more than one PR against. */
@@ -220,7 +222,8 @@ const tableOf = (
     '| --- | --- | --- | --- |',
     ...entries.map((entry) => rowOf(entry, bands.get(entry.url))),
   ]
-  if (entries.length > 1) lines.push('', sameRepoNote(repo, entries))
+  // The entries under NOT_A_PULL_REQUEST are not PRs, and share no overrides block.
+  if (entries.length > 1 && repo !== NOT_A_PULL_REQUEST) lines.push('', sameRepoNote(repo, entries))
   return lines.join('\n')
 }
 
@@ -258,7 +261,7 @@ const footnotes = (entries: readonly Entry[]): string[] => {
     ],
     [
       reads.some((entry) => entry.draft),
-      '`draft`: these PRs open ready, so a person converted this PR to a draft.',
+      '`draft`: these PRs open ready, so a person converted each draft PR.',
     ],
   ]
   return notes.filter(([shown]) => shown).map(([, text]) => `- ${text}`)

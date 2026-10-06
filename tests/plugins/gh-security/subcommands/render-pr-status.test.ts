@@ -178,12 +178,16 @@ describe('the merge state', () => {
     const text = only({ is_draft: true })
     expect(text).toContain('| passed | CLEAN, draft |')
     expect(notes(text)).toContain(
-      '- `draft`: these PRs open ready, so a person converted this PR to a draft.\n',
+      '- `draft`: these PRs open ready, so a person converted each draft PR.\n',
     )
   })
 
   it('shows no merge-state note for BLOCKED', () => {
     expect(notes(only({ merge_state: 'BLOCKED' }))).not.toMatch(/behind|conflict|UNKNOWN|draft/)
+  })
+
+  it('keeps a merge state that is not a known value inside its cell', () => {
+    expect(only({ merge_state: 'NEW|STATE' })).toContain('| passed | NEW\\|STATE |')
   })
 })
 
@@ -225,6 +229,34 @@ describe('an entry that pr-status could not read', () => {
         '## not a pull request URL\n\n' +
         HEADER +
         '| octo/app#2 | not scored | not read: not a GitHub pull request URL | - |\n\n' +
+        '## What the states are worth\n\n' +
+        '- `passed` is provisional. Checks appear as workflows start, and a job that has not reported is invisible. Absent is not pending. Do not read the set as CI-complete.\n',
+    )
+  })
+
+  it('gives URLs that are not PR URLs one table in the order of first appearance, with no paragraph on a shared block', () => {
+    const dir = filesOf({
+      'a.json': {
+        prs: [
+          { url: 'octo/app#2', error: 'not a GitHub pull request URL' },
+          { url: 'octo|app#3', error: 'not a GitHub\rpull request URL' },
+          entry('octo/app', 1),
+        ],
+      },
+      'bands.json': bandsOf(
+        ['octo/app#2', null],
+        ['octo|app#3', null],
+        [url('octo/app', 1), 'Low'],
+      ),
+    })
+    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+      '## not a pull request URL\n\n' +
+        HEADER +
+        '| octo/app#2 | not scored | not read: not a GitHub pull request URL | - |\n' +
+        '| octo\\|app#3 | not scored | not read: not a GitHub pull request URL | - |\n\n' +
+        '## octo/app\n\n' +
+        HEADER +
+        '| https://github.com/octo/app/pull/1 | Low | passed | CLEAN |\n\n' +
         '## What the states are worth\n\n' +
         '- `passed` is provisional. Checks appear as workflows start, and a job that has not reported is invisible. Absent is not pending. Do not read the set as CI-complete.\n',
     )
@@ -361,6 +393,10 @@ describe('the refusals', () => {
       'https://github.com/octo/app/pull/1/files',
       'x https://github.com/octo/app/pull/1',
       'https://github.com/octo/app/extra/pull/1',
+      'https://github.com/octo/app/pull/',
+      'https://github.com/octo/app/pull/abc',
+      'http://github.com/octo/app/pull/1',
+      'https://githubXcom/octo/app/pull/1',
     ].map((bad): [string, unknown, string] => [
       `has the url ${bad}`,
       { url: bad },
