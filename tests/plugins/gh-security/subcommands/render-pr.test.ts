@@ -928,6 +928,24 @@ describe('body', () => {
       }
     })
 
+    it.each([
+      [0.0125, '1.2'],
+      [0.0375, '3.8'],
+      [0.842, '84.2'],
+    ])(
+      'prints an EPSS of %s as %s%%, with a tie to the even digit as awk did',
+      async (epss, shown) => {
+        const ran = await render(
+          'body',
+          STATE,
+          edit(GROUP, (g) => {
+            g.alerts[0].epss_percentile = epss
+          }),
+        )
+        expect(ran.out).toContain(`| high | ${shown}% |`)
+      },
+    )
+
     it('takes an EPSS of exactly 1 as 100.0%', async () => {
       const ran = await render(
         'body',
@@ -1481,6 +1499,15 @@ describe('body', () => {
       )
     })
 
+    it('needs the note when the fatal move is the first of several', async () => {
+      const entries = [
+        move('fatal', 1, ['1.0.0'], []),
+        move('benign_dedup', 2, ['2.0.0'], ['2.0.1']),
+      ]
+      const ran = await moves(entries)
+      expect(ran.result).toMatchObject({ error: expect.stringContaining('Pass --collateral-note') })
+    })
+
     it('writes the no-baseline sentence for null, and no claim of "no collateral"', async () => {
       const ran = await moves(null)
       expect(ran.out).toContain(
@@ -1864,7 +1891,7 @@ describe('labels', () => {
     expect(ran.calls).toEqual([])
   })
 
-  it('does not lower a letter that is not A to Z', async () => {
+  it('refuses a band that has a letter outside A to Z, whatever its lower case is', async () => {
     const ran = await labels(['--repo', REPO, '--band', 'LOWİ'])
     expect(ran.result).toEqual(failure("labels: --band must be low, medium, or high, got 'LOWİ'"))
   })

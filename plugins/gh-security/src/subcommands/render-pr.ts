@@ -205,9 +205,8 @@ const BANDS: Readonly<Record<string, readonly [string, string]>> = {
   high: ['cf222e', 'High merge risk'],
 }
 
-/** The band in lower case. Only the letters A to Z change, as `tr` changed them. */
-const bandOf = (options: Options): string =>
-  flagOf(options, '--band').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+/** The band in lower case. The names of the bands are ASCII, so no other letter can match one. */
+const bandOf = (options: Options): string => flagOf(options, '--band').toLowerCase()
 
 /** The client of one call, with the env prefix in front of `gh`. */
 const clientFor = (
