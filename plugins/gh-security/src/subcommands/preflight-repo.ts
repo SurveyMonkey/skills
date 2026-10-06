@@ -41,8 +41,8 @@
 //
 // The command fails, with exit 1, for a bad command line, a root that is not
 // a directory, and a failed `probeRegistry`: no package to probe, or a
-// manifest that cannot be read. The dispatcher reads a non-zero exit as an
-// exclusion of the repository, as phase 5 says.
+// manifest that cannot be read. The dispatcher excludes the repository on a
+// non-zero exit, and also on an answer with `ok` false (exit 0).
 //
 // Additions to the contract on #228, in the contract comment there:
 // `exclude_error`, and the causes `detect` and `start`.
