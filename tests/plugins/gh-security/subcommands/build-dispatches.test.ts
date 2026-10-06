@@ -338,6 +338,10 @@ describe('build-dispatches: the envelope', () => {
       { ...MERGED, actionable: [{ ...MERGED.actionable[0], major_line: 1 }] },
     ],
     [
+      'a group with no repo',
+      { ...MERGED, actionable: [{ ...MERGED.actionable[0], repo: undefined }] },
+    ],
+    [
       'a group with no ecosystem',
       { ...MERGED, actionable: [{ ...MERGED.actionable[0], ecosystem: undefined }] },
     ],

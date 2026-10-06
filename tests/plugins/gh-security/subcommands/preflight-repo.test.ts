@@ -351,6 +351,25 @@ describe('preflight-repo: the probe package', () => {
     expect(calls[0]?.args).toEqual(['view', 'lodash', 'version'])
   })
 
+  it('probes the fallback package again on the retry', async () => {
+    const w = world({ name: 'app', dependencies: { lodash: '^4' } })
+    const { calls, runner } = recorder(
+      { status: 1, stdout: '', stderr: specimen('npm-econnrefused.txt') },
+      {},
+    )
+    const answer = await preflightRepo(
+      context(['--fallback-package', 'lodash', w.root], w.sandbox.env),
+      node,
+      runner,
+      w.scene,
+    )
+    expect(answer).toMatchObject({ outcome: 'ok', value: { ok: true, probe_package: 'lodash' } })
+    expect(calls.map(({ args }) => args)).toEqual([
+      ['view', 'lodash', 'version'],
+      ['view', 'lodash', 'version'],
+    ])
+  })
+
   it('fails, and probes nothing, when there is no package to probe', async () => {
     const w = world({ name: 'app' })
     const { calls, runner } = recorder()
