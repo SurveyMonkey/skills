@@ -40,7 +40,7 @@ worktree *paths* not colliding is not the same as repository state not colliding
   and the breakage surfaces in the victim, not the caller. `git worktree remove <own-path>` already
   removes the caller's own entry; that is the whole cleanup an agent is entitled to.
 - **What an agent leaves behind is reaped by the orchestrator, one agent at a time**, through
-  `common/reap-agent-artifacts.sh`: once that agent's result is in hand and its pull request has
+  `common/reap-agent-artifacts.sh` (in the port, the module `src/reap.ts`, #234): once that agent's result is in hand and its pull request has
   been verified open, and never for an agent that ended any other way. The verified open PR is what
   makes the local branch delete safe (its tip is on origin). Since issue #175 the reap runs after
   the dispatch workflow returns, so in practice no sibling is in flight — but **the local-scope
