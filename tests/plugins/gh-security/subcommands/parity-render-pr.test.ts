@@ -437,6 +437,15 @@ const DECLARED: Readonly<Record<string, Declared>> = {
   'create a URL of another host': { error: NO_URL('https://ghe.example/octo/app/pull/99') },
 }
 
+/**
+ * Rows whose answer from the script depends on the version of jq. The capture
+ * was made with jq 1.8.1, and CI has jq 1.7. `"4\n" | tonumber` is an error
+ * in 1.8 and the number 4 in 1.7, so the script answered with no next major
+ * in one, and with `<5` in the other. The capture and the port are compared,
+ * and the live script is not.
+ */
+const VARIES_WITH_JQ: ReadonlySet<string> = new Set(['body major_line with a trailing newline'])
+
 /** The answer that the port gives for a row: the script's, or the declared difference. */
 const portExpects = (row: Row, bash: Answer): Answer => {
   const declared = DECLARED[row.name]
@@ -481,7 +490,7 @@ describe('render-pr against render-pr.sh', () => {
     const { places, cleanup } = prepare(row)
     try {
       const expected = captured(row)
-      expect(bashSide(row, places)).toEqual(expected)
+      if (!VARIES_WITH_JQ.has(row.name)) expect(bashSide(row, places)).toEqual(expected)
       expect(await tsSide(row, places)).toEqual(portExpects(row, expected))
     } finally {
       cleanup()
