@@ -129,7 +129,7 @@ const pnpmCopies = (text: string, pkg: string): readonly PnpmCopy[] => {
  * it keeps the edge with the URL as its version, and can write a key that
  * names the URL. pnpm matches no such key. Both are declared parity
  * exceptions (#50, #313). `pnpmCopiesWithNoVersion` keeps the dropped copies
- * for the refusals.
+ * for the first refusal.
  */
 export const pnpmEdges = (text: string, pkg: string): readonly Edge[] =>
   pnpmCopies(text, pkg)
@@ -351,10 +351,11 @@ export const bareConflict = (
 /**
  * The first refusal of #50 and #313: a pnpm parent that this call qualifies
  * has a copy from outside the registry, such as a git copy, whose
- * `packages:` entry gives no manifest version. pnpm matches a qualified key
- * against the manifest version of a copy, so no qualified key matches that
- * copy, and the fix would leave it as it is. The detail names each such
- * parent, in the order of the call, with the versions of those copies.
+ * `packages:` entry gives no manifest version that a key can name. pnpm
+ * matches a qualified key against the manifest version of a copy, so no
+ * qualified key matches that copy, and the fix would leave it as it is.
+ * The detail names each such parent, in the order of the call, with the
+ * versions of those copies.
  */
 export const outsideRegistryRefusal = (
   qualifiers: Qualifiers,
@@ -367,7 +368,7 @@ export const outsideRegistryRefusal = (
   })
   if (detail.length === 0) return null
   return failed(
-    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy, whose 'packages:' entry gives no manifest version. Each parent in the detail resolves at two or more versions, so its keys must name a version ('<parent>@<version>>${pkg}'). pnpm matches that version against the manifest version of each copy, and the lockfile gives none for the copies in the detail, so no such key matches them (issues #50 and #313). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
+    `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy, whose 'packages:' entry gives no manifest version that a key can name. Each parent in the detail resolves at two or more versions, so its keys must name a version ('<parent>@<version>>${pkg}'). pnpm matches that version against the manifest version of each copy, and the lockfile gives no such version for the copies in the detail, so no such key matches them (issues #50 and #313). Detail: ${render(detail, null)}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`,
   )
 }
 
