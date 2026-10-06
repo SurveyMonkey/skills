@@ -61,7 +61,8 @@ in process. It calls their exported handlers, and never starts this CLI as a chi
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler
 may also fail with a report (`failedReport` in `src/cli/command.ts`). The report goes to stdout,
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
-same JSON on stdout when a URL failed.
+same JSON on stdout when a URL failed. `render-pr create` does this when `gh pr create` opened a
+pull request and then failed: the report is `{"error": ..., "pr_url": ...}` (ruling 18 of #233).
 A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
 that goes back to the agent (`needs_judgment`), which `apply` gives. These two codes are the codes
 of `fix-group.sh`. They are not `not-implemented` and `unsupported` of ADR 001.
@@ -118,7 +119,8 @@ into handlers and mocked one method at a time. Its API is the target stack's, wi
 it. The last six are not in the target stack, and `lib/gh.ts` names them as divergences.
 `createLabel` answers `created: false` for a label that exists, and `createPullRequest` never
 passes `--draft` (ADR 008). A method answers with the
-value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
+value, or throws a `GhError` with gh's exit `status` and its words in `detail`. For a failed
+`createPullRequest`, `pullRequestUrl` is the URL that gh wrote on stdout, or `null`. A command turns
 that error into an envelope. Octokit is not the client, because nothing shipped imports anything
 outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's
 authentication. The client takes no `env_prefix`; a caller that needs one wraps the client's `run`

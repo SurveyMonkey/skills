@@ -852,6 +852,40 @@ describe('createPullRequest', () => {
     ])
   })
 
+  // gh makes the PR, and then adds the labels in a second call. When that
+  // call fails, gh writes the URL on stdout and exits 1 (ruling 18, #233).
+  it('keeps the URL on stdout of a gh that opened the PR and then failed', async () => {
+    const error = (await ask({
+      status: 1,
+      stdout: `${URL}\n`,
+      stderr: 'pull request update failed: GraphQL: Could not add the label\n',
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.detail).toBe('pull request update failed: GraphQL: Could not add the label')
+    expect(error.pullRequestUrl).toBe(URL)
+  })
+
+  it('has no URL for a failure with nothing on stdout, or a URL on stderr only', async () => {
+    for (const reply of [
+      { status: 1, stderr: 'pull request create failed: HTTP 422\n' },
+      { status: 1, stderr: `a label does not exist ${URL}\n` },
+    ]) {
+      const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
+      expect(error).toBeInstanceOf(GhError)
+      expect(error.pullRequestUrl).toBeNull()
+    }
+  })
+
+  it('has no URL for a pipe error on exit 0, where stdout may be cut', async () => {
+    const error = (await ask({
+      status: 0,
+      stdout: `${URL}\n`,
+      streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }],
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.pullRequestUrl).toBeNull()
+  })
+
   it('passes a title with a leading dash, a newline and non-ASCII text as one word', async () => {
     const { calls } = ask(
       { stdout: `${URL}\n` },

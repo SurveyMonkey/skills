@@ -2159,6 +2159,28 @@ describe('create', () => {
     expect(ran.result).toEqual(failure(`gh pr create failed: a label does not exist ${URL}`))
   })
 
+  // gh opened the PR, and then failed to add its labels (ruling 18, #233).
+  it('gives the URL of a PR that gh opened before it failed', async () => {
+    const ran = await create(base, () => ({
+      status: 1,
+      stdout: `${URL}\n`,
+      stderr: 'pull request update failed: GraphQL: Could not add the label\n',
+    }))
+    const error = `gh pr create failed: pull request update failed: GraphQL: Could not add the label. gh opened the pull request ${URL}.`
+    expect(ran.result).toEqual({
+      outcome: 'failed',
+      error,
+      report: { error, pr_url: URL },
+    })
+  })
+
+  it('gives no URL for a failure with nothing on stdout', async () => {
+    expect(
+      (await create(base, () => ({ status: 1, stderr: 'pull request create failed: HTTP 422\n' })))
+        .result,
+    ).toEqual(failure('gh pr create failed: pull request create failed: HTTP 422'))
+  })
+
   it('names the exit status of a failure that has no stderr', async () => {
     expect((await create(base, () => ({ status: 1, stdout: 'only on stdout' }))).result).toEqual(
       failure('gh pr create failed: gh exited 1'),

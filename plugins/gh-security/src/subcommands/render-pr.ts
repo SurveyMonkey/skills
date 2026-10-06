@@ -35,7 +35,10 @@
 //   - The `gh` client turns a failure into its detail: the stderr of `gh`, or
 //     `gh exited <status>` when stderr is empty (#302). The script quoted
 //     stdout when stderr was empty, and stdout and stderr together for
-//     `gh pr create`.
+//     `gh pr create`. When `gh pr create` exits non-zero with a pull
+//     request URL on stdout, gh opened that PR before it failed. The failure
+//     then gives the URL in its message and as `pr_url` beside `error`
+//     (ruling 18). A URL on stderr only is not read.
 //   - A `gh pr create` that exits 0 with no URL fails as
 //     `gh pr create failed: gh answered gh pr create with no pull request
 //     URL: ...`. The script said `produced no PR URL`.
@@ -51,7 +54,12 @@
 
 import { readFileSync, statSync } from 'node:fs'
 
-import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
+import {
+  type CommandContext,
+  type CommandHandler,
+  type CommandResult,
+  failedReport,
+} from '../cli/command.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { type Envelope, failed, ok } from '../lib/envelope.ts'
 import { createGhClient, type GhClient, type GhClientOptions, GhError } from '../lib/gh.ts'
@@ -295,19 +303,24 @@ const create = async (
     return failed(`create: --band must be low, medium, or high, got '${flagOf(options, '--band')}'`)
   }
   const client = clientFor(context, options, makeClient, spawn)
-  let url = ''
-  const failure = await attempt('gh pr create', async () => {
-    url = (
-      await client.createPullRequest({
-        repository,
-        head,
-        labels: ['security', 'dependencies', `merge-risk:${band}`, ...options.labels],
-        title,
-        bodyFile: bodyFile.value,
-      })
-    ).url
-  })
-  return failure === null ? ok({ status: 'ok', pr_url: url }) : failed(failure)
+  try {
+    const { url } = await client.createPullRequest({
+      repository,
+      head,
+      labels: ['security', 'dependencies', `merge-risk:${band}`, ...options.labels],
+      title,
+      bodyFile: bodyFile.value,
+    })
+    return ok({ status: 'ok', pr_url: url })
+  } catch (error) {
+    if (!(error instanceof GhError)) throw error
+    const message = `gh pr create failed: ${error.detail}`
+    if (error.pullRequestUrl === null) return failed(message)
+    // gh opened the PR before it failed. The caller gets its URL, so that
+    // the PR is not lost, and a second try does not meet it (ruling 18).
+    const opened = `${message}. gh opened the pull request ${error.pullRequestUrl}.`
+    return failedReport(opened, { error: opened, pr_url: error.pullRequestUrl })
+  }
 }
 
 /**

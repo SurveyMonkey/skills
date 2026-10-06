@@ -127,13 +127,26 @@ export class GhError extends Error {
    */
   readonly detail: string
 
-  constructor(message: string, status: number | null, options: { cause: unknown; detail: string }) {
+  /**
+   * The URL of a pull request that `gh pr create` opened before it failed,
+   * or `null`. gh makes the pull request, and then adds its labels in a
+   * second call. When that call fails, gh writes the URL on stdout and exits
+   * 1 (ruling 18 of #233). Only `createPullRequest` sets it.
+   */
+  readonly pullRequestUrl: string | null
+
+  constructor(
+    message: string,
+    status: number | null,
+    options: { cause: unknown; detail: string; pullRequestUrl?: string | null },
+  ) {
     super(message, { cause: options.cause })
     // Set here, not inherited. Without this line, a caught failure reports
     // as a plain `Error`.
     this.name = 'GhError'
     this.status = status
     this.detail = options.detail
+    this.pullRequestUrl = options.pullRequestUrl ?? null
   }
 }
 
@@ -359,13 +372,17 @@ const labelExists = (result: RunResult): boolean =>
   result.streamErrors.length === 0 &&
   result.stderr.includes(LABEL_EXISTS)
 
+/** The last pull request URL in a text, or `null` for none. */
+const lastUrl = (text: string): string | null =>
+  [...text.matchAll(PULL_REQUEST_URL)].at(-1)?.[0] ?? null
+
 /**
  * What `createPullRequest` promises: a URL in what `gh` wrote. The script
  * read stdout and stderr as one text, and took the last URL in it.
  */
 const pullRequestOf = (result: RunResult): GhResults['createPullRequest'] => {
-  const url = [...result.combined.matchAll(PULL_REQUEST_URL)].at(-1)?.[0]
-  if (url !== undefined) return { url }
+  const url = lastUrl(result.combined)
+  if (url !== null) return { url }
   const said = `gh answered gh pr create with no pull request URL: ${result.combined.trimEnd().slice(0, SHOWN_CHARACTERS)}`
   throw new GhError(said, result.status, { cause: result, detail: said })
 }
@@ -384,7 +401,11 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   /** The result, after this function has found that gh succeeded. A
    *  non-zero exit, a gh that never started, or a pipe that failed becomes
    *  a {@link GhError} with the status and gh's own words. */
-  const ensured = (args: readonly string[], result: RunResult): RunResult => {
+  const ensured = (
+    args: readonly string[],
+    result: RunResult,
+    pullRequestUrl?: string | null,
+  ): RunResult => {
     // A pipe error is a failure even on status 0. gh exits 0 on the bytes it
     // wrote, but only some of them came through.
     if (result.status !== 0 || result.streamErrors.length !== 0) {
@@ -392,6 +413,7 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       throw new GhError(`gh ${args.join(' ')} failed: ${detail}`, result.status, {
         cause: result,
         detail,
+        pullRequestUrl,
       })
     }
     return result
@@ -474,21 +496,25 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       ensured(args, result)
       return { created: true }
     },
-    createPullRequest: async (pull) =>
-      pullRequestOf(
-        await succeeded([
-          'pr',
-          'create',
-          '--repo',
-          pull.repository,
-          '--head',
-          pull.head,
-          ...pull.labels.flatMap((name) => ['--label', name]),
-          '--title',
-          pull.title,
-          '--body-file',
-          pull.bodyFile,
-        ]),
-      ),
+    createPullRequest: async (pull) => {
+      const args = [
+        'pr',
+        'create',
+        '--repo',
+        pull.repository,
+        '--head',
+        pull.head,
+        ...pull.labels.flatMap((name) => ['--label', name]),
+        '--title',
+        pull.title,
+        '--body-file',
+        pull.bodyFile,
+      ]
+      const result = await invoke(args)
+      // A non-zero exit can come after gh opened the PR. Its URL is then on
+      // stdout. A pipe error on exit 0 can cut stdout, so no URL is read.
+      ensured(args, result, result.status === 0 ? null : lastUrl(result.stdout))
+      return pullRequestOf(result)
+    },
   }
 }
