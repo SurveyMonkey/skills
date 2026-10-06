@@ -4,7 +4,8 @@
 // text: `jq -r` printed a number, an object or `null` as text. Here each
 // field is read as the type that the contract promises, or the read fails
 // with a message that names the file and the field. Nothing is rendered from
-// a field that this file did not read, and nothing is read as a default.
+// a field that this file did not read. A default is read only where the
+// script read one with `//`.
 //
 // The checks run in the order that the script ran them, so a state that has
 // two defects gives the same first message as before. Every check runs
@@ -21,12 +22,15 @@
 //   - `epss_percentile` is a number from 0 to 1, a fraction. The script
 //     printed any number as a percentage.
 //   - A `summary` that is not text is refused. The script stopped in the
-//     middle of the body, after it had printed the first sections.
+//     middle of the body, after it had printed the first sections. For a
+//     `summary` of `false`, `// ""` gave the empty text.
 //   - `commit-msg` checks `major_line` as `body` does.
 //   - The range of a bare override is the value of the first top-level entry
 //     of `written[]` that has a text value. The script read `.value` of the
 //     first top-level entry, whatever its type, and printed `null` for a
 //     value that is not there.
+//   - A `written` that is an object gives no range to a lockfile refresh.
+//     The script read the values of the object as the entries.
 //   - A `requires_major_bump` version that names no major line is refused.
 //     The script printed `no patched release in the .x line`.
 //   - A moves `major` is text or a number, and a `before` or `after` is a
@@ -223,8 +227,9 @@ interface PackageFacts {
 const readPackage = (group: Rec, where: string, majorMessage: string): Envelope<PackageFacts> => {
   const name = required(group, 'package', where, 'text', isText)
   if (name.outcome !== 'ok') return name
-  // The text check of `major_line` is the third: the script asked for the
-  // presence of the three fields first, and for the format of one later.
+  // The text check of `major_line` comes after the three presence checks:
+  // the script asked for the presence of the three fields first, and for the
+  // format of one later.
   if (group.major_line === undefined || group.major_line === null) {
     return missing(where, 'major_line')
   }

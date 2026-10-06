@@ -6,20 +6,24 @@
 // Every value that comes from input reaches a line through `shown`, a table
 // cell through `cell`, and a code block through `fence` (`markdown.ts`).
 // Three values are Markdown, and go in as they are: `risk.markdown` and the
-// two notes.
+// two notes. `--repo` also goes in as it is, in each link to an alert.
 //
 // Declared differences from the script, each with #233:
 //   - A table cell is escaped for Markdown. The script escaped a pipe only in
 //     a summary, and the tsv step then doubled its backslash. That left a
-//     cell that a pipe ended. A version or a moves cell had no escape. A tab
-//     in a cell stays a tab, where the script printed `\t`.
-//   - A line break in a cell is one space. The script printed `\r` or `\n`.
+//     cell that a pipe ended. No other cell had an escape. A tab in a cell
+//     stays a tab, where the script printed `\t`.
+//   - A line break in a cell is one space. The script printed `\r` as two
+//     characters. It printed `\n` so too, except in a summary, where it
+//     made `\n` one space.
 //   - A code block has a fence longer than any run of backticks in it.
 //   - A line break in a value of a line is one space.
-//   - The next major line is exact for a `major_line` above 2^53.
+//   - The next major line is exact for a `major_line` above 2^53 that is
+//     text. A number above 2^53 has lost its last digits when it is read.
 //   - The `written` block is the JSON of JavaScript. A key that is a whole
 //     number goes first. A number is in its shortest form, so `1.0` is `1`
-//     and `1E+2` is `100`. U+007F is not escaped.
+//     and `1E+2` is `100`. An integer above 2^53 loses its last digits.
+//     U+007F is not escaped.
 //
 // This file ships. It imports nothing outside the plugin.
 

@@ -2,6 +2,9 @@
 // `render-pr.sh`. It is a template over the inputs that `pr-inputs.ts` read.
 // It makes no decision, and fails for no input: every check is already done.
 //
+// Declared difference from the script, with #233: a line break in an alert
+// id or a severity is one space. The script printed the line break.
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { inline } from './markdown.ts'

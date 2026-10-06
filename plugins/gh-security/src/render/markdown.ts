@@ -1,8 +1,11 @@
-// The text rules of the PR renderer (#233). Each function here is one rule
-// that `render-pr.sh` had as a jq filter or an awk call. A value that comes
-// from input reaches a line, a table cell or a code fence through one of
-// these functions, so it cannot break the Markdown around it. The values
-// that are Markdown are the exceptions (`pr-body.ts`).
+// The text rules of the PR renderer (#233). Most functions here are a rule
+// that `render-pr.sh` had as a jq filter or an awk call. `fence` is new, and
+// `cell` does for each cell what the script did only for a summary. A value
+// that comes from input reaches a line, a table cell or a code fence through
+// one of these functions. So a line break cannot split its line, a pipe
+// cannot end its cell, and a backtick run cannot end its fence. A backtick
+// in a line can still end a code span. The values that are Markdown, and
+// `--repo`, are the exceptions (`pr-body.ts`).
 //
 // This file ships. It imports nothing outside the plugin.
 
