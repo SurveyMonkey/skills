@@ -254,9 +254,11 @@ export const setup = async (
   //    itself (`src/signals.ts`). Then the reap removes what this run made:
   //    the work directory was not there at step 1, and the branch is new at
   //    `origin/<default>`. The process exits with the status of the signal.
-  //    When git refuses `worktree add` with a status, it made nothing. The
-  //    paths can then be those of another run, so the reap does not run. A
-  //    `worktree add` that a signal stopped has no status, and the reap runs.
+  //    When git refuses `worktree add` with a status, it made no worktree.
+  //    The paths can then be those of another run, so the reap does not run.
+  //    A branch that git made stays at `origin/<default>`, and the
+  //    stale-branch guard of the next `setup` clears it. A `worktree add`
+  //    that a signal stopped has no status, and the reap runs.
   let refused = false
   return holdSignals(
     signals,
