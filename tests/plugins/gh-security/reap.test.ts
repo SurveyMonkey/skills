@@ -199,6 +199,13 @@ describe('contain', () => {
         `the work path is not under ${w.repo}/.claude/worktrees/: ${w.repo}/.claude/worktrees. Nothing was removed.`,
     ],
     [
+      'the worktree root itself, with a slash at its end',
+      (w) => mkdirSync(join(w.repo, '.claude', 'worktrees'), { recursive: true }),
+      (w) => ({ work: `${join(w.repo, '.claude', 'worktrees')}/` }),
+      (w) =>
+        `the work path is not under ${w.repo}/.claude/worktrees/: ${w.repo}/.claude/worktrees. Nothing was removed.`,
+    ],
+    [
       'a worktree root that a link moved out of the repository',
       (w) => {
         addWorktree(w)

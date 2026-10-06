@@ -172,11 +172,13 @@ export const resolvePhysical = (path: string): string => {
 
 const hasDotDot = (path: string): boolean => path.split('/').includes('..')
 
-/** Under `<root>/.claude/worktrees/`, and not that directory itself. */
-const isContained = (root: string, path: string): boolean => {
-  const prefix = `${root}/.claude/worktrees/`
-  return path.startsWith(prefix) && path.length > prefix.length
-}
+/**
+ * Under `<root>/.claude/worktrees/`, and not that directory itself. A
+ * resolved path has no `/` at its end, so the directory itself does not
+ * start with the prefix.
+ */
+const isContained = (root: string, path: string): boolean =>
+  path.startsWith(`${root}/.claude/worktrees/`)
 
 /** Text of a child on one line, as each error is one entry. */
 const oneLine = (text: string): string => text.replace(/\s+$/, '').replace(/\n/g, ' ')
