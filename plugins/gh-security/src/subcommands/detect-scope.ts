@@ -48,7 +48,10 @@
 // `--env-prefix` is the opaque command prefix that the environment needs
 // (issue #193). It wraps the runner for `git`, `gh` and `ssh`, so each runs as
 // `<prefix> git ...`, `<prefix> gh ...` and `<prefix> ssh ...`. The ssh that
-// git starts runs under the prefix, so `ssh -G` reads the same configuration.
+// git starts runs under the prefix, so `ssh -G` reads the same default
+// configuration. git can also start another command (`core.sshCommand`,
+// `GIT_SSH_COMMAND`). When that command reads another configuration, `ssh -G`
+// does not see it, and an alias from it gives the symref.
 // Only `git remote show origin` and the GitHub call reach the network, and
 // they need an identity. Nothing here looks for a tool.
 //
