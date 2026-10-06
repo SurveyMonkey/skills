@@ -23,10 +23,13 @@
 #
 # What remains is the prose that IS the implementation, because a model
 # executes it and nothing else can: the approval boundary, the interruption
-# and resume contract, the reap cadence, the payload the orchestrator
-# assembles, and the phase 6 rules that predate the workflow. Those follow
-# the spec/fix_dependency_branch_spec.sh pattern — the sentence is the code,
-# and its absence is the whole regression.
+# and resume contract, the reap cadence, and the phase 6 rules that predate
+# the workflow. Those follow the spec/fix_dependency_branch_spec.sh pattern:
+# the sentence is the code, and its absence is the whole regression.
+#
+# The payload and the args are code since #228. The `build-dispatches`
+# command builds them, and the `preflight-repo` command does phase 5. Their
+# examples are in tests/plugins/gh-security/subcommands/.
 #
 # The dividing question for anything added later: does a MODEL do it, or does
 # the SCRIPT? A script behavior belongs in spec/js/, run rather than read.
@@ -157,52 +160,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # guards the half that is not JavaScript.
     It 'keeps the sonnet pin in the agent frontmatter ADR 004 names'
       When call rule_in "$AGENT" '^model: sonnet$'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'what the model still has to get right about args'
-    # The script refuses a malformed args object (spec/js/), but only the
-    # model can pass a well-formed one in the first place, and a stringified
-    # args is a caller mistake no callee can prevent.
-    # pin: mechanical, retired by build-dispatches.sh
-    It 'tells the caller to pass args as JSON, never as a JSON-encoded string'
-      When call phrase_in "$SKILL" 'Pass .args. as an actual JSON value, never as a JSON-encoded string'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by build-dispatches.sh
-    It 'names the silent empty-batch inversion that guard prevents'
-      When call blob_in "$SKILL" 'report as a whole batch of crashed agents when nothing was ever dispatched'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The payload is assembled by the model from phases 1, 2 and 5, so its
-    # field list is prose, not script.
-    Describe 'the dispatch payload the orchestrator assembles'
-      Parameters
-        'nwo'
-        'adapter_path'
-        'default_branch'
-        'repo_root'
-        'scripts_dir'
-      End
-
-      # pin: mechanical, retired by build-dispatches.sh
-      It "still carries $1"
-        When call phrase_in "$SKILL" "Each payload is the group JSON verbatim under .group., plus .*$1"
-        The status should be success
-        The output should equal '1'
-      End
-    End
-
-    # An omitted key, never a null: the one field whose absence is meaningful.
-    # pin: mechanical, retired by build-dispatches.sh
-    It 'still omits env_prefix rather than sending null'
-      When call phrase_in "$SKILL" 'omit the key rather than send null'
       The status should be success
       The output should equal '1'
     End
@@ -499,20 +456,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # the repository and the batch that hold however dispatch is scheduled.
     # Pinned here because a later editor clearing out pool-era prose is
     # exactly who would take them by mistake.
-    # pin: mechanical, retired by preflight-repo.sh
-    It 'still writes the worktree exclude once per repo, before any dispatch for it'
-      When call phrase_in "$SKILL" 'Once per distinct repo in the approved batch, before the first agent for that repo is'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by preflight-repo.sh
-    It 'still gives the registry preflight one retry before it means anything'
-      When call phrase_in "$SKILL" 'one retry.. before it means anything'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'still keeps repo-global git state with the orchestrator while agents are in flight'
       When call phrase_in "$SKILL" 'while any agent is in flight no agent may touch it'
       The status should be success
