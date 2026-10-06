@@ -359,6 +359,16 @@ describe('the refusals', () => {
       `has a check_counts without a total and a pending count: ${url('octo/app', 1)}`,
     ],
     [
+      'has check_counts that is null',
+      entry('octo/app', 1, { check_counts: null }),
+      `has a check_counts without a total and a pending count: ${url('octo/app', 1)}`,
+    ],
+    [
+      'has check_counts with a total that is not a whole number',
+      entry('octo/app', 1, { check_counts: { total: 1.5, pending: 0 } }),
+      `has a check_counts without a total and a pending count: ${url('octo/app', 1)}`,
+    ],
+    [
       'has check_counts that is not an object',
       entry('octo/app', 1, { check_counts: 4 }),
       `has a check_counts without a total and a pending count: ${url('octo/app', 1)}`,
