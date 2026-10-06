@@ -53,6 +53,9 @@ in prose on stderr. An unknown command is the one deliberate exception to that s
 command's result, so its envelope goes to stderr as JSON and stdout stays empty, because a caller
 reading stdout as this CLI's contract must never read "there is no such command" as a payload.
 A command may also answer with silence, which is exit 0 and nothing written at all.
+A command that makes a file's content may write that text itself to stdout, and then answer with
+silence. `render-pr commit-msg` and `render-pr body` do this. A failure of either is still
+`{"error": ...}`, and nothing else is written.
 A handler may return a promise, and `run.ts` waits for it. A command may compose other commands
 in process. It calls their exported handlers, and never starts this CLI as a child:
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler
