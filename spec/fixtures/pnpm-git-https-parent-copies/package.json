@@ -1,0 +1,10 @@
+{
+  "name": "demo-pnpm-git-https-parent-copies",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "git+https://git.example.com/debug.git#4.3.4",
+    "debug-latest": "npm:debug@4.4.3",
+    "finalhandler": "1.1.2"
+  }
+}

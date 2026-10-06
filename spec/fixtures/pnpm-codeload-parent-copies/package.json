@@ -1,0 +1,10 @@
+{
+  "name": "demo-pnpm-codeload-parent-copies",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "github:example/debug#4.3.4",
+    "debug-latest": "npm:debug@4.4.3",
+    "finalhandler": "1.1.2"
+  }
+}
