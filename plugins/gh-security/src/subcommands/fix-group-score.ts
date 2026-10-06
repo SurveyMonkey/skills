@@ -20,7 +20,14 @@ import { renameSync, writeFileSync } from 'node:fs'
 
 import type { CommandResult } from '../cli/command.ts'
 import { fieldOf, orElse, tostring } from '../jq.ts'
-import { type Failure, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
+import {
+  type Failure,
+  failed,
+  type JsonObject,
+  type JsonValue,
+  ok,
+  thrownText,
+} from '../lib/envelope.ts'
 import { type RiskFactor, scoreMergeRisk } from '../merge-risk/score.ts'
 import {
   readOptionalStrings,
@@ -270,7 +277,7 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
       driver.worktree,
     )
   } catch (error) {
-    scored = failed(error instanceof Error ? error.message : String(error))
+    scored = failed(thrownText(error))
   }
   // A failed scorer is a phase failure, as every other failure of this
   // phase. The detail is the text of the bash: the script name, and the
