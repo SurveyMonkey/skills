@@ -234,14 +234,16 @@ describe('the command', () => {
     expect(answer).toEqual({
       status: 1,
       json: {
-        error: 'usage: gh-security fix-group <setup|classify|baseline|apply|score> [options]',
+        error:
+          'usage: gh-security fix-group <setup|classify|baseline|apply|score|cleanup> [options]',
       },
-      stderr: 'usage: gh-security fix-group <setup|classify|baseline|apply|score> [options]',
+      stderr:
+        'usage: gh-security fix-group <setup|classify|baseline|apply|score|cleanup> [options]',
     })
   })
 
   // Exit 1, never exit 2: exit 2 is `needs_judgment` in this contract.
-  it.each(['cleanup', 'bogus'])('refuses the phase %s with exit 1', async (phase) => {
+  it.each(['bogus', 'Cleanup'])('refuses the phase %s with exit 1', async (phase) => {
     const answer = answerOf(await fixGroupCommand(context({}, [phase])))
     expect(answer.status).toBe(1)
     expect(answer.stderr).toContain(`'${phase}' is not a phase of this command`)
