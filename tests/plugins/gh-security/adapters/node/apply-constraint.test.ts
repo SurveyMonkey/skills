@@ -666,6 +666,15 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     )
   })
 
+  // Here the git copy is on the line, and the registry copy at its manifest
+  // version is not. The key `debug@4.3.4>ms` reaches both (#313).
+  it('refuses a qualified key that reaches a registry copy on another line (#313)', () => {
+    const setup = registryCopies(['4.3.4', '1.0.0'], ['4.4.3', '2.1.3'])
+    expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+      plainKeyRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
+
   // A qualified key that reaches only copies on the line leaves an off-line
   // registry copy as it is, beside a git copy.
   it('writes qualified keys beside a git copy and a registry copy on another line (#313)', () => {
