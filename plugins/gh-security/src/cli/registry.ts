@@ -77,6 +77,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
       'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root>',
     load: async () => (await import('../subcommands/prepare-checkout.ts')).prepareCheckoutCommand,
   },
+  'render-pr': {
+    description:
+      'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+    load: async () => (await import('../subcommands/render-pr.ts')).renderPrCommand,
+  },
   'render-pr-status': {
     description:
       'Write the phase 8 table from the pr-status answers of each repository: render-pr-status --bands <bands.json> <report.json>...',

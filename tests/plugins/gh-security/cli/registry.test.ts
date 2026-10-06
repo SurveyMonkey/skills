@@ -19,6 +19,7 @@ import { fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
+import { renderPrCommand } from '#gh-security/subcommands/render-pr.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
 import { pluginFile } from '#harness/paths.ts'
@@ -50,6 +51,7 @@ describe('the registry', () => {
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
+      "import('../subcommands/render-pr.ts')",
       "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/score-merge-risk.ts')",
       "import('../subcommands/session-start.ts')",
@@ -99,6 +101,21 @@ describe('the discovery entries', () => {
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
+  })
+})
+
+describe('the render-pr entry', () => {
+  it('loads the handler of render-pr', async () => {
+    expect(await COMMANDS['render-pr']?.load()).toBe(renderPrCommand)
+  })
+
+  it.each([
+    'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> |',
+    'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] |',
+    'render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] |',
+    'render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+  ])('describes the usage %s', (usage) => {
+    expect(COMMANDS['render-pr']?.description).toContain(usage)
   })
 })
 

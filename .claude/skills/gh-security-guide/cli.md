@@ -22,6 +22,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, the registry probe `probeRegistry`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
+| `src/render/` | The PR renderer of `render-pr`. `markdown.ts` has the text rules: line, table cell, code fence and percent. `pr-inputs.ts` checks the two parsed inputs, and gives typed inputs. `commit-message.ts` and `pr-body.ts` are the templates |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), the registry preflight of each repository (`preflight-repo`), the Workflow `args` (`build-dispatches`), the closing PR table (`render-pr-status`), scoring, rendering, the drivers |
 | `src/subcommands/fix-group*.ts` | The fix driver. `fix-group.ts` is the command and its contract. `fix-group-setup.ts`, `fix-group-classify.ts`, `fix-group-baseline.ts`, `fix-group-apply.ts` and `fix-group-score.ts` are the ported phases. `fix-group-ladder.ts` has the decisions of `apply` as pure functions. `fix-group-common.ts` has what the phases share |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
@@ -52,12 +53,16 @@ in prose on stderr. An unknown command is the one deliberate exception to that s
 command's result, so its envelope goes to stderr as JSON and stdout stays empty, because a caller
 reading stdout as this CLI's contract must never read "there is no such command" as a payload.
 A command may also answer with silence, which is exit 0 and nothing written at all.
+A command that makes a file's content may write that text itself to stdout, and then answer with
+silence. `render-pr commit-msg` and `render-pr body` do this. A failure of either is still
+`{"error": ...}` on stdout with the message on stderr, and no part of the text is written.
 A handler may return a promise, and `run.ts` waits for it. A command may compose other commands
 in process. It calls their exported handlers, and never starts this CLI as a child:
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler
 may also fail with a report (`failedReport` in `src/cli/command.ts`). The report goes to stdout,
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
-same JSON on stdout when a URL failed.
+same JSON on stdout when a URL failed. `render-pr create` does this when `gh pr create` opened a
+pull request and then failed: the report is `{"error": ..., "pr_url": ...}` (ruling 18 of #233).
 A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
 that goes back to the agent (`needs_judgment`), which `apply` gives. These two codes are the codes
 of `fix-group.sh`. They are not `not-implemented` and `unsupported` of ADR 001.
@@ -107,12 +112,15 @@ its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `s
 synchronous, so it keeps a local runner.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
-into handlers and mocked one method at a time. Its API is the target stack's, with five methods:
+into handlers and mocked one method at a time. Its API is the target stack's, with seven methods:
 `viewPullRequest` for `pr-status`, `viewDefaultBranch` for `detect-scope`, `listAdvisories` for
-`check-advisories`, and `listDependabotAlerts` and `searchOpenPullRequests` for `discover-alerts`.
-A method comes with the command that calls it. The last four are not in the target stack, and
-`lib/gh.ts` names them as divergences. A method answers with the
-value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
+`check-advisories`, `listDependabotAlerts` and `searchOpenPullRequests` for `discover-alerts`, and
+`createLabel` and `createPullRequest` for `render-pr`. A method comes with the command that calls
+it. The last six are not in the target stack, and `lib/gh.ts` names them as divergences.
+`createLabel` answers `created: false` for a label that exists, and `createPullRequest` never
+passes `--draft` (ADR 008). A method answers with the
+value, or throws a `GhError` with gh's exit `status` and its words in `detail`. For a failed
+`createPullRequest`, `pullRequestUrl` is the URL that gh wrote on stdout, or `null`. A command turns
 that error into an envelope. Octokit is not the client, because nothing shipped imports anything
 outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's
 authentication. The client takes no `env_prefix`; a caller that needs one wraps the client's `run`

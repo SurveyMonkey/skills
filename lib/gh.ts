@@ -2,12 +2,13 @@
 // real implementation of it. The exported names and signatures are the
 // target stack's `lib/gh.ts`, with the differences named in the notes below
 // (`PULL_REQUEST_FIELDS`, `DEFAULT_BRANCH_FIELDS`, `ADVISORY_PAGE_SIZE`,
-// `ALERT_PAGE_SIZE` and `SEARCH_FIELDS`). This file has the endpoints of the
-// commands that exist: `viewPullRequest` for `pr-status` (#226),
-// `viewDefaultBranch` for `detect-scope`, `listAdvisories` for
-// `check-advisories`, and `listDependabotAlerts` and `searchOpenPullRequests`
-// for `discover-alerts` (#225). A new endpoint comes with the command that
-// calls it, in the shape the target stack gives it (#274).
+// `ALERT_PAGE_SIZE`, `SEARCH_FIELDS`, `createLabel` and `createPullRequest`).
+// This file has the endpoints of the commands that exist: `viewPullRequest`
+// for `pr-status` (#226), `viewDefaultBranch` for `detect-scope`,
+// `listAdvisories` for `check-advisories`, `listDependabotAlerts` and
+// `searchOpenPullRequests` for `discover-alerts` (#225), and `createLabel`
+// and `createPullRequest` for `render-pr` (#233). A new endpoint comes with
+// the command that calls it, in the shape the target stack gives it (#274).
 //
 // A command gets a client as an argument, and never builds one itself. The
 // test double is `harness/gh.ts`.
@@ -41,6 +42,10 @@ export interface GhResults {
   listDependabotAlerts: readonly Record<string, unknown>[]
   /** The open pull requests that a `head:` search finds, in the order gh gives. */
   searchOpenPullRequests: readonly { readonly url: string }[]
+  /** Whether `gh` made the label (`true`), or the label was there before (`false`). */
+  createLabel: { readonly created: boolean }
+  /** The URL of the pull request that `gh` opened. */
+  createPullRequest: { readonly url: string }
 }
 
 export type GhEndpoint = keyof GhResults
@@ -66,6 +71,28 @@ export interface GhClient {
     repository: string
     head: string
   }): Promise<GhResults['searchOpenPullRequests']>
+  /**
+   * `repository` is `[HOST/]OWNER/REPO`, as `gh label create --repo` reads
+   * it. A label that exists already is `created: false`, not a failure.
+   */
+  createLabel(label: {
+    repository: string
+    name: string
+    color: string
+    description: string
+  }): Promise<GhResults['createLabel']>
+  /**
+   * `repository` is `[HOST/]OWNER/REPO`, as `gh pr create --repo` reads it.
+   * The pull request opens ready for review, never as a draft (ADR 008).
+   * `labels` must exist already: `gh pr create` fails on one that does not.
+   */
+  createPullRequest(pull: {
+    repository: string
+    head: string
+    labels: readonly string[]
+    title: string
+    bodyFile: string
+  }): Promise<GhResults['createPullRequest']>
 }
 
 /**
@@ -100,13 +127,26 @@ export class GhError extends Error {
    */
   readonly detail: string
 
-  constructor(message: string, status: number | null, options: { cause: unknown; detail: string }) {
+  /**
+   * The URL of a pull request that `gh pr create` opened before it failed,
+   * or `null`. gh makes the pull request, and then adds its labels in a
+   * second call. When that call fails, gh writes the URL on stdout and exits
+   * 1 (ruling 18 of #233). Only `createPullRequest` sets it.
+   */
+  readonly pullRequestUrl: string | null
+
+  constructor(
+    message: string,
+    status: number | null,
+    options: { cause: unknown; detail: string; pullRequestUrl?: string | null },
+  ) {
     super(message, { cause: options.cause })
     // Set here, not inherited. Without this line, a caught failure reports
     // as a plain `Error`.
     this.name = 'GhError'
     this.status = status
     this.detail = options.detail
+    this.pullRequestUrl = options.pullRequestUrl ?? null
   }
 }
 
@@ -189,6 +229,25 @@ const ALERT_PAGE_SIZE = 100
  * this endpoint is also a known divergence from it.
  */
 const SEARCH_FIELDS = 'url'
+
+/**
+ * The phrase of `gh label create` for a label that exists. `createLabel` (#233)
+ * is not in the target stack, and is a known divergence from it. It is the
+ * call that `render-pr.sh` made. Sibling agents that fix other packages of
+ * one batch race to make the same band label. The failure of the loser
+ * means that the label is there, which is what it wanted. So the answer
+ * says `created: false`, and does not throw.
+ */
+const LABEL_EXISTS = 'already exists'
+
+/**
+ * The URL that `gh pr create` prints. `createPullRequest` (#233) is not in
+ * the target stack either, and is a known divergence from it. The pattern
+ * is the one of `render-pr.sh`: the host is `github.com`, and the URL runs
+ * to the next white space. A pull request of another host is no URL here,
+ * the same as it was there.
+ */
+const PULL_REQUEST_URL = /https:\/\/github\.com\/\S+/g
 
 /** An optional filter, as the two argv words gh wants or as nothing at all. */
 const filter = (name: string, value: string | number | undefined): string[] =>
@@ -300,6 +359,34 @@ const pullRequestsOf = (result: RunResult): GhResults['searchOpenPullRequests'] 
   return (found as { url: string }[]).map((entry) => ({ url: entry.url }))
 }
 
+/**
+ * A failure that says the label is there. It reads gh's own stderr and
+ * nothing else (finding 5 of #172): a stdout with the phrase in it, or a
+ * child that never started, was killed, or lost a pipe, is a real failure.
+ */
+const labelExists = (result: RunResult): boolean =>
+  result.status !== null &&
+  result.status !== 0 &&
+  result.startFailure === null &&
+  !result.timedOut &&
+  result.streamErrors.length === 0 &&
+  result.stderr.includes(LABEL_EXISTS)
+
+/** The last pull request URL in a text, or `null` for none. */
+const lastUrl = (text: string): string | null =>
+  [...text.matchAll(PULL_REQUEST_URL)].at(-1)?.[0] ?? null
+
+/**
+ * What `createPullRequest` promises: a URL in what `gh` wrote. The script
+ * read stdout and stderr as one text, and took the last URL in it.
+ */
+const pullRequestOf = (result: RunResult): GhResults['createPullRequest'] => {
+  const url = lastUrl(result.combined)
+  if (url !== null) return { url }
+  const said = `gh answered gh pr create with no pull request URL: ${result.combined.trimEnd().slice(0, SHOWN_CHARACTERS)}`
+  throw new GhError(said, result.status, { cause: result, detail: said })
+}
+
 /** A `GhClient` that runs the real `gh`. */
 export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   const spawn = options.run ?? run
@@ -311,11 +398,14 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
   const invoke = (args: readonly string[]): Promise<RunResult> =>
     spawn('gh', args, { cwd: options.cwd, env: options.env, timeoutMs: options.boundMs })
 
-  /** What gh did, after this function has found that gh succeeded. A
+  /** The result, after this function has found that gh succeeded. A
    *  non-zero exit, a gh that never started, or a pipe that failed becomes
    *  a {@link GhError} with the status and gh's own words. */
-  const succeeded = async (args: readonly string[]): Promise<RunResult> => {
-    const result = await invoke(args)
+  const ensured = (
+    args: readonly string[],
+    result: RunResult,
+    pullRequestUrl?: string | null,
+  ): RunResult => {
     // A pipe error is a failure even on status 0. gh exits 0 on the bytes it
     // wrote, but only some of them came through.
     if (result.status !== 0 || result.streamErrors.length !== 0) {
@@ -323,10 +413,15 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
       throw new GhError(`gh ${args.join(' ')} failed: ${detail}`, result.status, {
         cause: result,
         detail,
+        pullRequestUrl,
       })
     }
     return result
   }
+
+  /** What gh did, after this function has found that gh succeeded. */
+  const succeeded = async (args: readonly string[]): Promise<RunResult> =>
+    ensured(args, await invoke(args))
 
   return {
     viewPullRequest: async (pull) =>
@@ -384,5 +479,42 @@ export const createGhClient = (options: GhClientOptions = {}): GhClient => {
           SEARCH_FIELDS,
         ]),
       ),
+    createLabel: async (label) => {
+      const args = [
+        'label',
+        'create',
+        label.name,
+        '--repo',
+        label.repository,
+        '--color',
+        label.color,
+        '--description',
+        label.description,
+      ]
+      const result = await invoke(args)
+      if (labelExists(result)) return { created: false }
+      ensured(args, result)
+      return { created: true }
+    },
+    createPullRequest: async (pull) => {
+      const args = [
+        'pr',
+        'create',
+        '--repo',
+        pull.repository,
+        '--head',
+        pull.head,
+        ...pull.labels.flatMap((name) => ['--label', name]),
+        '--title',
+        pull.title,
+        '--body-file',
+        pull.bodyFile,
+      ]
+      const result = await invoke(args)
+      // A non-zero exit can come after gh opened the PR. Its URL is then on
+      // stdout. A pipe error on exit 0 can cut stdout, so no URL is read.
+      ensured(args, result, result.status === 0 ? null : lastUrl(result.stdout))
+      return pullRequestOf(result)
+    },
   }
 }

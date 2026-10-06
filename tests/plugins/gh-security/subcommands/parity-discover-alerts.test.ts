@@ -156,6 +156,8 @@ const standIn = (scenario: Scenario): GhClient => {
     viewPullRequest: () => Promise.reject(new Error('not asked')),
     viewDefaultBranch: () => Promise.reject(new Error('not asked')),
     listAdvisories: () => Promise.reject(new Error('not asked')),
+    createLabel: () => Promise.reject(new Error('not asked')),
+    createPullRequest: () => Promise.reject(new Error('not asked')),
     listDependabotAlerts: async () => {
       const { served } = scenario
       if ('failure' in served) return refuse(served.failure, 1)

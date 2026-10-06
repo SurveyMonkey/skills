@@ -141,6 +141,8 @@ describe('the client options', () => {
       'listAdvisories',
       'listDependabotAlerts',
       'searchOpenPullRequests',
+      'createLabel',
+      'createPullRequest',
     ])
   })
 
@@ -667,5 +669,307 @@ describe('searchOpenPullRequests', () => {
       stderr: 'gh: could not resolve to a Repository\n',
     }).result.catch((thrown: unknown) => thrown)) as GhError
     expect(error.detail).toBe('gh: could not resolve to a Repository')
+  })
+})
+
+describe('createLabel', () => {
+  const LABEL = {
+    repository: 'octo/app',
+    name: 'merge-risk:low',
+    color: '2da44e',
+    description: 'Low merge risk',
+  }
+  const ask = (reply: Reply, label = LABEL) => {
+    const { gh, calls } = clientAnswering(reply, { repository: 'not/this' })
+    return { result: gh.createLabel(label), calls }
+  }
+
+  it('runs gh label create with the name first, and names the repository once', async () => {
+    const { result, calls } = ask({})
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'label',
+          'create',
+          'merge-risk:low',
+          '--repo',
+          'octo/app',
+          '--color',
+          '2da44e',
+          '--description',
+          'Low merge risk',
+        ],
+      },
+    ])
+  })
+
+  it('says the label was created when gh succeeds', async () => {
+    await expect(ask({ stdout: 'created\n' }).result).resolves.toEqual({ created: true })
+  })
+
+  it('passes a name, a color and a description that are not ASCII, and a space, as one word each', async () => {
+    const { calls } = ask({}, { ...LABEL, name: 'revisión 日本', description: 'Descripción: ñ' })
+    expect(calls[0]?.args.slice(2)).toEqual([
+      'revisión 日本',
+      '--repo',
+      'octo/app',
+      '--color',
+      '2da44e',
+      '--description',
+      'Descripción: ñ',
+    ])
+  })
+
+  it.each([
+    ['the whole text', 'HTTP 422: Validation Failed: name already exists'],
+    ['a longer text', 'warning: x\nlabel already exists, but with another color\n'],
+  ])('says the label exists already when stderr has %s', async (_shape, stderr) => {
+    await expect(ask({ status: 1, stderr }).result).resolves.toEqual({ created: false })
+  })
+
+  it('treats any non-zero status with that text on stderr as an existing label', async () => {
+    await expect(ask({ status: 4, stderr: 'already exists' }).result).resolves.toEqual({
+      created: false,
+    })
+  })
+
+  it('reads the phrase in lower case only, as the script did', async () => {
+    const error = (await ask({ status: 1, stderr: 'Already Exists' }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'Already Exists',
+      status: 1,
+    })
+  })
+
+  // The race rule reads stderr alone (finding 5 of #172). A failure whose
+  // stdout has the phrase is a real failure.
+  it('throws when only stdout has the phrase, and quotes stderr', async () => {
+    const error = (await ask({
+      status: 1,
+      stdout: 'some unrelated resource already exists in a different context\n',
+      stderr: 'real error: rate limited\n',
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'real error: rate limited',
+      status: 1,
+    })
+    expect(error.message).toBe(
+      'gh label create merge-risk:low --repo octo/app --color 2da44e --description Low merge risk failed: real error: rate limited',
+    )
+  })
+
+  it('ignores the phrase on stderr when gh succeeded', async () => {
+    await expect(ask({ stderr: 'a warning, already exists' }).result).resolves.toEqual({
+      created: true,
+    })
+  })
+
+  // Each case here has the phrase on stderr, and is a failure of another
+  // kind. Mutant: a rule that reads the phrase and nothing else.
+  it.each([
+    [
+      'a child that never started',
+      { status: 127, startFailure: { code: 'ENOENT', message: 'spawn gh ENOENT' } },
+    ],
+    ['a child that this process killed, with a status', { status: 1, timedOut: true }],
+    [
+      'a child that this process killed, with no status',
+      { status: null, timedOut: true, signal: 'SIGKILL' as const },
+    ],
+    ['a child that a signal ended', { status: null, signal: 'SIGTERM' as const }],
+    [
+      'a pipe that failed',
+      { status: 1, streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }] },
+    ],
+  ])('throws for %s even with the phrase on stderr', async (_kind, extra) => {
+    const reply: Reply = { stderr: 'already exists', ...extra }
+    const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+  })
+
+  // Mutant: a check of the status alone, which a pipe error on exit 0 passes.
+  it('throws for a pipe that failed when gh exited 0', async () => {
+    const reply: Reply = { status: 0, streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }] }
+    const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+  })
+
+  it('names the exit status for a failure with no stderr (parity exception, #302)', async () => {
+    const error = (await ask({ status: 1, stdout: 'only on stdout\n' }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: 'gh exited 1',
+      status: 1,
+    })
+  })
+})
+
+describe('createPullRequest', () => {
+  const PULL = {
+    repository: 'octo/app',
+    head: 'fix/dependabot-lodash-4x',
+    labels: ['security', 'dependencies', 'merge-risk:low'],
+    title: 'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x',
+    bodyFile: '/w/body.md',
+  }
+  const URL = 'https://github.com/octo/app/pull/99'
+  const ask = (reply: Reply, pull = PULL) => {
+    const { gh, calls } = clientAnswering(reply, { repository: 'not/this' })
+    return { result: gh.createPullRequest(pull), calls }
+  }
+
+  it('runs gh pr create with each label before the title, and no draft flag (ADR 008)', async () => {
+    const { result, calls } = ask({ stdout: `${URL}\n` })
+    await result
+    expect(calls.map(({ command, args }) => ({ command, args }))).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'pr',
+          'create',
+          '--repo',
+          'octo/app',
+          '--head',
+          'fix/dependabot-lodash-4x',
+          '--label',
+          'security',
+          '--label',
+          'dependencies',
+          '--label',
+          'merge-risk:low',
+          '--title',
+          'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x',
+          '--body-file',
+          '/w/body.md',
+        ],
+      },
+    ])
+  })
+
+  // gh makes the PR, and then adds the labels in a second call. When that
+  // call fails, gh writes the URL on stdout and exits 1 (ruling 18, #233).
+  it('keeps the URL on stdout of a gh that opened the PR and then failed', async () => {
+    const error = (await ask({
+      status: 1,
+      stdout: `${URL}\n`,
+      stderr: 'pull request update failed: GraphQL: Could not add the label\n',
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.detail).toBe('pull request update failed: GraphQL: Could not add the label')
+    expect(error.pullRequestUrl).toBe(URL)
+  })
+
+  it('has no URL for a failure with nothing on stdout, or a URL on stderr only', async () => {
+    for (const reply of [
+      { status: 1, stderr: 'pull request create failed: HTTP 422\n' },
+      { status: 1, stderr: `a label does not exist ${URL}\n` },
+    ]) {
+      const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
+      expect(error).toBeInstanceOf(GhError)
+      expect(error.pullRequestUrl).toBeNull()
+    }
+  })
+
+  it('has no URL for a pipe error on exit 0, where stdout may be cut', async () => {
+    const error = (await ask({
+      status: 0,
+      stdout: `${URL}\n`,
+      streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }],
+    }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect(error.pullRequestUrl).toBeNull()
+  })
+
+  it('passes a title with a leading dash, a newline and non-ASCII text as one word', async () => {
+    const { calls } = ask(
+      { stdout: `${URL}\n` },
+      { ...PULL, labels: [], title: '--x\nrésolu 日本' },
+    )
+    expect(calls[0]?.args).toEqual([
+      'pr',
+      'create',
+      '--repo',
+      'octo/app',
+      '--head',
+      'fix/dependabot-lodash-4x',
+      '--title',
+      '--x\nrésolu 日本',
+      '--body-file',
+      '/w/body.md',
+    ])
+  })
+
+  it('answers the URL', async () => {
+    await expect(ask({ stdout: `${URL}\n` }).result).resolves.toEqual({ url: URL })
+  })
+
+  it.each([
+    ['a warning before it', `Warning: 1 uncommitted change\n${URL}\n`, URL],
+    [
+      'text after it',
+      `${URL}\nsee https://github.com/octo/app/pull/99/files\n`,
+      'https://github.com/octo/app/pull/99/files',
+    ],
+    [
+      'two on one line',
+      `${URL} https://github.com/octo/app/pull/100\n`,
+      'https://github.com/octo/app/pull/100',
+    ],
+    ['a carriage return after it', `${URL}\r\n`, URL],
+    ['trailing punctuation', `(${URL}).\n`, `${URL}).`],
+  ])('answers the last URL that has %s', async (_shape, stdout, url) => {
+    await expect(ask({ stdout }).result).resolves.toEqual({ url })
+  })
+
+  // The script read stdout and stderr as one text. So does the port.
+  it('reads a URL that gh wrote to stderr', async () => {
+    await expect(ask({ stderr: `${URL}\n` }).result).resolves.toEqual({ url: URL })
+  })
+
+  it.each([
+    ['nothing', '', ''],
+    ['text with no URL', 'done\n', 'done'],
+    [
+      'a URL of another host',
+      'https://ghe.example/octo/app/pull/99\n',
+      'https://ghe.example/octo/app/pull/99',
+    ],
+    [
+      'a host that only looks like github.com',
+      'https://githubXcom/octo/app/pull/99\n',
+      'https://githubXcom/octo/app/pull/99',
+    ],
+  ])('throws when gh answered %s', async (_shape, stdout, shown) => {
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+    expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
+      message: `gh answered gh pr create with no pull request URL: ${shown}`,
+      detail: `gh answered gh pr create with no pull request URL: ${shown}`,
+      status: 0,
+    })
+  })
+
+  it('cuts a long answer with no URL at 200 characters', async () => {
+    const stdout = 'x'.repeat(300)
+    const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error.message).toBe(
+      `gh answered gh pr create with no pull request URL: ${'x'.repeat(200)}`,
+    )
+  })
+
+  it("throws gh's own words and status when gh exits non-zero, and does not read a URL in them", async () => {
+    const error = (await ask({ status: 1, stderr: `a label does not exist ${URL}\n` }).result.catch(
+      (thrown: unknown) => thrown,
+    )) as GhError
+    expect({ detail: error.detail, status: error.status }).toEqual({
+      detail: `a label does not exist ${URL}`,
+      status: 1,
+    })
   })
 })

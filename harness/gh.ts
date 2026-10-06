@@ -96,5 +96,7 @@ export function createGhMock(replies: GhReplies = {}): GhClient {
     listAdvisories: async () => answer(replies, 'listAdvisories'),
     listDependabotAlerts: async () => answer(replies, 'listDependabotAlerts'),
     searchOpenPullRequests: async () => answer(replies, 'searchOpenPullRequests'),
+    createLabel: async () => answer(replies, 'createLabel'),
+    createPullRequest: async () => answer(replies, 'createPullRequest'),
   }
 }

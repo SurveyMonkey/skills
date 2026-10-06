@@ -38,6 +38,8 @@ The command `preflight-repo` takes `--env-prefix` and wraps the registry probe w
 `cd` to the root. The worktree exclude runs bare, and `detect` runs in process. The command
 `build-dispatches` starts no child. It reads one prefix for each checkout from a file, and puts it
 in the payload of each group of that checkout, or leaves the key out.
+The ported command `render-pr` takes `--env-prefix` on its verbs `labels` and `create`, and wraps
+their `gh` calls with it. Its verbs `commit-msg` and `body` start no child.
 The ported command `fix-group setup` takes `--env-prefix` and records it
 in the state. Each phase wraps its `git` calls with it, and the package-manager calls that its
 adapter verbs start. `detect` runs in process and reads the PATH of the command, not the PATH
