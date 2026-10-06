@@ -59,7 +59,7 @@ const REGISTRY_SPEC = /^[^:/]*$/
 
 /** The HTTP statuses that the probe output can name, with the words that name each. */
 const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
-  [401, /\bE401\b|\bYN0041:|Response Code: 401\b/],
+  [401, /\bE401\b|\bYN0041:/],
   [403, /\bE403\b|Response Code: 403\b/],
   [404, /\bE404\b|Response Code: 404\b/],
 ]
@@ -102,10 +102,10 @@ export const probeRegistry = async (
   }
   const tail =
     detection.pm === 'yarn' ? ['npm', 'info', pkg, '--fields', 'version'] : ['view', pkg, 'version']
-  const [program, ...args] = [
-    ...detection.pm_exec.split(/[ \t\n]+/).filter((word) => word !== ''),
-    ...tail,
-  ] as [string, ...string[]]
+  const [program, ...args] = [...detection.pm_exec.split(/[ \t\n]+/), ...tail] as [
+    string,
+    ...string[],
+  ]
   const result = await run(program, args, {
     cwd: root,
     env: { ...env, COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
