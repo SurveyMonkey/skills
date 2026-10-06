@@ -244,6 +244,29 @@ describe('contain', () => {
       (w) =>
         `the worktree path resolves outside ${w.repo}/.claude/worktrees/: ${w.root}/outside/fix. Nothing was removed.`,
     ],
+    [
+      'the live worktree of another group',
+      (w) => {
+        addWorktree(w)
+        w.fixtures.branch(w.repo, 'other')
+        w.fixtures.worktree(w.repo, join(w.repo, '.claude', 'worktrees', 'other', 'fix'), 'other')
+      },
+      (w) => ({ worktree: join(w.repo, '.claude', 'worktrees', 'other', 'fix') }),
+      (w) =>
+        `the worktree path is not ${w.work}/fix: ${w.repo}/.claude/worktrees/other/fix. Nothing was removed.`,
+    ],
+    [
+      'a link at fix to the worktree of another group',
+      (w) => {
+        mkdirSync(w.work, { recursive: true })
+        w.fixtures.branch(w.repo, 'other')
+        w.fixtures.worktree(w.repo, join(w.repo, '.claude', 'worktrees', 'other', 'fix'), 'other')
+        symlinkSync(join(w.repo, '.claude', 'worktrees', 'other', 'fix'), w.wt)
+      },
+      () => ({}),
+      (w) =>
+        `the worktree path is not ${w.work}/fix: ${w.repo}/.claude/worktrees/other/fix. Nothing was removed.`,
+    ],
   ])('refuses %s, and changes nothing', async (_case, arrange, overrides, message) => {
     const w = world()
     arrange(w)

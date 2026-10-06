@@ -274,6 +274,9 @@
 //       - The report also has `left_behind[]`, as the reap has.
 //       - The repository root must be a git repository, and the branch a
 //         name that git accepts, before anything is removed.
+//       - The resolved worktree must be `<work>/fix`. The bash checked the
+//         worktree of the state only for the worktree root, so the worktree
+//         of another group passed.
 //       - Resolution needs no search permission on the directory itself,
 //         where `cd` needed it.
 //

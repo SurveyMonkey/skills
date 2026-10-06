@@ -23,6 +23,9 @@
 //     that directory itself.
 //   - When the caller gives the work path that `setup` recorded, the two are
 //     the same path. Only `fix-group cleanup` has one.
+//   - The resolved worktree is `<work>/fix`, as `reap-agent-artifacts.sh`
+//     makes it. So a worktree of another group cannot pass with this work
+//     directory, and a link at `fix` cannot carry it to one.
 // These checks do not prove that a state file is not forged. They refuse a
 // path outside the worktree root, a path through `..` or a link, and a work
 // directory that moved after `setup`. Each removal uses the resolved path that
@@ -224,6 +227,11 @@ export const contain = async (target: ReapTarget, git: Git): Promise<Envelope<Co
   const worktree = resolvePhysical(target.worktree)
   if (!isContained(root, worktree)) {
     return failed(`the worktree path resolves outside ${tree}: ${worktree}. Nothing was removed.`)
+  }
+  // Each path can be under the root and still name two groups. The worktree
+  // of another group must not go with this work directory (ADR 003).
+  if (worktree !== `${work}/fix`) {
+    return failed(`the worktree path is not ${work}/fix: ${worktree}. Nothing was removed.`)
   }
   return ok({ repoRoot: root, work, worktree, branch })
 }
