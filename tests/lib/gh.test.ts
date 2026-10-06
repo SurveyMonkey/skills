@@ -792,6 +792,13 @@ describe('createLabel', () => {
     expect(error).toBeInstanceOf(GhError)
   })
 
+  // Mutant: a check of the status alone, which a pipe error on exit 0 passes.
+  it('throws for a pipe that failed when gh exited 0', async () => {
+    const reply: Reply = { status: 0, streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }] }
+    const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
+    expect(error).toBeInstanceOf(GhError)
+  })
+
   it('names the exit status for a failure with no stderr (parity exception, #302)', async () => {
     const error = (await ask({ status: 1, stdout: 'only on stdout\n' }).result.catch(
       (thrown: unknown) => thrown,
