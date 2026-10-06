@@ -124,12 +124,12 @@ describe('the check state', () => {
       only({
         checks: 'failed',
         check_counts: { total: 4, passed: 2, failed: 2, pending: 0 },
-        failing_checks: ['lint', 'unit | node 22'],
+        failing_checks: ['lint', 'unit | node | 22'],
       }),
     ).toBe(
       '## octo/app\n\n' +
         HEADER +
-        '| https://github.com/octo/app/pull/1 | Low | failed: lint, unit \\| node 22 | CLEAN |\n\n' +
+        '| https://github.com/octo/app/pull/1 | Low | failed: lint, unit \\| node \\| 22 | CLEAN |\n\n' +
         '## What the states are worth\n\n' +
         '- `failed`: the table names the failing checks. Open these PRs first.\n',
     )
@@ -178,11 +178,11 @@ describe('the merge state', () => {
     const text = only({ is_draft: true })
     expect(text).toContain('| passed | CLEAN, draft |')
     expect(notes(text)).toContain(
-      '- `draft`: a person converted this PR to a draft, because these PRs open ready.\n',
+      '- `draft`: these PRs open ready, so a person converted this PR to a draft.\n',
     )
   })
 
-  it('never calls a PR clean when no state says so', () => {
+  it('shows no merge-state note for BLOCKED', () => {
     expect(notes(only({ merge_state: 'BLOCKED' }))).not.toMatch(/behind|conflict|UNKNOWN|draft/)
   })
 })
@@ -193,7 +193,7 @@ describe('an entry that pr-status could not read', () => {
       'a.json': {
         prs: [
           entry('octo/app', 1),
-          { url: url('octo/app', 2), error: 'gh: Could not resolve\nto a PullRequest | 404' },
+          { url: url('octo/app', 2), error: 'gh: Could not\r\nresolve\nto a PullRequest | 404' },
         ],
       },
       'bands.json': bandsOf([url('octo/app', 1), 'Low'], [url('octo/app', 2), 'High']),
@@ -206,6 +206,25 @@ describe('an entry that pr-status could not read', () => {
         'octo/app has 2 pull requests from this run: https://github.com/octo/app/pull/1, https://github.com/octo/app/pull/2. ' +
         'They edit the same overrides block. Merging one leaves the rest behind, and the second to merge may conflict. ' +
         'Use Update branch for the usual case. Close a conflicted fix PR and run this skill again for that package.\n\n' +
+        '## What the states are worth\n\n' +
+        '- `passed` is provisional. Checks appear as workflows start, and a job that has not reported is invisible. Absent is not pending. Do not read the set as CI-complete.\n',
+    )
+  })
+
+  it('keeps the row of an error entry whose url is not a PR URL', () => {
+    const dir = filesOf({
+      'a.json': {
+        prs: [entry('octo/app', 1), { url: 'octo/app#2', error: 'not a GitHub pull request URL' }],
+      },
+      'bands.json': bandsOf([url('octo/app', 1), 'Low'], ['octo/app#2', null]),
+    })
+    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+      '## octo/app\n\n' +
+        HEADER +
+        '| https://github.com/octo/app/pull/1 | Low | passed | CLEAN |\n\n' +
+        '## not a pull request URL\n\n' +
+        HEADER +
+        '| octo/app#2 | not scored | not read: not a GitHub pull request URL | - |\n\n' +
         '## What the states are worth\n\n' +
         '- `passed` is provisional. Checks appear as workflows start, and a job that has not reported is invisible. Absent is not pending. Do not read the set as CI-complete.\n',
     )
@@ -338,6 +357,15 @@ describe('the refusals', () => {
       { url: 'https://example.com/a' },
       'has a url that is not a GitHub pull request URL: https://example.com/a',
     ],
+    ...[
+      'https://github.com/octo/app/pull/1/files',
+      'x https://github.com/octo/app/pull/1',
+      'https://github.com/octo/app/extra/pull/1',
+    ].map((bad): [string, unknown, string] => [
+      `has the url ${bad}`,
+      { url: bad },
+      `has a url that is not a GitHub pull request URL: ${bad}`,
+    ]),
     [
       'has an error that is not text',
       { url: url('octo/app', 1), error: 5 },
