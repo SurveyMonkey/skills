@@ -18,6 +18,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () =>
       (await import('../subcommands/allow-own-commands.ts')).allowOwnCommandsCommand,
   },
+  'build-dispatches': {
+    description:
+      'Build the Workflow args for the approved groups: build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+    load: async () => (await import('../subcommands/build-dispatches.ts')).buildDispatchesCommand,
+  },
   'check-advisories': {
     description:
       'List every published advisory range of a package: check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
@@ -61,6 +66,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   'pr-status': {
     description: 'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>...',
     load: async () => (await import('../subcommands/pr-status.ts')).prStatusCommand,
+  },
+  'preflight-repo': {
+    description:
+      'Prepare one repository for dispatch: exclude the worktrees, detect the tree, probe its registry: preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>',
+    load: async () => (await import('../subcommands/preflight-repo.ts')).preflightRepoCommand,
   },
   'prepare-checkout': {
     description:

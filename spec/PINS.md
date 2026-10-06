@@ -27,10 +27,11 @@ grammar:
 # pin: mechanical, retired by <script>
 ```
 
-where `<script>` is one of the five successor scripts named in issue #193 whose pins are still open:
-`preflight-repo.sh`, `build-dispatches.sh`, `reap-batch.sh`, `summarize-run.sh`,
-`pr-status.sh --env-prefix`. The other two, `prepare-checkout.sh` and `merge-envelopes.sh`, are
-the TypeScript commands `prepare-checkout` and `merge-envelopes` (#227), and their pins are gone.
+where `<script>` is one of the three successor scripts named in issue #193 whose pins are still
+open: `reap-batch.sh`, `summarize-run.sh`, `pr-status.sh --env-prefix`. The other four are
+TypeScript commands now, and their pins are gone: `prepare-checkout.sh` and `merge-envelopes.sh`
+are `prepare-checkout` and `merge-envelopes` (#227), and `preflight-repo.sh` and
+`build-dispatches.sh` are `preflight-repo` and `build-dispatches` (#228).
 
 The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security,
 which took over issue #193; the script name is the mapping key) finds every pin it must delete
@@ -42,11 +43,11 @@ grep -rn 'pin: mechanical, retired by <script>' spec/
 
 `spec/pins_inventory_spec.sh` keeps this file and the markers honest: every
 `phrase_in`/`count_in`/`rule_in`-style example either carries the marker or is listed below as
-`judgment`, and every marker names one of the five scripts above.
+`judgment`, and every marker names one of the three scripts above.
 
 ## Totals
 
-338 pins across 16 files: 284 `judgment`, 54 `mechanical`.
+328 pins across 16 files: 284 `judgment`, 44 `mechanical`.
 
 Mechanical pins by successor script:
 
@@ -54,15 +55,13 @@ Mechanical pins by successor script:
 |---|---|
 | `reap-batch.sh` | 22 |
 | `summarize-run.sh` | 21 |
-| `build-dispatches.sh` | 5 |
-| `preflight-repo.sh` | 5 |
 | `pr-status.sh --env-prefix` | 1 |
 
 Each mechanical pin is retired in the same change that lands its successor, which is now a
 command in the TypeScript port of gh-security rather than a bash script in this repository;
 until then it stays here, marked, as the record of the rule the port must reproduce.
 
-### `spec/resolve_alerts_scope_spec.sh`: 46 pins (42 judgment, 4 mechanical)
+### `spec/resolve_alerts_scope_spec.sh`: 45 pins (42 judgment, 3 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -101,17 +100,16 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 316 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
 | 324 | reports every excluded checkout by name in phase 2 | judgment | - |
 | 331 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
-| 338 | excludes a repo whose adapter detect fails in phase 5 | mechanical | preflight-repo.sh |
-| 345 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
-| 354 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
-| 364 | omits the column for one checkout and shows it for several | judgment | - |
-| 370 | no longer keys the column on a scope mode | judgment | - |
-| 378 | branches on a null scope | judgment | - |
-| 384 | drops the git_remote cross-check it can no longer make | judgment | - |
-| 390 | stops on a null nwo | judgment | - |
-| 400 | re-runs detect-scope against the checkout the user names | judgment | - |
-| 406 | reads the second output rather than the first | judgment | - |
-| 414 | stays repo-scoped in the checkout vocabulary | judgment | - |
+| 338 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
+| 347 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
+| 357 | omits the column for one checkout and shows it for several | judgment | - |
+| 363 | no longer keys the column on a scope mode | judgment | - |
+| 371 | branches on a null scope | judgment | - |
+| 377 | drops the git_remote cross-check it can no longer make | judgment | - |
+| 383 | stops on a null nwo | judgment | - |
+| 393 | re-runs detect-scope against the checkout the user names | judgment | - |
+| 399 | reads the second output rather than the first | judgment | - |
+| 407 | stays repo-scoped in the checkout vocabulary | judgment | - |
 
 ### `spec/resolve_alerts_branch_style_spec.sh`: 4 pins (3 judgment, 1 mechanical)
 
@@ -134,79 +132,73 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 70 | gives the slug rule the concrete scoped-package example | judgment | - |
 | 80 | grounds the slug rule in scoring many packages in the same WORK | judgment | - |
 
-### `spec/resolve_alerts_dispatch_spec.sh`: 67 pins (40 judgment, 27 mechanical)
+### `spec/resolve_alerts_dispatch_spec.sh`: 61 pins (40 judgment, 21 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 56 | embeds no javascript fence in the skill any more | judgment | - |
-| 71 | copies the workflow byte-for-byte from the plugin root before launch | judgment | - |
-| 77 | checksums the staged copy against the source before launching | judgment | - |
-| 83 | launches the workflow by scriptPath, from the staged checksum-verified copy | judgment | - |
-| 93 | rules out the session scratchpad as a staging location | judgment | - |
-| 101 | requires the staged copy to survive until the run, and any resume, is done | judgment | - |
-| 110 | forbids inlining a copy or hand-editing a variant | judgment | - |
-| 116 | explains that the staged, checksum-verified copy is not the forbidden kind | judgment | - |
-| 122 | points at the tests as the reason the file is authoritative | judgment | - |
-| 140 | states the $1 guarantee once | judgment | - |
-| 147 | keeps the reap and the summary outside the script | judgment | - |
-| 156 | keeps the sonnet pin in the agent frontmatter ADR 004 names | judgment | - |
-| 168 | tells the caller to pass args as JSON, never as a JSON-encoded string | mechanical | build-dispatches.sh |
-| 175 | names the silent empty-batch inversion that guard prevents | mechanical | build-dispatches.sh |
-| 193 | still carries $1 | mechanical | build-dispatches.sh |
-| 202 | still omits env_prefix rather than sending null | mechanical | build-dispatches.sh |
-| 213 | says phase 4 approval covers the workflow launch and every agent in it | judgment | - |
-| 219 | states plainly that nothing inside the workflow prompts | judgment | - |
-| 225 | grants the Workflow tool in the frontmatter | judgment | - |
-| 234 | no longer grants the Task tool | judgment | - |
-| 257 | no longer carries the $1 | judgment | - |
-| 271 | refuses to read an absent or short return as nothing having run | judgment | - |
-| 284 | names the $1 mode | judgment | - |
-| 291 | names the journal as the record of what actually returned | judgment | - |
-| 297 | resumes from the runId rather than re-dispatching the batch | judgment | - |
-| 303 | says a plain relaunch duplicates the branches and PRs that already succeeded | judgment | - |
-| 312 | asks before resuming a run the user deliberately interrupted | judgment | - |
-| 318 | reaps the whole dispatch list anyway when resume is impossible or declined | judgment | - |
-| 325 | reports groups with no result as unknown rather than as failures | mechanical | summarize-run.sh |
-| 331 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
-| 340 | reads phase 7 off the returned entries rather than a fence | mechanical | summarize-run.sh |
-| 347 | treats a null entry as that group failure report, still reported | mechanical | reap-batch.sh |
-| 354 | reaps a null entry with an empty result file so post-agent.sh reports it missing | mechanical | reap-batch.sh |
-| 361 | never drops, hand-retries, or counts a null or mispaired entry as a success | mechanical | reap-batch.sh |
-| 370 | handles a mispaired entry exactly like a null one | mechanical | reap-batch.sh |
-| 377 | never reads a mispaired entry pr_url or branch | mechanical | reap-batch.sh |
-| 383 | says no bounded pool can make the dispatch order repeat | judgment | - |
-| 390 | says plainly what the schema cannot check | judgment | - |
-| 403 | reports every non-null cleanup alongside the reap accounting | mechanical | summarize-run.sh |
-| 410 | singles out a success whose cleanup failed | mechanical | summarize-run.sh |
-| 417 | refuses to report a leaked worktree as a failed group | mechanical | summarize-run.sh |
-| 426 | relates cleanup to post-agent.sh left_behind rather than duplicating it | mechanical | summarize-run.sh |
-| 433 | keeps left_behind as the key and cleanup as the explanation | mechanical | summarize-run.sh |
-| 440 | names the case where the reap cleared what the agent could not | mechanical | summarize-run.sh |
-| 450 | never gates the reap on cleanup being null | mechanical | reap-batch.sh |
-| 457 | says a leaked success is the group that most needs reaping | mechanical | reap-batch.sh |
-| 467 | warns that the same directory is not the same string | mechanical | summarize-run.sh |
-| 474 | names the consequence of comparing the two as text | mechanical | summarize-run.sh |
-| 481 | prescribes suffix matching or resolution before comparing | mechanical | summarize-run.sh |
-| 488 | reports one artifact when the two agree, showing the resolved path | mechanical | summarize-run.sh |
-| 501 | still writes the worktree exclude once per repo, before any dispatch for it | mechanical | preflight-repo.sh |
-| 508 | still gives the registry preflight one retry before it means anything | mechanical | preflight-repo.sh |
-| 514 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
-| 520 | still allows two lines of the same package to run together | judgment | - |
-| 533 | ties the reap to the result being in hand, not to a completion notification | mechanical | reap-batch.sh |
-| 540 | no longer claims in the plugin guide that the reap runs on each completion | mechanical | reap-batch.sh |
-| 547 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
-| 553 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
-| 559 | records the widened pull-request read window in ADR 003 | judgment | - |
-| 568 | no longer describes the fix agent as running from a rolling pool | judgment | - |
-| 575 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
-| 581 | keeps the headline bullet on the same mechanism | judgment | - |
-| 593 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
-| 599 | rests the decision on the harness already being node | judgment | - |
-| 605 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
-| 613 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
-| 619 | forbids the shipped code from importing the workflow file | judgment | - |
+| 61 | embeds no javascript fence in the skill any more | judgment | - |
+| 76 | copies the workflow byte-for-byte from the plugin root before launch | judgment | - |
+| 82 | checksums the staged copy against the source before launching | judgment | - |
+| 88 | launches the workflow by scriptPath, from the staged checksum-verified copy | judgment | - |
+| 98 | rules out the session scratchpad as a staging location | judgment | - |
+| 106 | requires the staged copy to survive until the run, and any resume, is done | judgment | - |
+| 115 | forbids inlining a copy or hand-editing a variant | judgment | - |
+| 121 | explains that the staged, checksum-verified copy is not the forbidden kind | judgment | - |
+| 127 | points at the tests as the reason the file is authoritative | judgment | - |
+| 145 | states the $1 guarantee once | judgment | - |
+| 152 | keeps the reap and the summary outside the script | judgment | - |
+| 161 | keeps the sonnet pin in the agent frontmatter ADR 004 names | judgment | - |
+| 172 | says phase 4 approval covers the workflow launch and every agent in it | judgment | - |
+| 178 | states plainly that nothing inside the workflow prompts | judgment | - |
+| 184 | grants the Workflow tool in the frontmatter | judgment | - |
+| 193 | no longer grants the Task tool | judgment | - |
+| 216 | no longer carries the $1 | judgment | - |
+| 230 | refuses to read an absent or short return as nothing having run | judgment | - |
+| 243 | names the $1 mode | judgment | - |
+| 250 | names the journal as the record of what actually returned | judgment | - |
+| 256 | resumes from the runId rather than re-dispatching the batch | judgment | - |
+| 262 | says a plain relaunch duplicates the branches and PRs that already succeeded | judgment | - |
+| 271 | asks before resuming a run the user deliberately interrupted | judgment | - |
+| 277 | reaps the whole dispatch list anyway when resume is impossible or declined | judgment | - |
+| 284 | reports groups with no result as unknown rather than as failures | mechanical | summarize-run.sh |
+| 290 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
+| 299 | reads phase 7 off the returned entries rather than a fence | mechanical | summarize-run.sh |
+| 306 | treats a null entry as that group failure report, still reported | mechanical | reap-batch.sh |
+| 313 | reaps a null entry with an empty result file so post-agent.sh reports it missing | mechanical | reap-batch.sh |
+| 320 | never drops, hand-retries, or counts a null or mispaired entry as a success | mechanical | reap-batch.sh |
+| 329 | handles a mispaired entry exactly like a null one | mechanical | reap-batch.sh |
+| 336 | never reads a mispaired entry pr_url or branch | mechanical | reap-batch.sh |
+| 342 | says no bounded pool can make the dispatch order repeat | judgment | - |
+| 349 | says plainly what the schema cannot check | judgment | - |
+| 362 | reports every non-null cleanup alongside the reap accounting | mechanical | summarize-run.sh |
+| 369 | singles out a success whose cleanup failed | mechanical | summarize-run.sh |
+| 376 | refuses to report a leaked worktree as a failed group | mechanical | summarize-run.sh |
+| 385 | relates cleanup to post-agent.sh left_behind rather than duplicating it | mechanical | summarize-run.sh |
+| 392 | keeps left_behind as the key and cleanup as the explanation | mechanical | summarize-run.sh |
+| 399 | names the case where the reap cleared what the agent could not | mechanical | summarize-run.sh |
+| 409 | never gates the reap on cleanup being null | mechanical | reap-batch.sh |
+| 416 | says a leaked success is the group that most needs reaping | mechanical | reap-batch.sh |
+| 426 | warns that the same directory is not the same string | mechanical | summarize-run.sh |
+| 433 | names the consequence of comparing the two as text | mechanical | summarize-run.sh |
+| 440 | prescribes suffix matching or resolution before comparing | mechanical | summarize-run.sh |
+| 447 | reports one artifact when the two agree, showing the resolved path | mechanical | summarize-run.sh |
+| 459 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
+| 465 | still allows two lines of the same package to run together | judgment | - |
+| 478 | ties the reap to the result being in hand, not to a completion notification | mechanical | reap-batch.sh |
+| 485 | no longer claims in the plugin guide that the reap runs on each completion | mechanical | reap-batch.sh |
+| 493 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
+| 499 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
+| 505 | records the widened pull-request read window in ADR 003 | judgment | - |
+| 514 | no longer describes the fix agent as running from a rolling pool | judgment | - |
+| 521 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
+| 527 | keeps the headline bullet on the same mechanism | judgment | - |
+| 539 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
+| 545 | rests the decision on the harness already being node | judgment | - |
+| 551 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
+| 559 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
+| 565 | forbids the shipped code from importing the workflow file | judgment | - |
 
-### `spec/audit_pins_rules_spec.sh`: 56 pins (53 judgment, 3 mechanical)
+### `spec/audit_pins_rules_spec.sh`: 53 pins (53 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -260,12 +252,9 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 582 | runs bare when env_prefix is absent, per $1 | judgment | - |
 | 592 | declares env_prefix OPTIONAL in the input contract of $1 | judgment | - |
 | 612 | takes the prefix from session context in $1 | judgment | - |
-| 623 | carries env_prefix into the fix-dependency Task payload | mechanical | build-dispatches.sh |
-| 630 | runs a registry preflight probe once per repo before phase 6 dispatch | mechanical | preflight-repo.sh |
-| 641 | composes the probe as cd repo_root, then env_prefix, in every snippet | mechanical | preflight-repo.sh |
-| 649 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
-| 664 | is stated in the audit agent | judgment | - |
-| 670 | is stated in the fix agent | judgment | - |
+| 622 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
+| 637 | is stated in the audit agent | judgment | - |
+| 643 | is stated in the fix agent | judgment | - |
 
 ### `spec/reap_agent_artifacts_spec.sh`: 24 pins (8 judgment, 16 mechanical)
 

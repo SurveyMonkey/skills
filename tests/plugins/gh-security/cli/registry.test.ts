@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { COMMANDS } from '#gh-security/cli/registry.ts'
+import { buildDispatchesCommand } from '#gh-security/subcommands/build-dispatches.ts'
 import { checkAdvisoriesCommand } from '#gh-security/subcommands/check-advisories.ts'
 import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts'
 import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
@@ -16,6 +17,7 @@ import { discoverAlertsCommand } from '#gh-security/subcommands/discover-alerts.
 import { discoverReposCommand } from '#gh-security/subcommands/discover-repos.ts'
 import { fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
+import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { pluginFile } from '#harness/paths.ts'
 
@@ -34,6 +36,7 @@ describe('the registry', () => {
   it('reaches each handler through a dynamic import of its own subcommand module', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
+      "import('../subcommands/build-dispatches.ts')",
       "import('../subcommands/check-advisories.ts')",
       "import('../subcommands/classify-lines.ts')",
       "import('../subcommands/detect-scope.ts')",
@@ -43,6 +46,7 @@ describe('the registry', () => {
       "import('../subcommands/fix-group.ts')",
       "import('../subcommands/merge-envelopes.ts')",
       "import('../subcommands/pr-status.ts')",
+      "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
@@ -53,18 +57,24 @@ describe('the registry', () => {
 describe('the discovery entries', () => {
   // The loader of each entry is the one line that reaches the handler.
   it.each([
+    ['build-dispatches', buildDispatchesCommand],
     ['check-advisories', checkAdvisoriesCommand],
     ['classify-lines', classifyLinesCommand],
     ['detect-scope', detectScopeCommand],
     ['discover-alerts', discoverAlertsCommand],
     ['discover-repos', discoverReposCommand],
     ['merge-envelopes', mergeEnvelopesCommand],
+    ['preflight-repo', preflightRepoCommand],
     ['prepare-checkout', prepareCheckoutCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
   })
 
   it.each([
+    [
+      'build-dispatches',
+      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+    ],
     [
       'check-advisories',
       'check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
@@ -80,6 +90,7 @@ describe('the discovery entries', () => {
     ],
     ['discover-repos', 'discover-repos [<path>]'],
     ['merge-envelopes', 'merge-envelopes <envelope.json>...'],
+    ['preflight-repo', 'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'],
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)

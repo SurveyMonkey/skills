@@ -334,13 +334,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The output should equal '1'
     End
 
-    # pin: mechanical, retired by preflight-repo.sh
-    It 'excludes a repo whose adapter detect fails in phase 5'
-      When call phrase_in "$SKILL" 'a non-zero exit there excludes every one of that repo.s groups'
-      The status should be success
-      The output should equal '1'
-    End
-
     # pin: mechanical, retired by summarize-run.sh
     It 'carries the registry exclusions into the phase 8 closing report'
       When call phrase_in "$SKILL" 'every repo phase 5.s registry preflight excluded, and what would unblock each'

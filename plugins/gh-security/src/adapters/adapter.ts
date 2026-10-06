@@ -15,7 +15,9 @@
 // The answer types are the JSON that `node.sh` writes for each verb, with
 // the same keys. A promised field is present and typed, or the verb fails.
 // `parents` is not a verb of `node.sh`. It is new in #221, from the parent
-// readers inside `node.sh`.
+// readers inside `node.sh`. `probeRegistry` is not a verb of `node.sh`
+// either. It is new in #228, from phase 5 of `resolve-alerts` SKILL.md
+// (round 6 ruling 8). It only reads, so it has no worktree guard.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -338,6 +340,28 @@ export type ValidateOptions = {
  */
 export type InstallSource = { readonly run: Runner; readonly env: Environment }
 
+/**
+ * How `probeRegistry` runs its probe. `env` is the environment of that
+ * command. A caller with an `env_prefix` wraps `run` in it.
+ */
+export type ProbeSource = { readonly run: Runner; readonly env: Environment }
+
+/** The `probeRegistry` answer: one attempt of the probe. */
+export type RegistryProbeAnswer = {
+  /** The package that the probe asked for. */
+  readonly package: string
+  /** The probe command, with its words joined by one space. */
+  readonly command: string
+  /** True only when the command exits 0, with text on stdout. */
+  readonly ok: boolean
+  /** False when the command did not start. */
+  readonly started: boolean
+  /** The HTTP status that the output of the package manager names, or null. */
+  readonly http_status: 401 | 403 | 404 | null
+  /** What the probe wrote: stderr, then stdout. Or why it did not start. */
+  readonly output: string
+}
+
 /** The `install` answer: what node.sh writes, and the status that it exits with. */
 export type InstallAnswer = {
   /** The `install_cmd` of the detection. */
@@ -537,4 +561,14 @@ export interface Adapter<Detection extends { readonly pm: string }> {
     tree: Tree<Detection>,
     request: ConstraintRequest,
   ) => Envelope<ApplyConstraintAnswer>
+  /**
+   * Ask the registry of the tree for one package, once, from the root of the
+   * tree. The verb picks the package by the rules of the ecosystem, and uses
+   * `fallback` when the tree gives none (#228). It only reads.
+   */
+  readonly probeRegistry: (
+    tree: Tree<Detection>,
+    fallback: string | null,
+    source: ProbeSource,
+  ) => Promise<Envelope<RegistryProbeAnswer>>
 }

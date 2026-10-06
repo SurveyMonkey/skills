@@ -34,6 +34,10 @@ process and start no child. The command `prepare-checkout` takes `--env-prefix` 
 each step: `detect-scope`, the namespace probe, `discover-alerts` and `classify-lines`. So each
 `git` and `gh` child of each step runs under it. The command `merge-envelopes` starts no child and
 takes no `--env-prefix`.
+The command `preflight-repo` takes `--env-prefix` and wraps the registry probe with it, after the
+`cd` to the root. The worktree exclude runs bare, and `detect` runs in process. The command
+`build-dispatches` starts no child. It reads one prefix for each checkout from a file, and puts it
+in the payload of each group of that checkout, or leaves the key out.
 The ported command `fix-group setup` takes `--env-prefix` and records it
 in the state. Each phase wraps its `git` calls with it, and the package-manager calls that its
 adapter verbs start. `detect` runs in process and reads the PATH of the command, not the PATH
