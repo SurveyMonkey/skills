@@ -20,6 +20,7 @@ import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
+import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -50,6 +51,7 @@ describe('the registry', () => {
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/render-pr-status.ts')",
+      "import('../subcommands/score-merge-risk.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
     ])
@@ -97,6 +99,18 @@ describe('the discovery entries', () => {
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
+  })
+})
+
+describe('the merge-risk entry', () => {
+  it('loads the handler of score-merge-risk', async () => {
+    expect(await COMMANDS['score-merge-risk']?.load()).toBe(scoreMergeRiskCommand)
+  })
+
+  it('describes score-merge-risk with its usage', () => {
+    expect(COMMANDS['score-merge-risk']?.description).toContain(
+      'score-merge-risk --package <pkg> --after <version> --why-json <file|-> --override-scope <none|scoped|bare-tightened|bare-added> --declared-range <range|none> [--declared-range <range>]... [--before <version>]',
+    )
   })
 })
 
