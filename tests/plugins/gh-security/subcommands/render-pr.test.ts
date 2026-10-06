@@ -1077,6 +1077,20 @@ describe('body', () => {
       )
       expect(ran.out).toContain('The fix is a no-change lockfile refresh')
       expect(ran.out).toContain('## Global override')
+      // A written that is not a list holds no range, as `.written[]?` gave none.
+      const text = await render(
+        'body',
+        edit(jsonOf('state-bare-added.json'), (s) => {
+          s.action = 'lockfile-refresh'
+          s.written = 'x'
+        }),
+        GROUP,
+        ['--global-override-note', fixture('global-override-note.txt')],
+      )
+      expect(text.result).toMatchObject({
+        error: expect.stringContaining('carries no top-level (parent: null) entry'),
+      })
+      expect(text.out).toBe('')
     })
 
     it('needs the override file for a bare override', async () => {
