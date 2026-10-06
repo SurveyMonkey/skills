@@ -22,8 +22,8 @@ decisions of `apply` (the range, the ladder and its stops, the widest shape, the
 pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
 `setup` writes. `setup`, `classify`, `baseline`, `apply` and `score` are ported. `cleanup` is
-not (#234), and the agent still calls the script for each step. `score` runs the bash scorer as a
-child process until #233 ports it. A state file that one of the two writes is not for the other.
+not (#234), and the agent still calls the script for each step. `score` calls the scorer in process
+(`src/merge-risk/score.ts`, #233). A state file that one of the two writes is not for the other.
 
 What that header does not say, and what belongs here:
 

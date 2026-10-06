@@ -7,7 +7,6 @@
 
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import type { CommandResult } from '../cli/command.ts'
 import { tostring } from '../jq.ts'
@@ -25,11 +24,6 @@ import {
   outputOf,
   runners,
 } from './fix-group-common.ts'
-
-/** The scorer that `score` runs when `--scorer` does not name one: the bash one, until #233. */
-export const DEFAULT_SCORER = fileURLToPath(
-  new URL('../../scripts/common/score-merge-risk.sh', import.meta.url),
-)
 
 /**
  * The keys a group must carry, in the order of the bash, then `ecosystem`,
@@ -195,7 +189,6 @@ export const setup = async (
     'repo-root': { type: 'string', default: '' },
     'default-branch': { type: 'string', default: '' },
     'env-prefix': { type: 'string', default: '' },
-    scorer: { type: 'string', default: '' },
   })
   if (parsed.outcome !== 'ok') return parsed
   const options = parsed.value
@@ -211,8 +204,6 @@ export const setup = async (
   if (!statSync(repoRoot, { throwIfNoEntry: false })?.isDirectory()) {
     return failed(`setup: no such repo root: ${repoRoot}`)
   }
-  const scorer = options.scorer === '' ? DEFAULT_SCORER : options.scorer
-
   const read = readGroup(groupFile)
   if ('error' in read) return failed(read.error)
   const group = read.group
@@ -273,7 +264,6 @@ export const setup = async (
     default_branch: defaultBranch,
     adapter: route.name,
     ecosystem,
-    scorer,
     env_prefix: options['env-prefix'],
     work,
     worktree,

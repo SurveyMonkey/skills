@@ -207,7 +207,6 @@ export interface DriverState {
   readonly adapter: string
   /** The advisory ecosystem of the group, which the registry routes. */
   readonly ecosystem: string
-  readonly scorer: string
   readonly worktree: string
   readonly package: string
   /** The major line, as the text that `setup` wrote. `loadDriverState` checks that it is digits. */
@@ -229,7 +228,6 @@ const DRIVER_KEYS: Readonly<Record<DriverField, string>> = {
   defaultBranch: 'default_branch',
   branchName: 'branch_name',
   adapter: 'adapter',
-  scorer: 'scorer',
   worktree: 'worktree',
   package: 'package',
   majorLine: 'major_line',

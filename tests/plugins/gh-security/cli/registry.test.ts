@@ -20,6 +20,7 @@ import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
+import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -50,6 +51,7 @@ describe('the registry', () => {
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/render-pr-status.ts')",
+      "import('../subcommands/score-merge-risk.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
     ])
@@ -100,13 +102,25 @@ describe('the discovery entries', () => {
   })
 })
 
+describe('the merge-risk entry', () => {
+  it('loads the handler of score-merge-risk', async () => {
+    expect(await COMMANDS['score-merge-risk']?.load()).toBe(scoreMergeRiskCommand)
+  })
+
+  it('describes score-merge-risk with its usage', () => {
+    expect(COMMANDS['score-merge-risk']?.description).toContain(
+      'score-merge-risk --package <pkg> --after <version> --why-json <file|-> --override-scope <none|scoped|bare-tightened|bare-added> --declared-range <range|none> [--declared-range <range>]... [--before <version>]',
+    )
+  })
+})
+
 describe('the fix driver entry', () => {
   it('loads the handler of fix-group', async () => {
     expect(await COMMANDS['fix-group']?.load()).toBe(fixGroupCommand)
   })
 
   it.each([
-    'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>]',
+    'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] |',
     'fix-group classify --work <dir>',
     'fix-group baseline --work <dir>',
     'fix-group apply --work <dir>',

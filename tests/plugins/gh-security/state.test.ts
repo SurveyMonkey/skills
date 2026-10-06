@@ -246,7 +246,6 @@ describe('loadDriverState', () => {
     branch_name: 'fix/dependabot-lodash-4x',
     adapter: 'node',
     ecosystem: 'npm',
-    scorer: '/s/score-merge-risk.sh',
     worktree: '/r/.claude/worktrees/fix-dependabot-lodash-4x/fix',
     package: 'lodash',
     major_line: '4',
@@ -268,12 +267,18 @@ describe('loadDriverState', () => {
       branchName: 'fix/dependabot-lodash-4x',
       adapter: 'node',
       ecosystem: 'npm',
-      scorer: '/s/score-merge-risk.sh',
       worktree: '/r/.claude/worktrees/fix-dependabot-lodash-4x/fix',
       package: 'lodash',
       majorLine: '4',
       envPrefix: null,
     })
+  })
+
+  // The scorer runs in process (#233). A state that an older setup wrote
+  // still names one, and the key is not read.
+  it('reads no scorer, and a state that names one still loads', () => {
+    const loaded = unwrap(loadDriverState(work({ ...SETUP, scorer: '/s/score-merge-risk.sh' })))
+    expect('scorer' in loaded).toBe(false)
   })
 
   it('reads a prefix that setup wrote', () => {

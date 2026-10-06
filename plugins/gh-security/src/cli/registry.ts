@@ -55,7 +55,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'fix-group': {
     description:
-      'Run one phase of the fix driver for one alert group: fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>] | fix-group classify --work <dir> | fix-group baseline --work <dir> | fix-group apply --work <dir> | fix-group score --work <dir>',
+      'Run one phase of the fix driver for one alert group: fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] | fix-group classify --work <dir> | fix-group baseline --work <dir> | fix-group apply --work <dir> | fix-group score --work <dir>',
     load: async () => (await import('../subcommands/fix-group.ts')).fixGroupCommand,
   },
   'merge-envelopes': {
@@ -81,6 +81,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description:
       'Write the phase 8 table from the pr-status answers of each repository: render-pr-status --bands <bands.json> <report.json>...',
     load: async () => (await import('../subcommands/render-pr-status.ts')).renderPrStatusCommand,
+  },
+  'score-merge-risk': {
+    description:
+      'Rate the merge risk of one dependency fix, from the root of its tree: score-merge-risk --package <pkg> --after <version> --why-json <file|-> --override-scope <none|scoped|bare-tightened|bare-added> --declared-range <range|none> [--declared-range <range>]... [--before <version>]',
+    load: async () => (await import('../subcommands/score-merge-risk.ts')).scoreMergeRiskCommand,
   },
   'session-start': {
     description: 'Check that the tools this plugin needs are present (SessionStart hook)',

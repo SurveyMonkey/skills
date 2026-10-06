@@ -26,10 +26,15 @@
 // A step that does not exit 0 ends the side, except that an `apply` always
 // runs after an `apply`: that is the re-run that the agent can make.
 //
-// The state file is normalized in one declared way before the compare, as
+// The state file is normalized before the compare, as
 // in `parity-fix-group.test.ts`. In bash, `adapter` is the path of
 // `node.sh`. In the port, it is the name of the adapter, and the port also
 // records the `ecosystem` that routes it.
+//
+// A second declared difference of the state, with #233: the bash state has
+// `scorer`, the path of `score-merge-risk.sh`. The port has no such key,
+// because it scores in process (ruling 9). The compare drops it from the
+// bash side.
 //
 // Declared differences, not compared:
 //   - The `validate` answer of the port carries `parent_range_breaks` (#170),
@@ -177,7 +182,7 @@ const tsStep = async (w: World, phase: Phase): Promise<Answer> => {
   return answerOf(await fixGroup(context, { spawn: run, route: selectAdapter }))
 }
 
-/** The state file, with the one declared normalization of the header. */
+/** The state file, with the declared normalizations of the header. */
 const stateOf = (w: World): JsonValue => {
   let text: string
   try {
@@ -185,7 +190,12 @@ const stateOf = (w: World): JsonValue => {
   } catch {
     return null
   }
-  const { adapter: _adapter, ecosystem: _ecosystem, ...rest } = JSON.parse(text) as Group
+  const {
+    adapter: _adapter,
+    ecosystem: _ecosystem,
+    scorer: _scorer,
+    ...rest
+  } = JSON.parse(text) as Group
   return rest
 }
 

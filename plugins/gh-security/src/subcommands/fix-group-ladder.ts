@@ -14,6 +14,7 @@
 
 import { orElse, uniqueJq } from '../jq.ts'
 import type { JsonValue } from '../lib/envelope.ts'
+import type { OverrideScope } from '../merge-risk/score.ts'
 
 /**
  * The fix installs of one run, across each `apply` of the run. One `apply`
@@ -257,7 +258,7 @@ export const widestShape = (written: readonly unknown[]): Shape | null => {
 /** The three labels of a fix that `score` and the pull request read. */
 export interface Labels {
   readonly action: 'bare-override' | 'direct-update' | 'scoped-override' | 'lockfile-refresh'
-  readonly override_scope: 'bare-tightened' | 'bare-added' | 'none' | 'scoped'
+  readonly override_scope: OverrideScope
   readonly bare_override: 'tightened' | 'added' | 'none'
 }
 

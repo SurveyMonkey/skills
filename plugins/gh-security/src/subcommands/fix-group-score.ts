@@ -4,10 +4,10 @@
 // report for the pull request. The contract is in the header of
 // `fix-group.ts`.
 //
-// The adapter verbs run in process. The scorer is the one child that is not
-// a verb. It is `score-merge-risk.sh` until #233 ports it (round 5 ruling 4
-// on #232). It runs in the worktree, under the prefix. It calls the adapter
-// again as a bash script, so it gets the path of `node.sh` in this plugin.
+// The adapter verbs run in process, and so does the scorer
+// (`src/merge-risk/score.ts`, #233, ruling 9). It scores the worktree, and
+// asks the adapter of the state for each comparison. The bash ran
+// `score-merge-risk.sh` as a child.
 //
 // The order of the steps and of the state writes is the order of the bash:
 // `post_fix`, the why file, `declared_post`, the scorer, and `risk`. Then
@@ -17,11 +17,18 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { renameSync, writeFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 
 import type { CommandResult } from '../cli/command.ts'
 import { fieldOf, orElse, tostring } from '../jq.ts'
-import { type Failure, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
+import {
+  type Failure,
+  failed,
+  type JsonObject,
+  type JsonValue,
+  ok,
+  thrownText,
+} from '../lib/envelope.ts'
+import { type RiskFactor, scoreMergeRisk } from '../merge-risk/score.ts'
 import {
   readOptionalStrings,
   readOptionalValue,
@@ -30,17 +37,8 @@ import {
   type StateFile,
   writeKey,
 } from '../state.ts'
-import { chomp, failPhase, type Loaded, promisedField } from './fix-group-common.ts'
+import { failPhase, type Loaded, promisedField } from './fix-group-common.ts'
 import { lineVersions, movesOf } from './fix-group-ladder.ts'
-
-/**
- * The adapter script that the scorer calls, as `--adapter`. Only the node
- * adapter has a script, and the registry has no other. A second adapter
- * needs a map from its name to its script here.
- */
-export const NODE_ADAPTER = fileURLToPath(
-  new URL('../../scripts/ecosystems/node.sh', import.meta.url),
-)
 
 /** The text of the state failure for a key that is absent or null. */
 const unusable = (state: StateFile, key: string): Failure =>
@@ -93,45 +91,8 @@ const lowestOnLine = (loaded: Loaded, payload: unknown, line: string): Lowest =>
   return { version: lowest }
 }
 
-/** The text that a scorer that failed wrote to stderr, or why it did not start. */
-const stderrOf = (result: {
-  readonly stderr: string
-  readonly startFailure: { readonly message: string } | null
-}): string => chomp(result.startFailure === null ? result.stderr : result.startFailure.message)
-
 /**
- * The text of the scorer's report, as a JSON object with a `band`, or null.
- * The bash tested `type == "object" and has("band")`.
- */
-const reportOf = (text: string): JsonObject | null => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return null
-  }
-  const record = recordOf(parsed)
-  return record !== null && Object.hasOwn(record, 'band') ? record : null
-}
-
-/** The score of the first factor with the id, or null. */
-const factorScore = (factors: readonly JsonValue[], id: string): JsonValue => {
-  const factor = factors.find((entry) => recordOf(entry)?.id === id)
-  return fieldOf(factor ?? null, 'score') as JsonValue
-}
-
-/** The factors of the report: absent or null is none, and a list of objects and nulls is read. */
-const factorsOf = (risk: JsonObject): readonly JsonValue[] | null => {
-  const factors = fieldOf(risk, 'factors')
-  if (factors === null) return []
-  if (!Array.isArray(factors)) return null
-  return factors.every((entry) => entry === null || recordOf(entry) !== null)
-    ? (factors as JsonValue[])
-    : null
-}
-
-/**
- * One `--declared-range` for each range, and one for each line of a range.
+ * One declared range for each range, and one for each line of a range.
  * The adapter makes the list distinct. Null when `ranges` is neither null
  * nor a list of text.
  */
@@ -292,39 +253,42 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
         `--declared-range can be read from it. ranges: ${JSON.stringify(fieldOf(declared, 'ranges'))}`,
     )
   }
-  const args = [
-    '--package',
-    pkg,
-    '--after',
-    after,
-    '--adapter',
-    NODE_ADAPTER,
-    '--why-json',
-    whyFile,
-    '--override-scope',
-    scope.value,
-    ...(before === '' ? [] : ['--before', before]),
-    // `none` is the sentinel for an empty list. Without the flag the scorer
-    // refuses, because its silent absence made the multi-major escalation
-    // unreachable.
-    ...(ranges.length === 0
-      ? ['--declared-range', 'none']
-      : ranges.flatMap((r) => ['--declared-range', r])),
-  ]
-
-  // A failed scorer is a phase failure, as every other failure of this phase.
-  const scored = await loaded.pm(driver.scorer, args, {
-    cwd: driver.worktree,
-    env: loaded.env as NodeJS.ProcessEnv,
-  })
-  if (scored.status !== 0) {
-    return failPhase('validate', `score-merge-risk.sh failed: ${stderrOf(scored)}`)
+  // A throw is a failed scorer too. The bash script exited non-zero on a
+  // crash, and the driver put that in this phase.
+  let scored: ReturnType<typeof scoreMergeRisk>
+  try {
+    scored = scoreMergeRisk(
+      {
+        package: pkg,
+        before,
+        after,
+        why: why.value,
+        whyLabel: whyFile,
+        overrideScope: scope.value,
+        // An empty list is the `none` sentinel. Without it the scorer cannot
+        // tell "no range could be read" from "no range is out of date".
+        declaredRanges: ranges.length === 0 ? 'none' : ranges,
+      },
+      {
+        name: driver.adapter,
+        compareVersions: adapter.compareVersions,
+        rangeFacts: adapter.rangeFacts,
+      },
+      driver.worktree,
+    )
+  } catch (error) {
+    scored = failed(thrownText(error))
   }
-  const reportText = chomp(scored.stdout)
-  const risk = reportOf(reportText)
-  if (risk === null) {
-    return failPhase('validate', `score-merge-risk.sh returned no usable report: ${reportText}`)
+  // A failed scorer is a phase failure, as every other failure of this
+  // phase. The detail is the text of the bash: the script name, and the
+  // JSON error that the script wrote.
+  if (scored.outcome !== 'ok') {
+    return failPhase(
+      'validate',
+      `score-merge-risk.sh failed: ${JSON.stringify({ error: scored.error })}`,
+    )
   }
+  const risk = scored.value
   const riskSaved = save(keeper, 'risk', risk)
   if (riskSaved !== null) return riskSaved
 
@@ -373,15 +337,6 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
         `validate: ${JSON.stringify(validateResult.value)}`,
     )
   }
-  const factors = factorsOf(risk)
-  if (factors === null) {
-    return failPhase(
-      'validate',
-      "the risk scorer's report has a 'factors' that is neither null nor a list of objects, so " +
-        `F4 and F5 cannot be read. factors: ${JSON.stringify(fieldOf(risk, 'factors'))}`,
-    )
-  }
-
   return ok({
     status: 'ready_for_pr',
     package: pkg,
@@ -397,13 +352,13 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
     resolved_version: after,
     before: before === '' ? null : before,
     risk: {
-      band: fieldOf(risk, 'band') as JsonValue,
-      score: fieldOf(risk, 'score') as JsonValue,
-      f4: factorScore(factors, 'F4'),
-      f5: factorScore(factors, 'F5'),
-      markdown: fieldOf(risk, 'markdown') as JsonValue,
-      coverage: fieldOf(risk, 'coverage') as JsonValue,
-      ci: fieldOf(risk, 'ci') as JsonValue,
+      band: risk.band,
+      score: risk.score,
+      f4: (risk.factors[3] as RiskFactor).score,
+      f5: (risk.factors[4] as RiskFactor).score,
+      markdown: risk.markdown,
+      coverage: risk.coverage,
+      ci: risk.ci,
     },
     written: orElse(fieldOf(apply, 'written'), []) as JsonValue,
     superseded_keys: orElse(fieldOf(apply, 'superseded_keys'), []) as JsonValue,
