@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { COMMANDS } from '#gh-security/cli/registry.ts'
+import { buildDispatchesCommand } from '#gh-security/subcommands/build-dispatches.ts'
 import { checkAdvisoriesCommand } from '#gh-security/subcommands/check-advisories.ts'
 import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts'
 import { detectScopeCommand } from '#gh-security/subcommands/detect-scope.ts'
@@ -35,6 +36,7 @@ describe('the registry', () => {
   it('reaches each handler through a dynamic import of its own subcommand module', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
+      "import('../subcommands/build-dispatches.ts')",
       "import('../subcommands/check-advisories.ts')",
       "import('../subcommands/classify-lines.ts')",
       "import('../subcommands/detect-scope.ts')",
@@ -55,6 +57,7 @@ describe('the registry', () => {
 describe('the discovery entries', () => {
   // The loader of each entry is the one line that reaches the handler.
   it.each([
+    ['build-dispatches', buildDispatchesCommand],
     ['check-advisories', checkAdvisoriesCommand],
     ['classify-lines', classifyLinesCommand],
     ['detect-scope', detectScopeCommand],
@@ -68,6 +71,10 @@ describe('the discovery entries', () => {
   })
 
   it.each([
+    [
+      'build-dispatches',
+      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+    ],
     [
       'check-advisories',
       'check-advisories [--env-prefix <prefix>] [--ecosystem <eco>] [--version <v>] <package>',
