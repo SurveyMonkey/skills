@@ -25,6 +25,14 @@
 //     must not contain a .. segment`, and `Nothing was removed.` after the
 //     path that is not under the worktree root. These are the words of
 //     `fix-group.sh`, which the module keeps.
+// Two rows make `git worktree remove` fail part way: `worktree-remove-fails`
+// and `reap-worktree-remove-fails`. git deletes the files of the worktree in
+// the order that the file system lists them, so on Linux the `.git` file of
+// the worktree can go before the locked directory stops git. The capture was
+// made on macOS, where it stayed. For these two rows, the disk after is
+// compared without that one file, on both sides. This is git and the file
+// system, and not the port.
+//
 // The row `reap-no-work-flag` is a usage error of the script. The module has
 // no command line: `reap-batch` (#229) has one. So no row of the port runs it.
 import { spawnSync } from 'node:child_process'
@@ -436,6 +444,20 @@ const runRow = async (row: Row) => {
 const comparable = (row: Row, result: Result): Result =>
   row.script === 'reap' && result.status !== 1 ? { ...result, stderr: '' } : result
 
+/** The rows where git stops part way through `worktree remove`. */
+const PART_WAY = new Set(['worktree-remove-fails', 'reap-worktree-remove-fails'])
+
+/** The disk after, without the `.git` file of a worktree that git removed part way. */
+const afterOf = (row: Row, disk: Disk): Disk =>
+  PART_WAY.has(row.name)
+    ? {
+        ...disk,
+        paths: disk.paths.filter(
+          (path) => path !== 'f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git',
+        ),
+      }
+    : disk
+
 describe('parity with the capture of fix-group.sh cleanup and reap-agent-artifacts.sh', () => {
   const rows = CAPTURE.rows.filter((row) => row.name !== 'reap-no-work-flag')
 
@@ -451,6 +473,8 @@ describe('parity with the capture of fix-group.sh cleanup and reap-agent-artifac
     const port = await runRow(row)
     expect(port.before).toEqual(row.before)
     expect(comparable(row, port.result)).toEqual(comparable(row, expected(row)))
-    expect(port.after).toEqual(DECLARED[row.name]?.after?.(row.after) ?? row.after)
+    expect(afterOf(row, port.after)).toEqual(
+      afterOf(row, DECLARED[row.name]?.after?.(row.after) ?? row.after),
+    )
   })
 })
