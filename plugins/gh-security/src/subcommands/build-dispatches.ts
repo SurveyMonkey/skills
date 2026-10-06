@@ -56,6 +56,7 @@ import { fileURLToPath } from 'node:url'
 import { selectAdapter } from '../adapters/registry.ts'
 import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
 import { parseCommandLine } from '../lib/args.ts'
+import { parseEnvPrefix } from '../lib/env-prefix.ts'
 import { type Envelope, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
 
 const USAGE =
@@ -152,7 +153,7 @@ const prefixesOf = (
     if (!checkouts.some((checkout) => checkout.checkout === path)) {
       return failed(`build-dispatches: ${given} names ${path}, which is not a kept checkout`)
     }
-    if (typeof prefix !== 'string' || prefix.trim() === '') {
+    if (typeof prefix !== 'string' || parseEnvPrefix(prefix).length === 0) {
       return failed(`build-dispatches: ${given} gives ${path} a prefix with no word in it`)
     }
     prefixes.set(path, prefix)

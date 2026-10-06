@@ -215,6 +215,11 @@ describe('build-dispatches: env_prefix (pin: still omits env_prefix rather than 
       { '/work/app': ' ' },
       'build-dispatches: prefixes.json gives /work/app a prefix with no word in it',
     ],
+    [
+      'the word null as its prefix',
+      { '/work/app': ' null ' },
+      'build-dispatches: prefixes.json gives /work/app a prefix with no word in it',
+    ],
   ])('refuses a prefixes file with %s', (_name, prefixes, error) => {
     const dir = scene({ 'prefixes.json': prefixes })
     expect(
@@ -316,6 +321,10 @@ describe('build-dispatches: the envelope', () => {
     ['a field that a merge does not give', { ...MERGED, groups: [] }],
     ['no skipped list', { ...MERGED, skipped: undefined }],
     ['a checkout that is not an object', { ...MERGED, checkouts: ['/work/app'] }],
+    [
+      'a checkout whose path is not text',
+      { ...MERGED, checkouts: [{ checkout: 7, nwo: 'octo/app', default_branch: 'main' }] },
+    ],
     [
       'a checkout with no default branch',
       { ...MERGED, checkouts: [{ checkout: '/work/app', nwo: 'octo/app' }] },
