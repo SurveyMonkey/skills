@@ -254,12 +254,15 @@ export const setup = async (
   //    itself (`src/signals.ts`). Then the reap removes what this run made:
   //    the work directory was not there at step 1, and the branch is new at
   //    `origin/<default>`. The process exits with the status of the signal.
-  //    When git refuses `worktree add` with a status, it made no worktree.
-  //    The paths can then be those of another run, so the reap does not run.
-  //    A branch that git made stays at `origin/<default>`, and the
-  //    stale-branch guard of the next `setup` clears it. A `worktree add`
-  //    that a signal stopped has no status, and the reap runs.
-  let refused = false
+  //    When `worktree add` exits with a status, git refused it, or it did not
+  //    start. The paths can then be those of another run, so the reap does
+  //    not run. A branch that git made stays at `origin/<default>`. The
+  //    stale-branch guard of the next `setup` clears it only while
+  //    `origin/<default>` has not moved. A `worktree add` that a signal
+  //    stopped has no status, and the reap runs. A prefix that does not
+  //    `exec` git can give a status for a signal. Then nothing is reaped,
+  //    and the guard for a crashed run stops the next `setup`.
+  let refused: string | null = null
   return holdSignals(
     signals,
     async () => {
@@ -272,7 +275,10 @@ export const setup = async (
         `origin/${defaultBranch}`,
       ])
       if (added.status !== 0) {
-        refused = added.status !== null
+        // The report on stderr is one line, as the reap's report is.
+        if (added.status !== null) {
+          refused = `status ${added.status}: ${outputOf(added).replace(/\n/g, ' ')}`
+        }
         return failPhase('worktree', `git worktree add ${worktree} failed: ${outputOf(added)}`)
       }
 
@@ -306,9 +312,10 @@ export const setup = async (
     },
     async (signal) => {
       if (signal === null) return
-      if (refused) {
+      if (refused !== null) {
         stderr(
-          `fix-group: setup stopped by ${signal}: git refused worktree add, so nothing was reaped\n`,
+          `fix-group: setup stopped by ${signal}: git worktree add exited with ${refused}. ` +
+            'Nothing was reaped.\n',
         )
         return
       }

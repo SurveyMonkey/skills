@@ -595,11 +595,14 @@ describe('a signal during fix-group setup', () => {
     expect(log).toEqual(['exit 143'])
     expect(existsSync(join(w.wt, '.git'))).toBe(true)
     // git makes the branch before it refuses the path. The branch stays at
-    // origin/main, and the stale-branch guard of the next setup clears it.
+    // origin/main, and the stale-branch guard of the next setup clears it
+    // while origin/main has not moved.
     expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main', 'other'])
-    expect(stderr.join('')).toBe(
-      'fix-group: setup stopped by SIGTERM: git refused worktree add, so nothing was reaped\n',
+    const report = stderr.join('')
+    expect(report).toMatch(
+      /^fix-group: setup stopped by SIGTERM: git worktree add exited with status 128: .* already exists\. Nothing was reaped\.\n$/,
     )
+    expect(report).toContain(`fatal: '${w.wt}' already exists`)
   })
 
   it('reaps when a signal stopped worktree add, which then has no status', async () => {
