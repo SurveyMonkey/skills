@@ -246,8 +246,6 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
         `--declared-range can be read from it. ranges: ${JSON.stringify(fieldOf(declared, 'ranges'))}`,
     )
   }
-  // An empty list is the `none` sentinel. Without it the scorer cannot tell
-  // "no range could be read" from "no range is out of date".
   // A throw is a failed scorer too. The bash script exited non-zero on a
   // crash, and the driver put that in this phase.
   let scored: ReturnType<typeof scoreMergeRisk>
@@ -260,6 +258,8 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
         why: why.value,
         whyLabel: whyFile,
         overrideScope: scope.value,
+        // An empty list is the `none` sentinel. Without it the scorer cannot
+        // tell "no range could be read" from "no range is out of date".
         declaredRanges: ranges.length === 0 ? 'none' : ranges,
       },
       {
