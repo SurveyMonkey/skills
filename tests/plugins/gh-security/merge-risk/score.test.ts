@@ -818,6 +818,12 @@ describe('the reads of the tree, as the bash reads them', () => {
     ])
   })
 
+  it('finds an import of a parent whose name is not ASCII', () => {
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': "require('café-lib')" })
+    const report = scored(root, { why: { relationship: 'transitive', parents: ['café-lib'] } })
+    expect(report.coverage.affected).toBe(1)
+  })
+
   it('reads a UTF-8 byte order mark at the start of package.json, as jq does', () => {
     const root = tree({ 'package.json': `\u{FEFF}${manifest({ scripts: { test: 'x' } })}` })
     expect(scored(root).factors[3]?.evidence).toBe(
