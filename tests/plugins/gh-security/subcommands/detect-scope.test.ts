@@ -282,6 +282,9 @@ describe('the answer for a repository with a GitHub remote', () => {
     'https://github.example.com/octo/app',
     'https://notgithub.com/octo/app',
     'https://github.com.example.org/octo/app',
+    // A subdomain of github.com is not a name of GitHub (#305).
+    'https://gist.github.com/octo/app',
+    'git@api.github.com:octo/app.git',
     'gh-alias:octo/app',
   ])('reads the symref, and asks GitHub nothing, for the remote %s', async (remote) => {
     const w = world()
@@ -346,6 +349,12 @@ describe('a remote host that is an alias in the ssh configuration (#305)', () =>
         '  HostName WWW.GitHub.com',
         'Host lab-alias',
         '  HostName gitlab.example.com',
+        'Host not-alias',
+        '  HostName notgithub.com',
+        'Host suffix-alias',
+        '  HostName github.com.example.org',
+        'Host gist-alias',
+        '  HostName gist.github.com',
         '',
       ].join('\n'),
     )
@@ -387,12 +396,15 @@ describe('a remote host that is an alias in the ssh configuration (#305)', () =>
   })
 
   // No reply is registered for `gh`, so a call to it throws.
-  it('reads the symref for an alias that resolves to another host', async () => {
-    const w = world()
-    const dir = repoWith(w, 'lab-alias:octo/app.git', 'trunk')
-    const answer = value(await detect(w, [dir], {}, '/nowhere', aliases(w)))
-    expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'trunk' })
-  })
+  it.each(['lab-alias', 'not-alias', 'suffix-alias', 'gist-alias'])(
+    'reads the symref for %s, an alias that resolves to another host',
+    async (alias) => {
+      const w = world()
+      const dir = repoWith(w, `${alias}:octo/app.git`, 'trunk')
+      const answer = value(await detect(w, [dir], {}, '/nowhere', aliases(w)))
+      expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'trunk' })
+    },
+  )
 
   // git reaches an https, http or git remote with no ssh, so the ssh
   // configuration does not apply to it.
@@ -408,6 +420,18 @@ describe('a remote host that is an alias in the ssh configuration (#305)', () =>
     expect(answer.default_branch).toBe('trunk')
     expect(calls).toEqual([])
   })
+
+  // A name of GitHub needs no ssh, and an ssh configuration cannot change it.
+  it.each(['git@github.com:octo/app.git', 'ssh://git@SSH.GitHub.com:443/octo/app.git'])(
+    'runs no ssh for the remote %s, a name of GitHub',
+    async (remote) => {
+      const w = world()
+      const dir = repoWith(w, remote)
+      const { runner, calls } = recordingSsh(aliases(w))
+      await detect(w, [dir], { viewDefaultBranch: { name: 'main' } }, '/nowhere', runner)
+      expect(calls).toEqual([])
+    },
+  )
 
   it('resolves the host with ssh -G, and ends the options before the host', async () => {
     const w = world()
