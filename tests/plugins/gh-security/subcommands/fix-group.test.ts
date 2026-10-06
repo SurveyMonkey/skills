@@ -38,10 +38,8 @@ import {
   porcelainPaths,
   runners,
 } from '#gh-security/subcommands/fix-group-common.ts'
-import { DEFAULT_SCORER } from '#gh-security/subcommands/fix-group-setup.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
-import { pluginFile } from '#harness/paths.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
 
 // Each example makes a repository and runs git many times.
@@ -534,7 +532,6 @@ describe('setup (phase 1)', () => {
         default_branch: 'main',
         adapter: 'node',
         ecosystem: 'npm',
-        scorer: DEFAULT_SCORER,
         env_prefix: '',
         work: w.work,
         worktree: w.worktree,
@@ -548,19 +545,19 @@ describe('setup (phase 1)', () => {
       })
     })
 
-    it('names the bash scorer of this plugin by default (ruling 4)', () => {
-      expect(DEFAULT_SCORER).toBe(
-        pluginFile('gh-security', 'scripts', 'common', 'score-merge-risk.sh'),
-      )
+    it('records the prefix that it was given', async () => {
+      const w = world()
+      await setup(w, '--env-prefix', 'env FOO=1')
+      expect(stateOf(w).env_prefix).toBe('env FOO=1')
     })
 
-    it('records the scorer and the prefix that it was given', async () => {
+    // The scorer runs in process (#233, ruling 9), so there is no scorer to name.
+    it('refuses --scorer as an unknown option, and makes no work directory', async () => {
       const w = world()
-      await setup(w, '--scorer', '/s/scorer.sh', '--env-prefix', 'env FOO=1')
-      expect({ scorer: stateOf(w).scorer, env_prefix: stateOf(w).env_prefix }).toEqual({
-        scorer: '/s/scorer.sh',
-        env_prefix: 'env FOO=1',
-      })
+      const answer = await setup(w, '--scorer', '/s/scorer.sh')
+      expect(answer.status).toBe(1)
+      expect(answer.stderr).toContain("Unknown option '--scorer'")
+      expect(existsSync(w.work)).toBe(false)
     })
 
     // The `/` goes to `-` in the path (#161), and the branch keeps it.

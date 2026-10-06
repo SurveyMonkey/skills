@@ -316,7 +316,12 @@ const factor = (id: string, name: string, score: number, evidence: string): Risk
   evidence,
 })
 
-const EMOJI: Readonly<Record<Band, string>> = { Low: '🟢', Medium: '🟡', High: '🔴' }
+/** The mark of each band: a green, a yellow and a red circle. */
+const EMOJI: Readonly<Record<Band, string>> = {
+  Low: '\u{1F7E2}',
+  Medium: '\u{1F7E1}',
+  High: '\u{1F534}',
+}
 
 const bandOf = (score: number): Band => (score <= 3 ? 'Low' : score <= 6 ? 'Medium' : 'High')
 

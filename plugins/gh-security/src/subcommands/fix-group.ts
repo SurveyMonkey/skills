@@ -4,7 +4,7 @@
 //
 //   fix-group setup    --group-json <file> --repo-root <path>
 //                      --default-branch <name>
-//                      [--env-prefix "<string>"] [--scorer <path>]
+//                      [--env-prefix "<string>"]
 //   fix-group classify --work <dir>
 //   fix-group baseline --work <dir>
 //   fix-group apply    --work <dir>
@@ -38,9 +38,8 @@
 //           failure: <detail>`. `score` gives only `validate`. The causes
 //           are a verb that fails after the fix, a promised field that is
 //           absent, a version that cannot be compared, and a why capture
-//           that cannot be written. They are also a scorer that fails or has
-//           no usable report, and a stored or scored value of the wrong
-//           type (see the differences below).
+//           that cannot be written. They are also a scorer that fails, and
+//           a stored value of the wrong type (see the differences below).
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
 //
@@ -88,10 +87,10 @@
 //             snapshot has `present` other than the text `true`. It is not
 //             given when it has no version on the line (#76). `--after` is the
 //             lowest version on the line after the fix, and it is never
-//             empty. The scorer runs in the worktree with `--package`,
-//             `--after`, `--adapter`, `--why-json`, `--override-scope`, an
-//             optional `--before`, and one `--declared-range` for each
-//             range, or `none`. The state keeps its `risk` report. Then the
+//             empty. The scorer scores the worktree, in process, with the
+//             package, `--after`, the why answer, the override scope, an
+//             optional `--before`, and the ranges, or `none`. The state
+//             keeps its `risk` report. Then the
 //             stored `apply_result`, `validate`, parent list, `drift_commit`
 //             and `observations_first` are read. One that is absent or null
 //             stops the phase with exit 1, after the scorer has run.
@@ -120,22 +119,18 @@
 //   - An install that the verb itself refuses, as the worktree guard does,
 //     is a failed control install, and its output is the message of the
 //     verb.
-//   - `--scorer` stays, for `score` (round 5 ruling 4 on #232). Without it,
-//     the state names the bash scorer in this plugin,
-//     `scripts/common/score-merge-risk.sh`. `score` runs it as a child
-//     process, under the prefix, with the worktree as its directory. Until
-//     #233 ports it, a TypeScript command calls a bash script here.
-//   - The scorer calls the adapter again, as a bash script. `score` gives it
-//     `--adapter` with the path of `scripts/ecosystems/node.sh` in this
-//     plugin. The state has the name of the adapter and not a path. The
-//     registry has no other adapter, so the node script is the one that
-//     exists. A second adapter needs a map from its name to its script.
+//   - There is no `--scorer`, and the state has no `scorer` key (#233,
+//     ruling 9). `score` calls the scorer in process
+//     (`src/merge-risk/score.ts`), and the scorer asks the adapter of the
+//     state in process. The bash ran `score-merge-risk.sh` as a child under
+//     the prefix, and that child ran `node.sh`. A state that the bash wrote
+//     has `scorer`, and a state that an older port wrote has it too. This
+//     command does not read it.
 //   - `score` runs `why` through the package manager under the prefix, and
-//     the other verbs in process, as the other phases do. The scorer starts
-//     the bash adapter itself. That child inherits the environment that the
-//     prefix sets, and has no prefix of its own.
-//   - A scorer that does not start fails the phase with the text of node's
-//     error. The bash gave the text of the shell.
+//     the other verbs in process, as the other phases do.
+//   - A scorer that fails gives the detail `score-merge-risk.sh failed: `
+//     and the JSON error, as the bash did. The differences of the scorer
+//     itself are in the header of `src/merge-risk/score.ts`.
 //   - A bad command line is exit 1 with `{"error": ...}` in node's words. The
 //     bash printed the shell's text for an absent value, and no JSON.
 //   - `setup` refuses a group that is JSON but not an object, with its own
@@ -206,7 +201,8 @@
 //   - `score` writes the why capture through a temporary file, and renames
 //     it. The bash wrote the file in place.
 //   - The why capture is the answer as one line of JSON. The bash wrote the
-//     text of the adapter, which has indents. The scorer reads both alike.
+//     text of the adapter, which has indents. The scorer gets the answer
+//     itself, and not the file.
 //   - `ranges` of the post-fix `declared_ranges` must be null or a list of
 //     text. The bash read a text, a number, `true` and `false` as an empty
 //     list. It read each value of an object, and `null` or a number in a
@@ -217,15 +213,6 @@
 //     The bash gave `length` of a text (its characters), of a number (its
 //     absolute value) and of an object (its keys), and stopped on `true`.
 //     Here each of these is a `validate` failure.
-//   - The report of the scorer must hold one JSON object that has `band`.
-//     The bash also passed two JSON values in a row, and then stopped at the
-//     write of the state with exit 1. Here that is a `validate` failure. A
-//     number in the report is written as node reads it, so `1.0` is `1`.
-//   - `factors` of the report must be null or a list of objects and nulls.
-//     The bash read a text, a number, `true` and `false` as no factors. It
-//     read each value of an object as a factor. It stopped in jq, with exit
-//     5 and no JSON, on a list that holds a text, a number, a boolean or a
-//     list. Here each of these is a `validate` failure.
 //   - The stored `apply_result` and `validate` must be objects. The bash
 //     stopped in jq, with exit 5 and no JSON, on any other value. A
 //     `benign_moves` entry that is not an object is not kept here. The bash

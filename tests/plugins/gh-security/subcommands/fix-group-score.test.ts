@@ -1,20 +1,19 @@
 // `gh-security fix-group score`. The seam is the exported handler, with the
 // runner and the registry as parameters. These are the examples of
 // `spec/fix_group_apply_spec.sh` that cover `score`, the examples of its
-// `env_prefix` block that name the scorer, and the branches that only the
-// port has.
+// `env_prefix` block, and the branches that only the port has.
 //
 // `score` reads the state that `apply` wrote and runs no git command. So each
 // example writes that state by hand, in a directory that has the lockfile of
 // a worktree, and the real flow is one example at the end. The adapter is the
 // real node adapter with `why`, `declared_ranges` and `resolved_versions`
 // replaced by written answers (`mocking.md`, "The injected collaborator").
-// `compare_versions` is the real one. The scorer is a stand-in program, which
-// is a real seam because the port runs it as a child. It writes its argv and
-// its directory to a log. The package manager is a stand-in on PATH.
-// The expected values come from the contract in the header of `fix-group.ts`
-// and from jq probes of the bash lines. `parity-fix-group-score.test.ts`
-// compares the port with `fix-group.sh` and the real scorer.
+// `compare_versions` and `range_facts` are the real ones. The scorer runs in
+// process on the worktree, a copy of the npm-v3 specimen (#233). The package
+// manager is a stand-in on PATH. The expected values come from the contract
+// in the header of `fix-group.ts`, from jq probes of the bash lines, and, for
+// the risk report, from `score-merge-risk.sh` on the same inputs.
+// `parity-fix-group-score.test.ts` compares the port with `fix-group.sh`.
 import {
   chmodSync,
   cpSync,
@@ -22,6 +21,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -35,26 +35,13 @@ import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
 import { exitCodeFor, failed, type JsonValue, ok } from '#gh-security/lib/envelope.ts'
 import { run } from '#gh-security/lib/process.ts'
 import { fixGroup, fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
-import { NODE_ADAPTER } from '#gh-security/subcommands/fix-group-score.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 import { createGitFixtures } from '#harness/git.ts'
-import { pluginFile } from '#harness/paths.ts'
 import { createSandbox } from '#harness/sandbox.ts'
 
 vi.setConfig({ testTimeout: 60_000 })
 
 type Json = Record<string, JsonValue>
-
-/** The stand-in scorer. It logs its argv with a NUL after each argument, and its directory. */
-const SCORER = `#!/bin/sh
-printf '%s\\0' "$@" > "$SCORER_DIR/argv"
-pwd > "$SCORER_DIR/cwd"
-env | grep '^SCORER_MARK=' > "$SCORER_DIR/mark" || true
-[ -f "$SCORER_DIR/hook.sh" ] && . "$SCORER_DIR/hook.sh"
-[ -f "$SCORER_DIR/err.txt" ] && cat "$SCORER_DIR/err.txt" >&2
-[ -f "$SCORER_DIR/out.txt" ] && cat "$SCORER_DIR/out.txt"
-exit "$(cat "$SCORER_DIR/status" 2>/dev/null || echo 0)"
-`
 
 /** The stand-in package manager. Only the prefix log can tell a call apart. */
 const FAKE_PM = `#!/bin/sh
@@ -67,18 +54,73 @@ printf '%s|%s\\n' "$PWD" "$1" >> "$PREFIX_LOG"
 exec "$@"
 `
 
-const RISK = {
+/**
+ * The report of `score-merge-risk.sh` on the base state: lodash 4.17.20 to
+ * 4.17.21 on the npm-v3 tree, a transitive under express, a scoped override,
+ * and the range ^4.17.20.
+ */
+const RISK: Json = {
   package: 'lodash',
   score: 3,
+  max: 14,
   band: 'Low',
-  factors: [
-    { id: 'F1', score: 2 },
-    { id: 'F4', score: 0 },
-    { id: 'F5', score: 1 },
-  ],
-  markdown: '## Merge risk',
-  coverage: { affected: 1, covered: 1, uncovered: [] },
+  escalated: false,
+  escalation_reason: null,
+  delta: 'patch',
+  majors_crossed: 0,
+  declared_ranges: ['^4.17.20'],
+  override_scope: 'scoped',
+  coverage: { affected: 0, covered: 0, uncovered: [] },
   ci: { workflow: null, trigger: null, step: null },
+  factors: [
+    { id: 'F1', name: 'Version delta', score: 0, evidence: '4.17.20 -> 4.17.21 (patch)' },
+    {
+      id: 'F2',
+      name: 'Runtime exposure',
+      score: 1,
+      evidence: 'transitive under a runtime dependency',
+    },
+    {
+      id: 'F3',
+      name: 'Usage surface',
+      score: 0,
+      evidence: 'no source imports found for parents of lodash (build or tooling only)',
+    },
+    {
+      id: 'F4',
+      name: 'Test coverage',
+      score: 0,
+      evidence: 'no source imports; a build script exists, so a broken tooling pin fails at build',
+    },
+    {
+      id: 'F5',
+      name: 'CI presence',
+      score: 2,
+      evidence:
+        'no GitHub Actions workflow triggers on this pull request; another CI vendor is not read',
+    },
+    {
+      id: 'F6',
+      name: 'Override blast radius',
+      score: 0,
+      evidence: 'scoped override: only the dependency paths that carried the alerts are pinned',
+    },
+    {
+      id: 'F7',
+      name: 'Declared-range distance',
+      score: 0,
+      evidence: 'no major line crossed; dependents declare ^4.17.20',
+    },
+  ],
+  markdown:
+    '## Merge risk: \u{1F7E2} Low (3/14)\n\n| Factor | Score | Evidence |\n|---|---|---|\n' +
+    '| Version delta | 0 | 4.17.20 -> 4.17.21 (patch) |\n' +
+    '| Runtime exposure | 1 | transitive under a runtime dependency |\n' +
+    '| Usage surface | 0 | no source imports found for parents of lodash (build or tooling only) |\n' +
+    '| Test coverage | 0 | no source imports; a build script exists, so a broken tooling pin fails at build |\n' +
+    '| CI presence | 2 | no GitHub Actions workflow triggers on this pull request; another CI vendor is not read |\n' +
+    '| Override blast radius | 0 | scoped override: only the dependency paths that carried the alerts are pinned |\n' +
+    '| Declared-range distance | 0 | no major line crossed; dependents declare ^4.17.20 |\n',
 }
 
 const rv = (...versions: string[]): Json => ({
@@ -168,8 +210,6 @@ interface World {
   readonly env: NodeJS.ProcessEnv
   readonly work: string
   readonly worktree: string
-  readonly scorerDir: string
-  readonly scorer: string
   readonly bin: string
   readonly state: Json
   readonly whyRuns: string[]
@@ -178,13 +218,12 @@ interface World {
 }
 
 /** The state that `apply` leaves, as `score` reads it. */
-const baseState = (work: string, worktree: string, scorer: string): Json => ({
+const baseState = (work: string, worktree: string): Json => ({
   group: { package: 'lodash', major_line: '4' },
   repo_root: '/repo',
   default_branch: 'main',
   adapter: 'node',
   ecosystem: 'npm',
-  scorer,
   env_prefix: '',
   work,
   worktree,
@@ -219,13 +258,6 @@ const world = (edit: (w: World) => void = () => {}): World => {
   const worktree = join(work, 'fix')
   mkdirSync(work)
   cpSync(join(FIXTURES_ROOT, 'npm-v3'), worktree, { recursive: true })
-  const scorerDir = sandbox.join('scorer')
-  mkdirSync(scorerDir)
-  const scorer = join(bin, 'score-merge-risk.sh')
-  writeFileSync(scorer, SCORER)
-  chmodSync(scorer, 0o755)
-  writeFileSync(join(scorerDir, 'out.txt'), JSON.stringify(RISK))
-  sandbox.env.SCORER_DIR = scorerDir
   sandbox.env.STATE_TMP = join(work, 'state.json.tmp')
   const w: World = {
     script: {
@@ -240,10 +272,8 @@ const world = (edit: (w: World) => void = () => {}): World => {
     env: sandbox.env,
     work,
     worktree,
-    scorerDir,
-    scorer,
     bin,
-    state: baseState(work, worktree, scorer),
+    state: baseState(work, worktree),
     whyRuns: [],
     detects: 0,
     verbs: [],
@@ -329,23 +359,14 @@ const score = async (w: World, work = w.work): Promise<Answer> =>
 const stateOf = (w: World): Json =>
   JSON.parse(readFileSync(join(w.work, 'state.json'), 'utf8')) as Json
 
-/** What the scorer was run with: its argv, in order. Null when it never ran. */
-const argvOf = (w: World): string[] | null => {
-  const path = join(w.scorerDir, 'argv')
-  return existsSync(path) ? readFileSync(path, 'utf8').split('\0').slice(0, -1) : null
-}
+/** The report that the scorer left in the state, or undefined when it never ran. */
+const riskOf = (w: World): Json | undefined => stateOf(w).risk as Json | undefined
 
-/** The value after the first flag of that name. */
-const flag = (argv: string[] | null, name: string): string | undefined =>
-  argv?.[argv.indexOf(name) + 1]
-
-const scorerOut = (w: World, text: string): void => {
-  writeFileSync(join(w.scorerDir, 'out.txt'), text)
-}
-
-const scorerHook = (w: World, body: string): void => {
-  writeFileSync(join(w.scorerDir, 'hook.sh'), body)
-}
+/** The evidence of F1 in the report: `<before> -> <after> (...)`, or the no-baseline text. */
+const deltaOf = (w: World): string | undefined =>
+  ((riskOf(w)?.factors as Json[] | undefined)?.[0] as Json | undefined)?.evidence as
+    | string
+    | undefined
 
 /** A projection of an answer: the exit status, and the named keys of its JSON. */
 const pick = (answer: Answer, ...keys: string[]): { exit: number } & Json => ({
@@ -386,11 +407,6 @@ describe('the command', () => {
     expect(answer.status).toBe(1)
     expect(answer.stderr).toContain('no readable state file')
   })
-
-  it('names the adapter script of this plugin, a script that is there', () => {
-    expect(NODE_ADAPTER).toBe(pluginFile('gh-security', 'scripts', 'ecosystems', 'node.sh'))
-    expect(existsSync(NODE_ADAPTER)).toBe(true)
-  })
 })
 
 describe('score (phase 5)', () => {
@@ -418,8 +434,8 @@ describe('score (phase 5)', () => {
           band: 'Low',
           score: 3,
           f4: 0,
-          f5: 1,
-          markdown: '## Merge risk',
+          f5: 2,
+          markdown: RISK.markdown,
           coverage: RISK.coverage,
           ci: RISK.ci,
         },
@@ -477,7 +493,6 @@ describe('score (phase 5)', () => {
     })
     const answer = await score(w)
     expect(answer.json.why_json).toBe(`${w.work}/why-scope-lodash.json`)
-    expect(flag(argvOf(w), '--why-json')).toBe(`${w.work}/why-scope-lodash.json`)
   })
 
   it('gives the text of --work to the names of the report as it is', async () => {
@@ -490,54 +505,42 @@ describe('score (phase 5)', () => {
     })
   })
 
-  describe('the argv of the scorer', () => {
-    it('is the argv of the bash, in its order', async () => {
+  // The scorer runs in process (#233, ruling 9). Its input is what the bash
+  // gave as flags, so each example reads that input back from the report.
+  describe('what the scorer is given', () => {
+    it('is the input of the bash: package, versions, scope and ranges', async () => {
       const w = world()
       await score(w)
-      expect(argvOf(w)).toEqual([
-        '--package',
-        'lodash',
-        '--after',
-        '4.17.21',
-        '--adapter',
-        NODE_ADAPTER,
-        '--why-json',
-        `${w.work}/why-lodash.json`,
-        '--override-scope',
-        'scoped',
-        '--before',
-        '4.17.20',
-        '--declared-range',
-        '^4.17.20',
-      ])
+      expect(riskOf(w)).toEqual(RISK)
     })
 
-    it('runs in the worktree', async () => {
+    it('reads the worktree as the tree to score', async () => {
       const w = world()
-      await score(w)
-      // The sandbox path can sit behind a link, as /var does on macOS.
-      expect(readFileSync(join(w.scorerDir, 'cwd'), 'utf8').trim()).toMatch(/\/work\/fix$/)
+      rmSync(join(w.worktree, 'package.json'))
+      const answer = await score(w)
+      expect(answer.json).toEqual({
+        status: 'failure',
+        phase: 'validate',
+        detail: `score-merge-risk.sh failed: ${JSON.stringify({
+          error:
+            `no package.json in ${w.worktree}. The scorer runs from the root of the tree being ` +
+            'scored, and F3 and F4 read the manifest there; without it the fix would score as a ' +
+            'repository that declares no scripts.',
+        })}`,
+      })
     })
 
-    it('gives the scorer the environment of the command', async () => {
-      const w = world()
-      w.env.SCORER_MARK = 'seen'
-      await score(w)
-      expect(readFileSync(join(w.scorerDir, 'mark'), 'utf8').trim()).toBe('SCORER_MARK=seen')
+    // A state that a version with `--scorer` wrote still has the key. It is
+    // not read: the scorer is in process.
+    it('ignores a scorer that an older state names', async () => {
+      const w = world((x) => {
+        x.state.scorer = join(x.bin, 'missing-scorer.sh')
+      })
+      expect((await score(w)).status).toBe(0)
+      expect(riskOf(w)).toEqual(RISK)
     })
 
-    it('runs the scorer that the state names', async () => {
-      const w = world()
-      const other = join(w.bin, 'other-scorer.sh')
-      writeFileSync(other, `#!/bin/sh\nprintf '{"band":"High"}'\n`)
-      chmodSync(other, 0o755)
-      w.state.scorer = other
-      writeFileSync(join(w.work, 'state.json'), JSON.stringify(w.state))
-      expect((await score(w)).json.risk).toMatchObject({ band: 'High' })
-      expect(argvOf(w)).toBeNull()
-    })
-
-    // The widest shape that apply wrote goes through `--override-scope`.
+    // The widest shape that apply wrote is the override scope.
     it.each(['none', 'scoped', 'bare-tightened', 'bare-added'])(
       'reports the override scope %s',
       async (scope) => {
@@ -545,39 +548,41 @@ describe('score (phase 5)', () => {
           x.state.override_scope = scope
         })
         const answer = await score(w)
-        expect(flag(argvOf(w), '--override-scope')).toBe(scope)
+        expect(riskOf(w)?.override_scope).toBe(scope)
         expect(answer.json.override_scope).toBe(scope)
       },
     )
 
     // The adapter makes the list distinct and sorts it. `score` gives each
     // range on, in the order it has, as `jq -r '.ranges[]?'` did.
-    it.each([[['^4.17.20', '~4.17.0']], [['~4.17.0', '^4.17.20']], [['^4.17.20', '^4.17.20']]])(
-      'gives one --declared-range for each range of %j, in order',
-      async (ranges) => {
-        const w = world((x) => {
-          x.script.declared = { ...DECLARED, ranges }
-        })
-        await score(w)
-        expect(argvOf(w)?.slice(12)).toEqual(ranges.flatMap((range) => ['--declared-range', range]))
-      },
-    )
+    it.each([
+      [
+        ['^4.17.20', '~4.17.0'],
+        ['^4.17.20', '~4.17.0'],
+      ],
+      [
+        ['~4.17.0', '^4.17.20'],
+        ['~4.17.0', '^4.17.20'],
+      ],
+      [['^4.17.20', '^4.17.20'], ['^4.17.20']],
+    ])('gives the ranges of %j to the scorer, in order', async (ranges, scored) => {
+      const w = world((x) => {
+        x.script.declared = { ...DECLARED, ranges }
+      })
+      await score(w)
+      expect(riskOf(w)?.declared_ranges).toEqual(scored)
+    })
 
-    it('splits a range with a newline into one flag for each line, and drops empty lines', async () => {
+    it('splits a range with a newline into one range for each line, and drops empty lines', async () => {
       const w = world((x) => {
         x.script.declared = { ...DECLARED, ranges: ['^4.17.20\n~4.17.0\n', ''] }
       })
       await score(w)
-      expect(argvOf(w)?.slice(12)).toEqual([
-        '--declared-range',
-        '^4.17.20',
-        '--declared-range',
-        '~4.17.0',
-      ])
+      expect(riskOf(w)?.declared_ranges).toEqual(['^4.17.20', '~4.17.0'])
     })
 
-    // `--declared-range` is required, with an explicit `none` sentinel:
-    // optional, its absence made the multi-major escalation unreachable.
+    // The ranges are required, with an explicit `none` sentinel: optional,
+    // their absence made the multi-major escalation unreachable.
     it.each([
       ['an empty list', []],
       ['null', null],
@@ -592,7 +597,7 @@ describe('score (phase 5)', () => {
         }
       })
       const answer = await score(w)
-      expect(argvOf(w)?.slice(12)).toEqual(['--declared-range', 'none'])
+      expect(riskOf(w)?.declared_ranges).toBe('none-stated')
       expect(pick(answer, 'declared_ranges', 'declared_ranges_cause')).toEqual({
         exit: 0,
         declared_ranges: ranges === null ? [] : ranges,
@@ -652,7 +657,7 @@ describe('score (phase 5)', () => {
       expect(answer.json.detail).toContain("'parents_read' that is not a list")
       expect(answer.json.detail).toContain(JSON.stringify(parents))
       // The report is in the state, because the bash wrote it first.
-      expect(stateOf(w).risk).toEqual(RISK)
+      expect(riskOf(w)?.declared_ranges).toBe('none-stated')
     })
 
     it('does not read parents_read when a range was read', async () => {
@@ -669,7 +674,7 @@ describe('score (phase 5)', () => {
     it('comes from the baseline on an ordinary fix', async () => {
       const w = world()
       const answer = await score(w)
-      expect(flag(argvOf(w), '--before')).toBe('4.17.20')
+      expect(deltaOf(w)).toBe('4.17.20 -> 4.17.21 (patch)')
       expect(answer.json.before).toBe('4.17.20')
     })
 
@@ -679,7 +684,7 @@ describe('score (phase 5)', () => {
         x.state.action = 'lockfile-refresh'
       })
       await score(w)
-      expect(flag(argvOf(w), '--before')).toBe('4.17.19')
+      expect(deltaOf(w)).toBe('4.17.19 -> 4.17.21 (patch)')
     })
 
     it.each(['bare-override', 'direct-update', 'scoped-override'])(
@@ -689,7 +694,7 @@ describe('score (phase 5)', () => {
           x.state.action = action
         })
         await score(w)
-        expect(flag(argvOf(w), '--before')).toBe('4.17.20')
+        expect(deltaOf(w)).toBe('4.17.20 -> 4.17.21 (patch)')
       },
     )
 
@@ -720,7 +725,7 @@ describe('score (phase 5)', () => {
         x.state.baseline = rv('4.17.9', '4.17.10')
       })
       await score(w)
-      expect(flag(argvOf(w), '--before')).toBe('4.17.9')
+      expect(deltaOf(w)).toBe('4.17.9 -> 4.17.21 (patch)')
     })
 
     // A package that is not in the pre-fix tree has no baseline, and the
@@ -734,7 +739,7 @@ describe('score (phase 5)', () => {
         x.state.baseline = baseline
       })
       const answer = await score(w)
-      expect(argvOf(w)).not.toContain('--before')
+      expect(deltaOf(w)).toBe('no pre-fix baseline available; scored as major')
       expect(answer.json.before).toBeNull()
       expect(answer.status).toBe(0)
     })
@@ -744,7 +749,7 @@ describe('score (phase 5)', () => {
         x.state.baseline = { ...rv('4.17.20'), present: 'true' }
       })
       await score(w)
-      expect(flag(argvOf(w), '--before')).toBe('4.17.20')
+      expect(deltaOf(w)).toBe('4.17.20 -> 4.17.21 (patch)')
     })
 
     // A version from another line is never put in its place (#76).
@@ -759,7 +764,7 @@ describe('score (phase 5)', () => {
       const answer = await score(w)
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.json.detail).toContain("F1's --before cannot be stated")
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     it.each([
@@ -774,7 +779,7 @@ describe('score (phase 5)', () => {
       const answer = await score(w)
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.json.detail).toContain('could not be compared for the 4.x line')
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     it.each([
@@ -790,7 +795,7 @@ describe('score (phase 5)', () => {
         }) as never
       })
       await score(w)
-      expect(flag(argvOf(w), '--before')).toBe(lowest)
+      expect(deltaOf(w)).toBe(`${lowest} -> 4.17.21 (none)`)
     })
   })
 
@@ -803,7 +808,8 @@ describe('score (phase 5)', () => {
       })
       const answer = await score(w)
       expect(answer.json.resolved_version).toBe('4.17.9')
-      expect(flag(argvOf(w), '--after')).toBe('4.17.9')
+      // 4.17.9 is below the floor of ^4.17.20, so the range is one it escapes.
+      expect(deltaOf(w)).toBe('4.17.20 -> 4.17.9 (patch; parents declare ^4.17.20)')
     })
 
     it('reads one version for each line of a version text', async () => {
@@ -822,7 +828,7 @@ describe('score (phase 5)', () => {
       const answer = await score(w)
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.stderr).toContain('no comparable 4.x version')
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     it('fails for a comparison that cannot be read, and never gives an empty --after', async () => {
@@ -833,7 +839,7 @@ describe('score (phase 5)', () => {
       const answer = await score(w)
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.json.detail).toContain('no comparable 4.x version')
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     it('fails for a post-fix answer with no version list', async () => {
@@ -841,7 +847,7 @@ describe('score (phase 5)', () => {
         x.script.rv = { present: true }
       })
       expect(failure(await score(w))).toEqual(FAILURE)
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
   })
 
@@ -866,7 +872,7 @@ describe('score (phase 5)', () => {
       expect(answer.json).toEqual({ status: 'failure', phase: 'validate', detail })
       expect(answer.status).toBe(3)
       expect(answer.stderr).toBe(`fix-group: validate failure: ${detail}`)
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     // `detect` runs again for each verb, and its failure is the failure of
@@ -883,7 +889,7 @@ describe('score (phase 5)', () => {
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.json.detail).toContain(detail)
       expect(answer.json.detail).toContain('the stand-in found no lockfile')
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     // An adapter answering with nothing used to make `jq -n --argjson` die
@@ -956,7 +962,7 @@ describe('score (phase 5)', () => {
       expect(answer.json.detail).toBe(
         `the why capture could not be written to ${w.work}/why-lodash.json, so the risk scorer has no --why-json to read.`,
       )
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     it('needs a package_path, and stops with exit 1 after the first write', async () => {
@@ -993,8 +999,12 @@ describe('score (phase 5)', () => {
       ],
       [
         'risk',
+        // The first comparison of the scorer is the last thing before the write.
         (w: World) => {
-          scorerHook(w, 'mkdir "$STATE_TMP"\n')
+          w.script.compare = (a, b) => {
+            blockState(w)
+            return node.compareVersions(a, b)
+          }
         },
         ['resolved_versions lodash', 'why lodash', 'declared_ranges lodash 4'],
         true,
@@ -1005,163 +1015,45 @@ describe('score (phase 5)', () => {
       expect(answer.status).toBe(1)
       expect(answer.stderr).toContain(BLOCKED)
       expect(w.verbs).toEqual(verbs)
-      expect(argvOf(w) !== null).toBe(ran)
+      // The scorer runs after declared_post is written, and before risk is.
+      expect(stateOf(w).declared_post !== undefined).toBe(ran)
     })
   })
 
   describe('the scorer', () => {
-    // A scorer that ran and failed is a phase failure, and not exit 1, which
-    // is the usage and internal code of the driver.
-    it('is a phase failure when it exits non-zero, with its stderr', async () => {
-      const w = world()
-      writeFileSync(
-        join(w.scorerDir, 'err.txt'),
-        'score-merge-risk.sh: adapter contract violation\n\n',
+    // A scorer that fails is a phase failure, and not exit 1, which is the
+    // usage and internal code of the driver. The detail is the text the bash
+    // gave: the name of the script, and its JSON error.
+    it('is a phase failure when it refuses the override scope, with its error', async () => {
+      const w = world((x) => {
+        x.state.override_scope = 'wide'
+      })
+      const answer = await score(w)
+      expect(answer.json).toEqual({
+        status: 'failure',
+        phase: 'validate',
+        detail:
+          'score-merge-risk.sh failed: {"error":"--override-scope must be none, scoped, bare-tightened, or bare-added"}',
+      })
+      expect(answer.status).toBe(3)
+      expect(riskOf(w)).toBeUndefined()
+    })
+
+    it('is a phase failure when the adapter breaks the contract under it', async () => {
+      const w = world((x) => {
+        x.script.compare = (a, b) =>
+          a === '4.17.20' && b === '4.17.21' ? ok({} as never) : node.compareVersions(a, b)
+      })
+      const answer = await score(w)
+      expect(failure(answer)).toEqual(FAILURE)
+      expect(answer.json.detail).toMatch(
+        /^score-merge-risk\.sh failed: \{"error":"adapter node: compare_versions '4\.17\.20' '4\.17\.21' emitted no usable 'delta'\./,
       )
-      writeFileSync(join(w.scorerDir, 'status'), '1\n')
-      const answer = await score(w)
-      expect(answer.json).toEqual({
-        status: 'failure',
-        phase: 'validate',
-        detail: 'score-merge-risk.sh failed: score-merge-risk.sh: adapter contract violation',
-      })
-      expect(answer.status).toBe(3)
-      expect(stateOf(w).risk).toBeUndefined()
     })
 
-    it('is a phase failure when a signal ends it', async () => {
-      const w = world()
-      scorerHook(w, 'kill -9 $$\n')
-      const answer = await score(w)
-      expect(failure(answer)).toEqual(FAILURE)
-      expect(answer.json.detail).toBe('score-merge-risk.sh failed: ')
-    })
-
-    it('is a phase failure when it does not start, with the error of node', async () => {
-      const w = world((x) => {
-        x.state.scorer = join(x.bin, 'missing-scorer.sh')
-      })
-      const answer = await score(w)
-      expect(failure(answer)).toEqual(FAILURE)
-      expect(answer.json.detail).toContain('score-merge-risk.sh failed: ')
-      expect(answer.json.detail).toContain('ENOENT')
-    })
-
-    // A scorer that writes nothing, and one with JSON of the wrong shape.
-    it.each([
-      ['nothing', '', ''],
-      ['white space', ' \n ', ' \n '],
-      ['text that is not JSON', 'nope', 'nope'],
-      ['text that is not JSON, with newlines at its end', 'nope\n\n', 'nope'],
-      ['a list', '[{"band":"Low"}]', '[{"band":"Low"}]'],
-      ['a text', '"band"', '"band"'],
-      ['null', 'null', 'null'],
-      ['an object with no band', '{"package":"lodash"}\n', '{"package":"lodash"}'],
-      ['two objects', '{"band":1}{"band":2}', '{"band":1}{"band":2}'],
-    ])('is a phase failure for %s on stdout', async (_name, text, shown) => {
-      const w = world()
-      scorerOut(w, text)
-      const answer = await score(w)
-      expect(answer.json).toEqual({
-        status: 'failure',
-        phase: 'validate',
-        detail: `score-merge-risk.sh returned no usable report: ${shown}`,
-      })
-      expect(answer.status).toBe(3)
-      expect(stateOf(w).risk).toBeUndefined()
-    })
-
-    it('accepts a report with a band of null, as jq has("band") did', async () => {
-      const w = world()
-      scorerOut(w, '{"band":null}\n')
-      const answer = await score(w)
-      expect(pick(answer, 'risk')).toEqual({
-        exit: 0,
-        risk: {
-          band: null,
-          score: null,
-          f4: null,
-          f5: null,
-          markdown: null,
-          coverage: null,
-          ci: null,
-        },
-      })
-    })
-
-    it('writes a number of the report as node reads it', async () => {
-      const w = world()
-      scorerOut(w, '{"band":"Low","score":1.0,"big":1E2}')
-      const answer = await score(w)
-      expect(answer.json.risk).toMatchObject({ score: 1 })
-      expect(stateOf(w).risk).toEqual({ band: 'Low', score: 1, big: 100 })
-    })
-  })
-
-  describe('the factors of the report', () => {
-    const withFactors = (factors: unknown) => (w: World) =>
-      scorerOut(w, JSON.stringify({ band: 'Low', factors }))
-
-    it.each([
-      ['absent', undefined, null, null],
-      ['null', null, null, null],
-      ['an empty list', [], null, null],
-      ['a list with a null entry', [null, { id: 'F5', score: 2 }], null, 2],
-      [
-        'two entries for F4, so the first wins',
-        [
-          { id: 'F4', score: 2 },
-          { id: 'F4', score: 0 },
-        ],
-        2,
-        null,
-      ],
-      ['an F4 with no score', [{ id: 'F4' }, { id: 'F5', score: 1 }], null, 1],
-      ['an F4 with a score of null', [{ id: 'F4', score: null }], null, null],
-      ['an entry with no id', [{ score: 1 }], null, null],
-    ])('reads F4 and F5 from %s', async (_name, factors, f4, f5) => {
-      const w = world((x) => {
-        scorerOut(
-          x,
-          JSON.stringify(factors === undefined ? { band: 'Low' } : { band: 'Low', factors }),
-        )
-      })
-      const answer = await score(w)
-      expect(pick(answer, 'risk').risk).toMatchObject({ f4, f5 })
-    })
-
-    // jq read a text, a number, `true` and `false` as no factors, an object by
-    // its values, and stopped on a list with an entry of another type.
-    it.each([
-      ['a text', 'abc'],
-      ['a number', 5],
-      ['true', true],
-      ['false', false],
-      ['an object', { a: { id: 'F4', score: 2 } }],
-      ['a list with a number', [1]],
-      ['a list with a text', ['x']],
-      ['a list with a boolean', [true]],
-      ['a list with a list', [[]]],
-    ])('is a validate failure for factors of %s', async (_name, factors) => {
-      const w = world(withFactors(factors))
-      const answer = await score(w)
-      expect(failure(answer)).toEqual(FAILURE)
-      expect(answer.json.detail).toContain("'factors' that is neither null nor a list of objects")
-      expect(answer.json.detail).toContain(JSON.stringify(factors))
-    })
-
-    it('passes markdown, coverage and ci on, and null when they are absent', async () => {
-      const w = world()
-      scorerOut(w, '{"band":"High","score":9,"markdown":"m","coverage":[1],"ci":false}')
-      expect(pick(await score(w), 'risk').risk).toEqual({
-        band: 'High',
-        score: 9,
-        f4: null,
-        f5: null,
-        markdown: 'm',
-        coverage: [1],
-        ci: false,
-      })
+    it('reads F4 and F5 from the factors of the report', async () => {
+      const answer = await score(world())
+      expect(answer.json.risk).toMatchObject({ f4: 0, f5: 2 })
     })
   })
 
@@ -1185,7 +1077,7 @@ describe('score (phase 5)', () => {
       expect(failure(answer)).toEqual(FAILURE)
       expect(answer.json.detail).toContain("'ranges' that is neither null nor a list of text")
       expect(answer.json.detail).toContain(JSON.stringify(ranges))
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
       expect(stateOf(w).declared_post).toEqual({ ...DECLARED, ranges })
     })
 
@@ -1256,7 +1148,7 @@ describe('score (phase 5)', () => {
       const answer = await score(w)
       expect(answer.status).toBe(1)
       expect(answer.stderr).toContain(`no usable value for '${key}'`)
-      expect(argvOf(w)).toBeNull()
+      expect(riskOf(w)).toBeUndefined()
     })
 
     // `cmd_apply` writes `override_scope` and `apply_result` a few statements
@@ -1282,7 +1174,6 @@ describe('score (phase 5)', () => {
       expect(answer.json.status).toBeUndefined()
       expect(JSON.stringify(answer.json)).not.toContain('ready_for_pr')
       // The scorer ran, and the report is in the state, as in the bash.
-      expect(argvOf(w)).not.toBeNull()
       expect(stateOf(w).risk).toEqual(RISK)
     })
 
@@ -1513,11 +1404,11 @@ describe('score (phase 5)', () => {
   })
 })
 
-// `env_prefix` reaches the scorer and the package manager that `why` starts. The prefix
-// logs the directory and its first argument. `score` runs no git command, so
-// the git rows are for the other phases, and the end of this file runs them
-// all.
-describe('env_prefix reaches the scorer', () => {
+// `env_prefix` reaches the package manager that `why` starts. The scorer runs
+// in process, so it is no child and has no prefix (#233). The prefix logs
+// the directory and its first argument. `score` runs no git command, so the
+// git rows are for the other phases, and the end of this file runs them all.
+describe('env_prefix in score', () => {
   const prefixed = (extra: (w: World) => void = () => {}) =>
     world((w) => {
       const prefix = join(w.bin, 'prefix')
@@ -1534,13 +1425,6 @@ describe('env_prefix reaches the scorer', () => {
       .split('\n')
       .filter((line) => line !== '')
 
-  it('prepends the prefix to the scorer, from inside the worktree', async () => {
-    const w = prefixed()
-    expect((await score(w)).status).toBe(0)
-    expect(logOf(w)).toContain(`${realpathSync(w.worktree)}|${w.scorer}`)
-    expect(argvOf(w)).not.toBeNull()
-  })
-
   it('prepends the prefix to the package manager that why starts', async () => {
     const w = prefixed()
     await score(w)
@@ -1551,16 +1435,16 @@ describe('env_prefix reaches the scorer', () => {
     const w = prefixed()
     await score(w)
     expect(logOf(w).filter((line) => line.endsWith('|cd'))).toEqual([])
-    expect(logOf(w).map((line) => line.split('|')[1])).toEqual(['npm', w.scorer])
+    expect(logOf(w).map((line) => line.split('|')[1])).toEqual(['npm'])
   })
 
-  it('gives no prefix a bare scorer', async () => {
+  it('gives no prefix to a package manager when the state has none, and still scores', async () => {
     const w = prefixed((x) => {
       x.state.env_prefix = ''
     })
     await score(w)
     expect(logOf(w)).toEqual([])
-    expect(argvOf(w)).not.toBeNull()
+    expect(riskOf(w)).toEqual(RISK)
   })
 
   it('splits the prefix on white space', async () => {
@@ -1568,7 +1452,7 @@ describe('env_prefix reaches the scorer', () => {
       x.state.env_prefix = `${join(x.bin, 'prefix')}  env  `
     })
     expect((await score(w)).status).toBe(0)
-    expect(logOf(w).map((line) => line.split('|')[1])).toEqual(['env', 'env'])
+    expect(logOf(w).map((line) => line.split('|')[1])).toEqual(['env'])
   })
 
   it('refuses an env_prefix that is not text', async () => {
@@ -1582,8 +1466,8 @@ describe('env_prefix reaches the scorer', () => {
 })
 
 // The real flow, through `setup`, `classify`, `baseline` and `apply`, with the
-// real node adapter and the real scorer, and a prefix that logs the children
-// that the driver starts: git, the package manager and the scorer.
+// real node adapter and the scorer in process, and a prefix that logs the
+// children that the driver starts: git and the package manager.
 describe('the whole run', () => {
   const NPM = `#!/bin/sh
 case "$1" in
@@ -1592,7 +1476,7 @@ case "$1" in
 esac
 `
 
-  it('reaches ready_for_pr, and git, the package manager and the scorer ran under the prefix', async () => {
+  it('reaches ready_for_pr, and git and the package manager ran under the prefix', async () => {
     const sandbox = createSandbox()
     const fixtures = createGitFixtures(sandbox)
     const repo = fixtures.create(join(realpathSync(sandbox.path), 'r'))
@@ -1654,8 +1538,10 @@ esac
     })
     expect((answer.json.risk as Json).band).toMatch(/^(Low|Medium|High)$/)
     const log = readFileSync(sandbox.env.PREFIX_LOG, 'utf8').split('\n')
-    const scorer = pluginFile('gh-security', 'scripts', 'common', 'score-merge-risk.sh')
-    expect(log).toContain(`${join(work, 'fix')}|${scorer}`)
+    // The scorer is no child: git and the package manager are the only ones.
+    expect([
+      ...new Set(log.filter((line) => line !== '').map((line) => line.split('|')[1])),
+    ]).toEqual(['git', 'npm'])
     expect(log.some((line) => line.endsWith('|git'))).toBe(true)
     expect(log.some((line) => line.endsWith('|npm'))).toBe(true)
   })

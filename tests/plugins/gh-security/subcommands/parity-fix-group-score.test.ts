@@ -8,9 +8,10 @@
 // sides. The row compares the exit status and the JSON of each step, and the
 // state file at the end.
 //
-// The adapter and the scorer are the real ones on both sides: `node.sh`
-// through `--adapter` for bash, and the registry for the port, and
-// `scripts/common/score-merge-risk.sh` as the scorer of each. The trees are
+// The adapter is the real one on both sides: `node.sh` through `--adapter`
+// for bash, and the registry for the port. The bash runs
+// `scripts/common/score-merge-risk.sh` as its scorer, and the port scores in
+// process (#233). The trees are
 // the lockfile specimens under `spec/fixtures/`. git is real, with a bare
 // origin that `harness/git.ts` builds in a sandbox.
 //
@@ -29,10 +30,15 @@
 // runs after an `apply`. A row can edit the state file between `apply` and
 // `score`, on each side alike, as a run that a crash interrupted leaves it.
 //
-// The state file is normalized in one declared way before the compare, as
+// The state file is normalized before the compare, as
 // in `parity-fix-group-apply.test.ts`. In bash, `adapter` is the path of
 // `node.sh`. In the port, it is the name of the adapter, and the port also
 // records the `ecosystem` that routes it.
+//
+// A second declared difference of the state, with #233: the bash state has
+// `scorer`, the path of `score-merge-risk.sh`. The port has no such key,
+// because it scores in process (ruling 9). The compare drops it from the
+// bash side.
 //
 // Declared differences, not compared:
 //   - The `validate` answer of the port carries `parent_range_breaks` (#170),
@@ -195,7 +201,7 @@ const tsStep = async (w: World, phase: Phase): Promise<Answer> => {
   return answerOf(await fixGroup(context, { spawn: run, route: selectAdapter }))
 }
 
-/** The state file, with the one declared normalization of the header. */
+/** The state file, with the declared normalizations of the header. */
 const stateOf = (w: World): JsonValue => {
   let text: string
   try {
@@ -203,7 +209,12 @@ const stateOf = (w: World): JsonValue => {
   } catch {
     return null
   }
-  const { adapter: _adapter, ecosystem: _ecosystem, ...rest } = JSON.parse(text) as Group
+  const {
+    adapter: _adapter,
+    ecosystem: _ecosystem,
+    scorer: _scorer,
+    ...rest
+  } = JSON.parse(text) as Group
   return rest
 }
 

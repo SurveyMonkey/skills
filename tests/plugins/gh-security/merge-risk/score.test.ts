@@ -235,9 +235,10 @@ describe('the factors and the bands (ADR 006)', () => {
     expect([report.score, report.band, report.escalated]).toEqual([9, 'High', false])
   })
 
-  it('writes the markdown table, with the emoji of each band', () => {
+  // The marks are a green, a yellow and a red circle.
+  it('writes the markdown table, with the mark of each band', () => {
     expect(scored(quiet()).markdown).toBe(
-      '## Merge risk: 🟢 Low (0/14)\n\n' +
+      '## Merge risk: \u{1F7E2} Low (0/14)\n\n' +
         '| Factor | Score | Evidence |\n|---|---|---|\n' +
         '| Version delta | 0 | 1.0.0 -> 1.0.1 (patch) |\n' +
         '| Runtime exposure | 0 | dev-only dependency chain |\n' +
@@ -248,10 +249,10 @@ describe('the factors and the bands (ADR 006)', () => {
         '| Declared-range distance | 0 | no major line crossed; caller stated no dependent ranges could be read |\n',
     )
     expect(scored(quiet(), { after: '2.0.0' }).markdown).toMatch(
-      /^## Merge risk: 🟡 Medium \(2\/14\)/,
+      /^## Merge risk: \u{1F7E1} Medium \(2\/14\)/u,
     )
     expect(scored(untested(), { after: '2.0.0', why: {} }).markdown).toMatch(
-      /^## Merge risk: 🔴 High \(7\/14\)/,
+      /^## Merge risk: \u{1F534} High \(7\/14\)/u,
     )
   })
 })

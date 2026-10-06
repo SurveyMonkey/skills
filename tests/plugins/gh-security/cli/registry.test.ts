@@ -120,7 +120,7 @@ describe('the fix driver entry', () => {
   })
 
   it.each([
-    'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] [--scorer <path>]',
+    'fix-group setup --group-json <file> --repo-root <path> --default-branch <name> [--env-prefix <prefix>] |',
     'fix-group classify --work <dir>',
     'fix-group baseline --work <dir>',
     'fix-group apply --work <dir>',
