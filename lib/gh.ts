@@ -366,7 +366,7 @@ const labelExists = (result: RunResult): boolean =>
 const pullRequestOf = (result: RunResult): GhResults['createPullRequest'] => {
   const url = [...result.combined.matchAll(PULL_REQUEST_URL)].at(-1)?.[0]
   if (url !== undefined) return { url }
-  const said = `gh answered gh pr create with no pull request URL: ${result.combined.slice(0, SHOWN_CHARACTERS)}`
+  const said = `gh answered gh pr create with no pull request URL: ${result.combined.trimEnd().slice(0, SHOWN_CHARACTERS)}`
   throw new GhError(said, result.status, { cause: result, detail: said })
 }
 

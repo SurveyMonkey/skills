@@ -889,16 +889,24 @@ describe('createPullRequest', () => {
   })
 
   it.each([
-    ['nothing', ''],
-    ['text with no URL', 'done\n'],
-    ['a URL of another host', 'https://ghe.example/octo/app/pull/99\n'],
-    ['a host that only looks like github.com', 'https://githubXcom/octo/app/pull/99\n'],
-  ])('throws when gh answered %s', async (_shape, stdout) => {
+    ['nothing', '', ''],
+    ['text with no URL', 'done\n', 'done'],
+    [
+      'a URL of another host',
+      'https://ghe.example/octo/app/pull/99\n',
+      'https://ghe.example/octo/app/pull/99',
+    ],
+    [
+      'a host that only looks like github.com',
+      'https://githubXcom/octo/app/pull/99\n',
+      'https://githubXcom/octo/app/pull/99',
+    ],
+  ])('throws when gh answered %s', async (_shape, stdout, shown) => {
     const error = (await ask({ stdout }).result.catch((thrown: unknown) => thrown)) as GhError
     expect(error).toBeInstanceOf(GhError)
     expect({ message: error.message, detail: error.detail, status: error.status }).toEqual({
-      message: `gh answered gh pr create with no pull request URL: ${stdout}`,
-      detail: `gh answered gh pr create with no pull request URL: ${stdout}`,
+      message: `gh answered gh pr create with no pull request URL: ${shown}`,
+      detail: `gh answered gh pr create with no pull request URL: ${shown}`,
       status: 0,
     })
   })

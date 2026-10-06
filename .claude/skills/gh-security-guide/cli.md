@@ -22,6 +22,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, the registry probe `probeRegistry`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
+| `src/render/` | The PR renderer of `render-pr`. `markdown.ts` has the text rules: line, table cell, code fence and percent. `pr-inputs.ts` reads and checks the two input files, and gives typed inputs. `commit-message.ts` and `pr-body.ts` are the templates |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), the registry preflight of each repository (`preflight-repo`), the Workflow `args` (`build-dispatches`), the closing PR table (`render-pr-status`), scoring, rendering, the drivers |
 | `src/subcommands/fix-group*.ts` | The fix driver. `fix-group.ts` is the command and its contract. `fix-group-setup.ts`, `fix-group-classify.ts`, `fix-group-baseline.ts`, `fix-group-apply.ts` and `fix-group-score.ts` are the ported phases. `fix-group-ladder.ts` has the decisions of `apply` as pure functions. `fix-group-common.ts` has what the phases share |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
@@ -107,11 +108,13 @@ its time limit, or never starts is an answer (`status`, `signal`, `timedOut`, `s
 synchronous, so it keeps a local runner.
 
 **The `gh` client is SDK-style: one typed method per operation a command performs**, injected
-into handlers and mocked one method at a time. Its API is the target stack's, with five methods:
+into handlers and mocked one method at a time. Its API is the target stack's, with seven methods:
 `viewPullRequest` for `pr-status`, `viewDefaultBranch` for `detect-scope`, `listAdvisories` for
-`check-advisories`, and `listDependabotAlerts` and `searchOpenPullRequests` for `discover-alerts`.
-A method comes with the command that calls it. The last four are not in the target stack, and
-`lib/gh.ts` names them as divergences. A method answers with the
+`check-advisories`, `listDependabotAlerts` and `searchOpenPullRequests` for `discover-alerts`, and
+`createLabel` and `createPullRequest` for `render-pr`. A method comes with the command that calls
+it. The last six are not in the target stack, and `lib/gh.ts` names them as divergences.
+`createLabel` answers `created: false` for a label that exists, and `createPullRequest` never
+passes `--draft` (ADR 008). A method answers with the
 value, or throws a `GhError` with gh's exit `status` and its words in `detail`. A command turns
 that error into an envelope. Octokit is not the client, because nothing shipped imports anything
 outside the plugin (ADR 012). `gh` stays the transport, because it already has the user's
