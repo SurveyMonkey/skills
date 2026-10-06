@@ -2,7 +2,9 @@
 
 A plugin can assume node on the 22.18 floor, git and the GitHub CLI. It assumes nothing else.
 gh-security also needs `bash` and `jq` for its bash scripts. Two of them, `notice-scan.sh` and
-`detect-capacity.sh`, stay bash after the port.
+`detect-capacity.sh`, stay bash after the port. gh-security also needs `ssh`: `detect-scope` runs
+`ssh -G` to find the real host of an ssh alias
+([#305](https://github.com/SurveyMonkey/skills/issues/305)).
 It still checks each tool that it uses, so that a user who is not set up gets an early alert.
 
 - Declare each dependency (a tool, a `gh` extension, another plugin) in one table in the plugin.

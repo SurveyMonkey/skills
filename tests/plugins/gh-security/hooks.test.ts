@@ -125,7 +125,7 @@ describe('the SessionStart entry', () => {
   it('writes nothing when node and every other tool are on PATH', () => {
     const PATH = pathWith((directory) => {
       symlinkSync(process.execPath, join(directory, 'node'))
-      for (const tool of ['git', 'gh', 'bash', 'jq'])
+      for (const tool of ['git', 'gh', 'ssh', 'bash', 'jq'])
         symlinkSync(toolPath(tool), join(directory, tool))
     })
     expect(sh(PATH)).toBe('')

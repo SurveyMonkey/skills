@@ -2,6 +2,7 @@
 // really works. It has the same API as the target stack's `lib/process.ts`.
 // A process seam exists only at an ecosystem boundary (ADR 001 as amended
 // by ADR 012): the package manager, `git`, `gh` and `detect-capacity.sh`.
+// `detect-scope` also runs `ssh -G`, which reads the ssh configuration (#305).
 // `lib/gh.ts` runs `gh` through this file.
 //
 // **Failure to start is not failure to succeed.** A child that is not on

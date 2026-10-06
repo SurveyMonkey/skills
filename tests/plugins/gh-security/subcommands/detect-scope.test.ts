@@ -4,7 +4,8 @@
 // answer run real git on repositories built by `harness/git.ts`, with a
 // literal `origin` URL. `gh` is the one mock boundary. A recording runner
 // stands in only where the example is about the argv that reaches a child,
-// which is the `--env-prefix` wrap. The expected values are written by hand
+// which is the `--env-prefix` wrap. `ssh -G` is real, but it reads only the
+// ssh configuration that the example writes (`sshReading`). The expected values are written by hand
 // from the contract in the header of the command, and the repository name is
 // fictitious. The bash script is compared in `parity-detect-scope.test.ts`.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -23,39 +24,55 @@ import {
 import { createGhMock, type GhReplies, ghFails } from '#harness/gh.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
 import { pluginFile } from '#harness/paths.ts'
-import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
+import { createSandbox, findOnPath, type Sandbox } from '#harness/sandbox.ts'
 
 const ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 
 describe('the nwo of a remote', () => {
-  // One row for each branch of the parse. The triple is `[owner, repo, host]`.
+  // One row for each branch of the parse. The row is `[owner, repo, host, ssh]`.
+  // `ssh` is true for the forms that git reaches through ssh: the scp form, and
+  // the `ssh`, `git+ssh` and `ssh+git` schemes (#305). A real `git ls-remote`
+  // with `GIT_SSH_COMMAND` set ran ssh for each of those four, and for no
+  // other form.
   it.each([
     [
       'https://github.com/example-org/example-repo.git',
-      ['example-org', 'example-repo', 'github.com'],
+      ['example-org', 'example-repo', 'github.com', false],
     ],
-    ['https://github.com/example-org/example-repo', ['example-org', 'example-repo', 'github.com']],
-    ['git@github.com:octo/app.git', ['octo', 'app', 'github.com']],
-    ['ssh://git@github.com/octo/app.git', ['octo', 'app', 'github.com']],
-    ['ssh://git@github.com:2222/octo/app.git', ['octo', 'app', 'github.com']],
-    ['https://user:pass@github.com/octo/app.git', ['octo', 'app', 'github.com']],
-    ['gh-alias:octo/app.git', ['octo', 'app', 'gh-alias']],
-    ['https://github.com/Owner/My.Repo.git', ['Owner', 'My.Repo', 'github.com']],
-    ['https://github.com/octo/app/', ['octo', 'app', 'github.com']],
-    ['https://github.com/octo/app.git/', ['octo', 'app', 'github.com']],
-    ['https://github.com/octo/app/.git', ['octo', 'app', 'github.com']],
-    ['https://github.example.com/octo/app', ['octo', 'app', 'github.example.com']],
-    ['github.com:octo/app', ['octo', 'app', 'github.com']],
+    [
+      'https://github.com/example-org/example-repo',
+      ['example-org', 'example-repo', 'github.com', false],
+    ],
+    ['git@github.com:octo/app.git', ['octo', 'app', 'github.com', true]],
+    ['ssh://git@github.com/octo/app.git', ['octo', 'app', 'github.com', true]],
+    ['ssh://git@github.com:2222/octo/app.git', ['octo', 'app', 'github.com', true]],
+    ['git+ssh://gh-alias/octo/app.git', ['octo', 'app', 'gh-alias', true]],
+    ['ssh+git://gh-alias/octo/app.git', ['octo', 'app', 'gh-alias', true]],
+    ['git://gh-alias/octo/app.git', ['octo', 'app', 'gh-alias', false]],
+    ['http://gh-alias/octo/app.git', ['octo', 'app', 'gh-alias', false]],
+    ['https://user:pass@github.com/octo/app.git', ['octo', 'app', 'github.com', false]],
+    ['gh-alias:octo/app.git', ['octo', 'app', 'gh-alias', true]],
+    ['https://github.com/Owner/My.Repo.git', ['Owner', 'My.Repo', 'github.com', false]],
+    ['https://github.com/octo/app/', ['octo', 'app', 'github.com', false]],
+    ['https://github.com/octo/app.git/', ['octo', 'app', 'github.com', false]],
+    ['https://github.com/octo/app/.git', ['octo', 'app', 'github.com', false]],
+    ['https://github.example.com/octo/app', ['octo', 'app', 'github.example.com', false]],
+    ['github.com:octo/app', ['octo', 'app', 'github.com', true]],
     // The colon in the path is not a host separator once the host has a slash,
     // but a colon after a plain host is.
-    ['host:a:b/c', ['a:b', 'c', 'host']],
+    ['host:a:b/c', ['a:b', 'c', 'host', true]],
     // The last `@` ends the credentials.
-    ['https://a@b@github.com/octo/app', ['octo', 'app', 'github.com']],
+    ['https://a@b@github.com/octo/app', ['octo', 'app', 'github.com', false]],
     // A scheme at the start of the text is still a scheme, with no host before it
     // to read. The script matches `*://*` the same way.
-    ['://github.com/octo/app', ['octo', 'app', 'github.com']],
+    ['://github.com/octo/app', ['octo', 'app', 'github.com', false]],
   ])('reads %s as %j', (remote, pair) => {
-    expect(parseRemote(remote)).toEqual({ owner: pair[0], repo: pair[1], host: pair[2] })
+    expect(parseRemote(remote)).toEqual({
+      owner: pair[0],
+      repo: pair[1],
+      host: pair[2],
+      ssh: pair[3],
+    })
   })
 
   it.each([
@@ -128,13 +145,28 @@ const factoryOf =
   () =>
     createGhMock(replies)
 
+/**
+ * The real runner, with `ssh` reading only `config`. `ssh -G` reads the
+ * files of the user that the password database names, not of `HOME`. So
+ * without `-F`, the ssh configuration of the developer could change an
+ * answer. `-F` also stops the read of the system file.
+ */
+const sshReading =
+  (config: string): Runner =>
+  (command, args = [], options) =>
+    run(command, command === 'ssh' ? ['-F', config, ...args] : args, options)
+
+/** No ssh configuration at all: each host resolves to itself. */
+const NO_SSH_CONFIG = sshReading('/dev/null')
+
 /** The answer of the command on the real git, with `gh` answering from `replies`. */
 const detect = (
   w: World,
   args: readonly string[],
   replies: GhReplies = {},
   cwd = '/nowhere',
-): Promise<CommandResult> => detectScope(context(w, args), factoryOf(replies), run, cwd)
+  runner: Runner = NO_SSH_CONFIG,
+): Promise<CommandResult> => detectScope(context(w, args), factoryOf(replies), runner, cwd)
 
 const value = (result: CommandResult): Record<string, unknown> => {
   if (result?.outcome !== 'ok') throw new Error(`expected an answer: ${JSON.stringify(result)}`)
@@ -218,6 +250,13 @@ describe('the answer for a repository with a GitHub remote', () => {
     'https://user:pass@github.com/octo/app.git',
     'github.com:octo/app',
     'https://GitHub.com/octo/app',
+    // The other names of GitHub (#305).
+    'git@ssh.github.com:octo/app.git',
+    'ssh://git@ssh.github.com:443/octo/app.git',
+    'ssh://git@SSH.GitHub.com:443/octo/app.git',
+    'https://www.github.com/octo/app.git',
+    'https://WWW.GitHub.com/octo/app',
+    'git@www.github.com:octo/app.git',
   ])('asks GitHub for the remote %s', async (remote) => {
     const w = world()
     const dir = repoWith(w, remote)
@@ -229,7 +268,7 @@ describe('the answer for a repository with a GitHub remote', () => {
         return { name: 'develop' }
       },
     })
-    const answer = value(await detectScope(context(w, [dir]), factory, run, '/nowhere'))
+    const answer = value(await detectScope(context(w, [dir]), factory, NO_SSH_CONFIG, '/nowhere'))
     expect(asked).toEqual(['github.com/octo/app'])
     expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'develop' })
   })
@@ -288,6 +327,136 @@ describe('the answer for a repository with a GitHub remote', () => {
     await expect(
       detect(w, [dir], { viewDefaultBranch: new Error('a defect, not a gh failure') }),
     ).rejects.toThrow('a defect, not a gh failure')
+  })
+})
+
+describe('a remote host that is an alias in the ssh configuration (#305)', () => {
+  /** An ssh configuration with an alias for each name of GitHub, and one for another host. */
+  const aliases = (w: World): Runner => {
+    const config = w.sandbox.join('ssh_config')
+    writeFileSync(
+      config,
+      [
+        'Host gh-alias',
+        '  HostName ssh.github.com',
+        '  Port 443',
+        'Host gh-work',
+        '  HostName github.com',
+        'Host gh-www',
+        '  HostName WWW.GitHub.com',
+        'Host lab-alias',
+        '  HostName gitlab.example.com',
+        '',
+      ].join('\n'),
+    )
+    return sshReading(config)
+  }
+
+  /** The runner, with a record of the argv of each `ssh` call. */
+  const recordingSsh = (inner: Runner) => {
+    const calls: (readonly string[])[] = []
+    const runner: Runner = async (command, args = [], options) => {
+      if (command === 'ssh') calls.push(args)
+      return inner(command, args, options)
+    }
+    return { runner, calls }
+  }
+
+  // The symref names `trunk`, and GitHub names `develop`.
+  it.each([
+    'gh-alias:octo/app.git',
+    'git@gh-alias:octo/app.git',
+    'ssh://git@gh-alias/octo/app.git',
+    'git+ssh://gh-work/octo/app',
+    'ssh+git://gh-work/octo/app',
+    'gh-www:octo/app',
+  ])('asks GitHub for the remote %s, an alias that resolves to GitHub', async (remote) => {
+    const w = world()
+    const dir = repoWith(w, remote, 'trunk')
+    const asked: string[] = []
+    const factory: ClientFactory = () => ({
+      ...createGhMock(),
+      viewDefaultBranch: async (repo) => {
+        asked.push(repo.repository)
+        return { name: 'develop' }
+      },
+    })
+    const answer = value(await detectScope(context(w, [dir]), factory, aliases(w), '/nowhere'))
+    expect(asked).toEqual(['github.com/octo/app'])
+    expect(answer).toMatchObject({ nwo: 'octo/app', git_remote: remote, default_branch: 'develop' })
+  })
+
+  // No reply is registered for `gh`, so a call to it throws.
+  it('reads the symref for an alias that resolves to another host', async () => {
+    const w = world()
+    const dir = repoWith(w, 'lab-alias:octo/app.git', 'trunk')
+    const answer = value(await detect(w, [dir], {}, '/nowhere', aliases(w)))
+    expect(answer).toMatchObject({ nwo: 'octo/app', default_branch: 'trunk' })
+  })
+
+  // git reaches an https, http or git remote with no ssh, so the ssh
+  // configuration does not apply to it.
+  it.each([
+    'https://gh-alias/octo/app.git',
+    'http://gh-alias/octo/app.git',
+    'git://gh-alias/octo/app.git',
+  ])('runs no ssh for the remote %s, and reads the symref', async (remote) => {
+    const w = world()
+    const dir = repoWith(w, remote, 'trunk')
+    const { runner, calls } = recordingSsh(aliases(w))
+    const answer = value(await detect(w, [dir], {}, '/nowhere', runner))
+    expect(answer.default_branch).toBe('trunk')
+    expect(calls).toEqual([])
+  })
+
+  it('resolves the host with ssh -G, and ends the options before the host', async () => {
+    const w = world()
+    const dir = repoWith(w, 'gh-alias:octo/app.git')
+    const { runner, calls } = recordingSsh(aliases(w))
+    await detect(w, [dir], { viewDefaultBranch: { name: 'main' } }, '/nowhere', runner)
+    expect(calls).toEqual([['-G', '--', 'gh-alias']])
+  })
+
+  // Ruling 3 on #305: a host that ssh cannot resolve is not known to be GitHub.
+  it('reads the symref when ssh -G fails', async () => {
+    const w = world()
+    const dir = repoWith(w, 'gh-alias:octo/app.git', 'trunk')
+    const failing = sshReading(w.sandbox.join('no-such-config'))
+    const answer = value(await detect(w, [dir], {}, '/nowhere', failing))
+    expect(answer.default_branch).toBe('trunk')
+  })
+
+  // ssh refuses a host that starts with a dash, so it is never an option.
+  it('reads the symref for a host that ssh refuses', async () => {
+    const w = world()
+    const dir = repoWith(w, 'x:octo/app.git', 'trunk')
+    w.fixtures.git(dir, 'remote', 'set-url', 'origin', '--', '-oProxyCommand=x:octo/app.git')
+    const { runner, calls } = recordingSsh(aliases(w))
+    const answer = value(await detect(w, [dir], {}, '/nowhere', runner))
+    expect(calls).toEqual([['-G', '--', '-oProxyCommand=x']])
+    expect(answer.default_branch).toBe('trunk')
+  })
+
+  it('reads the symref when ssh is not on PATH', async () => {
+    const w = world()
+    const dir = repoWith(w, 'gh-alias:octo/app.git', 'trunk')
+    w.sandbox.env.PATH = w.sandbox.pathWithout()
+    expect(findOnPath('ssh', w.sandbox.env.PATH)).toBeUndefined()
+    const answer = value(await detect(w, [dir], {}, '/nowhere', run))
+    expect(answer.default_branch).toBe('trunk')
+  })
+
+  // A stand-in for ssh. A real `ssh -G` that exits 0 always writes a
+  // hostname line, and one that fails writes none.
+  it.each([
+    ['names no hostname', reply({ stdout: 'user git\nport 22\n' })],
+    ['fails after a hostname line', reply({ status: 255, stdout: 'hostname github.com\n' })],
+  ])('reads the symref when ssh -G %s', async (_name, answer) => {
+    const w = world()
+    const dir = repoWith(w, 'gh-alias:octo/app.git', 'trunk')
+    const standIn: Runner = async (command, args = [], options) =>
+      command === 'ssh' ? answer : run(command, args, options)
+    expect(value(await detect(w, [dir], {}, '/nowhere', standIn)).default_branch).toBe('trunk')
   })
 })
 
@@ -588,6 +757,26 @@ describe('--env-prefix', () => {
     const show = calls.find((call) => call.args.includes('show'))
     expect(show?.command).toBe('env')
     expect(show?.args).toEqual(['git', '-C', '/work', 'remote', 'show', 'origin'])
+  })
+
+  it('runs ssh -G under the prefix, with the environment of the command', async () => {
+    const w = world()
+    const calls: Call[] = []
+    const runner: Runner = async (command, args = [], options) => {
+      calls.push({ command, args, env: options?.env })
+      const words = args.join(' ')
+      if (words.includes('remote get-url')) return reply({ stdout: 'gh-alias:octo/app.git\n' })
+      if (words.includes('ssh -G')) return reply({ stdout: 'host gh-alias\nhostname github.com\n' })
+      if (words.includes('repo view')) {
+        return reply({ stdout: '{"defaultBranchRef":{"name":"main"}}' })
+      }
+      return reply()
+    }
+    const run_ = context(w, ['--env-prefix', 'env', '/work'])
+    const answer = value(await detectScope(run_, real, runner, '/nowhere'))
+    const ssh = calls.find((call) => call.args.includes('ssh'))
+    expect(ssh).toEqual({ command: 'env', args: ['ssh', '-G', '--', 'gh-alias'], env: run_.env })
+    expect(answer.default_branch).toBe('main')
   })
 
   it('reads a prefix of the word null as no prefix', async () => {

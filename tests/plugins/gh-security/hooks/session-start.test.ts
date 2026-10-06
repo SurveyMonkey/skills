@@ -15,7 +15,7 @@ import { pluginFile } from '#harness/paths.ts'
 const GH_SECURITY_ROOT = pluginFile('gh-security')
 
 const ENTRY = join(GH_SECURITY_ROOT, 'hooks', 'session-start.ts')
-const TOOLS = ['git', 'gh', 'bash', 'jq'] as const
+const TOOLS = ['git', 'gh', 'ssh', 'bash', 'jq'] as const
 
 const problem = (text: string): string =>
   `\u001b[33m\u001b[1mgh-security:\u001b[22m ⚠️ ${text}\u001b[0m`
@@ -57,7 +57,7 @@ describe('the hook as a process', () => {
   })
 
   it('writes one JSON object that names jq when jq is hidden, and exits 0', async () => {
-    const result = await hook(pathWith(['git', 'gh', 'bash']))
+    const result = await hook(pathWith(['git', 'gh', 'ssh', 'bash']))
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(result.stdout.endsWith('}\n')).toBe(true)
     expect(result.stdout.trimEnd().split('\n')).toHaveLength(1)
@@ -123,7 +123,7 @@ describe('the hook in this process', () => {
 
   it('runs the check when the version meets the floor', async () => {
     const { out, err } = capture()
-    const exitCode = await load({ path: pathWith(['git', 'gh', 'bash']) })
+    const exitCode = await load({ path: pathWith(['git', 'gh', 'ssh', 'bash']) })
     expect({ exitCode, err }).toEqual({ exitCode: 0, err: [] })
     expect(JSON.parse(out.join('')).systemMessage).toBe(`\n${problem('jq is missing')}`)
   })
