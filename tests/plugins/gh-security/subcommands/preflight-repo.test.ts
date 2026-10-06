@@ -304,6 +304,24 @@ describe('preflight-repo: the prefix (pin: composes the probe as cd repo_root, t
     ).toEqual([{ command: 'env-run', args: ['--profile', 'work', ...probe], cwd: w.root }])
   })
 
+  it('runs the retry under the prefix too', async () => {
+    const w = world()
+    const { calls, runner } = recorder(
+      { status: 1, stdout: '', stderr: specimen('npm-401.txt') },
+      {},
+    )
+    await preflightRepo(
+      context(['--env-prefix', 'env-run --profile work', w.root], w.sandbox.env),
+      node,
+      runner,
+      w.scene,
+    )
+    expect(calls.map(({ command, args }) => [command, ...args])).toEqual([
+      ['env-run', '--profile', 'work', 'pnpm', 'view', '@example-org/ui', 'version'],
+      ['env-run', '--profile', 'work', 'pnpm', 'view', '@example-org/ui', 'version'],
+    ])
+  })
+
   it('runs the probe bare when there is no prefix', async () => {
     const w = world()
     const { calls, runner } = recorder()
