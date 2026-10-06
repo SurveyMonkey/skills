@@ -40,17 +40,17 @@
 //     `resolved_versions` without `apply_constraint`. Other parity files
 //     cover those verbs.
 //
-// Declared exception (#50, ruling 2), a case of its own below: a pnpm parent
-// with a git copy beside two registry copies. bash writes keys qualified by
-// the registry versions, which miss the git copy. The port refuses, and
-// writes nothing. Beside one registry copy, both sides write the plain key.
-// That is true for a git URL with an `@`. For another copy from outside the
-// registry, such as a `git+https` URL, bash keeps the edge. Beside two
-// registry copies, the port refuses it in the same way. Beside one registry
-// copy, the port writes the plain key, and bash writes a qualified key for
-// each copy. Where a copy has the package on another major line, the port
-// refuses the plain key too (#50). No fixture has such a copy as a parent,
-// so the unit tests hold these cases.
+// Declared exception (#50, #313), cases of their own below: a pnpm parent
+// with a copy from outside the registry beside two registry copies. bash
+// writes keys qualified by the registry versions. For a git URL with an `@`,
+// those keys miss the git copy. For another URL, such as a codeload, a
+// `git+https` or a `file:` copy, bash also writes a key that names the URL,
+// and pnpm matches no such key. The port also qualifies that copy, by the
+// manifest version that its `packages:` entry gives (`debug@4.3.4>ms`),
+// because pnpm matches a key against that version. Beside one registry copy
+// at the same version, both sides write the plain key. The unit tests hold
+// the refusals of the port: a copy with no manifest version under a parent
+// that must be qualified, and a key that reaches a copy on another major line.
 //
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There
@@ -1270,12 +1270,19 @@ const GIT_PARENT_AGREES = call(
   '^2.1.3',
   'debug',
 )
-const GIT_PARENT_REFUSED = call(
-  'a git parent beside two registry copies',
+const OUTSIDE_PARENTS: readonly Case[] = [
   'pnpm-git-parent-copies',
-  'ms',
-  '>=2.1.3 <3',
-  'debug',
+  'pnpm-codeload-parent-copies',
+  'pnpm-git-https-parent-copies',
+  'pnpm-file-parent-copies',
+].map((fixture) =>
+  call(
+    'a parent from outside the registry beside two registry copies',
+    fixture,
+    'ms',
+    '>=2.1.3 <3',
+    'debug',
+  ),
 )
 
 /** The cases whose bash side runs before the examples, at the same time. */
@@ -1284,7 +1291,7 @@ const ALL_CASES: readonly Case[] = [
   ...generated,
   ...odd,
   GIT_PARENT_AGREES,
-  GIT_PARENT_REFUSED,
+  ...OUTSIDE_PARENTS,
 ]
 
 /** The time limit of the bash side of all cases together. */
@@ -1312,7 +1319,7 @@ describe('apply_constraint parity on the odd cases', () => {
   )
 })
 
-describe('apply_constraint parity on a git parent (#50)', () => {
+describe('apply_constraint parity on a parent from outside the registry (#50, #313)', () => {
   it(
     'agrees beside one registry copy',
     () => {
@@ -1321,16 +1328,20 @@ describe('apply_constraint parity on a git parent (#50)', () => {
     CASE_TIMEOUT_MS,
   )
 
-  // The declared exception of ruling 2 on #50.
-  it(
-    'differs beside two registry copies: bash writes, and the port refuses and writes nothing',
-    () => {
-      const outcome = outcomeOf(GIT_PARENT_REFUSED)
-      expect(outcome.answer.startsWith('bash answered: ')).toBe(true)
-      expect({ wrote: outcome.wrote, treesDiffer: outcome.tree !== null }).toEqual({
-        wrote: false,
-        treesDiffer: true,
-      })
+  // The declared exception of #313. Only the port writes the key of the
+  // manifest version of the copy from outside the registry.
+  it.each(OUTSIDE_PARENTS.map((testCase) => [testCase.fixture, testCase] as const))(
+    'differs on %s: only the port qualifies the copy from outside the registry by its manifest version',
+    (_fixture, testCase) => {
+      const outcome = outcomeOf(testCase)
+      expect(outcome.answer.startsWith('they differ at ')).toBe(true)
+      const [bash = '', typescript = ''] = (outcome.tree ?? '').split(', TypeScript ')
+      expect({
+        wrote: outcome.wrote,
+        file: bash.startsWith('package.json differs: bash '),
+        bash: bash.includes('debug@4.3.4>ms'),
+        typescript: typescript.includes('debug@4.3.4>ms'),
+      }).toEqual({ wrote: true, file: true, bash: false, typescript: true })
     },
     CASE_TIMEOUT_MS,
   )

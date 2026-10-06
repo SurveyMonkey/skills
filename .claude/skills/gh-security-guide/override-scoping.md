@@ -27,14 +27,19 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   with. A bare key there matched every copy of the parent, which is how `ws` 7.x/8.x and
   `brace-expansion` 1.x each collapsed their sibling lines on the field run; the qualified form is
   the one five shipped field PRs validated with `other_line_moves: []`
-  ([#100](https://github.com/SurveyMonkey/skills/issues/100)). No qualified key matches a copy
-  of the parent from outside the registry, such as a git copy (`debug@git+ssh://git@...`,
-  `debug@git+https://...`). So when such a parent must get qualified keys,
-  the TypeScript `apply_constraint` refuses before it writes, and names the parent
-  ([#50](https://github.com/SurveyMonkey/skills/issues/50), ruling 2). The plain key reaches each copy
-  of such a parent. So where a copy has the package on another major line, the TypeScript
-  `apply_constraint` also refuses the plain key (#50). A single-version parent keeps the
-  bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
+  ([#100](https://github.com/SurveyMonkey/skills/issues/100)). For a copy of the parent from
+  outside the registry, such as a git, codeload or `file:` copy, pnpm matches the qualifier
+  against the version in the manifest of that copy, not against its URL. A real pnpm 10.34.5
+  install showed this: `debug@4.3.4>ms` moved the `ms` of such a copy, and a key that names the
+  URL did nothing. The `packages:` entry of the copy gives that version as `version:`. So the
+  TypeScript `apply_constraint` qualifies the copy by it
+  ([#313](https://github.com/SurveyMonkey/skills/issues/313)). It refuses before it writes in two
+  cases, and names the parent. First, the parent must get qualified keys, and a copy from outside
+  the registry has no manifest version
+  ([#50](https://github.com/SurveyMonkey/skills/issues/50)). Second, a key of the call reaches a
+  copy of such a parent that has the package on another major line (#50, #313). The plain key
+  reaches each copy, and a qualified key reaches each copy at that version. A single-version
+  parent keeps the bare key — nothing else exists for it to leak onto. A multi-version parent can still receive
   the bare key on two fallback paths — no parent version qualifies for the target line, or none
   of its snapshot keys carries a readable version — because an entry that over-covers beats
   writing nothing. The exact-version form is a deliberate staleness tradeoff: it is the shape the
