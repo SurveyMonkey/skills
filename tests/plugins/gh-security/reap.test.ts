@@ -267,6 +267,14 @@ describe('contain', () => {
       (w) =>
         `the worktree path is not ${w.work}/fix: ${w.repo}/.claude/worktrees/other/fix. Nothing was removed.`,
     ],
+    [
+      'a worktree under the work directory that is not fix',
+      (w) => {
+        addWorktree(w)
+      },
+      (w) => ({ worktree: join(w.work, 'other') }),
+      (w) => `the worktree path is not ${w.work}/fix: ${w.work}/other. Nothing was removed.`,
+    ],
   ])('refuses %s, and changes nothing', async (_case, arrange, overrides, message) => {
     const w = world()
     arrange(w)
