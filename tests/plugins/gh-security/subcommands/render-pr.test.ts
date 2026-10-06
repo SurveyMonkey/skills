@@ -22,6 +22,8 @@ import { createGhMock, ghFails } from '#harness/gh.ts'
 
 const FX = join(FIXTURES_ROOT, 'render-pr')
 const REPO = 'octo/app'
+// The dash of three messages of the script. The source holds its code point.
+const DASH = String.fromCodePoint(0x2014)
 const fixture = (name: string): string => join(FX, name)
 const textOf = (name: string): string => readFileSync(fixture(name), 'utf8')
 const jsonOf = (name: string) => JSON.parse(textOf(name))
@@ -154,7 +156,7 @@ describe('commit-msg', () => {
   it('refuses a lockfile refresh: nothing is left to commit', async () => {
     refused(
       await commit('state-lockfile-refresh.json'),
-      "commit-msg: action is lockfile-refresh — there is nothing to commit beyond phase 3's drift commit, which is already on the branch. Skip straight to push.",
+      `commit-msg: action is lockfile-refresh ${DASH} there is nothing to commit beyond phase 3's drift commit, which is already on the branch. Skip straight to push.`,
     )
   })
 
@@ -1210,7 +1212,7 @@ describe('body', () => {
       ranges: unknown = ['<4.17.19'],
     ) => ({ version, path, vulnerable_ranges: ranges })
     const BAD = (file: string): string =>
-      `body: --state ${file} has a requires_major_bump entry missing 'version' or 'path' as a string, or an unreadable vulnerable_ranges[]. Rendering the table's header with no rows from this would read as "nothing left open" — the opposite of the truth — so nothing is rendered instead.`
+      `body: --state ${file} has a requires_major_bump entry missing 'version' or 'path' as a string, or an unreadable vulnerable_ranges[]. Rendering the table's header with no rows from this would read as "nothing left open" ${DASH} the opposite of the truth ${DASH} so nothing is rendered instead.`
 
     it('refuses a state whose list is not an array', async () => {
       const ran = await bump({ a: 1 })
