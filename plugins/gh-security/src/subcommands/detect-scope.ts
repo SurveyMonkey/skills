@@ -17,17 +17,28 @@
 // not a GitHub repository. Each of those answers null, because a made-up
 // `src/other-repo` reads downstream as a real repository.
 //
-// **`default_branch` comes from GitHub when the remote host is `github.com`**
-// (#167, rulings 5 and 11 on #225). The `nwo` field does not depend on the
-// host. The local `origin/HEAD` symref is written once, at clone time, and
+// **`default_branch` comes from GitHub when the remote host is GitHub**
+// (#167, rulings 5 and 11 on #225, #305). The `nwo` field does not depend on
+// the host. The local `origin/HEAD` symref is written once, at clone time, and
 // `git fetch` never refreshes it. A branch that is renamed on GitHub then
 // stays wrong in each older checkout, with no sign. A failed read from GitHub
 // is an error. It is never a fall back to the symref, because the symref is
 // the value that cannot be trusted. A repository with no default branch on
-// GitHub gives a null `default_branch`. The read names the host, because a
-// bare `OWNER/REPO` follows `GH_HOST`, and could ask another server.
+// GitHub gives a null `default_branch`. The read names the host `github.com`,
+// because a bare `OWNER/REPO` follows `GH_HOST`, and could ask another server.
 //
-// With no nwo, or with a host that is not `github.com`, there is no GitHub
+// **The host rule** (#305). The hosts of GitHub are `github.com`,
+// `ssh.github.com` and `www.github.com`, and the match ignores case. git
+// reaches a remote in the scp form, or with the `ssh`, `git+ssh` or `ssh+git`
+// scheme, through ssh. There the host can be an alias of the ssh
+// configuration. So for such a remote on another host, `ssh -G <host>`
+// resolves the host once, and its `hostname` line goes through the same rule.
+// `ssh -G` reads the configuration and does not connect. git reaches an
+// `https`, `http` or `git` remote with no ssh, so its host is the real name,
+// and ssh does not run for it. When `ssh -G` fails, or names no hostname, the
+// host is not known to be GitHub (ruling 3 on #305).
+//
+// With no nwo, or with a host that is not GitHub, there is no GitHub
 // repository to ask. A name on another host can also exist on `github.com`,
 // where it is a different repository. The command then reads the `origin/HEAD`
 // symref. When there is an `origin`, it then runs `git remote show origin`, as
@@ -35,14 +46,19 @@
 // is null when both fail, and a caller that needs the branch must stop.
 //
 // `--env-prefix` is the opaque command prefix that the environment needs
-// (issue #193). It wraps the runner for `git` and for `gh`, so each runs as
-// `<prefix> git ...` and `<prefix> gh ...`. Only `git remote show origin` and
-// the GitHub call reach the network, and they need an identity. Nothing here
-// names a tool, or looks for one.
+// (issue #193). It wraps the runner for `git`, `gh` and `ssh`, so each runs as
+// `<prefix> git ...`, `<prefix> gh ...` and `<prefix> ssh ...`. The ssh that
+// git starts runs under the prefix, so `ssh -G` reads the same default
+// configuration. git can also start another command (`core.sshCommand`,
+// `GIT_SSH_COMMAND`). When that command reads another configuration, `ssh -G`
+// does not see it, and an alias from it gives the symref.
+// Only `git remote show origin` and the GitHub call reach the network, and
+// they need an identity. Nothing here looks for a tool.
 //
 // Differences from the script:
-//   - The default branch comes from GitHub for a `github.com` remote, as
-//     above. This is the main difference in the answers of a working checkout.
+//   - The default branch comes from GitHub for a remote on a host of GitHub,
+//     or on an ssh alias of one (#305), as above. This is the main difference
+//     in the answers of a working checkout.
 //   - `HEAD branch: (unknown)`, which git writes for a remote with no HEAD,
 //     gives a null `default_branch`. The script answers the text `(unknown)`.
 //   - `git remote show` runs with `LC_ALL=C`, so git writes `HEAD branch` in
@@ -58,13 +74,16 @@ import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, ok } from '../lib/envelope.ts'
 import { createGhClient, type GhClient, type GhClientOptions, GhError } from '../lib/gh.ts'
-import { type Runner, run } from '../lib/process.ts'
+import { type Runner, type RunResult, run } from '../lib/process.ts'
 
 /** How a `gh` client is made. A test gives its own. */
 export type ClientFactory = (options: GhClientOptions) => GhClient
 
 /** Text with its trailing newlines removed, as `$( )` removes them. */
 const chomp = (text: string): string => text.replace(/\n+$/, '')
+
+/** The schemes with which git reaches a remote through ssh. The scp form has no scheme. */
+const SSH_SCHEMES: ReadonlySet<string> = new Set(['ssh', 'git+ssh', 'ssh+git'])
 
 /**
  * The owner and the name in the URL of a remote, or null.
@@ -73,11 +92,11 @@ const chomp = (text: string): string => text.replace(/\n+$/, '')
  * and the scp form `[user@]host:path`, which also covers an alias of an ssh
  * configuration. Anything else has no host. The path must have exactly two
  * segments, because the last two of a deeper path make a wrong, plausible
- * pair.
+ * pair. `ssh` is true when git reaches the remote through ssh (#305).
  */
 export const parseRemote = (
   remote: string,
-): { host: string; owner: string; repo: string } | null => {
+): { host: string; owner: string; repo: string; ssh: boolean } | null => {
   let url = remote
   if (url.endsWith('/')) url = url.slice(0, -1)
   if (url.endsWith('.git')) url = url.slice(0, -'.git'.length)
@@ -110,7 +129,8 @@ export const parseRemote = (
   const cut = path.indexOf('/')
   const owner = path.slice(0, cut)
   const repo = path.slice(cut + 1)
-  return host === '' || owner === '' || repo === '' ? null : { host, owner, repo }
+  const ssh = scheme < 0 || SSH_SCHEMES.has(url.slice(0, scheme))
+  return host === '' || owner === '' || repo === '' ? null : { host, owner, repo, ssh }
 }
 
 const ORIGIN_PREFIX = 'refs/remotes/origin/'
@@ -119,8 +139,38 @@ const HEAD_BRANCH = 'HEAD branch: '
 /** The name that `remote show` gives to a remote that has no HEAD. */
 const UNKNOWN_HEAD = '(unknown)'
 
-/** The one host that the GitHub read serves. The match ignores case, as DNS does. */
+/** The host that the GitHub read names. */
 const GITHUB_HOST = 'github.com'
+
+/** The names of GitHub (#305). The match ignores case, as DNS does. */
+const GITHUB_HOSTS: ReadonlySet<string> = new Set([GITHUB_HOST, 'ssh.github.com', 'www.github.com'])
+
+const isGitHubHost = (host: string): boolean => GITHUB_HOSTS.has(host.toLowerCase())
+
+/** The key of the line of `ssh -G` that names the real host. */
+const HOSTNAME = 'hostname '
+
+/**
+ * Whether the host of a remote is GitHub. For a remote that git reaches
+ * through ssh, a host that is not a name of GitHub can be an alias, so
+ * `ssh -G` resolves it. The `--` stops a host that starts with a dash from
+ * being an option. A failure of `ssh -G` is not GitHub (ruling 3 on #305).
+ */
+const isOnGitHub = async (
+  remote: { host: string; ssh: boolean },
+  ssh: (args: readonly string[]) => Promise<RunResult>,
+): Promise<boolean> => {
+  if (isGitHubHost(remote.host)) return true
+  if (!remote.ssh) return false
+  const resolved = await ssh(['-G', '--', remote.host])
+  return (
+    resolved.status === 0 &&
+    resolved.stdout
+      .split('\n')
+      .filter((line) => line.startsWith(HOSTNAME))
+      .some((line) => isGitHubHost(line.slice(HOSTNAME.length)))
+  )
+}
 
 /**
  * The handler. The `gh` client factory, the process runner and the working
@@ -168,7 +218,8 @@ export const detectScope = async (
   const nwo = pair === null ? null : `${pair.owner}/${pair.repo}`
 
   let defaultBranch = ''
-  if (pair !== null && pair.host.toLowerCase() === GITHUB_HOST) {
+  const ssh = (args: readonly string[]) => prefixed('ssh', args, { env: context.env })
+  if (pair !== null && (await isOnGitHub(pair, ssh))) {
     try {
       const view = await makeClient({ env: context.env, run: prefixed }).viewDefaultBranch({
         repository: `${GITHUB_HOST}/${pair.owner}/${pair.repo}`,

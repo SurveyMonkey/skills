@@ -98,7 +98,8 @@ type ParentCopy = {
   /**
    * Null when the reader finds no version for this copy. The pnpm reader
    * also gives null for a version that does not start with a digit, such as
-   * a `file:` or a git target.
+   * a `file:` or a git target. `apply_constraint` reads the manifest version
+   * of such a copy from its `packages:` entry instead (#313).
    */
   readonly version: string | null
 }

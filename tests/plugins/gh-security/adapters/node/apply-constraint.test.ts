@@ -149,19 +149,29 @@ const pnpmRefusalOf = (fixture: string, args: readonly string[], setup?: Setup):
 const GIT_DEBUG =
   'git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
 
-/** The refusal of #50, written by hand from ruling 2. */
+/** The versions of the copy of `debug` from outside the registry in the three specimens of #313. */
+const CODELOAD_DEBUG =
+  'https://codeload.github.com/example/debug/tar.gz/da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
+const GIT_HTTPS_DEBUG =
+  'git+https://git.example.com/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc'
+const FILE_DEBUG = 'file:vendor/debug-4.3.4.tgz'
+
+/**
+ * The first refusal of #50 and #313, written by hand from the issue: a copy
+ * from outside the registry with no manifest version, under a qualified parent.
+ */
 const outsideRegistryRefusal = (
   pkg: string,
   parents: readonly (readonly [string, readonly string[]])[],
 ): string =>
-  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail also resolves at two or more registry versions, so its keys must name a registry version ('<parent>@<version>>${pkg}'), and no such key matches the other copy (issue #50). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy, whose 'packages:' entry gives no manifest version that a key can name. Each parent in the detail resolves at two or more versions, so its keys must name a version ('<parent>@<version>>${pkg}'). pnpm matches that version against the manifest version of each copy, and the lockfile gives no such version for the copies in the detail, so no such key matches them (issues #50 and #313). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, or one registry copy of the parent, so that the plain '<parent>>${pkg}' key covers each copy.`
 
-/** The second refusal of #50: the plain key would move a copy across its major line. */
+/** The second refusal of #50 and #313: a key of the call would move a copy across its major line. */
 const plainKeyRefusal = (
   pkg: string,
   parents: readonly (readonly [string, readonly string[]])[],
 ): string =>
-  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. Each parent in the detail keeps the plain '<parent>>${pkg}' key, and pnpm applies that key to each copy of the parent. A copy of the parent has '${pkg}' on another major line, so the key would move that copy across its line (issue #50). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, so that a key can name each copy of the parent.`
+  `apply_constraint: cannot scope '${pkg}' under a pnpm parent with a copy from outside the registry, such as a git copy. For each parent in the detail, a key of the call reaches a copy that has '${pkg}' on another major line, so the key would move that copy across its line. The plain '<parent>>${pkg}' key reaches each copy of the parent, and '<parent>@<version>>${pkg}' reaches each copy whose manifest version is that version, so no key names the copies on the line apart from that copy (issues #50 and #313). Detail: ${JSON.stringify(parents.map(([parent, versions_outside_registry]) => ({ parent, versions_outside_registry })))}. Nothing was written. The remedy is a registry version for that dependency, so that a key can name each copy of the parent.`
 
 const readOptional = (dir: string, file: string): string | null => {
   try {
@@ -339,10 +349,8 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   })
 
   // node.sh names this git copy `debug@git+ssh://git`, so no parent `debug`
-  // reads it. The port drops its edge too (#50). Each expected key is the
-  // answer of node.sh on the same copy. Ruling 2 on #50: where the keys of
-  // `debug` must be version-qualified, the port refuses instead, because no
-  // qualified key matches the git copy.
+  // reads it. The port reads it at its manifest version, 4.3.4 (#313). Each
+  // expected key is also the answer of node.sh on the same copy.
   /**
    * Copies of `debug` beside the git copy, each with its version of `ms`. A
    * copy with the version '' has the snapshot key `debug`, with no version.
@@ -374,7 +382,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       ],
       { 'debug>ms': '^2.1.3' },
     ],
-  ] as const)('reads no edge from a git copy of the parent, beside %s', (_, copies, keys) => {
+  ] as const)('writes the plain key for a git copy of the parent, beside %s', (_, copies, keys) => {
     const manifest = manifestAfter(
       'pnpm-git-parent',
       ['ms', '^2.1.3', 'debug'],
@@ -398,17 +406,79 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     expect(pnpmOverrides(manifest)).toEqual({ 'debug>ms': '^2.1.3' })
   })
 
-  it('refuses the parent that why names, beside two registry copies, and writes nothing (#50)', async () => {
+  /** The keys of `debug` that qualify each copy of the copies fixtures, the git copy by its manifest version. */
+  const EACH_COPY = {
+    'debug@2.6.9>ms': '>=2.1.3 <3',
+    'debug@4.3.4>ms': '>=2.1.3 <3',
+    'debug@4.4.3>ms': '>=2.1.3 <3',
+  }
+
+  it('qualifies each copy of the parent that why names, the git copy by its manifest version (#313)', async () => {
     const parents = await parentsByWhy('pnpm-git-parent-copies')
     expect(parents).toEqual(['debug'])
-    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])).toBe(
+    const manifest = manifestAfter('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', ...parents])
+    expect(pnpmOverrides(manifest)).toEqual(EACH_COPY)
+  })
+
+  // Each specimen is a real lockfile of pnpm 10.34.5. A real `pnpm install`
+  // with `debug@4.3.4>ms` moved the `ms` of the codeload, `git+https` and
+  // `file:` copy (the probe of #313). The `git+ssh` row is the copies fixture.
+  it.each([
+    ['a codeload', 'pnpm-codeload-parent-copies'],
+    ['a git+https', 'pnpm-git-https-parent-copies'],
+    ['a file:', 'pnpm-file-parent-copies'],
+    ['a git+ssh', 'pnpm-git-parent-copies'],
+  ])(
+    'qualifies %s copy beside two registry copies by its manifest version (#313)',
+    (_, fixture) => {
+      const manifest = manifestAfter(fixture, ['ms', '>=2.1.3 <3', 'debug'])
+      expect(pnpmOverrides(manifest)).toEqual(EACH_COPY)
+    },
+  )
+
+  /** The lockfile with no `version:` line in its `packages:` entries: a copy with no manifest version. */
+  const noManifestVersion: Setup = (dir) => {
+    const text = textAt(dir, 'pnpm-lock.yaml')
+    const stripped = text.replace(/\n {4}version: [^\n]*/g, '')
+    if (stripped === text) throw new Error('the lockfile has no manifest version to remove')
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), stripped)
+  }
+
+  it.each([
+    ['a codeload', 'pnpm-codeload-parent-copies', CODELOAD_DEBUG],
+    ['a git+https', 'pnpm-git-https-parent-copies', GIT_HTTPS_DEBUG],
+    ['a file:', 'pnpm-file-parent-copies', FILE_DEBUG],
+    ['a git+ssh', 'pnpm-git-parent-copies', GIT_DEBUG],
+  ])(
+    'refuses %s copy with no manifest version beside two registry copies, and writes nothing (#313)',
+    (_, fixture, version) => {
+      expect(pnpmRefusalOf(fixture, ['ms', '>=2.1.3 <3', 'debug'], noManifestVersion)).toBe(
+        outsideRegistryRefusal('ms', [['debug', [version]]]),
+      )
+    },
+  )
+
+  // A manifest version that does not start with a digit is no version a key can name.
+  it('refuses a git copy whose manifest version a key cannot name (#313)', () => {
+    const setup: Setup = (dir) => {
+      const text = textAt(dir, 'pnpm-lock.yaml')
+      writeFileSync(
+        join(dir, 'pnpm-lock.yaml'),
+        text.replace('    version: 4.3.4', '    version: v4'),
+      )
+    }
+    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
       outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
     )
   })
 
   it('names each refused parent, and only the parents with a git copy (#50)', () => {
     expect(
-      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'finalhandler', 'debug']),
+      pnpmRefusalOf(
+        'pnpm-git-parent-copies',
+        ['ms', '>=2.1.3 <3', 'finalhandler', 'debug'],
+        noManifestVersion,
+      ),
     ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
@@ -432,14 +502,20 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   it('leaves a qualified parent with no git copy out of the detail (#50)', () => {
     const send = parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'])
     expect(
-      pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'send', 'debug'], send),
+      pnpmRefusalOf(
+        'pnpm-git-parent-copies',
+        ['ms', '>=2.1.3 <3', 'send', 'debug'],
+        both(noManifestVersion, send),
+      ),
     ).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
 
+  // A copy that `parentCopies` adds has no manifest version.
   it('gives each refused parent its own git copies, in the order of the file (#50)', () => {
     const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
     const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
     const setup = both(
+      noManifestVersion,
       parentCopies('debug', [debugGit, '2.1.2']),
       parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
     )
@@ -459,6 +535,7 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     const debugGit = 'git+ssh://git@git.example.com/example/debug.git#1111111'
     const sendGit = 'git+ssh://git@git.example.com/example/send.git#2222222'
     const setup = both(
+      noManifestVersion,
       parentCopies('debug', [debugGit, '2.1.2']),
       parentCopies('send', ['0.16.2', '2.0.0'], ['0.18.0', '2.1.3'], [sendGit, '2.1.3']),
     )
@@ -472,11 +549,25 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     )
   })
 
-  it('refuses a git copy of the parent beside two registry copies (#50)', () => {
-    const error = pnpmRefusalOf(
+  // The git copy and a registry copy have the same manifest version, 4.3.4,
+  // and one key qualifies both.
+  it('qualifies a git copy beside two registry copies, one at its own version (#313)', () => {
+    const manifest = manifestAfter(
       'pnpm-git-parent',
       ['ms', '^2.1.3', 'debug'],
       registryCopies(['4.3.4', '2.1.2'], ['2.6.9', '2.0.0']),
+    )
+    expect(pnpmOverrides(manifest)).toEqual({
+      'debug@2.6.9>ms': '^2.1.3',
+      'debug@4.3.4>ms': '^2.1.3',
+    })
+  })
+
+  it('refuses a git copy with no manifest version beside two registry copies (#50)', () => {
+    const error = pnpmRefusalOf(
+      'pnpm-git-parent',
+      ['ms', '^2.1.3', 'debug'],
+      both(noManifestVersion, registryCopies(['4.3.4', '2.1.2'], ['2.6.9', '2.0.0'])),
     )
     expect(error).toBe(outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]))
   })
@@ -501,12 +592,15 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
       writeFileSync(join(dir, 'pnpm-lock.yaml'), moved)
     }
 
-  it.each(OTHER_COPIES)('refuses a copy at %s beside two registry copies (#50)', (version) => {
-    const setup = gitCopyAt(version)
-    expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
-      outsideRegistryRefusal('ms', [['debug', [version]]]),
-    )
-  })
+  it.each(OTHER_COPIES)(
+    'refuses a copy at %s with no manifest version beside two registry copies (#50)',
+    (version) => {
+      const setup = both(noManifestVersion, gitCopyAt(version))
+      expect(pnpmRefusalOf('pnpm-git-parent-copies', ['ms', '>=2.1.3 <3', 'debug'], setup)).toBe(
+        outsideRegistryRefusal('ms', [['debug', [version]]]),
+      )
+    },
+  )
 
   it.each(OTHER_COPIES)(
     'writes the plain key for a copy at %s beside one registry copy (#50)',
@@ -536,11 +630,12 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     version === GIT_DEBUG ? () => undefined : gitCopyAt(version)
 
   // The plain key reaches each copy of the parent. A real pnpm 10.34.5 run
-  // gave this: with `debug>ms` in the overrides, `pnpm install
-  // --lockfile-only` moved the `ms` of a codeload copy of `debug`. So where a
-  // copy of the parent has `ms` on another major line, the plain key moves
-  // that copy across its line. node.sh writes `debug@4.3.4>ms` here for a
-  // URL with no `@`, and the plain key for a URL with an `@` (#50).
+  // gave this: with `debug>ms` in the overrides, `pnpm install` moved the
+  // `ms` of a codeload, a `git+https` and a `file:` copy of `debug` (#313).
+  // Here the registry copy has the manifest version of the git copy, 4.3.4,
+  // so no key names the copies apart, and each key moves the git copy across
+  // its line. node.sh writes `debug@4.3.4>ms` here for a URL with no `@`,
+  // and the plain key for a URL with an `@` (#50).
   it.each([GIT_DEBUG, ...OTHER_COPIES])(
     'refuses the plain key when a copy at %s has ms on another line (#50)',
     (version) => {
@@ -551,14 +646,69 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
     },
   )
 
-  // Here the copy from outside the registry is on the line, and each registry
-  // copy is not. No registry copy is on the line, so no key is qualified, and
-  // the plain key would move both registry copies. node.sh writes a key that
-  // names the URL, or the plain key for a URL with an `@` (#50).
+  // The registry copy has a version of its own, so its key leaves the git
+  // copy on its line (#313).
   it.each([GIT_DEBUG, ...OTHER_COPIES])(
-    'refuses the plain key when a copy at %s is the one copy on the line (#50)',
+    'qualifies the registry copy when a copy at %s has ms on another line (#313)',
+    (version) => {
+      const setup = both(gitChildAt('1.0.0'), copyAt(version), registryCopies(['4.4.3', '2.1.3']))
+      const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+      expect(pnpmOverrides(manifest)).toEqual({ 'debug@4.4.3>ms': '^2.1.3' })
+    },
+  )
+
+  // A qualified key reaches the git copy at the version of a registry copy on
+  // the line. Here the git copy is off the line (#313).
+  it('refuses a qualified key that reaches a git copy on another line (#313)', () => {
+    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3'], ['2.6.9', '2.0.0']))
+    expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+      plainKeyRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
+
+  // Here the git copy is on the line, and the registry copy at its manifest
+  // version is not. The key `debug@4.3.4>ms` reaches both (#313).
+  it('refuses a qualified key that reaches a registry copy on another line (#313)', () => {
+    const setup = registryCopies(['4.3.4', '1.0.0'], ['4.4.3', '2.1.3'])
+    expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
+      plainKeyRefusal('ms', [['debug', [GIT_DEBUG]]]),
+    )
+  })
+
+  // A qualified key that reaches only copies on the line leaves an off-line
+  // registry copy as it is, beside a git copy.
+  it('writes qualified keys beside a git copy and a registry copy on another line (#313)', () => {
+    const setup = registryCopies(['4.4.3', '2.1.3'], ['2.6.9', '1.0.0'])
+    const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+    expect(pnpmOverrides(manifest)).toEqual({
+      'debug@4.3.4>ms': '^2.1.3',
+      'debug@4.4.3>ms': '^2.1.3',
+    })
+  })
+
+  // Here the copy from outside the registry is on the line, and each registry
+  // copy is not. Its manifest version qualifies it, and the registry copies
+  // keep their line (#313). node.sh writes a key that names the URL, or the
+  // plain key for a URL with an `@` (#50).
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
+    'qualifies a copy at %s, the one copy on the line, by its manifest version (#313)',
     (version) => {
       const setup = both(copyAt(version), registryCopies(['2.6.9', '1.0.0'], ['3.0.0', '1.1.0']))
+      const manifest = manifestAfter('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)
+      expect(pnpmOverrides(manifest)).toEqual({ 'debug@4.3.4>ms': '^2.1.3' })
+    },
+  )
+
+  // With no manifest version, no key is qualified, and the plain key would
+  // move both registry copies (#50).
+  it.each([GIT_DEBUG, ...OTHER_COPIES])(
+    'refuses the plain key when a copy at %s with no manifest version is the one copy on the line (#50)',
+    (version) => {
+      const setup = both(
+        noManifestVersion,
+        copyAt(version),
+        registryCopies(['2.6.9', '1.0.0'], ['3.0.0', '1.1.0']),
+      )
       expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
         plainKeyRefusal('ms', [['debug', [version]]]),
       )
@@ -582,7 +732,11 @@ describe('pnpm parent keys are version-qualified across major lines', () => {
   // A qualified parent with a git copy gets the first refusal, also when a
   // copy is off the line.
   it('gives the qualified-key refusal before the plain-key refusal (#50)', () => {
-    const setup = both(gitChildAt('1.0.0'), registryCopies(['4.3.4', '2.1.3'], ['2.6.9', '1.0.0']))
+    const setup = both(
+      noManifestVersion,
+      gitChildAt('1.0.0'),
+      registryCopies(['4.3.4', '2.1.3'], ['2.6.9', '1.0.0']),
+    )
     expect(pnpmRefusalOf('pnpm-git-parent', ['ms', '^2.1.3', 'debug'], setup)).toBe(
       outsideRegistryRefusal('ms', [['debug', [GIT_DEBUG]]]),
     )

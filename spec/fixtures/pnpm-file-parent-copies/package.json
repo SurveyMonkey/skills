@@ -1,0 +1,10 @@
+{
+  "name": "demo-pnpm-file-parent-copies",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "file:vendor/debug-4.3.4.tgz",
+    "debug-latest": "npm:debug@4.4.3",
+    "finalhandler": "1.1.2"
+  }
+}

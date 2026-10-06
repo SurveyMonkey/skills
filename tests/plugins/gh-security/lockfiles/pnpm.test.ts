@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import {
   copies,
   isV9,
+  manifestVersions,
   parents,
   resolutionMap,
   resolvedVersions,
@@ -483,5 +484,49 @@ describe('isV9', () => {
     ['settings: {}\n', false],
   ])('reads %j', (text, v9) => {
     expect(isV9(text)).toBe(v9)
+  })
+})
+
+describe('manifestVersions', () => {
+  // pnpm writes `version:` in the `packages:` entry of a copy from outside the
+  // registry, and in no registry entry (#313). Each specimen is a real lockfile.
+  it.each([
+    [
+      'pnpm-codeload-parent-copies',
+      'debug@https://codeload.github.com/example/debug/tar.gz/da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    ],
+    [
+      'pnpm-git-https-parent-copies',
+      'debug@git+https://git.example.com/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    ],
+    ['pnpm-file-parent-copies', 'debug@file:vendor/debug-4.3.4.tgz'],
+    [
+      'pnpm-git-parent-copies',
+      'debug@git+ssh://git@git.example.com/example/debug.git#da66c86c5fd71ef570f36b5b1edfa4472149f1bc',
+    ],
+  ])('reads the manifest version of the one copy in %s that has one', (fixture, key) => {
+    expect([...manifestVersions(lockfile(fixture))]).toEqual([[key, '4.3.4']])
+  })
+
+  it('reads a quoted key and a quoted version, and ignores a version of no entry', () => {
+    const text = [
+      'importers:',
+      '  .:',
+      '    version: 9.9.9',
+      'packages:',
+      '    version: 3.0.0',
+      "  'a@file:x.tgz':",
+      "    version: '1.0.0'",
+      '  b@1.0.0:',
+      '    resolution: {}',
+      '  c@git+https://h/c.git#1:',
+      '    resolution: {}',
+      '    engines: {node: x}',
+      'snapshots:',
+      '  d@file:d:',
+      '    version: 2.0.0',
+      '',
+    ].join('\n')
+    expect([...manifestVersions(text)]).toEqual([['a@file:x.tgz', '1.0.0']])
   })
 })

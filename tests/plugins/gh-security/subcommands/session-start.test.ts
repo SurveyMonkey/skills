@@ -45,11 +45,12 @@ const only =
     found.includes(path)
 
 describe('the dependency table', () => {
-  it('lists node, git, gh, bash and jq, in that order, with the text a user reads', () => {
+  it('lists node, git, gh, ssh, bash and jq, in that order, with the text a user reads', () => {
     expect(DEPENDENCIES).toEqual([
       { tool: 'node', label: 'node 22.18.0 or newer' },
       { tool: 'git', label: 'git' },
       { tool: 'gh', label: 'the GitHub CLI (gh)' },
+      { tool: 'ssh', label: 'ssh' },
       { tool: 'bash', label: 'bash' },
       { tool: 'jq', label: 'jq' },
     ])
@@ -64,6 +65,7 @@ describe('sessionStartOutput', () => {
   it.each([
     ['git', 'git'],
     ['gh', 'the GitHub CLI (gh)'],
+    ['ssh', 'ssh'],
     ['bash', 'bash'],
     ['jq', 'jq'],
   ])('writes one line that names %s when only it is missing', (tool, label) => {
@@ -89,10 +91,10 @@ describe('sessionStartOutput', () => {
       DEADLINE_MS,
     )
     expect(JSON.parse(output)).toEqual({
-      systemMessage: `\n${problem('git is missing')}\n${problem('jq is missing')}`,
+      systemMessage: `\n${problem('git is missing')}\n${problem('ssh is missing')}\n${problem('jq is missing')}`,
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: 'Missing: git; jq. The gh-security plugin cannot run.',
+        additionalContext: 'Missing: git; ssh; jq. The gh-security plugin cannot run.',
       },
     })
   })
@@ -305,7 +307,7 @@ describe('with real files', () => {
 
   it('the command writes nothing and answers silence when every tool is present', () => {
     const written: string[] = []
-    const directory = stubs(['git', 'gh', 'bash', 'jq'])
+    const directory = stubs(['git', 'gh', 'ssh', 'bash', 'jq'])
     expect(sessionStartCommand(contextFor(directory, written))).toBeUndefined()
     expect(written).toEqual([])
   })
@@ -313,7 +315,7 @@ describe('with real files', () => {
   it('the command reads the real clock against the deadline', () => {
     vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(DEADLINE_MS)
     const written: string[] = []
-    const directory = stubs(['git', 'gh', 'bash', 'jq'])
+    const directory = stubs(['git', 'gh', 'ssh', 'bash', 'jq'])
     expect(sessionStartCommand(contextFor(directory, written))).toBeUndefined()
     expect(written).toEqual([
       `{"systemMessage":"\\n${problem('the tool check ran out of time').replaceAll('\u001b', '\\u001b')}"}\n`,
@@ -322,7 +324,7 @@ describe('with real files', () => {
 
   it('the command writes one JSON object to stdout when jq is missing', () => {
     const written: string[] = []
-    const directory = stubs(['git', 'gh', 'bash'])
+    const directory = stubs(['git', 'gh', 'ssh', 'bash'])
     expect(sessionStartCommand(contextFor(directory, written))).toBeUndefined()
     expect(written).toHaveLength(1)
     expect(JSON.parse(written[0] ?? '')).toEqual({

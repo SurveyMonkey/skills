@@ -59,9 +59,9 @@ const readKey = (key: string): Reading =>
       UNREADABLE,
     )
 
-/** Each `packages:` key, without the peer suffix, the colon and the quotes. */
-const packageKeys = (text: string): string[] => {
-  const keys: string[] = []
+/** The lines of the `packages:` section, without its header. */
+const packageLines = (text: string): string[] => {
+  const section: string[] = []
   let inPackages = false
   for (const line of lines(text)) {
     if (line.startsWith('packages:')) {
@@ -69,11 +69,40 @@ const packageKeys = (text: string): string[] => {
       continue
     }
     if (TOP_LEVEL.test(line)) inPackages = false
-    if (inPackages && ENTRY_KEY.test(line)) {
-      keys.push(before(line.slice(2), '(').replace(/:$/, '').replaceAll("'", ''))
+    if (inPackages) section.push(line)
+  }
+  return section
+}
+
+/** The key of an entry line, without the peer suffix, the colon and the quotes. */
+const packageKey = (line: string): string =>
+  before(line.slice(2), '(').replace(/:$/, '').replaceAll("'", '')
+
+/** Each `packages:` key. */
+const packageKeys = (text: string): string[] =>
+  packageLines(text)
+    .filter((line) => ENTRY_KEY.test(line))
+    .map(packageKey)
+
+const MANIFEST_VERSION = /^ {4}version:[ \t]*/
+
+/**
+ * The `version:` of each `packages:` entry that has one, by the key of the
+ * entry. pnpm writes it for a copy from outside the registry, such as a git,
+ * codeload or `file:` copy, and the value is the version in the manifest of
+ * that copy (#313). A registry key names its version, and has no such line.
+ * The key is the snapshot key of the copy without its peer suffix.
+ */
+export const manifestVersions = (text: string): ReadonlyMap<string, string> => {
+  const versions = new Map<string, string>()
+  let key: string | null = null
+  for (const line of packageLines(text)) {
+    if (ENTRY_KEY.test(line)) key = packageKey(line)
+    else if (key !== null && MANIFEST_VERSION.test(line)) {
+      versions.set(key, line.replace(MANIFEST_VERSION, '').trimEnd().replaceAll("'", ''))
     }
   }
-  return keys
+  return versions
 }
 
 type Row = { readonly name: string; readonly version: string }

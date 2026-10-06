@@ -6,12 +6,19 @@
 // boundary. The bash script never calls it.
 //
 // One difference is declared (rulings 5 and 11 on #225, the fix for #167).
-// When the remote host is `github.com`, the port reads `default_branch` from
+// When the remote host is GitHub, the port reads `default_branch` from
 // GitHub, where the script reads the local `origin/HEAD` symref. The rows
 // below give the mock the same branch that the symref names, so every field is
 // compared. The stale-symref row gives a different branch, and asserts the
 // difference. A remote on another host reads the symref in both, and the unit
 // tests hold that.
+//
+// The host rule is a declared exception of its own (#305, ruling 12). The
+// port reads GitHub for `ssh.github.com`, `www.github.com` and an ssh alias
+// that `ssh -G` resolves to a host of GitHub. The script reads the symref for
+// each of them. The rows of that describe assert the difference. `ssh -G`
+// reads only the configuration that a row gives (`-F`), never the files of
+// the developer.
 //
 // Three more differences are declared, and held by the unit tests:
 //   - A failed read from GitHub is an error in the port. The script has no
@@ -20,13 +27,13 @@
 //     in the port. The script answers the text `(unknown)` as a branch name.
 //   - The port reads an unknown option as an error. The script reads it as a
 //     path.
-import { mkdirSync, realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
 import { exitCodeFor, type JsonObject, type JsonValue } from '#gh-security/lib/envelope.ts'
-import { run } from '#gh-security/lib/process.ts'
+import { type Runner, run } from '#gh-security/lib/process.ts'
 import { detectScope } from '#gh-security/subcommands/detect-scope.ts'
 import { createGhMock, type GhReplies } from '#harness/gh.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
@@ -61,11 +68,18 @@ const repoWith = (w: World, remote?: string, symref = 'main'): string => {
   return dir
 }
 
+/** The real runner, with `ssh` reading only `config`. */
+const sshReading =
+  (config: string): Runner =>
+  (command, args = [], options) =>
+    run(command, command === 'ssh' ? ['-F', config, ...args] : args, options)
+
 const typescriptSide = async (
   w: World,
   args: readonly string[],
   replies: GhReplies,
   cwd: string,
+  runner: Runner = sshReading('/dev/null'),
 ): Promise<CommandResult> => {
   const context: CommandContext = {
     args,
@@ -73,7 +87,7 @@ const typescriptSide = async (
     io: { stdout: () => {}, stderr: () => {}, readStdin: () => '' },
     commandNames: [],
   }
-  return detectScope(context, () => createGhMock(replies), run, cwd)
+  return detectScope(context, () => createGhMock(replies), runner, cwd)
 }
 
 const answerOf = (result: CommandResult): { status: number; json: JsonObject | undefined } => {
@@ -252,4 +266,38 @@ describe('detect-scope parity: the declared exception, default_branch from GitHu
     const { default_branch: _typescript, ...typescriptRest } = typescript.json as JsonObject
     expect(firstDifference(bashRest, typescriptRest)).toBeNull()
   })
+})
+
+describe('detect-scope parity: the declared exception, every host of GitHub (#305)', () => {
+  // The symref names `main`, and GitHub names `develop`.
+  it.each([
+    'git@ssh.github.com:octo/app.git',
+    'ssh://git@ssh.github.com:443/octo/app.git',
+    'https://www.github.com/octo/app.git',
+    'gh-alias:octo/app.git',
+    'git@gh-alias:octo/app.git',
+  ])(
+    'answers the branch GitHub names for %s, where the script reads the symref',
+    async (remote) => {
+      const w = world()
+      const config = w.sandbox.join('ssh_config')
+      writeFileSync(config, 'Host gh-alias\n  HostName ssh.github.com\n  Port 443\n')
+      const dir = repoWith(w, remote, 'main')
+      const bash = JSON.parse(runBash({ command: SCRIPT, args: [dir] }).stdout) as JsonObject
+      const typescript = answerOf(
+        await typescriptSide(
+          w,
+          [dir],
+          { viewDefaultBranch: { name: 'develop' } },
+          process.cwd(),
+          sshReading(config),
+        ),
+      )
+      expect(bash.default_branch).toBe('main')
+      expect(typescript.json?.default_branch).toBe('develop')
+      const { default_branch: _bash, ...bashRest } = bash
+      const { default_branch: _typescript, ...typescriptRest } = typescript.json as JsonObject
+      expect(firstDifference(bashRest, typescriptRest)).toBeNull()
+    },
+  )
 })

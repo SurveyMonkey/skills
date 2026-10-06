@@ -2,7 +2,8 @@
 // (`.claude/skills/plugin-design/dependencies.md`). The `session-start` hook
 // checks it.
 // `bash` and `jq` stay here because `notice-scan.sh` and `detect-capacity.sh`
-// stay bash after the port.
+// stay bash after the port. `detect-scope` runs `ssh -G` to resolve an alias
+// of the ssh configuration (#305).
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -16,6 +17,7 @@ export const DEPENDENCIES: readonly Dependency[] = [
   { tool: NODE_TOOL, label: `node ${NODE_FLOOR} or newer` },
   { tool: 'git', label: 'git' },
   { tool: 'gh', label: 'the GitHub CLI (gh)' },
+  { tool: 'ssh', label: 'ssh' },
   { tool: 'bash', label: 'bash' },
   { tool: 'jq', label: 'jq' },
 ]

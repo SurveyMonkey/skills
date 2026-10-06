@@ -19,10 +19,11 @@
 // the environment of this process, and the TypeScript side reads PATH from
 // that same environment.
 //
-// No fixture is out. On `pnpm-git-parent` and `pnpm-git-parent-copies`,
-// bash and the port agree on `resolved_versions` and `resolution_map`. The
-// #50 differences are the name of a git parent (parity-node-tree.test.ts)
-// and the refusal of ruling 2 (parity-node-apply-constraint.test.ts).
+// No fixture is out. On each pnpm fixture with a copy from outside the
+// registry, bash and the port agree on `resolved_versions` and
+// `resolution_map`. The #50 and #313 differences are the name of a git parent
+// (parity-node-tree.test.ts), and the key that names the manifest version of
+// such a copy (parity-node-apply-constraint.test.ts).
 //
 // Declared divergence in the exit status: where jq itself stops, bash exits
 // with jq's own status 5, and writes jq's own message. That status is not

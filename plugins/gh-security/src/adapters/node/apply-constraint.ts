@@ -16,13 +16,17 @@
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
 //
-// Declared parity exceptions (#50, ruling 2). A pnpm parent can have a copy
-// from outside the registry, such as a git copy. Where the keys of that
-// parent must be version-qualified, the port refuses. Where it keeps the
-// plain key and a copy has the package on another major line, the port also
-// refuses. node.sh writes keys in both cases. Beside one registry copy on
-// the line, the port writes the plain key. For a URL with no `@`, node.sh
-// writes a qualified key for each copy there.
+// Declared parity exceptions (#50, #313). A pnpm parent can have a copy from
+// outside the registry, such as a git copy. The port qualifies that copy by
+// the manifest version that its `packages:` entry gives, because pnpm
+// matches a qualified key against that version. node.sh reads no manifest
+// version. It drops such a copy for a URL with an `@`, and names the URL in
+// a key for another URL. The port refuses where the keys of the parent must
+// be version-qualified and the copy has no manifest version. It also refuses
+// where a key of the call reaches a copy of that parent with the package on
+// another major line. node.sh writes keys in each case. Beside one registry
+// copy at the same version, the port writes the plain key. For a URL with no
+// `@`, node.sh writes a qualified key for each copy there.
 //
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
@@ -72,8 +76,9 @@ import {
   outsideRegistryRefusal,
   plainKeyRefusal,
   pnpmCopiesOutsideRegistry,
+  pnpmCopiesWithNoVersion,
   pnpmEdges,
-  pnpmParentsOffLine,
+  pnpmOffLineVersions,
   type Qualifiers,
   qualifiersOf,
 } from './parent-qualifiers.ts'
@@ -212,14 +217,14 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       ),
     )
     // A qualified key misses a copy of its parent from outside the registry
-    // (#50, ruling 2). A plain key can move such a parent's copy across its
-    // line (#50).
+    // with no manifest version (#50, #313). A key can move a copy of such a
+    // parent across its line (#50, #313).
     if (pnpmLock !== null) {
       const outside = pnpmCopiesOutsideRegistry(pnpmLock, pkg)
-      const offLine = pnpmParentsOffLine(pnpmLock, pkg, targetOf(range))
+      const offLine = pnpmOffLineVersions(pnpmLock, pkg, targetOf(range))
       const refusal =
-        outsideRegistryRefusal(qualifiers, outside, pkg) ??
-        plainKeyRefusal(parents, outside, offLine, pkg)
+        outsideRegistryRefusal(qualifiers, pnpmCopiesWithNoVersion(pnpmLock, pkg), pkg) ??
+        plainKeyRefusal(parents, qualifiers, outside, offLine, pkg)
       if (refusal !== null) throw new Error(refusal.error)
     }
   }
