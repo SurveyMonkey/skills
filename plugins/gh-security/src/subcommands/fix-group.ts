@@ -244,7 +244,9 @@
 //     the work directory and the new branch, and the process exits with 130
 //     or 143 and no answer (ruling 11 on #234). The bash has no trap, so a
 //     signal left the workspace, and the guard for a crashed run stopped the
-//     next `setup`. A line on stderr gives the report of the reap.
+//     next `setup`. A line on stderr gives the report of the reap. When git
+//     refused `worktree add` with a status, the reap does not run: the
+//     paths can be those of another run.
 //   - `cleanup` is `src/reap.ts`, the one module of #234. These are its
 //     differences from `cmd_cleanup`:
 //       - A worktree directory that is gone while its registration stays

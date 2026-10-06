@@ -10,9 +10,10 @@
 // for SIGINT, 143 for SIGTERM). The command writes no answer on stdout,
 // because the exit comes before the answer.
 //
-// The body is not stopped part way, so a worktree that `git worktree add`
-// was making is complete or absent when the release runs. The release must
-// not depend on the body: it reads only what is on the disk.
+// The body is not stopped part way. But a git child stays in the process
+// group (`src/lib/process.ts`), so a Ctrl-C in the terminal also stops it.
+// A `git worktree add` can thus stop part way, with no exit status. So the
+// release reads the disk, and does not trust the body to have finished.
 //
 // Other signals, such as SIGHUP, stop the process at once, and the worktree
 // stays. SIGKILL cannot be caught. `src/reap.ts` says how the reap finds a

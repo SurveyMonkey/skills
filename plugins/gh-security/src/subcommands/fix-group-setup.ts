@@ -254,6 +254,10 @@ export const setup = async (
   //    itself (`src/signals.ts`). Then the reap removes what this run made:
   //    the work directory was not there at step 1, and the branch is new at
   //    `origin/<default>`. The process exits with the status of the signal.
+  //    When git refuses `worktree add` with a status, it made nothing. The
+  //    paths can then be those of another run, so the reap does not run. A
+  //    `worktree add` that a signal stopped has no status, and the reap runs.
+  let refused = false
   return holdSignals(
     signals,
     async () => {
@@ -266,6 +270,7 @@ export const setup = async (
         `origin/${defaultBranch}`,
       ])
       if (added.status !== 0) {
+        refused = added.status !== null
         return failPhase('worktree', `git worktree add ${worktree} failed: ${outputOf(added)}`)
       }
 
@@ -299,6 +304,12 @@ export const setup = async (
     },
     async (signal) => {
       if (signal === null) return
+      if (refused) {
+        stderr(
+          `fix-group: setup stopped by ${signal}: git refused worktree add, so nothing was reaped\n`,
+        )
+        return
+      }
       const target = await contain({ repoRoot, work, worktree, branch }, git)
       const report =
         target.outcome === 'ok'

@@ -506,6 +506,54 @@ describe('a signal during fix-group setup', () => {
     )
   })
 
+  it('reaps nothing when git refuses worktree add, as the paths can be of another run', async () => {
+    const w = world()
+    const { log, listeners, signals } = signalsOf()
+    const stderr: string[] = []
+    // Another run makes its worktree at the same path just before this one.
+    const sending = async (command: string, args: readonly string[] = [], options = {}) => {
+      if (args.slice(2, 4).join(' ') === 'worktree add') {
+        w.fixtures.branch(w.repo, 'other')
+        w.fixtures.worktree(w.repo, w.wt, 'other')
+      }
+      const result = await run(command, args, options)
+      if (args.slice(2, 4).join(' ') === 'worktree add') listeners.get('SIGTERM')?.('SIGTERM')
+      return result
+    }
+    await fixGroup(
+      contextOf(w.env, setupArgs(w), stderr),
+      { spawn: sending, route: selectAdapter },
+      signals,
+    )
+    expect(log).toEqual(['exit 143'])
+    expect(existsSync(join(w.wt, '.git'))).toBe(true)
+    // git makes the branch before it refuses the path. The branch stays at
+    // origin/main, and the stale-branch guard of the next setup clears it.
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main', 'other'])
+    expect(stderr.join('')).toBe(
+      'fix-group: setup stopped by SIGTERM: git refused worktree add, so nothing was reaped\n',
+    )
+  })
+
+  it('reaps when a signal stopped worktree add, which then has no status', async () => {
+    const w = world()
+    const { log, listeners, signals } = signalsOf()
+    const sending = async (command: string, args: readonly string[] = [], options = {}) => {
+      const result = await run(command, args, options)
+      if (args.slice(2, 4).join(' ') !== 'worktree add') return result
+      listeners.get('SIGINT')?.('SIGINT')
+      return { ...result, status: null }
+    }
+    await fixGroup(
+      contextOf(w.env, setupArgs(w)),
+      { spawn: sending, route: selectAdapter },
+      signals,
+    )
+    expect(log).toEqual(['exit 130'])
+    expect(existsSync(w.work)).toBe(false)
+    expect(w.fixtures.branches(w.repo)).toEqual(['main'])
+  })
+
   it('keeps the workspace when no signal comes', async () => {
     const w = world()
     const { log, signals } = signalsOf()
