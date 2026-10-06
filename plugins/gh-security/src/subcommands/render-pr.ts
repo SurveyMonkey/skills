@@ -181,17 +181,21 @@ const body = (options: Options): Envelope<string> => {
   const inputs = readInputs('body', options)
   if (inputs.outcome !== 'ok') return inputs
   // A note file must exist whether or not this state needs it. The script
-  // checked the collateral note first.
-  const notes: { override?: string; collateral?: string } = {}
-  for (const [flag, key] of [
-    ['--collateral-note', 'collateral'],
-    ['--global-override-note', 'override'],
-  ] as const) {
-    const path = flagOf(options, flag)
-    if (path === '') continue
-    const file = needFile(flag, path)
+  // checked that both were there, the collateral note first, before it read
+  // one.
+  const given = (
+    [
+      ['--collateral-note', 'collateral'],
+      ['--global-override-note', 'override'],
+    ] as const
+  ).filter(([flag]) => flagOf(options, flag) !== '')
+  for (const [flag] of given) {
+    const file = needFile(flag, flagOf(options, flag))
     if (file.outcome !== 'ok') return file
-    const text = readNote(flag, path)
+  }
+  const notes: { override?: string; collateral?: string } = {}
+  for (const [flag, key] of given) {
+    const text = readNote(flag, flagOf(options, flag))
     if (text.outcome !== 'ok') return text
     notes[key] = text.value
   }

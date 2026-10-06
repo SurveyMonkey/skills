@@ -1031,6 +1031,25 @@ describe('body', () => {
       ])
       refused(ran, `--collateral-note: no such file: ${gone}.collateral`)
     })
+
+    // The script checked that both notes were there before it read one.
+    it('checks that the override note is there before it reads the collateral note', async () => {
+      const files = place({ 'note.txt': 'x' })
+      const path = files['note.txt'] as string
+      const gone = fixture('no-such-note.txt')
+      chmodSync(path, 0)
+      try {
+        const ran = await render('body', STATE, GROUP, [
+          '--collateral-note',
+          path,
+          '--global-override-note',
+          gone,
+        ])
+        refused(ran, `--global-override-note: no such file: ${gone}`)
+      } finally {
+        chmodSync(path, 0o644)
+      }
+    })
   })
 
   describe('the written list and the override file', () => {
@@ -1077,7 +1096,8 @@ describe('body', () => {
       )
       expect(ran.out).toContain('The fix is a no-change lockfile refresh')
       expect(ran.out).toContain('## Global override')
-      // A written that is not a list holds no range, as `.written[]?` gave none.
+      // A text holds no range, as `.written[]?` gave none for it. An object
+      // gave its values to jq, and is a declared difference (#233).
       const text = await render(
         'body',
         edit(jsonOf('state-bare-added.json'), (s) => {
@@ -1164,6 +1184,19 @@ describe('body', () => {
       )
       expect(ran.out).toContain('the committed lockfile pinned `4.17.18` on the 4.x line.')
     })
+
+    // `$(...)` dropped the line feeds first, and `[ -n ]` then saw no version.
+    it('reads a before of line feeds only as no version', async () => {
+      const ran = await render(
+        'body',
+        edit(STATE, (s) => {
+          s.action = 'lockfile-refresh'
+          s.before = '\n\n'
+        }),
+        GROUP,
+      )
+      expect(ran.out).toContain('had no comparable version')
+    })
   })
 
   describe('a bare override', () => {
@@ -1209,6 +1242,22 @@ describe('body', () => {
         'body',
         bare((s) => {
           s.written = [{ parent: null, value: null }, { parent: null }, { value: '>=2 <3' }]
+        }),
+        GROUP,
+        note,
+      )
+      expect(ran.out).toContain('Added an unscoped override `lodash: ">=2 <3"`.')
+    })
+
+    // jq gave no error for `null | .parent`, so a null entry is skipped.
+    it.each([
+      ['after the range', [{ parent: null, value: '>=2 <3' }, null]],
+      ['before the range', [null, { parent: null, value: '>=2 <3' }]],
+    ])('skips a null entry of written %s', async (_name, written) => {
+      const ran = await render(
+        'body',
+        bare((s) => {
+          s.written = written
         }),
         GROUP,
         note,

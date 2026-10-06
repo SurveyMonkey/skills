@@ -517,7 +517,8 @@ export const readBodyInputs = (
 
   const actionWhere = `${where} (action '${action}')`
   // A lockfile refresh does not need `written`. A bare override still reads
-  // its range from it, as `.written[]?` of the script did.
+  // its range from a list, as `.written[]?` of the script did. For an object,
+  // `.written[]?` gave its values. Here an object holds no range (#233).
   let written: unknown[] = isArray(state.written) ? state.written : []
   if (action !== 'lockfile-refresh') {
     const found = required(state, 'written', actionWhere, 'a list', isArray)
@@ -538,11 +539,11 @@ export const readBodyInputs = (
   let globalOverride: GlobalOverride | null = null
   if (bare.value !== 'none') {
     // The range is the value of the first top-level entry (no parent) that
-    // has a text value. An entry that is not an object is a state that
-    // contradicts itself. For `jq`, a number or a text was an error too. A
-    // null entry passed, and the script printed `null` as the range. Here a
-    // null entry is refused (#233).
-    const top = written.every(isRecord) ? written.find(isTopLevel) : undefined
+    // has a text value. A null entry has no value, and is skipped. Any other
+    // entry that is not an object is a state that contradicts itself. For
+    // `jq`, `.parent` of such an entry was an error too.
+    const entries = written.filter((entry) => entry !== null)
+    const top = entries.every(isRecord) ? entries.find(isTopLevel) : undefined
     if (top === undefined) {
       return failed(
         `body: bare_override is '${bare.value}' but ${stateFile}'s written[] carries no top-level (parent: null) entry with a string value to report the range from. The state file contradicts its own classification; nothing is rendered rather than a fabricated range.`,
@@ -582,8 +583,9 @@ export const readBodyInputs = (
     riskMarkdown: risk.value,
     whyRaw: why.value,
     checked: checked.value,
-    // An empty `before` is no version, as `[ -n "$before" ]` read it.
-    before: before === null || before === '' ? null : shown(before),
+    // A `before` that is empty once `$(...)` dropped its final line feeds is
+    // no version, as `[ -n "$before" ]` read it.
+    before: before === null || shown(before) === '' ? null : shown(before),
     written,
     overrideFile,
     globalOverride,
