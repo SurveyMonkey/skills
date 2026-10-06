@@ -19,6 +19,7 @@ import { fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
+import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -48,6 +49,7 @@ describe('the registry', () => {
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
+      "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/session-start.ts')",
       "import('../subcommands/version.ts')",
     ])
@@ -66,6 +68,7 @@ describe('the discovery entries', () => {
     ['merge-envelopes', mergeEnvelopesCommand],
     ['preflight-repo', preflightRepoCommand],
     ['prepare-checkout', prepareCheckoutCommand],
+    ['render-pr-status', renderPrStatusCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
   })

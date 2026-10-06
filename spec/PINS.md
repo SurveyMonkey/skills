@@ -27,11 +27,11 @@ grammar:
 # pin: mechanical, retired by <script>
 ```
 
-where `<script>` is one of the three successor scripts named in issue #193 whose pins are still
-open: `reap-batch.sh`, `summarize-run.sh`, `pr-status.sh --env-prefix`. The other four are
-TypeScript commands now, and their pins are gone: `prepare-checkout.sh` and `merge-envelopes.sh`
-are `prepare-checkout` and `merge-envelopes` (#227), and `preflight-repo.sh` and
-`build-dispatches.sh` are `preflight-repo` and `build-dispatches` (#228).
+where `<script>` is one of the two successor scripts named in issue #193 whose pins are still
+open: `reap-batch.sh` and `summarize-run.sh`. The other five are TypeScript commands now, and their
+pins are gone: `prepare-checkout.sh` and `merge-envelopes.sh` are `prepare-checkout` and
+`merge-envelopes` (#227), `preflight-repo.sh` and `build-dispatches.sh` are `preflight-repo` and
+`build-dispatches` (#228), and `pr-status.sh --env-prefix` is `render-pr-status` (#230).
 
 The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security,
 which took over issue #193; the script name is the mapping key) finds every pin it must delete
@@ -43,11 +43,11 @@ grep -rn 'pin: mechanical, retired by <script>' spec/
 
 `spec/pins_inventory_spec.sh` keeps this file and the markers honest: every
 `phrase_in`/`count_in`/`rule_in`-style example either carries the marker or is listed below as
-`judgment`, and every marker names one of the three scripts above.
+`judgment`, and every marker names one of the two scripts above.
 
 ## Totals
 
-328 pins across 16 files: 284 `judgment`, 44 `mechanical`.
+327 pins across 16 files: 284 `judgment`, 43 `mechanical`.
 
 Mechanical pins by successor script:
 
@@ -55,13 +55,12 @@ Mechanical pins by successor script:
 |---|---|
 | `reap-batch.sh` | 22 |
 | `summarize-run.sh` | 21 |
-| `pr-status.sh --env-prefix` | 1 |
 
 Each mechanical pin is retired in the same change that lands its successor, which is now a
 command in the TypeScript port of gh-security rather than a bash script in this repository;
 until then it stays here, marked, as the record of the rule the port must reproduce.
 
-### `spec/resolve_alerts_scope_spec.sh`: 45 pins (42 judgment, 3 mechanical)
+### `spec/resolve_alerts_scope_spec.sh`: 44 pins (42 judgment, 2 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -101,15 +100,14 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 324 | reports every excluded checkout by name in phase 2 | judgment | - |
 | 331 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
 | 338 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
-| 347 | reads PR status once per repo, under that repo prefix | mechanical | pr-status.sh --env-prefix |
-| 357 | omits the column for one checkout and shows it for several | judgment | - |
-| 363 | no longer keys the column on a scope mode | judgment | - |
-| 371 | branches on a null scope | judgment | - |
-| 377 | drops the git_remote cross-check it can no longer make | judgment | - |
-| 383 | stops on a null nwo | judgment | - |
-| 393 | re-runs detect-scope against the checkout the user names | judgment | - |
-| 399 | reads the second output rather than the first | judgment | - |
-| 407 | stays repo-scoped in the checkout vocabulary | judgment | - |
+| 348 | omits the column for one checkout and shows it for several | judgment | - |
+| 354 | no longer keys the column on a scope mode | judgment | - |
+| 362 | branches on a null scope | judgment | - |
+| 368 | drops the git_remote cross-check it can no longer make | judgment | - |
+| 374 | stops on a null nwo | judgment | - |
+| 384 | re-runs detect-scope against the checkout the user names | judgment | - |
+| 390 | reads the second output rather than the first | judgment | - |
+| 398 | stays repo-scoped in the checkout vocabulary | judgment | - |
 
 ### `spec/resolve_alerts_branch_style_spec.sh`: 4 pins (3 judgment, 1 mechanical)
 
