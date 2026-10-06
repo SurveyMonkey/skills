@@ -1010,6 +1010,27 @@ describe('body', () => {
         error: expect.stringContaining('reports validate.checked: 0'),
       })
     })
+
+    it('asks for the override note before the collateral note, as the script did', async () => {
+      const state = edit(jsonOf('state-bare-added.json'), (s) => {
+        s.other_line_moves = [{ class: 'fatal', major: 1, before: ['1.0.0'], after: [] }]
+      })
+      const ran = await render('body', state, GROUP)
+      expect(ran.result).toMatchObject({
+        error: expect.stringContaining('Pass --global-override-note'),
+      })
+    })
+
+    it('checks the collateral note file before the override note file, as the script did', async () => {
+      const gone = fixture('no-such-note.txt')
+      const ran = await render('body', STATE, GROUP, [
+        '--global-override-note',
+        `${gone}.override`,
+        '--collateral-note',
+        `${gone}.collateral`,
+      ])
+      refused(ran, `--collateral-note: no such file: ${gone}.collateral`)
+    })
   })
 
   describe('the written list and the override file', () => {
@@ -1043,6 +1064,37 @@ describe('body', () => {
         GROUP,
       )
       expect(ran.out).toContain('The fix is a no-change lockfile refresh')
+    })
+
+    it('takes the range of a bare override from written, for a lockfile refresh too', async () => {
+      const ran = await render(
+        'body',
+        edit(jsonOf('state-bare-added.json'), (s) => {
+          s.action = 'lockfile-refresh'
+        }),
+        GROUP,
+        ['--global-override-note', fixture('global-override-note.txt')],
+      )
+      expect(ran.out).toContain('The fix is a no-change lockfile refresh')
+      expect(ran.out).toContain('## Global override')
+    })
+
+    it('needs the override file for a bare override', async () => {
+      const ran = await render(
+        'body',
+        edit(jsonOf('state-bare-added.json'), (s) => {
+          delete s.override_file
+        }),
+        GROUP,
+        ['--global-override-note', fixture('global-override-note.txt')],
+      )
+      refused(
+        ran,
+        missing(
+          `body: --state ${ran.files['state.json']} (action 'bare-override')`,
+          'override_file',
+        ),
+      )
     })
 
     it('refuses an override_file that is not text, for any action', async () => {

@@ -177,11 +177,12 @@ const commitMsg = (options: Options): Envelope<string> => {
 const body = (options: Options): Envelope<string> => {
   const inputs = readInputs('body', options)
   if (inputs.outcome !== 'ok') return inputs
-  // A note file must exist whether or not this state needs it.
+  // A note file must exist whether or not this state needs it. The script
+  // checked the collateral note first.
   const notes: { override?: string; collateral?: string } = {}
   for (const [flag, key] of [
-    ['--global-override-note', 'override'],
     ['--collateral-note', 'collateral'],
+    ['--global-override-note', 'override'],
   ] as const) {
     const path = flagOf(options, flag)
     if (path === '') continue

@@ -346,7 +346,7 @@ export interface BodyInputs extends PackageFacts {
   readonly checked: number
   /** The version on the line before the fix, or null for none. */
   readonly before: string | null
-  /** What `apply` wrote. Not read for a lockfile refresh. */
+  /** What `apply` wrote. A lockfile refresh reads it only for the range of a bare override. */
   readonly written: readonly unknown[]
   readonly overrideFile: string | null
   readonly globalOverride: GlobalOverride | null
@@ -516,7 +516,9 @@ export const readBodyInputs = (
   }
 
   const actionWhere = `${where} (action '${action}')`
-  let written: unknown[] = []
+  // A lockfile refresh does not need `written`. A bare override still reads
+  // its range from it, as `.written[]?` of the script did.
+  let written: unknown[] = isArray(state.written) ? state.written : []
   if (action !== 'lockfile-refresh') {
     const found = required(state, 'written', actionWhere, 'a list', isArray)
     if (found.outcome !== 'ok') return found
