@@ -77,6 +77,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
       'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root>',
     load: async () => (await import('../subcommands/prepare-checkout.ts')).prepareCheckoutCommand,
   },
+  'render-pr-status': {
+    description:
+      'Write the phase 8 table from the pr-status answers of each repository: render-pr-status --bands <bands.json> <report.json>...',
+    load: async () => (await import('../subcommands/render-pr-status.ts')).renderPrStatusCommand,
+  },
   'session-start': {
     description: 'Check that the tools this plugin needs are present (SessionStart hook)',
     load: async () => (await import('../subcommands/session-start.ts')).sessionStartCommand,

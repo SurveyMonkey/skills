@@ -340,15 +340,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The status should be success
       The output should equal '1'
     End
-
-    # One pr-status.sh call cannot carry two prefixes, and two checkouts can
-    # resolve different ones.
-    # pin: mechanical, retired by pr-status.sh --env-prefix
-    It 'reads PR status once per repo, under that repo prefix'
-      When call phrase_in "$SKILL" 'group the URLs by repo and make one call per repo, under that repo.s .env_prefix.'
-      The status should be success
-      The output should equal '1'
-    End
   End
 
   Describe 'the Repo column follows the number of checkouts'
