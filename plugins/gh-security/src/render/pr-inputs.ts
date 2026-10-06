@@ -23,10 +23,10 @@
 //   - A `summary` that is not text is refused. The script stopped in the
 //     middle of the body, after it had printed the first sections.
 //   - `commit-msg` checks `major_line` as `body` does.
-//   - An entry of `written[]` that is not an object cannot carry the range
-//     of a bare override. The script stopped on one. Here it is skipped, and
-//     the first top-level entry with a text value gives the range, where the
-//     script read `.value` of the first top-level entry whatever its type.
+//   - The range of a bare override is the value of the first top-level entry
+//     of `written[]` that has a text value. The script read `.value` of the
+//     first top-level entry, whatever its type, and printed `null` for a
+//     value that is not there.
 //   - A `requires_major_bump` version that names no major line is refused.
 //     The script printed `no patched release in the .x line`.
 //   - A moves `major` is text or a number, and a `before` or `after` is a
