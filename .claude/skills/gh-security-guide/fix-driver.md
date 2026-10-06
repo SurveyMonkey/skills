@@ -21,8 +21,8 @@ difference from the script. Each phase has its own module, `fix-group-<phase>.ts
 decisions of `apply` (the range, the ladder and its stops, the widest shape, the empty diff) are
 pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
-`setup` writes. `setup`, `classify`, `baseline`, `apply` and `score` are ported. `cleanup` is
-not (#234), and the agent still calls the script for each step. `score` calls the scorer in process
+`setup` writes. All six phases are ported, and the agent still calls the script for each step
+until #237. `cleanup` runs on the reap module `src/reap.ts` (#234). `score` calls the scorer in process
 (`src/merge-risk/score.ts`, #233). A state file that one of the two writes is not for the other.
 
 What that header does not say, and what belongs here:
@@ -45,7 +45,10 @@ What that header does not say, and what belongs here:
 - **`cleanup` holds its path to `reap-agent-artifacts.sh`'s containment discipline**, because the
   two run the same `rm -rf` on the same directory from opposite sides. Both sides resolved
   physically, no `..` segment, contained under `<repo_root>/.claude/worktrees/`, plus one
-  condition available only here: `--work` must name the workspace `setup` recorded. The removal's
+  condition available only here: `--work` must name the workspace `setup` recorded. In the port,
+  one module holds these checks for both sides: `src/reap.ts`, which `fix-group cleanup` uses, and
+  `reap-batch` will use (#229). It checks the `..` segment on the path as given, and refuses a
+  resolved worktree that is not `<work>/fix`. The removal's
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
   `worktree_removed: true` with no field naming `$WORK` is the failure `reap-agent-artifacts.sh`
   guards against on its side of the same operation. **A populated `errors[]` exits non-zero**, as it does there

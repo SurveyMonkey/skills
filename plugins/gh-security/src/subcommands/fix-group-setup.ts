@@ -13,6 +13,8 @@ import { tostring } from '../jq.ts'
 import { parseArguments } from '../lib/args.ts'
 import { parseEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
+import { contain, reap } from '../reap.ts'
+import { holdSignals, type Signals } from '../signals.ts'
 import { createState } from '../state.ts'
 import {
   chomp,
@@ -162,7 +164,7 @@ const clearStaleBranch = async (
  * the drift paths alone. Both checks, never one of them (#152). A read that
  * fails gives no subject or no path, so the answer is no.
  */
-const onlyDriftCommit = async (
+export const onlyDriftCommit = async (
   git: Git,
   repoRoot: string,
   defaultBranch: string,
@@ -183,6 +185,8 @@ export const setup = async (
   args: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   deps: FixGroupDeps,
+  signals: Signals,
+  stderr: (text: string) => void,
 ): Promise<CommandResult> => {
   const parsed = parseArguments(args, {
     'group-json': { type: 'string', default: '' },
@@ -246,43 +250,81 @@ export const setup = async (
   } catch (error) {
     return failPhase('worktree', `cannot create ${repoRoot}/.claude/worktrees: ${String(error)}`)
   }
-  const added = await git(repoRoot, [
-    'worktree',
-    'add',
-    worktree,
-    '-b',
-    branch,
-    `origin/${defaultBranch}`,
-  ])
-  if (added.status !== 0) {
-    return failPhase('worktree', `git worktree add ${worktree} failed: ${outputOf(added)}`)
-  }
+  // 3. From `worktree add` to the answer, a SIGINT or a SIGTERM only records
+  //    itself (`src/signals.ts`). Then the reap removes what this run made:
+  //    the work directory was not there at step 1, and the branch is new at
+  //    `origin/<default>`. The process exits with the status of the signal.
+  //    When `worktree add` exits with a status, git refused it, or it did not
+  //    start. The paths can then be those of another run, so the reap does
+  //    not run. A branch that git made stays at `origin/<default>`. The
+  //    stale-branch guard of the next `setup` clears it only while
+  //    `origin/<default>` has not moved. A `worktree add` that a signal
+  //    stopped has no status, and the reap runs. A prefix that does not
+  //    `exec` git can give a status for a signal. Then nothing is reaped,
+  //    and the guard for a crashed run stops the next `setup`.
+  let refused: string | null = null
+  return holdSignals(
+    signals,
+    async () => {
+      const added = await git(repoRoot, [
+        'worktree',
+        'add',
+        worktree,
+        '-b',
+        branch,
+        `origin/${defaultBranch}`,
+      ])
+      if (added.status !== 0) {
+        // The report on stderr is one line, as the reap's report is.
+        if (added.status !== null) {
+          refused = `status ${added.status}: ${outputOf(added).replace(/\n/g, ' ')}`
+        }
+        return failPhase('worktree', `git worktree add ${worktree} failed: ${outputOf(added)}`)
+      }
 
-  const created = createState(work, {
-    group,
-    repo_root: repoRoot,
-    default_branch: defaultBranch,
-    adapter: route.name,
-    ecosystem,
-    env_prefix: options['env-prefix'],
-    work,
-    worktree,
-    branch_name: branch,
-    package: pkg,
-    package_path: packagePath,
-    major_line: majorLine,
-    drift_commit: false,
-    fix_installs: 0,
-    install_signals: [],
-  })
-  if (created.outcome !== 'ok') return failed(`setup: ${created.error}`)
-  return ok({
-    status: 'ok',
-    step: 'setup',
-    work,
-    worktree,
-    branch,
-    package: pkg,
-    major_line: majorLine,
-  })
+      const created = createState(work, {
+        group,
+        repo_root: repoRoot,
+        default_branch: defaultBranch,
+        adapter: route.name,
+        ecosystem,
+        env_prefix: options['env-prefix'],
+        work,
+        worktree,
+        branch_name: branch,
+        package: pkg,
+        package_path: packagePath,
+        major_line: majorLine,
+        drift_commit: false,
+        fix_installs: 0,
+        install_signals: [],
+      })
+      if (created.outcome !== 'ok') return failed(`setup: ${created.error}`)
+      return ok({
+        status: 'ok',
+        step: 'setup',
+        work,
+        worktree,
+        branch,
+        package: pkg,
+        major_line: majorLine,
+      })
+    },
+    async (signal) => {
+      if (signal === null) return
+      if (refused !== null) {
+        stderr(
+          `fix-group: setup stopped by ${signal}: git worktree add exited with ${refused}. ` +
+            'Nothing was reaped.\n',
+        )
+        return
+      }
+      const target = await contain({ repoRoot, work, worktree, branch }, git)
+      const report =
+        target.outcome === 'ok'
+          ? await reap(target.value, { pushed: false, defaultBranch }, git)
+          : target
+      stderr(`fix-group: setup stopped by ${signal}: ${JSON.stringify(report)}\n`)
+    },
+  )
 }

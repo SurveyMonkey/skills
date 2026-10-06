@@ -394,7 +394,7 @@ const BLOCKED = 'cannot write the state file'
 describe('the command', () => {
   it('names score in its usage', async () => {
     const answer = answerOf(await fixGroupCommand(context({}, [])))
-    expect(answer.json.error).toContain('<setup|classify|baseline|apply|score>')
+    expect(answer.json.error).toContain('<setup|classify|baseline|apply|score|cleanup>')
   })
 
   it('refuses score with no --work', async () => {

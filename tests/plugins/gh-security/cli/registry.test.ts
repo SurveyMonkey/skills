@@ -142,6 +142,7 @@ describe('the fix driver entry', () => {
     'fix-group baseline --work <dir>',
     'fix-group apply --work <dir>',
     'fix-group score --work <dir>',
+    'fix-group cleanup --work <dir> [--pushed]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
   })

@@ -108,7 +108,8 @@
 // with 130 or 143. It writes no answer on stdout. So the worktree goes, as
 // the script's EXIT trap removed it. A signal before the end of step 3 does
 // not stop step 3. Other signals, such as SIGHUP, stop the process at once,
-// and the worktree stays. The script's trap also ran for those.
+// and the worktree stays. The script's trap also ran for those. The shared
+// helper `src/signals.ts` holds the two signals.
 // `--repo-root` must be the top level of a repository. When the removal
 // fails, the worktree and its directory stay. A deleted directory with its
 // entry still in the repository blocks later worktrees (`git.md`). A line on
@@ -157,7 +158,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { constants, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import type { Adapter, Tree } from '../adapters/adapter.ts'
@@ -173,6 +174,7 @@ import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { type Envelope, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
 import { type Runner, run } from '../lib/process.ts'
+import { holdSignals, type Signals } from '../signals.ts'
 
 const USAGE =
   'usage: gh-security classify-lines [--env-prefix <prefix>] --repo-root <path> ' +
@@ -270,12 +272,7 @@ const readInput = (
   return { input, actionable, skipped }
 }
 
-/** The part of `process` that the signal handler of `--base-ref` uses. */
-export interface Signals {
-  readonly on: (signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void) => unknown
-  readonly off: (signal: NodeJS.Signals, listener: (signal: NodeJS.Signals) => void) => unknown
-  readonly exit: (status: number) => void
-}
+export type { Signals } from '../signals.ts'
 
 /**
  * The handler. The runner, the registry, the current directory and the
@@ -352,59 +349,55 @@ export const classifyLines = async (
     return spawn(line.command, line.args, { env: context.env })
   }
 
-  let baseDir: string | null = null
-  // A signal while the worktree can exist only records itself. The `finally`
-  // below then removes the worktree, and exits with the status of the signal.
-  // The type comes from the assertion. With a type annotation, tsc reads the
-  // `null` and then sees no signal in the `finally`.
-  let stopped = null as NodeJS.Signals | null
-  const stop = (signal: NodeJS.Signals): void => {
-    stopped ??= signal
+  if (baseRef === '') {
+    return ok(classify(read, routed, unsupported, root, baseRef, options['branch-style'], context))
   }
+  const top = await git(['rev-parse', '--show-toplevel'])
+  const topLevel = top.status === 0 ? chomp(top.stdout) : ''
+  if (topLevel === '') {
+    return failed(`--base-ref requires --repo-root to be a git repository: ${given}`)
+  }
+  // Both sides with their links resolved, so `/tmp` and `/private/tmp`
+  // are one path. A linked worktree is its own top level. A top level
+  // that cannot be resolved is not this directory, as `pwd -P` of the
+  // script gave no text for it.
+  if (realpathSync(root) !== realOrEmpty(topLevel)) {
+    return failed(
+      `--base-ref requires --repo-root to be the repository top level, not a subdirectory: ${given} (top level: ${topLevel})`,
+    )
+  }
+  const branch = baseRef.slice(ORIGIN.length)
+  // The refspec is explicit and forced. With a narrow
+  // `remote.origin.fetch`, a bare `fetch origin <branch>` moves only
+  // FETCH_HEAD, and an old remote-tracking ref then passes the check below.
+  const fetched = await git([
+    'fetch',
+    '-q',
+    'origin',
+    `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+  ])
+  if (fetched.status !== 0) {
+    return failed(`git fetch for --base-ref ${baseRef} failed: ${firstLine(fetched.stderr)}`)
+  }
+  if ((await git(['rev-parse', '--verify', '-q', `refs/remotes/${baseRef}`])).status !== 0) {
+    return failed(`--base-ref not found after fetch: ${baseRef}`)
+  }
+  let baseDir: string
   try {
-    let treeRoot = root
-    if (baseRef !== '') {
-      const top = await git(['rev-parse', '--show-toplevel'])
-      const topLevel = top.status === 0 ? chomp(top.stdout) : ''
-      if (topLevel === '') {
-        return failed(`--base-ref requires --repo-root to be a git repository: ${given}`)
-      }
-      // Both sides with their links resolved, so `/tmp` and `/private/tmp`
-      // are one path. A linked worktree is its own top level. A top level
-      // that cannot be resolved is not this directory, as `pwd -P` of the
-      // script gave no text for it.
-      if (realpathSync(root) !== realOrEmpty(topLevel)) {
-        return failed(
-          `--base-ref requires --repo-root to be the repository top level, not a subdirectory: ${given} (top level: ${topLevel})`,
-        )
-      }
-      const branch = baseRef.slice(ORIGIN.length)
-      // The refspec is explicit and forced. With a narrow
-      // `remote.origin.fetch`, a bare `fetch origin <branch>` moves only
-      // FETCH_HEAD, and an old remote-tracking ref then passes the check below.
-      const fetched = await git([
-        'fetch',
-        '-q',
-        'origin',
-        `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
-      ])
-      if (fetched.status !== 0) {
-        return failed(`git fetch for --base-ref ${baseRef} failed: ${firstLine(fetched.stderr)}`)
-      }
-      if ((await git(['rev-parse', '--verify', '-q', `refs/remotes/${baseRef}`])).status !== 0) {
-        return failed(`--base-ref not found after fetch: ${baseRef}`)
-      }
-      try {
-        // `mktemp -d` reads TMPDIR, and an empty TMPDIR is no TMPDIR.
-        baseDir = mkdtempSync(join(context.env.TMPDIR || tmpdir(), 'classify-lines-'))
-      } catch {
-        return failed(
-          '--base-ref could not create a temporary directory for the detached worktree (mktemp -d failed)',
-        )
-      }
-      const tree = join(baseDir, 'tree')
-      signals.on('SIGINT', stop)
-      signals.on('SIGTERM', stop)
+    // `mktemp -d` reads TMPDIR, and an empty TMPDIR is no TMPDIR.
+    baseDir = mkdtempSync(join(context.env.TMPDIR || tmpdir(), 'classify-lines-'))
+  } catch {
+    return failed(
+      '--base-ref could not create a temporary directory for the detached worktree (mktemp -d failed)',
+    )
+  }
+  const tree = join(baseDir, 'tree')
+  // From `worktree add` to the removal, a signal only records itself. The
+  // removal runs when the body returns or throws, and the process then
+  // exits with the status of the signal.
+  return holdSignals(
+    signals,
+    async () => {
       const added = await git([
         'worktree',
         'add',
@@ -416,14 +409,11 @@ export const classifyLines = async (
       if (added.status !== 0) {
         return failed(`git worktree add for ${baseRef} failed: ${firstLine(added.stderr)}`)
       }
-      treeRoot = tree
-    }
-    return ok(
-      classify(read, routed, unsupported, treeRoot, baseRef, options['branch-style'], context),
-    )
-  } finally {
-    if (baseDir !== null) {
-      const tree = join(baseDir, 'tree')
+      return ok(
+        classify(read, routed, unsupported, tree, baseRef, options['branch-style'], context),
+      )
+    },
+    async () => {
       // `worktree remove` drops this command's own entry and no other. A
       // directory whose removal failed stays, with its entry.
       if ((await git(['worktree', 'remove', '--force', tree])).status === 0) {
@@ -435,12 +425,8 @@ export const classifyLines = async (
       } else {
         removeDirectory(baseDir, context)
       }
-    }
-    signals.off('SIGINT', stop)
-    signals.off('SIGTERM', stop)
-    // The status that a shell gives: 128 and the number of the signal.
-    if (stopped !== null) signals.exit(128 + constants.signals[stopped])
-  }
+    },
+  )
 }
 
 /** The real path, or no text when the path cannot be resolved. */

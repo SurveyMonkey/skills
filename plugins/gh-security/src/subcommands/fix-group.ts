@@ -1,6 +1,6 @@
 // `gh-security fix-group <phase>`: the driver for one dependency-fix group.
 // This is the port of `scripts/common/fix-group.sh` (#232), one phase at a
-// time. These five phases are ported:
+// time. All six phases are ported:
 //
 //   fix-group setup    --group-json <file> --repo-root <path>
 //                      --default-branch <name>
@@ -9,16 +9,16 @@
 //   fix-group baseline --work <dir>
 //   fix-group apply    --work <dir>
 //   fix-group score    --work <dir>
+//   fix-group cleanup  --work <dir> [--pushed]
 //
-// `cleanup` stays in the bash, and #234 ports it (round 5 ruling 5 on #232).
-// Until then the agent calls `fix-group.sh` for all six steps.
+// The agent calls `fix-group.sh` for all six steps until #237 moves it here.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
 // The state file is the only thing that goes from one step to the next.
 //
-// Contract, for these five phases:
-//   exit 0  {"status":"ok","step":"setup|classify|baseline|apply", ...}
+// Contract:
+//   exit 0  {"status":"ok","step":"setup|classify|baseline|apply|cleanup", ...}
 //           an intermediate step completed.
 //           {"status":"no_op", ...}  terminal: nothing to fix (`apply`).
 //           {"status":"ready_for_pr", ...}  terminal: hand to phase 6. Only
@@ -42,6 +42,11 @@
 //           a stored value of the wrong type (see the differences below).
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
+//
+// `cleanup` exits 3 when its `errors[]` is not empty, with the whole report
+// on stdout: `status: "failure"` and `phase: "worktree"`. This exit 3 does
+// not say that the run failed. Cleanup runs after the push and the pull
+// request, so the agent maps it by what shipped (`fix-driver.md`).
 //
 // What each phase does:
 //   setup     checks the group, then refuses a work directory that is
@@ -94,6 +99,17 @@
 //             stored `apply_result`, `validate`, parent list, `drift_commit`
 //             and `observations_first` are read. One that is absent or null
 //             stops the phase with exit 1, after the scorer has run.
+//   cleanup   reads the state, and gives `src/reap.ts` the work path, the
+//             worktree and the branch. `--work` must be the work path that
+//             `setup` recorded, and both must pass the containment checks of
+//             the reap. The reap removes the worktree on its own path, then
+//             the work directory, then deletes the branch when its tip is
+//             safe to lose. A tip is safe when it equals `origin/<branch>`
+//             and `--pushed` is given, when it equals `origin/<default>`, or
+//             when its one commit is the drift commit over the drift paths.
+//             The report has `worktree` and `work_dir`, each `{path,
+//             action}`, the branch with its tip and reason, `detail`,
+//             `errors[]` and `left_behind[]`.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `setup` records (env-prefix.md). The prefix sets no
@@ -223,11 +239,48 @@
 //     text, or a list of other values, to the report.
 //   - A state with neither `applied_parents` nor `eligible_parents` gives the
 //     key `'applied_parents // eligible_parents'`, with no dot at the start.
-//   - A SIGINT or a SIGTERM during `setup` does not remove the worktree. The
-//     worktree is the workspace of the run, as in the bash, which has no
-//     trap. `cleanup` removes it. The guard for a crashed run stops the next
-//     `setup`. Ruling 15 on #225 is for a worktree that a command removes
-//     before it ends.
+//   - A SIGINT or a SIGTERM from `worktree add` to the end of `setup` does
+//     not stop it at once. When `setup` ends, the reap removes the worktree,
+//     the work directory and the new branch, and the process exits with 130
+//     or 143 and no answer (ruling 11 on #234). The bash has no trap, so a
+//     signal left the workspace, and the guard for a crashed run stopped the
+//     next `setup`. A line on stderr gives the report of the reap. When git
+//     refused `worktree add` with a status, the reap does not run: the
+//     paths can be those of another run.
+//   - `cleanup` is `src/reap.ts`, the one module of #234. These are its
+//     differences from `cmd_cleanup`:
+//       - A worktree directory that is gone while its registration stays
+//         loses its one admin entry (`stale-registration-removed`), and the
+//         branch can then go. The bash called it `absent`, left the
+//         registration, and could not delete the branch.
+//       - A plain directory at the worktree path is `not-a-worktree`, and it
+//         goes with the work directory. A work path that is a file is
+//         `not-a-directory`, an error. A registration that no admin entry
+//         names is `stale-registration`, an error. A `worktree list` that
+//         fails is an error. The bash had none of these.
+//       - The branch rule runs when the worktree step failed, as in
+//         `reap-agent-artifacts.sh`. A failed `worktree remove` can drop the
+//         registration, and the branch can then go. The bash kept the
+//         branch, and gave the reason for a tip that is not on origin.
+//       - A `branch -D` that fails is an error, so the exit is 3, and the
+//         reason says that the delete failed. The bash put it in `detail`
+//         only, with exit 0.
+//       - A ref that cannot be read leaves the branch with one reason for
+//         each ref. The bash had one reason for `origin/<branch>`, and none
+//         for the local branch.
+//       - A ref read with an exit status but no text on stderr is a missing
+//         ref, as in `reap-agent-artifacts.sh`.
+//       - The work directory is removed in process. Its error quotes node,
+//         as `<work> was not removed: <message>`, where the bash quoted
+//         `rm -rf`.
+//       - The report also has `left_behind[]`, as the reap has.
+//       - The repository root must be a git repository, and the branch a
+//         name that git accepts, before anything is removed.
+//       - The resolved worktree must be `<work>/fix`. The bash checked the
+//         worktree of the state only for the worktree root, so the worktree
+//         of another group passed.
+//       - Resolution needs no search permission on the directory itself,
+//         where `cd` needed it.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -236,32 +289,39 @@ import type { CommandContext, CommandHandler, CommandResult } from '../cli/comma
 import { parseArguments } from '../lib/args.ts'
 import { failed } from '../lib/envelope.ts'
 import { run } from '../lib/process.ts'
+import type { Signals } from '../signals.ts'
 import { apply } from './fix-group-apply.ts'
 import { baseline } from './fix-group-baseline.ts'
 import { classify } from './fix-group-classify.ts'
+import { cleanup } from './fix-group-cleanup.ts'
 import { type FixGroupDeps, loadPhase } from './fix-group-common.ts'
 import { score } from './fix-group-score.ts'
 import { setup } from './fix-group-setup.ts'
 
 export type { FixGroupDeps } from './fix-group-common.ts'
 
-const USAGE = 'usage: gh-security fix-group <setup|classify|baseline|apply|score> [options]'
+const USAGE = 'usage: gh-security fix-group <setup|classify|baseline|apply|score|cleanup> [options]'
 
 /** The phases after `setup`. Each reads the state that `--work` names. */
 const PHASES = { classify, baseline, apply, score } as const
 
-/** The handler. The runner and the registry are parameters. */
+/**
+ * The handler. The runner, the registry and the signals of the process are
+ * parameters.
+ */
 export const fixGroup = async (
   context: CommandContext,
   deps: FixGroupDeps,
+  signals: Signals = process,
 ): Promise<CommandResult> => {
   const [phase, ...args] = context.args
   if (phase === undefined) return failed(USAGE)
-  if (phase === 'setup') return setup(args, context.env, deps)
+  if (phase === 'setup') return setup(args, context.env, deps, signals, context.io.stderr)
+  if (phase === 'cleanup') return cleanup(args, context.env, deps)
   if (!Object.hasOwn(PHASES, phase)) {
     return failed(
-      `fix-group: '${phase}' is not a phase of this command. It ports setup, classify, ` +
-        'baseline, apply and score; cleanup still runs in fix-group.sh.',
+      `fix-group: '${phase}' is not a phase of this command. Its phases are setup, classify, ` +
+        'baseline, apply, score and cleanup.',
     )
   }
   const parsed = parseArguments(args, { work: { type: 'string', default: '' } })

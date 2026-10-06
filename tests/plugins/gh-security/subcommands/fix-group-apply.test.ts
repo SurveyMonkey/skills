@@ -397,7 +397,7 @@ describe('the command', () => {
   it('names apply in its usage', async () => {
     const answer = answerOf(await fixGroupCommand(context({}, [])))
     expect(answer.json).toEqual({
-      error: 'usage: gh-security fix-group <setup|classify|baseline|apply|score> [options]',
+      error: 'usage: gh-security fix-group <setup|classify|baseline|apply|score|cleanup> [options]',
     })
   })
 
@@ -407,14 +407,11 @@ describe('the command', () => {
   })
 
   // The phase table is an object. A name of its prototype is not a phase.
-  it.each(['toString', 'constructor', 'cleanup'])(
-    'refuses the phase %s with exit 1',
-    async (phase) => {
-      const answer = answerOf(await fixGroupCommand(context({}, [phase, '--work', '/x'])))
-      expect(answer.status).toBe(1)
-      expect(answer.stderr).toContain(`'${phase}' is not a phase of this command`)
-    },
-  )
+  it.each(['toString', 'constructor'])('refuses the phase %s with exit 1', async (phase) => {
+    const answer = answerOf(await fixGroupCommand(context({}, [phase, '--work', '/x'])))
+    expect(answer.status).toBe(1)
+    expect(answer.stderr).toContain(`'${phase}' is not a phase of this command`)
+  })
 })
 
 describe('apply (phase 4)', () => {

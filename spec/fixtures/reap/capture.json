@@ -1,0 +1,4461 @@
+{
+  "about": "The answers of fix-group.sh cleanup and reap-agent-artifacts.sh over real git repositories. Generated from the two scripts and never edited by hand. Each row holds its recipe: a repository like harness/git.ts create (a bare origin at $ROOT/origin.git, a clone at $ROOT/work with one commit), then for a fix-group row the setup of fix-group.sh with the named group, then the `pre` and `prepare` bash after the prelude, with ROOT, REPO, WORK, WT and BRANCH in the environment. The run had a neutral HOME and TMPDIR. $ROOT is the physical row root. <origin/main>, <origin/branch> and <branch> are the commits of those refs before the run, the first label for each commit. `before` and `after` are the disk: each path under $ROOT except the two git directories, the worktree list, the entries under .git/worktrees, and the refs.",
+  "generator": {
+    "git": "git version 2.54.0 (Apple Git-157)",
+    "jq": "jq-1.8.1",
+    "bash": "5.3.9(1)-release",
+    "platform": "darwin"
+  },
+  "prelude": "set -eu\ng() { git -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null \"$@\"; }\ncommit_file() { mkdir -p \"$(dirname \"$1/$2\")\"; printf '%s\\n' \"$3\" > \"$1/$2\"; g -C \"$1\" add -A; g -C \"$1\" commit -qm \"$4\"; }\nadd_worktree() { mkdir -p \"$REPO/.claude/worktrees\"; g -C \"$REPO\" worktree add -q \"$WT\" -b \"$BRANCH\" origin/main; }\nlock_dir() { mkdir -p \"$1\"; : > \"$1/held\"; chmod 555 \"$1\"; }\nDRIFT='chore(deps): refresh lockfile (control install, no manifest change)'\n",
+  "groups": {
+    "plain": {
+      "package": "example-pkg",
+      "ecosystem": "npm",
+      "major_line": "6",
+      "highest_fixed_version": "6.1.0",
+      "branch_name": "fix/dependabot-example-pkg-6x",
+      "alerts": [
+        {
+          "number": 1,
+          "vulnerable_range": "< 6.1.0"
+        }
+      ]
+    },
+    "scoped": {
+      "package": "@example-scope/example-pkg",
+      "ecosystem": "npm",
+      "major_line": "2",
+      "highest_fixed_version": "2.0.1",
+      "branch_name": "fix/dependabot-@example-scope/example-pkg-2x",
+      "alerts": [
+        {
+          "number": 2,
+          "vulnerable_range": "< 2.0.1"
+        }
+      ]
+    }
+  },
+  "rows": [
+    {
+      "name": "fresh",
+      "script": "fix-group",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "fresh-pushed-flag",
+      "script": "fix-group",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "pushed",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/branch>",
+          "reason": "pushed: the remote carries the same commits, so the local ref is a duplicate",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "pushed-no-flag",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<origin/branch>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "branch fix/dependabot-example-pkg-6x left in place at <origin/branch>",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "unpushed-pushed-flag",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" fix.txt fix 'fix: one commit'",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<branch>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "branch fix/dependabot-example-pkg-6x left in place at <branch>",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "ahead-of-origin",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\ncommit_file \"$WT\" more.txt more 'fix: a second commit'",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<branch>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "branch fix/dependabot-example-pkg-6x left in place at <branch>",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/more.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "drift-only",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" package-lock.json '{}' \"$DRIFT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<branch>",
+          "reason": "the only commit is this flow's drift commit, which a rerun's control install regenerates equivalently from the same manifests",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/package-lock.json",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "drift-subject-manifest",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" package.json '{}' \"$DRIFT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<branch>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "branch fix/dependabot-example-pkg-6x left in place at <branch>",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/package.json",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "drift-two-commits",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" package-lock.json '{}' \"$DRIFT\"\ncommit_file \"$WT\" yarn.lock 'x' \"$DRIFT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<branch>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "branch fix/dependabot-example-pkg-6x left in place at <branch>",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/package-lock.json",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/yarn.lock",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "drift-yarn-cache",
+      "script": "fix-group",
+      "prepare": "commit_file \"$WT\" .yarn/cache/a.zip 'z' \"$DRIFT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<branch>",
+          "reason": "the only commit is this flow's drift commit, which a rerun's control install regenerates equivalently from the same manifests",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.yarn",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.yarn/cache",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.yarn/cache/a.zip",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "dirty",
+      "script": "fix-group",
+      "prepare": "printf 'changed\\n' > \"$WT/file.txt\"\nprintf 'new\\n' > \"$WT/untracked.txt\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/untracked.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "worktree-gone",
+      "script": "fix-group",
+      "prepare": "g -C \"$REPO\" worktree remove --force \"$WT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": false,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "absent"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "worktree-dir-deleted",
+      "script": "fix-group",
+      "prepare": "rm -rf \"$WT\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": false,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "absent"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": "git branch -D fix/dependabot-example-pkg-6x failed: error: cannot delete branch 'fix/dependabot-example-pkg-6x' used by worktree at '$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix'",
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "no-local-branch",
+      "script": "fix-group",
+      "prepare": "g -C \"$REPO\" worktree remove --force \"$WT\"\ng -C \"$REPO\" branch -q -D \"$BRANCH\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": false,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "absent"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": null,
+          "reason": null,
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "outside",
+      "script": "fix-group",
+      "prepare": "mkdir -p \"$ROOT/outside/fix-dependabot-example-pkg-6x\"\ncp \"$WORK/state.json\" \"$ROOT/outside/fix-dependabot-example-pkg-6x/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$ROOT/outside/fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the work path is not under $ROOT/work/.claude/worktrees/: $ROOT/outside/fix-dependabot-example-pkg-6x. Nothing was removed."
+        },
+        "stderr": "cleanup: the work path is not under $ROOT/work/.claude/worktrees/: $ROOT/outside/fix-dependabot-example-pkg-6x. Nothing was removed."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix-dependabot-example-pkg-6x",
+          "f outside/fix-dependabot-example-pkg-6x/state.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix-dependabot-example-pkg-6x",
+          "f outside/fix-dependabot-example-pkg-6x/state.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "dotdot",
+      "script": "fix-group",
+      "args": [
+        "cleanup",
+        "--work",
+        "$REPO/.claude/worktrees/../worktrees/fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the work path must not contain a .. segment: $ROOT/work/.claude/worktrees/../worktrees/fix-dependabot-example-pkg-6x"
+        },
+        "stderr": "cleanup: the work path must not contain a .. segment: $ROOT/work/.claude/worktrees/../worktrees/fix-dependabot-example-pkg-6x"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "symlink-to-work",
+      "script": "fix-group",
+      "prepare": "ln -s \"$WORK\" \"$ROOT/link\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$ROOT/link"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "l link",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "l link",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "symlink-out-of-tree",
+      "script": "fix-group",
+      "prepare": "mkdir -p \"$ROOT/elsewhere/fake\"\ncp \"$WORK/state.json\" \"$ROOT/elsewhere/fake/state.json\"\nln -s \"$ROOT/elsewhere/fake\" \"$REPO/.claude/worktrees/fake-link\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$REPO/.claude/worktrees/fake-link"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the work path is not under $ROOT/work/.claude/worktrees/: $ROOT/elsewhere/fake. Nothing was removed."
+        },
+        "stderr": "cleanup: the work path is not under $ROOT/work/.claude/worktrees/: $ROOT/elsewhere/fake. Nothing was removed."
+      },
+      "before": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/fake",
+          "f elsewhere/fake/state.json",
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "l work/.claude/worktrees/fake-link",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/fake",
+          "f elsewhere/fake/state.json",
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "l work/.claude/worktrees/fake-link",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "moved",
+      "script": "fix-group",
+      "prepare": "mv \"$WORK\" \"$REPO/.claude/worktrees/moved\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$REPO/.claude/worktrees/moved"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: --work names $ROOT/work/.claude/worktrees/moved, but setup recorded this run's workspace as $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x. A removal is only ever issued against the path this run created; nothing was removed."
+        },
+        "stderr": "cleanup: --work names $ROOT/work/.claude/worktrees/moved, but setup recorded this run's workspace as $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x. A removal is only ever issued against the path this run created; nothing was removed."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/moved",
+          "d work/.claude/worktrees/moved/fix",
+          "f work/.claude/worktrees/moved/fix/.git",
+          "f work/.claude/worktrees/moved/fix/file.txt",
+          "f work/.claude/worktrees/moved/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/moved",
+          "d work/.claude/worktrees/moved/fix",
+          "f work/.claude/worktrees/moved/fix/.git",
+          "f work/.claude/worktrees/moved/fix/file.txt",
+          "f work/.claude/worktrees/moved/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "state-worktree-outside",
+      "script": "fix-group",
+      "prepare": "mkdir -p \"$ROOT/outside/fix\"\njq --arg w \"$ROOT/outside/fix\" '.worktree = $w' \"$WORK/state.json\" > \"$WORK/state.new\"\nmv \"$WORK/state.new\" \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the worktree path resolves outside $ROOT/work/.claude/worktrees/: $ROOT/outside/fix. Nothing was removed."
+        },
+        "stderr": "cleanup: the worktree path resolves outside $ROOT/work/.claude/worktrees/: $ROOT/outside/fix. Nothing was removed."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "state-worktree-dotdot",
+      "script": "fix-group",
+      "prepare": "jq --arg w \"$WORK/../fix-dependabot-example-pkg-6x/fix\" '.worktree = $w' \"$WORK/state.json\" > \"$WORK/state.new\"\nmv \"$WORK/state.new\" \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the worktree path must not contain a .. segment: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/../fix-dependabot-example-pkg-6x/fix"
+        },
+        "stderr": "cleanup: the worktree path must not contain a .. segment: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/../fix-dependabot-example-pkg-6x/fix"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "state-worktree-symlink-out",
+      "script": "fix-group",
+      "prepare": "mkdir -p \"$ROOT/outside/fix\"\nln -s \"$ROOT/outside/fix\" \"$WORK/linked\"\njq --arg w \"$WORK/linked\" '.worktree = $w' \"$WORK/state.json\" > \"$WORK/state.new\"\nmv \"$WORK/state.new\" \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: the worktree path resolves outside $ROOT/work/.claude/worktrees/: $ROOT/outside/fix. Nothing was removed."
+        },
+        "stderr": "cleanup: the worktree path resolves outside $ROOT/work/.claude/worktrees/: $ROOT/outside/fix. Nothing was removed."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "l work/.claude/worktrees/fix-dependabot-example-pkg-6x/linked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "l work/.claude/worktrees/fix-dependabot-example-pkg-6x/linked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "scoped",
+      "script": "fix-group",
+      "group": "scoped",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-@example-scope/example-pkg-2x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-@example-scope/example-pkg-2x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "scoped-pushed",
+      "script": "fix-group",
+      "group": "scoped",
+      "prepare": "commit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--pushed"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-@example-scope/example-pkg-2x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/branch>",
+          "reason": "pushed: the remote carries the same commits, so the local ref is a duplicate",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "repo-root-via-symlink",
+      "script": "fix-group",
+      "pre": "ln -s \"$REPO\" \"$ROOT/alias\"",
+      "repo_root": "$ROOT/alias",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "status": "ok",
+          "step": "cleanup",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": null,
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "l alias",
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "l alias",
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "no-state",
+      "script": "fix-group",
+      "prepare": "rm \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "no state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json; run 'setup' first"
+        },
+        "stderr": "no state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json; run 'setup' first"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "empty-state",
+      "script": "fix-group",
+      "prepare": ": > \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "the state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json is not a readable JSON object. A crashed 'setup' can leave a zero-byte one; inspect $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x by hand rather than rerunning, because nothing here can tell an interrupted run from a foreign directory."
+        },
+        "stderr": "the state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json is not a readable JSON object. A crashed 'setup' can leave a zero-byte one; inspect $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x by hand rather than rerunning, because nothing here can tell an interrupted run from a foreign directory."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "state-without-work",
+      "script": "fix-group",
+      "prepare": "jq 'del(.work)' \"$WORK/state.json\" > \"$WORK/state.new\"\nmv \"$WORK/state.new\" \"$WORK/state.json\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "the state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json has no usable value for '.work'. Run the earlier steps first; an absent or empty value is never read as a legitimate answer here."
+        },
+        "stderr": "the state file at $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json has no usable value for '.work'. Run the earlier steps first; an absent or empty value is never read as a legitimate answer here."
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "unknown-option",
+      "script": "fix-group",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK",
+        "--bogus"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "error": "cleanup: unknown option '--bogus'"
+        },
+        "stderr": "cleanup: unknown option '--bogus'"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "worktree-remove-fails",
+      "script": "fix-group",
+      "prepare": "lock_dir \"$WT/locked\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 3,
+        "stdout": {
+          "status": "failure",
+          "step": "cleanup",
+          "phase": "worktree",
+          "worktree_removed": false,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removal-failed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "kept-registration-live"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": false,
+          "branch_tip": "<origin/main>",
+          "reason": "left in place: the tip is not on origin and is not this flow's own leftover, and a commit that never reached the remote is the one thing here that cannot be recreated",
+          "detail": "git worktree remove --force $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix failed: error: failed to delete '$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix': Permission denied; $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of fix/dependabot-example-pkg-6x, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand.; branch fix/dependabot-example-pkg-6x left in place at <origin/main>",
+          "errors": [
+            "git worktree remove --force $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix failed: error: failed to delete '$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix': Permission denied"
+          ]
+        },
+        "stderr": "fix-group: cleanup failure: git worktree remove --force $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix failed: error: failed to delete '$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix': Permission denied; $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x was left on disk: deleting it while the worktree registration survives is the state that blocks a later worktree add on this path and any branch -D of fix/dependabot-example-pkg-6x, and git worktree remove refuses to clean it up afterwards. Remove the registration first, by hand.; branch fix/dependabot-example-pkg-6x left in place at <origin/main>"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked/held",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked/held",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "work-dir-remove-fails",
+      "script": "fix-group",
+      "prepare": "lock_dir \"$WORK/locked\"",
+      "args": [
+        "cleanup",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 3,
+        "stdout": {
+          "status": "failure",
+          "step": "cleanup",
+          "phase": "worktree",
+          "worktree_removed": true,
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removal-failed"
+          },
+          "branch": "fix/dependabot-example-pkg-6x",
+          "branch_deleted": true,
+          "branch_tip": "<origin/main>",
+          "reason": "tip still equals origin/main: there is nothing on the branch to lose",
+          "detail": "rm -rf $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x did not remove the directory, quoting it: rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held: Permission denied\nrm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked: Directory not empty\nrm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x: Directory not empty",
+          "errors": [
+            "rm -rf $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x did not remove the directory: rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held: Permission denied rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked: Directory not empty rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x: Directory not empty"
+          ]
+        },
+        "stderr": "fix-group: cleanup failure: rm -rf $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x did not remove the directory, quoting it: rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held: Permission denied\nrm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked: Directory not empty\nrm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x: Directory not empty"
+      },
+      "before": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/state.json",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "f group.json",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-pushed",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-at-default-unpushed",
+      "script": "reap",
+      "prepare": "add_worktree",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "left",
+            "reason": "no-remote-tracking-ref",
+            "local_tip": "<origin/main>",
+            "origin_tip": null
+          },
+          "left_behind": [
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-ahead",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\ncommit_file \"$WT\" more.txt more 'fix: a second commit'",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch",
+        "branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "left",
+            "reason": "tip-not-on-origin",
+            "local_tip": "<branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/more.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-nothing",
+      "script": "reap",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "absent"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "absent"
+          },
+          "branch_ref": {
+            "action": "absent",
+            "reason": "no-local-branch",
+            "local_tip": null,
+            "origin_tip": null
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-stale-registration",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nrm -rf \"$WT\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "stale-registration-removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-plain-directory",
+      "script": "reap",
+      "prepare": "mkdir -p \"$WT\"\nprintf 'x\\n' > \"$WT/x\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "not-a-worktree"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "absent",
+            "reason": "no-local-branch",
+            "local_tip": null,
+            "origin_tip": null
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/x",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-work-is-file",
+      "script": "reap",
+      "prepare": "mkdir -p \"$REPO/.claude/worktrees\"\nprintf 'x\\n' > \"$WORK\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "absent"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "not-a-directory"
+          },
+          "branch_ref": {
+            "action": "absent",
+            "reason": "no-local-branch",
+            "local_tip": null,
+            "origin_tip": null
+          },
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "work path exists and is not a directory: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-dotdot-missing",
+      "script": "reap",
+      "prepare": "add_worktree",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$REPO/.claude/worktrees/gone/../fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "work path must not contain a .. segment: $ROOT/work/.claude/worktrees/gone/../fix-dependabot-example-pkg-6x"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-dotdot-existing",
+      "script": "reap",
+      "prepare": "add_worktree\nmkdir -p \"$REPO/.claude/worktrees/there\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$REPO/.claude/worktrees/there/../fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "left",
+            "reason": "no-remote-tracking-ref",
+            "local_tip": "<origin/main>",
+            "origin_tip": null
+          },
+          "left_behind": [
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "d work/.claude/worktrees/there",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/there",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-outside",
+      "script": "reap",
+      "prepare": "mkdir -p \"$ROOT/outside/fix-dependabot-example-pkg-6x\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$ROOT/outside/fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "work path is not under $ROOT/work/.claude/worktrees/: $ROOT/outside/fix-dependabot-example-pkg-6x"
+        }
+      },
+      "before": {
+        "paths": [
+          "d outside",
+          "d outside/fix-dependabot-example-pkg-6x",
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d outside",
+          "d outside/fix-dependabot-example-pkg-6x",
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-worktree-root",
+      "script": "reap",
+      "prepare": "add_worktree",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$REPO/.claude/worktrees"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "work path is not under $ROOT/work/.claude/worktrees/: $ROOT/work/.claude/worktrees"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-symlinked-worktrees",
+      "script": "reap",
+      "prepare": "add_worktree\nmkdir -p \"$ROOT/elsewhere\"\nmv \"$REPO/.claude/worktrees\" \"$ROOT/elsewhere/wt\"\nln -s \"$ROOT/elsewhere/wt\" \"$REPO/.claude/worktrees\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "work path is not under $ROOT/work/.claude/worktrees/: $ROOT/elsewhere/wt/fix-dependabot-example-pkg-6x"
+        }
+      },
+      "before": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/wt",
+          "d elsewhere/wt/fix-dependabot-example-pkg-6x",
+          "d elsewhere/wt/fix-dependabot-example-pkg-6x/fix",
+          "f elsewhere/wt/fix-dependabot-example-pkg-6x/fix/.git",
+          "f elsewhere/wt/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "d work",
+          "d work/.claude",
+          "l work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/wt",
+          "d elsewhere/wt/fix-dependabot-example-pkg-6x",
+          "d elsewhere/wt/fix-dependabot-example-pkg-6x/fix",
+          "f elsewhere/wt/fix-dependabot-example-pkg-6x/fix/.git",
+          "f elsewhere/wt/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "d work",
+          "d work/.claude",
+          "l work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-symlink-fix",
+      "script": "reap",
+      "prepare": "mkdir -p \"$WORK\" \"$ROOT/outside/fix\"\nln -s \"$ROOT/outside/fix\" \"$WT\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "worktree path resolves outside $ROOT/work/.claude/worktrees/: $ROOT/outside/fix"
+        }
+      },
+      "before": {
+        "paths": [
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "l work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d outside",
+          "d outside/fix",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "l work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-symlink-to-work",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nln -s \"$WORK\" \"$ROOT/link\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$ROOT/link"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "l link",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "l link",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-repo-root-via-symlink",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nln -s \"$REPO\" \"$ROOT/alias\"",
+      "args": [
+        "--repo-root",
+        "$ROOT/alias",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$ROOT/alias/.claude/worktrees/fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "l alias",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "l alias",
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-scoped",
+      "script": "reap",
+      "group": "scoped",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-@example-scope/example-pkg-2x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-flat-branch",
+      "script": "reap",
+      "branch": "fix-dependabot-example-pkg-6x",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix-dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix-dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix-dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix-dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-dirty",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nprintf 'changed\\n' > \"$WT/file.txt\"\nprintf 'new\\n' > \"$WT/untracked.txt\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "removed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/untracked.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-dash-branch",
+      "script": "reap",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "-D",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "branch name must not begin with a dash: -D"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-invalid-branch",
+      "script": "reap",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "a..b",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "not a valid branch name: a..b"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-not-a-repo",
+      "script": "reap",
+      "prepare": "mkdir -p \"$ROOT/plain\"",
+      "args": [
+        "--repo-root",
+        "$ROOT/plain",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$ROOT/plain/.claude/worktrees/fix-dependabot-example-pkg-6x"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "not a git repository: $ROOT/plain"
+        }
+      },
+      "before": {
+        "paths": [
+          "d plain",
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d plain",
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-repo-missing",
+      "script": "reap",
+      "args": [
+        "--repo-root",
+        "$ROOT/missing",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "repo_root does not exist: $ROOT/missing"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-no-work-flag",
+      "script": "reap",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH"
+      ],
+      "labels": [
+        "origin/main"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": "",
+        "stderr": {
+          "error": "Usage: reap-agent-artifacts.sh --repo-root <path> --branch <name> --work <path>"
+        }
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-worktree-remove-fails",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nlock_dir \"$WT/locked\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "failed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "skipped"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "worktree remove failed: error: failed to delete '$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix': Permission denied"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "reap-work-dir-remove-fails",
+      "script": "reap",
+      "prepare": "add_worktree\ncommit_file \"$WT\" fix.txt fix 'fix: one commit'\ng -C \"$WT\" push -q origin \"$BRANCH\"\nlock_dir \"$WORK/locked\"",
+      "args": [
+        "--repo-root",
+        "$REPO",
+        "--branch",
+        "$BRANCH",
+        "--work",
+        "$WORK"
+      ],
+      "labels": [
+        "origin/main",
+        "origin/branch"
+      ],
+      "result": {
+        "status": 1,
+        "stdout": {
+          "repo_root": "$ROOT/work",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "work": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "worktree": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+            "action": "removed"
+          },
+          "work_dir": {
+            "path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "action": "failed"
+          },
+          "branch_ref": {
+            "action": "deleted",
+            "reason": "tip-on-origin",
+            "local_tip": "<origin/branch>",
+            "origin_tip": "<origin/branch>"
+          },
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "rm -rf failed: rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held: Permission denied",
+            "rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked: Directory not empty",
+            "rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x: Directory not empty"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    }
+  ]
+}
