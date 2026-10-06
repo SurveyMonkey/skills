@@ -6,7 +6,7 @@
 // The expected values are written by hand from ADR 006 and the header of
 // `score-merge-risk.sh`. `parity-score-merge-risk.test.ts` compares the port
 // with the script on the shellspec tables.
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -794,5 +794,140 @@ describe('F5: CI presence', () => {
       'no GitHub Actions workflow triggers on this pull request; another CI vendor is not read',
       { workflow: null, trigger: null, step: null },
     ])
+  })
+})
+
+// Each expected value below is the answer of `score-merge-risk.sh` on the
+// same tree, read from the line of the script that each title names.
+describe('the reads of the tree, as the bash reads them', () => {
+  const direct = { why: { relationship: 'direct' } }
+  const lodash = "import x from 'lodash'"
+
+  it('reads text as UTF-8, as grep passes the bytes through and jq writes them', () => {
+    const root = tree({
+      'package.json': manifest({ scripts: { test: 'x' } }),
+      'src/café.js': lodash,
+      'tests/c.test.js': "import c from '../src/café'",
+      '.github/workflows/ci.yml':
+        'on: [pull_request]\njobs:\n  t:\n    steps:\n      - run: npm test # ✓\n',
+    })
+    const report = scored(root, direct)
+    expect([report.coverage, report.ci.step]).toEqual([
+      { affected: 1, covered: 1, uncovered: [] },
+      'npm test # ✓',
+    ])
+  })
+
+  it('reads a UTF-8 byte order mark at the start of package.json, as jq does', () => {
+    const root = tree({ 'package.json': `\u{FEFF}${manifest({ scripts: { test: 'x' } })}` })
+    expect(scored(root).factors[3]?.evidence).toBe(
+      'no source imports and no build script; the test script is the only thing that would notice',
+    )
+  })
+
+  it('reads parents that are only empty lines as no parents: $(...) drops the trailing newlines', () => {
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': lodash })
+    const report = scored(root, { why: { relationship: 'transitive', parents: ['', ''] } })
+    expect([report.factors[2]?.score, report.coverage.affected]).toEqual([2, null])
+  })
+
+  it('cuts the parents at 20 lines of jq -r, which prints an object on many lines', () => {
+    const big = Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`k${index}`, index]))
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': "require('real')" })
+    const report = scored(root, { why: { relationship: 'transitive', parents: [big, 'real'] } })
+    expect(report.coverage.affected).toBe(0)
+  })
+
+  it('takes only a non-empty text as a script', () => {
+    const root = tree({ 'package.json': manifest({ scripts: { test: {} } }), 'src/a.js': lodash })
+    expect(scored(root, direct).factors[3]?.evidence).toBe(
+      '1 affected module(s), and package.json declares no test script',
+    )
+  })
+
+  it('takes a browser text as an entry point', () => {
+    const root = tree({ 'package.json': manifest({ browser: 'src/a.js' }), 'src/a.js': lodash })
+    expect(scored(root, direct).factors[2]?.evidence).toBe(
+      'imported in 1 module(s) for lodash, including a declared entry point',
+    )
+  })
+
+  it.each([
+    [5, 'src/m0.js, src/m1.js, src/m2.js, src/m3.js, src/m4.js uncovered'],
+    [6, 'src/m0.js, src/m1.js, src/m2.js, src/m3.js, src/m4.js, and 1 more uncovered'],
+  ])('names %i uncovered modules with "and N more" only past five', (count, names) => {
+    const files = Object.fromEntries(
+      Array.from({ length: count }, (_, index) => [`src/m${index}.js`, lodash]),
+    )
+    const root = tree({ 'package.json': manifest({ scripts: { test: 'x' } }), ...files })
+    expect(scored(root, direct).factors[3]?.evidence).toBe(
+      `none of the ${count} affected module(s) is covered by a test (${names})`,
+    )
+  })
+
+  it('sorts the uncovered modules by bytes, so an upper case name comes first', () => {
+    const root = tree({
+      'package.json': manifest({ scripts: { test: 'x' } }),
+      'src/a.js': lodash,
+      'src/Z.js': lodash,
+    })
+    expect(scored(root, direct).coverage.uncovered).toEqual(['src/Z.js', 'src/a.js'])
+  })
+
+  it('reads each source extension, and no other file', () => {
+    const files = Object.fromEntries(
+      ['jsx', 'tsx', 'mjs', 'cjs', 'vue', 'svelte', 'js', 'ts', 'json'].map((ext) => [
+        `src/a.${ext}`,
+        lodash,
+      ]),
+    )
+    const root = tree({ 'package.json': manifest({}), ...files })
+    expect(scored(root, direct).coverage.affected).toBe(8)
+  })
+
+  it('enters no pruned directory, and takes no test path as the surface', () => {
+    const pruned = ['node_modules', 'build', '.next', 'coverage', 'out', '.yarn', '.git']
+    const tests = ['__mocks__', 'cypress', 'spec', 'specs', 'test', 'tests']
+    const files = Object.fromEntries(
+      [...pruned, 'storybook-static', ...tests].map((dir) => [`${dir}/a.js`, lodash]),
+    )
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': lodash, ...files })
+    expect(scored(root, direct).coverage.affected).toBe(1)
+  })
+
+  it('reads a line at a time, so an import split across lines is not seen', () => {
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': "import x from\n  'lodash'" })
+    expect(scored(root, direct).coverage.affected).toBe(0)
+  })
+
+  it('reads a dot in the package name as a dot', () => {
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': "require('aXb')" })
+    expect(scored(root, { package: 'a.b', ...direct }).coverage.affected).toBe(0)
+  })
+
+  it('does not follow a link in the walk, as grep -r and find -type f do not', () => {
+    const root = tree({ 'package.json': manifest({}), 'src/a.js': lodash })
+    symlinkSync('a.js', join(root, 'src/l.js'))
+    expect(scored(root, direct).coverage.affected).toBe(1)
+  })
+
+  it('takes neither a directory nor a longer name under __tests__ as the test of a module', () => {
+    const root = tree({
+      'package.json': manifest({ scripts: { test: 'x' } }),
+      'src/a.js': lodash,
+      'src/__tests__/a.x/k.txt': '',
+      'src/__tests__/ab.js': '',
+    })
+    expect(scored(root, direct).coverage.uncovered).toEqual(['src/a.js'])
+  })
+
+  it('takes the workflows in byte order, so an upper case name comes first', () => {
+    const run = 'on: pull_request\njobs:\n  t:\n    steps:\n      - run: npm test\n'
+    const root = tree({
+      'package.json': manifest({}),
+      '.github/workflows/a.yml': run,
+      '.github/workflows/B.yml': run,
+    })
+    expect(scored(root).ci.workflow).toBe('.github/workflows/B.yml')
   })
 })

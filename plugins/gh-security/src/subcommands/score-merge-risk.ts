@@ -31,8 +31,13 @@ import { resolve } from 'node:path'
 
 import { type selectAdapter as select, selectAdapter } from '../adapters/registry.ts'
 import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
-import { failed, type JsonObject, ok } from '../lib/envelope.ts'
-import { isOverrideScope, SCOPE_ERROR, scoreMergeRisk as score } from '../merge-risk/score.ts'
+import { failed, ok } from '../lib/envelope.ts'
+import {
+  isOverrideScope,
+  SCOPE_ERROR,
+  scoreMergeRisk as score,
+  withoutBom,
+} from '../merge-risk/score.ts'
 
 /** The flags that take a value. Each other word is an unknown argument. */
 const FLAGS = [
@@ -50,7 +55,9 @@ const REQUIRED = ['--package', '--after', '--why-json', '--override-scope']
 /** Read the why payload: stdin for `-`, else the file. Undefined when nothing parses. */
 const readWhy = (path: string | null, context: CommandContext): unknown => {
   try {
-    return JSON.parse(path === null ? context.io.readStdin() : readFileSync(path, 'utf8'))
+    return JSON.parse(
+      withoutBom(path === null ? context.io.readStdin() : readFileSync(path, 'utf8')),
+    )
   } catch {
     return undefined
   }
@@ -103,7 +110,8 @@ export const scoreMergeRisk = (
     )
   }
   const routed = route('npm')
-  const adapter = routed.adapter as NonNullable<typeof routed.adapter>
+  if (!routed.supported) return failed(routed.reason)
+  const adapter = routed.adapter
   const report = score(
     {
       package: values.get('--package') as string,
@@ -115,13 +123,13 @@ export const scoreMergeRisk = (
       declaredRanges: stated.length > 0 ? stated : 'none',
     },
     {
-      name: routed.name as string,
+      name: routed.name,
       compareVersions: adapter.compareVersions,
       rangeFacts: adapter.rangeFacts,
     },
     cwd,
   )
-  return report.outcome === 'ok' ? ok(report.value as JsonObject) : report
+  return report.outcome === 'ok' ? ok(report.value) : report
 }
 
 /** The registry entry: the handler, with the directory of the process as the tree. */

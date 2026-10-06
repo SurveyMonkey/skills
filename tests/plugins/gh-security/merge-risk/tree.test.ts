@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ciStep,
+  importPattern,
+  packageTested,
   prTrigger,
   runCommands,
   siblingTested,
@@ -146,5 +148,29 @@ describe('the walks', () => {
   it('reads no workflow directory from a file of that name', () => {
     const root = tree({ '.github/workflows': 'on: pull_request\n' })
     expect([workflowDirUnreadable(root), workflowFiles(root)]).toEqual([false, []])
+  })
+})
+
+describe('ciStep, each command the bash takes as a check', () => {
+  it.each([
+    'bun test',
+    'bunx lint',
+    'pnpm typecheck',
+    'yarn check',
+    'npm run check-types',
+    'cd a&&yarn lint',
+    'jest',
+    'playwright test',
+    'cypress run',
+  ])('takes %s', (command) => {
+    expect(ciStep(`jobs:\n  t:\n    steps:\n      - run: ${command}\n`)).toBe(command)
+  })
+})
+
+describe('packageTested', () => {
+  it('skips a test file it cannot read: 2>/dev/null || true', () => {
+    const root = tree({ 't.test.js': "import x from 'lodash'" })
+    chmodSync(join(root, 't.test.js'), 0)
+    expect(packageTested(root, ['./t.test.js'], importPattern(['lodash']))).toBe(false)
   })
 })

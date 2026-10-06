@@ -4,8 +4,10 @@
 // The rules and the reasons for each are in the header of that script and in
 // ADR 006. `score.ts` holds the factors and the bands.
 //
-// Each read is a line test, as grep does it. A file is read as latin1, so
-// each byte is one character, as grep reads bytes in the C locale.
+// Each read is a line test, as grep does it. A file is read as UTF-8: grep
+// passes the bytes through, and jq writes them in the report as UTF-8. A
+// module name from the walk is UTF-8 too, so it compares with the names in
+// a test file.
 //
 // Differences from the bash, each declared with #233:
 //   - Text is sorted by its bytes: the uncovered modules, and the workflow
@@ -104,12 +106,12 @@ const anyLine = (text: string, pattern: RegExp): boolean =>
  * that cannot be read throws the error of node.
  */
 export const matchingFiles = (root: string, files: readonly string[], pattern: RegExp): string[] =>
-  files.filter((file) => anyLine(readFileSync(join(root, file), 'latin1'), pattern))
+  files.filter((file) => anyLine(readFileSync(join(root, file), 'utf8'), pattern))
 
 /** The text of a file, or null when it cannot be read: `2>/dev/null || true`. */
 const readOrNull = (path: string): string | null => {
   try {
-    return readFileSync(path, 'latin1')
+    return readFileSync(path, 'utf8')
   } catch {
     return null
   }

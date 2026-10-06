@@ -202,3 +202,21 @@ describe('the registry entry', () => {
     expect(error(result as CommandResult).error).toBe('Missing required argument: --package')
   })
 })
+
+describe('the inputs, as the bash reads them', () => {
+  it('reads a UTF-8 byte order mark at the start of the why file, as jq does', () => {
+    const root = world()
+    writeFileSync(join(root, 'why.json'), `\u{FEFF}${JSON.stringify({ relationship: 'direct' })}`)
+    const result = run(root, ARGS)
+    expect(result).toMatchObject({
+      outcome: 'ok',
+      value: { factors: expect.arrayContaining([expect.objectContaining({ id: 'F2', score: 2 })]) },
+    })
+  })
+
+  it('fails with the reason when the registry routes npm to no adapter', () => {
+    const none = selectAdapter('no-such-ecosystem')
+    if (none.supported) throw new Error('the registry routes no-such-ecosystem')
+    expect(error(run(world(), ARGS, '', () => none))).toEqual({ exit: 1, error: none.reason })
+  })
+})

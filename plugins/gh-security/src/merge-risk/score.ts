@@ -298,11 +298,14 @@ const entryPoints = (manifest: Record_): string[] => {
 const raw = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 
-/** The parents that `why` names, as `jq -r '.parents[]?' | head -20` gives them. */
+/**
+ * The parents that `why` names, as `$(jq -r '.parents[]?' | head -20)` gives
+ * them: the command substitution drops the newlines at the end.
+ */
 const parentsText = (why: Record_): string => {
   const parents = fieldOf(why, 'parents')
   const values = Array.isArray(parents) ? parents : isRecord(parents) ? Object.values(parents) : []
-  return values.map(raw).join('\n').split('\n').slice(0, 20).join('\n')
+  return values.map(raw).join('\n').split('\n').slice(0, 20).join('\n').replace(/\n+$/, '')
 }
 
 const words = (text: string): string[] => text.split(/[ \t\n]+/).filter((word) => word !== '')
@@ -325,6 +328,9 @@ const EMOJI: Readonly<Record<Band, string>> = {
 
 const bandOf = (score: number): Band => (score <= 3 ? 'Low' : score <= 6 ? 'Medium' : 'High')
 
+/** The text without a UTF-8 byte order mark at its start, which jq ignores. */
+export const withoutBom = (text: string): string => text.replace(/^\u{FEFF}/u, '')
+
 /** Read package.json at `root`, or the refusal. */
 const readManifest = (root: string): Envelope<Record_> => {
   if (!statSync(join(root, 'package.json'), { throwIfNoEntry: false })?.isFile()) {
@@ -336,7 +342,7 @@ const readManifest = (root: string): Envelope<Record_> => {
   }
   let manifest: unknown = null
   try {
-    manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    manifest = JSON.parse(withoutBom(readFileSync(join(root, 'package.json'), 'utf8')))
   } catch {}
   return isRecord(manifest)
     ? ok(manifest)
@@ -487,7 +493,7 @@ const ciPresence = (root: string): Envelope<Ci> => {
   for (const workflow of workflowFiles(root)) {
     let text: string
     try {
-      text = readFileSync(join(root, workflow), 'latin1')
+      text = readFileSync(join(root, workflow), 'utf8')
     } catch {
       return failed(
         `${workflow} cannot be read, so whether it runs a check on this pull request could not ` +
