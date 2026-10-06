@@ -22,6 +22,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -528,6 +529,19 @@ describe('score (phase 5)', () => {
             'repository that declares no scripts.',
         })}`,
       })
+    })
+
+    // A stat of a link to itself throws ELOOP. `[ -f package.json ]` was false
+    // there, so the bash scorer failed, and the driver put it in this phase.
+    it('puts a scorer that throws in the validate phase', async () => {
+      const w = world()
+      rmSync(join(w.worktree, 'package.json'))
+      symlinkSync('package.json', join(w.worktree, 'package.json'))
+      const answer = await score(w)
+      expect(answer.json).toMatchObject({ status: 'failure', phase: 'validate' })
+      expect((answer.json as { detail: string }).detail).toMatch(
+        /^score-merge-risk\.sh failed: \{"error":".*ELOOP/,
+      )
     })
 
     // A state that a version with `--scorer` wrote still has the key. It is

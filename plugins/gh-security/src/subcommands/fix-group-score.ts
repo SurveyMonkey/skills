@@ -248,23 +248,30 @@ export const score = async (loaded: Loaded, work: string): Promise<CommandResult
   }
   // An empty list is the `none` sentinel. Without it the scorer cannot tell
   // "no range could be read" from "no range is out of date".
-  const scored = scoreMergeRisk(
-    {
-      package: pkg,
-      before,
-      after,
-      why: why.value,
-      whyLabel: whyFile,
-      overrideScope: scope.value,
-      declaredRanges: ranges.length === 0 ? 'none' : ranges,
-    },
-    {
-      name: driver.adapter,
-      compareVersions: adapter.compareVersions,
-      rangeFacts: adapter.rangeFacts,
-    },
-    driver.worktree,
-  )
+  // A throw is a failed scorer too. The bash script exited non-zero on a
+  // crash, and the driver put that in this phase.
+  let scored: ReturnType<typeof scoreMergeRisk>
+  try {
+    scored = scoreMergeRisk(
+      {
+        package: pkg,
+        before,
+        after,
+        why: why.value,
+        whyLabel: whyFile,
+        overrideScope: scope.value,
+        declaredRanges: ranges.length === 0 ? 'none' : ranges,
+      },
+      {
+        name: driver.adapter,
+        compareVersions: adapter.compareVersions,
+        rangeFacts: adapter.rangeFacts,
+      },
+      driver.worktree,
+    )
+  } catch (error) {
+    scored = failed(error instanceof Error ? error.message : String(error))
+  }
   // A failed scorer is a phase failure, as every other failure of this
   // phase. The detail is the text of the bash: the script name, and the
   // JSON error that the script wrote.
