@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -378,6 +379,23 @@ describe('fix-group cleanup', () => {
     })
     expect(existsSync(join(w.wt, '.git'))).toBe(true)
     expect(w.fixtures.branches(w.repo)).toEqual(branches)
+  })
+
+  it('refuses a workspace that moved after setup, and changes nothing', async () => {
+    const w = world()
+    await setUp(w)
+    const moved = join(w.repo, '.claude', 'worktrees', 'moved')
+    renameSync(w.work, moved)
+    const message =
+      `cleanup: --work names ${moved}, but setup recorded this run's workspace as ${w.work}. ` +
+      'A removal is only ever issued against the path this run created; nothing was removed.'
+    expect(await call(w, ['cleanup', '--work', moved])).toEqual({
+      status: 1,
+      json: { error: message },
+      stderr: message,
+    })
+    expect(existsSync(join(moved, 'fix', '.git'))).toBe(true)
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
   })
 
   it('refuses a state with no work path', async () => {
