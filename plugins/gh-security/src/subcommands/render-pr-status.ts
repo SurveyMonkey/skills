@@ -59,6 +59,9 @@ const CHECK_STATES = ['none', 'pending', 'passed', 'failed']
 /** What the table shows for a PR that has no score. */
 const NOT_SCORED = 'not scored'
 
+/** The heading for error entries whose URL is not a PR URL. */
+const NOT_A_PULL_REQUEST = 'not a pull request URL'
+
 /** A JSON object, and not `null`, a list or a scalar. */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -111,11 +114,13 @@ const entryOf = (value: unknown): Entry | string => {
   const { url } = value
   if (typeof url !== 'string') return 'has a url that is not text'
   const repo = PULL_REQUEST_URL.exec(url)?.[1]
-  if (repo === undefined) return `has a url that is not a GitHub pull request URL: ${url}`
+  // `pr-status` gives an error entry for a URL that is not a PR URL, so an
+  // error entry keeps its row under a heading of its own.
   if ('error' in value) {
     if (typeof value.error !== 'string') return `has an error that is not text: ${url}`
-    return { url, repo, error: value.error }
+    return { url, repo: repo ?? NOT_A_PULL_REQUEST, error: value.error }
   }
+  if (repo === undefined) return `has a url that is not a GitHub pull request URL: ${url}`
   const counts = value.check_counts
   const failing = value.failing_checks
   if (typeof value.checks !== 'string' || !CHECK_STATES.includes(value.checks)) {
@@ -253,7 +258,7 @@ const footnotes = (entries: readonly Entry[]): string[] => {
     ],
     [
       reads.some((entry) => entry.draft),
-      '`draft`: a person converted this PR to a draft, because these PRs open ready.',
+      '`draft`: these PRs open ready, so a person converted this PR to a draft.',
     ],
   ]
   return notes.filter(([shown]) => shown).map(([, text]) => `- ${text}`)
