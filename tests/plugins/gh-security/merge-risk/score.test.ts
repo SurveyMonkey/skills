@@ -880,6 +880,17 @@ describe('the reads of the tree, as the bash reads them', () => {
     expect(scored(root, direct).coverage.uncovered).toEqual(['src/Z.js', 'src/a.js'])
   })
 
+  // The walk goes into `a` before it reads `a-b.js`, on any filesystem that
+  // lists a directory in order. The bytes put `-` (2D) before `/` (2F).
+  it('sorts the uncovered modules by bytes, and not in the order of the walk', () => {
+    const root = tree({
+      'package.json': manifest({ scripts: { test: 'x' } }),
+      'a/x.js': lodash,
+      'a-b.js': lodash,
+    })
+    expect(scored(root, direct).coverage.uncovered).toEqual(['a-b.js', 'a/x.js'])
+  })
+
   it('reads each source extension, and no other file', () => {
     const files = Object.fromEntries(
       ['jsx', 'tsx', 'mjs', 'cjs', 'vue', 'svelte', 'js', 'ts', 'json'].map((ext) => [

@@ -149,6 +149,22 @@ describe('the walks', () => {
     const root = tree({ '.github/workflows': 'on: pull_request\n' })
     expect([workflowDirUnreadable(root), workflowFiles(root)]).toEqual([false, []])
   })
+
+  // The listing comes out of byte order, so each order is the sort's, on any
+  // filesystem. U+FF21 is EF BC A1 and U+1F600 is F0 9F 98 80 in UTF-8, but
+  // U+1F600 is first in UTF-16, the order of a sort with no comparator.
+  it('sorts each workflow glob by the bytes of the name, whatever order the listing gives', () => {
+    const names = ['c.yml', '\u{1F600}.yml', 'a.yml', 'B.yml', '\u{FF21}.yml']
+    const root = tree(Object.fromEntries(names.map((name) => [`.github/workflows/${name}`, ''])))
+    const files = workflowFiles(root, () => names)
+    expect(files.map((path) => path.slice('.github/workflows/'.length))).toEqual([
+      'B.yml',
+      'a.yml',
+      'c.yml',
+      '\u{FF21}.yml',
+      '\u{1F600}.yml',
+    ])
+  })
 })
 
 describe('ciStep, each command the bash takes as a check', () => {

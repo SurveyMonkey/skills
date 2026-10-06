@@ -19,6 +19,8 @@
 //     it. A glob character in one is not expanded against the tree.
 //   - A binary file is read as text. grep names a binary file that matches,
 //     and does not print its lines.
+//   - A file name that is not valid UTF-8 is not read. Its decoded name is
+//     not on the disk, so F3 fails, and F4 and F5 skip the file.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -225,10 +227,11 @@ export const byBytes = (a: string, b: string): number =>
 /**
  * The workflow files, as `.github/workflows/*.yml` and then `*.yaml` expand:
  * no name that starts with a dot, each glob in byte order, and regular files
- * only.
+ * only. `list` reads the names of the directory. A test can give the names
+ * in an order that is not the byte order.
  */
-export const workflowFiles = (root: string): string[] => {
-  const names = namesIn(join(root, WORKFLOW_DIR)).filter((name) => !name.startsWith('.'))
+export const workflowFiles = (root: string, list = namesIn): string[] => {
+  const names = list(join(root, WORKFLOW_DIR)).filter((name) => !name.startsWith('.'))
   const glob = (suffix: string): string[] =>
     names.filter((name) => name.endsWith(suffix)).sort(byBytes)
   return [...glob('.yml'), ...glob('.yaml')]

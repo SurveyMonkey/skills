@@ -160,6 +160,7 @@ describe('the why payload', () => {
     const why = JSON.stringify({ relationship: 'direct', dev_only: false })
     const result = run(world(), args, why)
     expect(result?.outcome === 'ok' && result.value).toMatchObject({ band: 'Medium', score: 4 })
+    expect(run(world(), args, `\u{FEFF}${why}`)).toMatchObject({ outcome: 'ok' })
     expect(error(run(world(), args, '')).error).toMatch(
       /^--why-json - did not contain a JSON object\./,
     )
