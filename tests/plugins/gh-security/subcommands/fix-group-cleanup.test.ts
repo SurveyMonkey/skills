@@ -4,7 +4,7 @@
 // worktree in a repository with a bare origin from `harness/git.ts`. A git
 // failure comes from the git shim of that harness on PATH. The expected
 // values are written by hand from the header of `fix-group.ts`.
-// `parity-fix-group-cleanup.test.ts` compares the port with the capture of
+// `parity-reap.test.ts` compares the port with the capture of
 // `fix-group.sh cleanup`.
 import {
   chmodSync,
@@ -310,6 +310,51 @@ describe('fix-group cleanup', () => {
     })
   })
 
+  it('keeps a branch whose local ref cannot be read, and names no tip', async () => {
+    const w = world()
+    await setUp(w)
+    const env = refusing(w, `rev-parse --verify --quiet refs/heads/${BRANCH}`)
+    const answer = await call(w, ['cleanup', '--work', w.work], env)
+    const failure = `git rev-parse refs/heads/${BRANCH} failed: git stub: refusing rev-parse --verify --quiet refs/heads/${BRANCH}`
+    expect(answer.status).toBe(3)
+    expect(answer.json).toMatchObject({
+      branch_deleted: false,
+      branch_tip: null,
+      detail: failure,
+      errors: [failure],
+      left_behind: [BRANCH],
+    })
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
+  })
+
+  it.each<[string, (w: World) => void, Record<string, JsonValue>]>([
+    [
+      'a plain directory at the worktree path',
+      (w) => {
+        w.fixtures.git(w.repo, 'worktree', 'remove', '--force', w.wt)
+        mkdirSync(w.wt)
+      },
+      { worktree_removed: false, worktree: { action: 'not-a-worktree' } },
+    ],
+    [
+      'a registration that no admin entry names',
+      (w) => {
+        renameSync(w.wt, `${w.wt}.gone`)
+        writeFileSync(join(w.repo, '.git', 'worktrees', 'fix', 'gitdir'), `${w.wt}\n`)
+      },
+      {
+        status: 'failure',
+        worktree: { action: 'stale-registration' },
+        work_dir: { action: 'kept-registration-live' },
+      },
+    ],
+  ])('reports %s in the words of the report', async (_case, arrange, expected) => {
+    const w = world()
+    await setUp(w)
+    arrange(w)
+    expect((await call(w, ['cleanup', '--work', w.work])).json).toMatchObject(expected)
+  })
+
   it('exits 3 when git refuses the branch delete', async () => {
     const w = world()
     await setUp(w)
@@ -475,7 +520,24 @@ describe('a signal during fix-group setup', () => {
       expect(w.fixtures.git(w.repo, 'worktree', 'list', '--porcelain').split('\n')[0]).toBe(
         `worktree ${w.repo}`,
       )
-      expect(stderr.join('')).toContain(`fix-group: setup stopped by ${signal}`)
+      const prefix = `fix-group: setup stopped by ${signal}: `
+      const line = stderr.join('')
+      expect(line.startsWith(prefix)).toBe(true)
+      expect(JSON.parse(line.slice(prefix.length))).toEqual({
+        repo_root: w.repo,
+        branch: BRANCH,
+        work: w.work,
+        worktree: { path: w.wt, action: 'removed' },
+        work_dir: { path: w.work, action: 'removed' },
+        branch_ref: {
+          action: 'deleted',
+          reason: 'tip-on-default',
+          local_tip: w.fixtures.sha(w.repo, 'main'),
+          origin_tip: null,
+        },
+        left_behind: [],
+        errors: [],
+      })
     },
   )
 
@@ -498,6 +560,11 @@ describe('a signal during fix-group setup', () => {
     )
     expect(log).toEqual(['exit 143'])
     expect(existsSync(join(w.wt, '.git'))).toBe(true)
+    expect(existsSync(join(w.work, 'state.json'))).toBe(true)
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
+    expect(w.fixtures.git(w.repo, 'worktree', 'list', '--porcelain')).toContain(
+      `worktree ${w.wt}\n`,
+    )
     expect(stderr.join('')).toBe(
       `fix-group: setup stopped by SIGTERM: ${JSON.stringify({
         outcome: 'failed',

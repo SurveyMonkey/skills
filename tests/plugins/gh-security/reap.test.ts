@@ -428,8 +428,14 @@ describe('reap', () => {
 
   it('removes the one admin entry of a registration whose directory is gone', async () => {
     const w = world()
+    // The worktree of another group, made first. git names its admin entry
+    // `fix`, and the entry of this group `fix1`. So the sibling comes first.
     w.fixtures.branch(w.repo, 'sibling')
-    w.fixtures.worktree(w.repo, join(w.repo, '.claude', 'worktrees', 'sibling'), 'sibling')
+    w.fixtures.worktree(
+      w.repo,
+      join(w.repo, '.claude', 'worktrees', 'fix-dependabot-other-1x', 'fix'),
+      'sibling',
+    )
     addWorktree(w)
     commitIn(w, 'fix.txt')
     push(w)
@@ -442,7 +448,16 @@ describe('reap', () => {
       'removed',
       'deleted',
     ])
-    expect(readdirSync(join(w.repo, '.git', 'worktrees'))).toEqual(['aaa', 'sibling'])
+    expect(readdirSync(join(w.repo, '.git', 'worktrees'))).toEqual(['aaa', 'fix'])
+  })
+
+  it('matches the whole line of the worktree list, as grep -Fqx did', async () => {
+    const w = world()
+    // A registration whose path starts with the worktree path, and none at it.
+    mkdirSync(join(w.repo, '.claude', 'worktrees'), { recursive: true })
+    w.fixtures.git(w.repo, 'worktree', 'add', '-q', `${w.wt}-old`, '-b', BRANCH, 'origin/main')
+    const report = await reap(await contained(w), ORIGIN_ONLY, w.git)
+    expect(report.worktree).toEqual({ path: w.wt, action: 'absent' })
   })
 
   it('refuses a stale registration that no admin entry names', async () => {
@@ -583,6 +598,26 @@ describe('reap', () => {
     })
     expect(report.errors).toEqual([
       'git rev-parse refs/remotes/origin/main failed: git stub: refusing rev-parse --verify --quiet refs/remotes/origin/main',
+    ])
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
+  })
+
+  it('leaves the branch when the local ref cannot be read', async () => {
+    const w = world()
+    addWorktree(w)
+    const report = await reap(
+      await contained(w),
+      { pushed: true, defaultBranch: 'main' },
+      shimmed(w, `rev-parse --verify --quiet refs/heads/${BRANCH}`),
+    )
+    expect(report.branch_ref).toEqual({
+      action: 'left',
+      reason: 'tip-read-failed',
+      local_tip: null,
+      origin_tip: null,
+    })
+    expect(report.errors).toEqual([
+      `git rev-parse refs/heads/${BRANCH} failed: git stub: refusing rev-parse --verify --quiet refs/heads/${BRANCH}`,
     ])
     expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
   })
