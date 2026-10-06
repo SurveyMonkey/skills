@@ -1,0 +1,3 @@
+npm error code E403
+npm error 403 403 Forbidden - GET http://127.0.0.1:61255/@example-org%2fx - nope
+npm error 403 In most cases, you or one of your dependencies are requesting a package version that is forbidden by your security policy, or on a server you do not have access to.

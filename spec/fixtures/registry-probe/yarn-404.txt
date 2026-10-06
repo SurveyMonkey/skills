@@ -1,0 +1,4 @@
+➤ YN0035: Package not found
+➤ YN0035:   Response Code: 404 (Not Found)
+➤ YN0035:   Request Method: GET
+➤ YN0035:   Request URL: https://registry.yarnpkg.com/@example-org%2fdoes-not-exist-zz
