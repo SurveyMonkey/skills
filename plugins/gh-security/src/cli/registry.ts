@@ -62,6 +62,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description: 'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>...',
     load: async () => (await import('../subcommands/pr-status.ts')).prStatusCommand,
   },
+  'preflight-repo': {
+    description:
+      'Prepare one repository for dispatch: exclude the worktrees, detect the tree, probe its registry: preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>',
+    load: async () => (await import('../subcommands/preflight-repo.ts')).preflightRepoCommand,
+  },
   'prepare-checkout': {
     description:
       'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root>',
