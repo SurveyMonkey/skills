@@ -22,7 +22,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
 | `src/adapters/` | `adapter.ts`: the ADR 001 verbs as one in-process interface. It has the read verbs, `validate`, the registry probe `probeRegistry`, and the write verbs `install`, `shim` and `applyConstraint`. `node.ts`: the adapter for `npm` alerts. `registry.ts`: GitHub's advisory ecosystem to an adapter, with no CLI entry. `node/`: one file for each verb or group of verbs, one file for each pass of `apply-constraint.ts`, and the helpers. `attempt.ts` makes a throw `failed`. `manifest.ts` reads a `package.json`. `workspace-overrides.ts` reads the `pnpm-workspace.yaml` block. `jq-json.ts` reads and writes JSON values with the rules of jq. `npm-lock.ts` reads a `package-lock.json` for `applyConstraint` |
-| `src/render/` | The PR renderer of `render-pr`. `markdown.ts` has the text rules: line, table cell, code fence and percent. `pr-inputs.ts` reads and checks the two input files, and gives typed inputs. `commit-message.ts` and `pr-body.ts` are the templates |
+| `src/render/` | The PR renderer of `render-pr`. `markdown.ts` has the text rules: line, table cell, code fence and percent. `pr-inputs.ts` checks the two parsed inputs, and gives typed inputs. `commit-message.ts` and `pr-body.ts` are the templates |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), the registry preflight of each repository (`preflight-repo`), the Workflow `args` (`build-dispatches`), the closing PR table (`render-pr-status`), scoring, rendering, the drivers |
 | `src/subcommands/fix-group*.ts` | The fix driver. `fix-group.ts` is the command and its contract. `fix-group-setup.ts`, `fix-group-classify.ts`, `fix-group-baseline.ts`, `fix-group-apply.ts` and `fix-group-score.ts` are the ported phases. `fix-group-ladder.ts` has the decisions of `apply` as pure functions. `fix-group-common.ts` has what the phases share |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
@@ -55,7 +55,7 @@ reading stdout as this CLI's contract must never read "there is no such command"
 A command may also answer with silence, which is exit 0 and nothing written at all.
 A command that makes a file's content may write that text itself to stdout, and then answer with
 silence. `render-pr commit-msg` and `render-pr body` do this. A failure of either is still
-`{"error": ...}`, and nothing else is written.
+`{"error": ...}` on stdout with the message on stderr, and no part of the text is written.
 A handler may return a promise, and `run.ts` waits for it. A command may compose other commands
 in process. It calls their exported handlers, and never starts this CLI as a child:
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler

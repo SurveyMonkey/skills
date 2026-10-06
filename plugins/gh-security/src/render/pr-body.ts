@@ -5,15 +5,21 @@
 //
 // Every value that comes from input reaches a line through `shown`, a table
 // cell through `cell`, and a code block through `fence` (`markdown.ts`).
+// Three values are Markdown, and go in as they are: `risk.markdown` and the
+// two notes.
 //
 // Declared differences from the script, each with #233:
-//   - A table cell is escaped for Markdown. The script escaped a pipe, and
-//     the tsv step then doubled its backslash, which left a cell that a pipe
-//     ended. A tab in a cell stays a tab, where the script printed `\t`.
+//   - A table cell is escaped for Markdown. The script escaped a pipe only in
+//     a summary, and the tsv step then doubled its backslash. That left a
+//     cell that a pipe ended. A version or a moves cell had no escape. A tab
+//     in a cell stays a tab, where the script printed `\t`.
+//   - A line break in a cell is one space. The script printed `\r` or `\n`.
 //   - A code block has a fence longer than any run of backticks in it.
 //   - A line break in a value of a line is one space.
-//   - The `written` block has the key order of JavaScript: a key that is a
-//     whole number goes first.
+//   - The next major line is exact for a `major_line` above 2^53.
+//   - The `written` block is the JSON of JavaScript. A key that is a whole
+//     number goes first. A number is in its shortest form, so `1.0` is `1`
+//     and `1E+2` is `100`. U+007F is not escaped.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -103,7 +109,7 @@ const globalOverride = (inputs: BodyInputs, override: GlobalOverride): string[] 
   ]
 }
 
-/** The name of the parent in the path of a copy, or null when the path names none. */
+/** The name without its last `@version`. A name with no `@` after its first character stays as it is. */
 const bareName = (key: string): string => {
   const at = key.lastIndexOf('@')
   return at <= 0 ? key : key.slice(0, at)

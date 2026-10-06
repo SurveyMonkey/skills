@@ -221,9 +221,9 @@ const SEARCH_FIELDS = 'url'
  * The phrase of `gh label create` for a label that exists. `createLabel` (#233)
  * is not in the target stack, and is a known divergence from it. It is the
  * call that `render-pr.sh` made. Sibling agents that fix other packages of
- * one batch race to make the same band label, and the loser's failure means
- * that the label is there, which is what it wanted. So the answer says
- * `created: false`, and does not throw.
+ * one batch race to make the same band label. The failure of the loser
+ * means that the label is there, which is what it wanted. So the answer
+ * says `created: false`, and does not throw.
  */
 const LABEL_EXISTS = 'already exists'
 

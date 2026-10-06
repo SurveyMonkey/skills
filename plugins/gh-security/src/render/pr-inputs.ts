@@ -16,8 +16,8 @@
 //     number for a text field, and the text of an unknown `action` or
 //     `bare_override`. A value of another type is refused here, in `body`
 //     and `commit-msg` alike.
-//   - An alert id, a severity or a version that is the empty text is
-//     refused. The script shifted the columns of the table for it.
+//   - An alert id or a severity that is the empty text is refused. The
+//     script shifted the columns of the alerts table for it.
 //   - `epss_percentile` is a number from 0 to 1, a fraction. The script
 //     printed any number as a percentage.
 //   - A `summary` that is not text is refused. The script stopped in the
@@ -539,7 +539,9 @@ export const readBodyInputs = (
   if (bare.value !== 'none') {
     // The range is the value of the first top-level entry (no parent) that
     // has a text value. An entry that is not an object is a state that
-    // contradicts itself, as it was for `jq`.
+    // contradicts itself. For `jq`, a number or a text was an error too. A
+    // null entry passed, and the script printed `null` as the range. Here a
+    // null entry is refused (#233).
     const top = written.every(isRecord) ? written.find(isTopLevel) : undefined
     if (top === undefined) {
       return failed(

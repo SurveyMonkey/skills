@@ -1,7 +1,8 @@
 // The text rules of the PR renderer (#233). Each function here is one rule
 // that `render-pr.sh` had as a jq filter or an awk call. A value that comes
 // from input reaches a line, a table cell or a code fence through one of
-// these functions, so no input can break the Markdown around it.
+// these functions, so it cannot break the Markdown around it. The values
+// that are Markdown are the exceptions (`pr-body.ts`).
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -19,16 +20,17 @@ export const withoutFinalNewlines = (text: string): string => text.replace(/\n+$
 export const inline = (text: string): string => text.replace(/\r\n|[\r\n]/g, ' ')
 
 /**
- * The text of a value that the script read with `$(jq -r ...)`: the shell
- * dropped its final line feeds, and a line break inside it is one space.
+ * The text of a value that the script read with `$(jq -r ...)`. The shell
+ * dropped its final line feeds. A line break inside it becomes one space,
+ * which is a difference from the script (#233).
  */
 export const shown = (text: string): string => inline(withoutFinalNewlines(text))
 
 /**
  * Text for one table cell. A backslash is doubled and a pipe is escaped, in
- * that order, so a text that holds `\|` cannot end the cell. The script
- * escaped the pipe first, and the tsv step then doubled its backslash. That
- * left a cell that a pipe ended (#233).
+ * that order, so a text that holds `\|` cannot end the cell. In a summary,
+ * the script escaped the pipe first, and the tsv step then doubled its
+ * backslash. That left a cell that a pipe ended (#233).
  */
 export const cell = (text: string): string =>
   inline(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')

@@ -13,10 +13,11 @@
 //
 // `--state` is the `ready_for_pr` answer of `fix-group score`. `--group-json`
 // is the group that `fix-group setup` was given. `commit-msg` and `body` run
-// no child. They write the text itself on stdout, and not a JSON string: the
-// commit message and the body are the files that a caller needs, and a
-// caller that gets them as JSON must unwrap them. Nothing is written when a
-// check fails. A failure is `{"error": ...}` on stdout, as for every command.
+// no child. They write the text itself on stdout, and not a JSON string. The
+// commit message and the body are the files that a caller needs. A caller
+// that gets them as JSON must unwrap them. When a check fails, no part of
+// the text is written. A failure is `{"error": ...}` on stdout, as for every
+// command, with the message on stderr.
 //
 // `labels` and `create` run `gh label create` and `gh pr create`, through
 // the `gh` client (`lib/gh.ts`). `create` never passes `--draft`: a PR opens
@@ -38,9 +39,11 @@
 //   - A `gh pr create` that exits 0 with no URL fails as
 //     `gh pr create failed: gh answered gh pr create with no pull request
 //     URL: ...`. The script said `produced no PR URL`.
-//   - A file that cannot be read as UTF-8 text is read with U+FFFD for each
-//     bad byte. `jq` and `cat` passed the bytes. A note file is written as it
-//     is, and so are its line breaks.
+//   - A note file that is not UTF-8 text is read with U+FFFD for each bad
+//     sequence, as `jq` read a JSON file. `cat` passed the bytes of a note.
+//     A note file is written as it is, and so are its line breaks.
+//   - A note file that cannot be read is an error, also when the state does
+//     not need the note. The script checked only that the file was there.
 //   - A `--env-prefix` with no value is an error. The script looped for ever.
 //   The differences of the rendered text are in `src/render/`.
 //
