@@ -774,17 +774,20 @@ describe('createLabel', () => {
   it.each([
     [
       'a child that never started',
-      { startFailure: { code: 'ENOENT', message: 'spawn gh ENOENT' } },
+      { status: 127, startFailure: { code: 'ENOENT', message: 'spawn gh ENOENT' } },
     ],
-    ['a child that this process killed', { timedOut: true, signal: 'SIGKILL' as const }],
-    ['a child that a signal ended', { signal: 'SIGTERM' as const }],
-    ['a pipe that failed', { streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }] }],
+    ['a child that this process killed, with a status', { status: 1, timedOut: true }],
+    [
+      'a child that this process killed, with no status',
+      { status: null, timedOut: true, signal: 'SIGKILL' as const },
+    ],
+    ['a child that a signal ended', { status: null, signal: 'SIGTERM' as const }],
+    [
+      'a pipe that failed',
+      { status: 1, streamErrors: [{ code: 'EPIPE', message: 'broken pipe' }] },
+    ],
   ])('throws for %s even with the phrase on stderr', async (_kind, extra) => {
-    const reply: Reply = {
-      status: Object.hasOwn(extra, 'signal') ? null : 1,
-      stderr: 'already exists',
-      ...extra,
-    }
+    const reply: Reply = { stderr: 'already exists', ...extra }
     const error = (await ask(reply).result.catch((thrown: unknown) => thrown)) as GhError
     expect(error).toBeInstanceOf(GhError)
   })

@@ -31,6 +31,8 @@
 //     The script printed `no patched release in the .x line`.
 //   - A moves `major` is text or a number, and a `before` or `after` is a
 //     list of texts.
+//   - A `requires_major_bump` or a `vulnerable_ranges` that is `false` is
+//     refused. The script read `false` as the empty list, with `// []`.
 //
 // This file ships. It imports nothing outside the plugin.
 

@@ -928,6 +928,17 @@ describe('body', () => {
       }
     })
 
+    it('takes an EPSS of exactly 1 as 100.0%', async () => {
+      const ran = await render(
+        'body',
+        STATE,
+        edit(GROUP, (g) => {
+          g.alerts[0].epss_percentile = 1
+        }),
+      )
+      expect(ran.out).toContain('| 100.0% |')
+    })
+
     it('reads a summary that is null, absent or empty as an empty cell', async () => {
       for (const summary of [null, undefined, '']) {
         const ran = await render(
@@ -1214,6 +1225,22 @@ describe('body', () => {
     const BAD = (file: string): string =>
       `body: --state ${file} has a requires_major_bump entry missing 'version' or 'path' as a string, or an unreadable vulnerable_ranges[]. Rendering the table's header with no rows from this would read as "nothing left open" ${DASH} the opposite of the truth ${DASH} so nothing is rendered instead.`
 
+    it.each([[false], [0], ['']])(
+      'refuses a requires_major_bump that is %j, where the script read false as empty',
+      async (value) => {
+        const ran = await bump(value)
+        refused(
+          ran,
+          `body: --state ${ran.files['state.json']}'s requires_major_bump is not an array.`,
+        )
+      },
+    )
+
+    it('refuses ranges that are false, where the script read false as empty', async () => {
+      const ran = await bump([{ version: '3.0.0', path: 'p', vulnerable_ranges: false }])
+      refused(ran, BAD(ran.files['state.json'] as string))
+    })
+
     it('refuses a state whose list is not an array', async () => {
       const ran = await bump({ a: 1 })
       refused(
@@ -1320,6 +1347,7 @@ describe('body', () => {
       ['node_modules/@/node_modules/lodash', '@'],
       ['node_modules/a/node_modules/b/node_modules/lodash', 'b'],
       ['a/node_modules/lodash', 'a'],
+      ['@s/a/node_modules/lodash', '@s/a'],
       ['packages/web/node_modules/lodash', 'web'],
       ['node_modules/ünï-日本/node_modules/lodash', 'ünï-日本'],
     ])('names the parent of %s as %s', async (path, parent) => {
