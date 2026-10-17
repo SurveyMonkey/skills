@@ -5,15 +5,24 @@
 // each expected report is written by hand from the contract in the header of
 // the command. `parity-reap-batch.test.ts` compares the command with the
 // capture of `post-agent.sh`.
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
 import type { JsonValue } from '#gh-security/lib/envelope.ts'
-import { run } from '#gh-security/lib/process.ts'
+import { createGhClient } from '#gh-security/lib/gh.ts'
+import { type Runner, run } from '#gh-security/lib/process.ts'
 import type { ClientFactory } from '#gh-security/subcommands/pr-status.ts'
-import { reapBatch } from '#gh-security/subcommands/reap-batch.ts'
+import { reapBatch, reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
 import { createGhMock, ghFails } from '#harness/gh.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
@@ -392,5 +401,242 @@ describe('a scoped package', () => {
       false,
     )
     expect(branches(at)).toEqual(['main'])
+  })
+})
+
+describe('the loop over the entries', () => {
+  const OTHER: Group = {
+    package: 'other-pkg',
+    major_line: '1',
+    branch_name: 'fix/dependabot-other-pkg-1x',
+  }
+
+  it('gives one report for each entry, in entry order, and a refused reap does not stop the next', async () => {
+    const at = world()
+    fixed(at, OTHER)
+    // The worktree root of the repository is a link out of it, so the reap
+    // of the first entry refuses its paths.
+    const elsewhere = join(realpathSync(at.sandbox.path), 'elsewhere')
+    mkdirSync(elsewhere)
+    const root = join(at.repo, '.claude', 'worktrees')
+    const moved = join(at.repo, '.claude', 'moved')
+    at.fixtures.git(at.repo, 'worktree', 'move', `${workOf(at.repo, OTHER)}/fix`, `${moved}-fix`)
+    rmSync(root, { recursive: true })
+    symlinkSync(elsewhere, root)
+    const result = await reapAll(
+      at,
+      [
+        entry(at.repo, success()),
+        entry(at.repo, null, { group: OTHER }),
+        entry(at.repo, success(OTHER, { pr_url: 'https://github.com/octo/lib/pull/3' }), {
+          group: OTHER,
+        }),
+      ],
+      { 'octo/app#12': view('OPEN'), 'octo/lib#3': view('MERGED') },
+    )
+    if (result?.outcome !== 'ok') throw new Error(JSON.stringify(result))
+    const reports = result.value as Record<string, JsonValue>[]
+    expect(reports.map((report) => [report.package, report.result_status, report.reaped])).toEqual([
+      ['example-pkg', 'success', false],
+      ['other-pkg', 'missing', false],
+      ['other-pkg', 'success', false],
+    ])
+    expect(reports[0]).toMatchObject({
+      reason: 'the reap refused the paths, so nothing was removed',
+      errors: [
+        `the reap refused the paths, so nothing was removed: the work path is not under ${at.repo}/.claude/worktrees/: ${elsewhere}/fix-dependabot-example-pkg-6x. Nothing was removed.`,
+      ],
+      left_behind: [workOf(at.repo, PLAIN), PLAIN.branch_name],
+    })
+    expect(reports[2]).toMatchObject({ pr_state: 'MERGED' })
+  })
+
+  it('reports a reap that failed part way, and still reaps the next entry', async () => {
+    const at = world()
+    fixed(at)
+    fixed(at, OTHER)
+    // A directory with no write bit in the work directory stops its removal.
+    const locked = join(workOf(at.repo, PLAIN), 'locked')
+    mkdirSync(locked)
+    writeFileSync(join(locked, 'held'), '')
+    chmodSync(locked, 0o555)
+    try {
+      const result = await reapAll(
+        at,
+        [
+          entry(at.repo, success()),
+          entry(at.repo, success(OTHER, { pr_url: 'https://github.com/octo/lib/pull/3' }), {
+            group: OTHER,
+          }),
+        ],
+        { 'octo/app#12': view('OPEN'), 'octo/lib#3': view('OPEN') },
+      )
+      if (result?.outcome !== 'ok') throw new Error(JSON.stringify(result))
+      const [first, second] = result.value as Record<string, JsonValue>[]
+      expect(first).toMatchObject({
+        reaped: true,
+        reason: null,
+        left_behind: [workOf(at.repo, PLAIN)],
+      })
+      expect(first?.errors).toEqual([
+        expect.stringMatching(new RegExp(`^${workOf(at.repo, PLAIN)} was not removed: E`)),
+      ])
+      expect(second).toMatchObject({ reaped: true, left_behind: [], errors: [] })
+      expect(branches(at)).toEqual(['main'])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
+
+  it('reads a major_line that the dispatch gives as a number', async () => {
+    const at = world()
+    const dispatch = entry(at.repo, null) as { dispatch: { group: Record<string, JsonValue> } }
+    dispatch.dispatch.group.major_line = 6
+    expect(await only(reapAll(at, [dispatch as unknown as JsonValue]))).toMatchObject({
+      major_line: '6',
+      worktree_path: workOf(at.repo, PLAIN),
+    })
+  })
+})
+
+describe('the env_prefix of an entry', () => {
+  it('wraps the gh call of the pull request read, and never the git of the reap', async () => {
+    const at = world()
+    fixed(at)
+    const calls: string[][] = []
+    const spawn: Runner = (command, args = [], options) => {
+      calls.push([command, ...args])
+      if (command === 'git') return run(command, args, options)
+      return Promise.resolve({
+        status: 0,
+        signal: null,
+        stdout: JSON.stringify(view('OPEN')),
+        stderr: '',
+        combined: JSON.stringify(view('OPEN')),
+        timedOut: false,
+        elapsedMs: 0,
+        startFailure: null,
+        streamErrors: [],
+      })
+    }
+    const file = join(at.sandbox.path, 'results.json')
+    writeFileSync(
+      file,
+      JSON.stringify([entry(at.repo, success(), { envPrefix: 'env GH_SECURITY_EXAMPLE=1' })]),
+    )
+    const result = await reapBatch(context(at, [file]), createGhClient, spawn)
+    expect(result).toMatchObject({ outcome: 'ok', value: [{ reaped: true, errors: [] }] })
+    const gh = calls.filter((call) => call[0] !== 'git')
+    expect(gh.map((call) => call.slice(0, 6))).toEqual([
+      ['env', 'GH_SECURITY_EXAMPLE=1', 'gh', 'pr', 'view', '12'],
+    ])
+    expect(calls.filter((call) => call[0] === 'git').length).toBeGreaterThan(0)
+  })
+})
+
+describe('a results file that is refused', () => {
+  const refused = async (at: World, text: string) => {
+    const file = join(at.sandbox.path, 'results.json')
+    writeFileSync(file, text)
+    return { file, result: await reapBatch(context(at, [file]), viewing({}), run) }
+  }
+
+  it.each([
+    [[], 'usage: gh-security reap-batch <results.json>'],
+    [['a.json', 'b.json'], 'usage: gh-security reap-batch <results.json>'],
+    [['--bogus', 'a.json'], expect.stringMatching(/^Unknown option '--bogus'/)],
+  ])('refuses the command line %j', async (args, message) => {
+    const at = world()
+    expect(await reapBatch(context(at, args), viewing({}), run)).toEqual({
+      outcome: 'failed',
+      error: message,
+    })
+  })
+
+  it('refuses a file that cannot be read', async () => {
+    const at = world()
+    const file = join(at.sandbox.path, 'absent.json')
+    const result = await reapBatch(context(at, [file]), viewing({}), run)
+    expect(result).toMatchObject({ outcome: 'failed' })
+    expect((result as { error: string }).error).toMatch(
+      new RegExp(`^reap-batch: cannot read ${file}: ENOENT`),
+    )
+  })
+
+  it('refuses a file that is not JSON', async () => {
+    const at = world()
+    const { file, result } = await refused(at, '{not json')
+    expect(result).toEqual({ outcome: 'failed', error: `reap-batch: ${file} is not JSON` })
+  })
+
+  it.each([
+    ['an object', '{}', 'is not a list of workflow entries'],
+    ['an empty list', '[]', 'has no entry'],
+  ])('refuses %s', async (_name, text, problem) => {
+    const at = world()
+    const { file, result } = await refused(at, text)
+    expect(result).toEqual({ outcome: 'failed', error: `reap-batch: ${file} ${problem}` })
+  })
+
+  const GONE = Symbol('gone')
+
+  /** One valid entry, with the value at `path` set, or removed for `GONE`. */
+  const edited = (repo: string, path: readonly string[], to: unknown): unknown => {
+    const value = structuredClone(entry(repo, null)) as Record<string, unknown>
+    const at = path.slice(0, -1).reduce((node, key) => node[key] as Record<string, unknown>, value)
+    const last = path[path.length - 1] as string
+    if (to === GONE) Reflect.deleteProperty(at, last)
+    else at[last] = to
+    return value
+  }
+
+  it.each([
+    ['has no dispatch object', ['dispatch'], []],
+    ['has a dispatch.repo_root that is not text', ['dispatch', 'repo_root'], ''],
+    ['has a dispatch.env_prefix that is not text', ['dispatch', 'env_prefix'], null],
+    ['has no dispatch.group object', ['dispatch', 'group'], GONE],
+    ['has a dispatch.group.package that is not text', ['dispatch', 'group', 'package'], 5],
+    ['has a dispatch.group.branch_name that is not text', ['dispatch', 'group', 'branch_name'], ''],
+    [
+      'has a dispatch.group.major_line that is not text or a whole number',
+      ['dispatch', 'group', 'major_line'],
+      1.5,
+    ],
+    [
+      'has a dispatch.group.major_line that is not text or a whole number',
+      ['dispatch', 'group', 'major_line'],
+      -1,
+    ],
+    ['has a mispaired that is not true or false', ['mispaired'], 'no'],
+    ['has no result', ['result'], GONE],
+  ] as const)('refuses an entry that %s, and reaps no entry', async (problem, path, to) => {
+    const at = world()
+    fixed(at)
+    const { file, result } = await refused(
+      at,
+      JSON.stringify([entry(at.repo, success()), edited(at.repo, path, to)]),
+    )
+    expect(result).toEqual({ outcome: 'failed', error: `reap-batch: ${file} entry 1 ${problem}` })
+    expect(existsSync(`${workOf(at.repo, PLAIN)}/fix`)).toBe(true)
+    expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
+  })
+
+  it('refuses an entry that is not an object', async () => {
+    const at = world()
+    const { file, result } = await refused(at, '[null]')
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: `reap-batch: ${file} entry 0 is not an object`,
+    })
+  })
+})
+
+describe('the command', () => {
+  it('runs the handler, which refuses a bare invocation with its usage', async () => {
+    const at = world()
+    expect(await reapBatchCommand(context(at, []))).toEqual({
+      outcome: 'failed',
+      error: 'usage: gh-security reap-batch <results.json>',
+    })
   })
 })
