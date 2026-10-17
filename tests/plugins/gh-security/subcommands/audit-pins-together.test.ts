@@ -681,6 +681,8 @@ describe('together (phase 7)', () => {
       ['unread entries at the baseline', { baseline_unreadable_entries: 2 }, '2'],
       ['no count of unread entries', { baseline_unreadable_entries: null }, 'unavailable'],
       ['a count that is text', { baseline_unreadable_entries: '0' }, '0'],
+      ['a count that is a list', { baseline_unreadable_entries: [1] }, '[\n  1\n]'],
+      ['a count that is text with a line break', { baseline_unreadable_entries: '2\n' }, '2'],
     ])('runs no attempt after %s', async (_name, extra, unreadable) => {
       const w = world()
       await judged(w, TWO, extra as Record<string, JsonValue>)
