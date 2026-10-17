@@ -1262,6 +1262,17 @@ describe('test-pin (phase 4, one pin per install)', () => {
       })
     })
 
+    it('stops when the state has a map but no baseline map to diff', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      editState(w, (state) => {
+        state.baseline_map = null
+      })
+      expect(((await testPin(w, ['--key', 'lodash'])).json as { detail: string }).detail).toBe(
+        "this pin's finding could not be assembled, so nothing was recorded for it.",
+      )
+    })
+
     it('refuses a baseline map of the state that is not an object or null', async () => {
       const w = world('npm-v3')
       await prepare(w)
@@ -1419,6 +1430,17 @@ describe('test-pin (phase 4, one pin per install)', () => {
       const answer = await testPin(w, ['--key', 'lodash'], stand({ listPins: FAIL('broken') }))
       expect((answer.json as { detail: string }).detail).toBe(
         'list_pins failed after removing lodash: broken',
+      )
+      expect(GIT_CLEAN(w)).toBe('')
+    })
+
+    it('fails when detect fails after the removal, and the restore brings the lockfile back', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      rmSync(join(w.wt, 'package-lock.json'))
+      const answer = await testPin(w, ['--key', 'lodash'])
+      expect((answer.json as { detail: string }).detail).toMatch(
+        /^list_pins failed after removing lodash: No supported lockfile found in /,
       )
       expect(GIT_CLEAN(w)).toBe('')
     })
