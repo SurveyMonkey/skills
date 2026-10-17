@@ -867,6 +867,59 @@ describe('judge (phase 5)', () => {
     })
   })
 
+  describe('a finding with no optional fields', () => {
+    const without = (finding: JsonObject, ...keys: string[]): JsonObject =>
+      Object.fromEntries(Object.entries(finding).filter(([key]) => !keys.includes(key)))
+
+    it('reads each absent field as null, as jq does', async () => {
+      const d = desk()
+      const answer = await judged(
+        d,
+        [
+          without(
+            tested({ collateral_verdict: 'not-checked' }),
+            'collateral_not_checked_reason',
+            'package',
+          ),
+          without(tested({ key: 'b', path: ['b'] }), 'collateral_verdict', 'sampled_families'),
+          { status: 'still-required' },
+        ],
+        [adv('GHSA-x', 'lodash', '< 4.0.0')],
+      )
+      expect(project(answer, 'key', 'status', 'collateral_verdict', 'detail')).toEqual([
+        {
+          key: 'lodash',
+          status: 'inconclusive',
+          collateral_verdict: 'not-checked',
+          detail:
+            "4.17.19: no-advisories. the verdict covers null only: no whole-tree view was available, so no other package's resolution was re-checked",
+        },
+        { key: 'b', status: 'removable', collateral_verdict: 'none', detail: '4.17.19: safe' },
+        {
+          key: undefined,
+          status: 'still-required',
+          collateral_verdict: undefined,
+          detail: undefined,
+        },
+      ])
+      const json = answer.json as JsonObject
+      expect({ still: json.still_required, untested: json.untested }).toEqual({
+        still: [null],
+        untested: [{ key: 'glob', path: ['glob', 'minimatch'], package: 'minimatch' }],
+      })
+    })
+
+    it('asks with no prefix when the state has none', async () => {
+      const d = desk()
+      const state = stateWith(d, [tested()])
+      delete state.env_prefix
+      write(d, state)
+      const made: unknown[] = []
+      const answer = await judge(d, { made, replies: { listAdvisories: [LODASH_OLD] } })
+      expect({ status: answer.status, made: made.length }).toEqual({ status: 0, made: 1 })
+    })
+  })
+
   describe('the guards and the state', () => {
     it('requires --work', async () => {
       const d = desk()
@@ -977,7 +1030,7 @@ describe('judge (phase 5)', () => {
       write(
         d,
         stateWith(d, [{ ...PIN_LODASH, status: 'inconclusive', tested: false }], {
-          baseline_inconclusive: null,
+          baseline_inconclusive: false,
           test_order: {},
         }),
       )

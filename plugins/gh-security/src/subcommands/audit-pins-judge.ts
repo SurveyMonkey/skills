@@ -478,15 +478,14 @@ const pinsOwed = (session: Session): number => {
 
 /**
  * jq's `index($p) != null` on a list. A list as `$p` is found where its
- * entries are in a row, and an empty list is never found.
+ * entries are in a row, and an empty list is never found. A JSON value is
+ * never `undefined`, so a row that runs past the end does not match.
  */
 const found = (list: readonly unknown[], wanted: unknown): boolean => {
   if (!Array.isArray(wanted)) return list.some((each) => equal(each, wanted))
   return list.some(
     (_, start) =>
-      wanted.length > 0 &&
-      start + wanted.length <= list.length &&
-      wanted.every((each, offset) => equal(list[start + offset], each)),
+      wanted.length > 0 && wanted.every((each, offset) => equal(list[start + offset], each)),
   )
 }
 

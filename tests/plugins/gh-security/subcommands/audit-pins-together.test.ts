@@ -470,6 +470,16 @@ describe('together (phase 7)', () => {
       })
     })
 
+    it('reads a candidate with no fields as nulls, and refuses its path', async () => {
+      const w = world()
+      await judged(w, [{ status: 'removable' }])
+      expect(await together(w)).toEqual(
+        compose(
+          'package.json could not be rewritten to remove the candidate set [null]. Quoting the error: a candidate path is not a list of keys',
+        ),
+      )
+    })
+
     it('refuses an override root that is not a list, before any edit', async () => {
       const w = world()
       await judged(w, TWO, { override_root: 'x' })

@@ -51,7 +51,7 @@ import { removeManifestPaths, removeWorkspaceKey } from './audit-pins-removal.ts
 import { installOnce, outputOf } from './fix-group-common.ts'
 
 /** A pin of a candidate set, as `{key, path, package, value, status}` picks it. */
-type Candidate = JsonObject & { readonly path: JsonValue }
+type Candidate = JsonObject & { readonly key: JsonValue; readonly path: JsonValue }
 
 /** What one attempt found. */
 interface Attempt {
@@ -71,7 +71,7 @@ const isKeyList = (path: JsonValue): path is string[] =>
  */
 const removeCandidates = async (session: Session, candidates: readonly Candidate[]) => {
   if (session.overrideFile === 'pnpm-workspace.yaml') {
-    for (const key of linesOf(candidates.map((candidate) => candidate.key ?? null))) {
+    for (const key of linesOf(candidates.map((candidate) => candidate.key))) {
       if (removeWorkspaceKey(session.worktree, key) === 0) continue
       await restoreTree(session, 'the combined set')
       failPhase(
@@ -246,7 +246,7 @@ const pick = (finding: JsonObject): Candidate => ({
   path: finding.path ?? null,
   package: finding.package ?? null,
   value: finding.value ?? null,
-  status: finding.status ?? null,
+  status: finding.status as string,
 })
 
 const reasonOf = (attempt: Attempt): string =>
@@ -344,7 +344,7 @@ export const together = (
       status: 'ready_for_pr',
       step: 'together',
       attempt,
-      removed_keys: removed.map((each) => each.key ?? null),
+      removed_keys: removed.map((each) => each.key),
       removed: [...removed],
       left_behind: left,
       collateral: run.collateral,
@@ -378,7 +378,7 @@ export const together = (
       const left = first
         .filter((each) => each.status === 'removable-individually')
         .map((each) => ({
-          key: each.key ?? null,
+          key: each.key,
           reason: `${one.detail}; excluded from attempt 2`,
         }))
       return ready(2, second, two, left)
