@@ -405,6 +405,74 @@ describe('setup (phase 1)', () => {
       expect((await setup(w)).status).toBe(0)
     })
 
+    // git 2.54 makes the `-b` branch, then exits 128 when the path is a
+    // directory with files in it (#325). The branch stays at `origin/main`.
+    // Then `origin/main` moves: the tip is behind it, so it holds no work.
+    it('deletes and makes again a branch that a refused worktree add left, after origin/main moved', async () => {
+      const w = world()
+      const taken = join(w.work, '..', 'taken')
+      mkdirSync(taken, { recursive: true })
+      writeFileSync(join(taken, 'file.txt'), 'x')
+      const refused = w.fixtures.tryGit(
+        w.repo,
+        'worktree',
+        'add',
+        taken,
+        '-b',
+        BRANCH,
+        'origin/main',
+      )
+      expect(refused.status).toBe(128)
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(w.fixtures.sha(w.repo, 'origin/main'))
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      expect(pick(await setup(w), 'step', 'branch')).toEqual({
+        status: 0,
+        step: 'setup',
+        branch: BRANCH,
+      })
+      expect(w.fixtures.currentBranch(w.worktree)).toBe(BRANCH)
+    })
+
+    // Pinning: green when written. A tip with one commit of its own, on an older `origin/main`, is not an ancestor.
+    it('refuses a branch with its own commit after origin/main moved, and keeps it', async () => {
+      const w = world()
+      commitOnBranch(w, 'src.js', 'console.log(1)\n', 'feat: unpushed work')
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      expect(pick(await setup(w), 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
+    })
+
+    // A `merge-base` that fails gives no answer, so the guard stops, keeps the
+    // branch and names the git error. The stand-in runs a real `merge-base`
+    // that exits 128.
+    it('keeps an ancestor branch when merge-base fails', async () => {
+      const w = world()
+      w.fixtures.git(w.repo, 'branch', BRANCH)
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      const spawn: typeof run = (command, args, options) =>
+        args?.includes('merge-base') === true
+          ? run(
+              command,
+              ['-C', w.repo, 'merge-base', '--is-ancestor', 'no-such-ref', 'HEAD'],
+              options,
+            )
+          : run(command, args, options)
+      const answer = answerOf(
+        await fixGroup(context(w.env, setupArgs(w)), { spawn, route: selectAdapter }),
+      )
+      expect(pick(answer, 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(answer.stderr).toContain(
+        `git merge-base --is-ancestor ${tip} origin/main failed, so the local branch ${BRANCH} was not deleted`,
+      )
+      expect(answer.stderr).toContain('Not a valid object name no-such-ref')
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
+    })
+
     it.each([
       ['a drift subject over package.json', 'package.json', '{"name":"x"}\n', DRIFT_SUBJECT],
       ['a lockfile commit with another subject', 'package-lock.json', '{}\n', 'chore: by hand'],

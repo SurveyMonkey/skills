@@ -11,7 +11,7 @@
 // npm 11.19.0 and Yarn 4.9.2 (`spec/fixtures/registry-probe/`).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { Environment, Tree } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
@@ -366,5 +366,232 @@ describe('probeRegistry: the answer of one attempt', () => {
     expect(
       answer.outcome === 'ok' && { ok: answer.value.ok, started: answer.value.started },
     ).toEqual({ ok: false, started: false })
+  })
+})
+
+describe('probeRegistry: the size of the output', () => {
+  const KEEP = 4096
+  const attempt = async (result: Partial<RunResult>) => {
+    const answer = await node.probeRegistry(treeOf('yarn', SCOPED), null, {
+      run: recorder(result).runner,
+      env: {},
+    })
+    if (answer.outcome !== 'ok') throw new Error(answer.error)
+    return answer.value
+  }
+
+  // A real Yarn 4.9.2 network failure: 60818 bytes on stderr, almost all minified source.
+  // Its own error is the short text on stdout, after stderr. The 401 text of
+  // another specimen stands in for a status that only the tail carries.
+  it('cuts a large output to its first and last 4 KiB, and says how many bytes it cut', async () => {
+    const stderr = specimen('yarn-large-stderr.txt')
+    const stdout = specimen('yarn-large-stdout.txt')
+    const full = Buffer.from(`${stderr}${stdout}`)
+    const { output } = await attempt({ status: 1, stderr, stdout })
+    const cut = full.length - 2 * KEEP
+    // 60818 + 312 bytes, less two ends of 4096.
+    expect(cut).toBe(52938)
+    expect(output).toContain('\n[the probe output is cut here: 52938 bytes]\n')
+    expect(output).toBe(
+      `${full.subarray(0, KEEP).toString()}\n[the probe output is cut here: ${cut} bytes]\n${full.subarray(-KEEP).toString()}`,
+    )
+    expect(output.endsWith(stdout)).toBe(true)
+  })
+
+  it('reads the status from the full text, before the cut', async () => {
+    const stderr = specimen('yarn-large-stderr.txt')
+    const stdout = specimen('yarn-401.txt')
+    const { output, http_status } = await attempt({ status: 1, stderr, stdout })
+    expect(http_status).toBe(401)
+    expect(output.length).toBeLessThan(2 * KEEP + 100)
+    expect(output).toContain('YN0041')
+  })
+
+  it('reads a status that only the cut part names', async () => {
+    const stderr = `${'x'.repeat(2 * KEEP)}\nE404\n${'x'.repeat(2 * KEEP)}\n`
+    const { output, http_status } = await attempt({ status: 1, stderr, stdout: '' })
+    expect(http_status).toBe(404)
+    expect(output).not.toContain('E404')
+  })
+
+  // Pinning: green when written. The limit is on bytes, so text of 8192 bytes stays whole.
+  it('does not cut an output of exactly 8 KiB', async () => {
+    const stderr = `${'e'.repeat(2 * KEEP - 1)}\n`
+    expect((await attempt({ status: 1, stderr, stdout: '' })).output).toBe(stderr)
+  })
+
+  it('cuts an output of one byte more than 8 KiB', async () => {
+    const stderr = `${'e'.repeat(2 * KEEP)}\n`
+    expect((await attempt({ status: 1, stderr, stdout: '' })).output).toContain(
+      '[the probe output is cut here: 1 bytes]',
+    )
+  })
+
+  it('counts bytes, not characters, and cuts only the output', async () => {
+    const stderr = `${'\u00e9'.repeat(3 * KEEP)}\n`
+    const answer = await attempt({ status: 1, stderr, stdout: '' })
+    // 12288 characters of 2 bytes, and a newline, less two ends of 4096.
+    expect(answer.output).toContain('[the probe output is cut here: 16385 bytes]')
+    expect(answer.command).toBe('yarn npm info @example-org/ui --fields version')
+  })
+})
+
+describe('probeRegistry: a scope that the repository maps comes first', () => {
+  const PUBLIC_FIRST = {
+    dependencies: { '@types/node': '^22', '@example-org/ui': '^2' },
+    devDependencies: { '@example-org/dev': '^1' },
+  }
+  const NPMRC = '@example-org:registry=https://registry.example.invalid/\n'
+
+  /** The package that a tree with these files probes. */
+  const chosen = async (
+    manifest: unknown,
+    files: Readonly<Record<string, string>>,
+    pm: 'npm' | 'yarn' = 'npm',
+  ) => {
+    const tree = treeOf(pm, manifest)
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(tree.root, name), text)
+    const answer = await node.probeRegistry(tree, 'lodash', { run: recorder().runner, env: {} })
+    return answer.outcome === 'ok' ? answer.value.package : answer
+  }
+
+  it('prefers a scope that .npmrc maps to a registry over an earlier public scope', async () => {
+    expect(await chosen(PUBLIC_FIRST, { '.npmrc': NPMRC })).toBe('@example-org/ui')
+  })
+
+  it('reads an indented .npmrc mapping line', async () => {
+    expect(await chosen(PUBLIC_FIRST, { '.npmrc': `  ${NPMRC}` })).toBe('@example-org/ui')
+  })
+
+  it.each([
+    [
+      'a bare key',
+      'npmScopes:\n  example-org:\n    npmRegistryServer: "https://r.example.invalid/"\n',
+    ],
+    [
+      'a double-quoted key',
+      'npmScopes:\n  "example-org":\n    npmRegistryServer: "https://r.example.invalid/"\n',
+    ],
+    [
+      'a block after other keys',
+      'enableTelemetry: false\nnpmScopes:\n  other:\n    npmAlwaysAuth: true\n  example-org:\n    npmAlwaysAuth: true\n',
+    ],
+    [
+      'CRLF line ends and a comment',
+      'npmScopes: # the private scopes\r\n  # the registry of the org\r\n# a note\r\n  example-org:\r\n    npmAlwaysAuth: true\r\n',
+    ],
+    ['a comment after the key', 'npmScopes:\n  example-org: # the org\n    npmAlwaysAuth: true\n'],
+    ['a comment after the key and CRLF', 'npmScopes:\r\n  example-org: # the org\r\n'],
+    ['a blank line before the key', 'npmScopes:\n\n  example-org:\n'],
+    ['a blank CRLF line before the key', 'npmScopes:\r\n\r\n  example-org:\r\n'],
+    ['a deeper comment before the key', 'npmScopes:\n    # an aside\n  example-org:\n'],
+    ['an indent of four', 'npmScopes:\n    example-org:\n      npmAlwaysAuth: true\n'],
+    ['a single-quoted key', "npmScopes:\n  'example-org':\n    npmAlwaysAuth: true\n"],
+  ])('prefers a scope that .yarnrc.yml maps in npmScopes, with %s', async (_name, yarnrc) => {
+    expect(await chosen(PUBLIC_FIRST, { '.yarnrc.yml': yarnrc }, 'yarn')).toBe('@example-org/ui')
+  })
+
+  it('looks across the dependency fields for a mapped scope', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22' },
+      devDependencies: { '@example-org/dev': '^1' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@example-org/dev')
+  })
+
+  // Pinning: green when written. Each case maps no scope that the manifest uses.
+  it.each([
+    ['no file', {}],
+    [
+      'an .npmrc that maps another scope',
+      { '.npmrc': '@other:registry=https://r.example.invalid/\n' },
+    ],
+    ['an .npmrc with a token line only', { '.npmrc': '//r.example.invalid/:_authToken=abc\n' }],
+    [
+      'an .npmrc with the mapping in a comment',
+      {
+        '.npmrc':
+          '; @example-org:registry=https://r.example.invalid/\n# @example-org:registry=https://r.example.invalid/\n',
+      },
+    ],
+    ['an .npmrc with an empty registry', { '.npmrc': '@example-org:registry=\n' }],
+    ['an .npmrc that is a directory', {}],
+    [
+      'npmScopes with a value on the same line',
+      { '.yarnrc.yml': 'npmScopes: oops\n  example-org:\n' },
+    ],
+    ['npmScopes that holds a list', { '.yarnrc.yml': 'npmScopes:\n  - example-org\n' }],
+    [
+      'npmScopes with no scope under it',
+      { '.yarnrc.yml': 'npmScopes:\nenableTelemetry: false\n  example-org:\n' },
+    ],
+    [
+      'the scope as a key one level down in npmScopes',
+      { '.yarnrc.yml': 'npmScopes:\n  other:\n    example-org:\n      npmAlwaysAuth: true\n' },
+    ],
+    [
+      'the scope under a top-level key after npmScopes',
+      {
+        '.yarnrc.yml':
+          'npmScopes:\n  other:\n    npmAlwaysAuth: true\nnpmRegistries:\n  example-org:\n    npmAuthToken: x\n',
+      },
+    ],
+    [
+      'the scope key with text after the colon',
+      { '.yarnrc.yml': 'npmScopes:\n  example-org:#x\n' },
+    ],
+    [
+      'the scope mapped under another key',
+      { '.yarnrc.yml': 'npmRegistries:\n  example-org:\n    npmAuthToken: x\n' },
+    ],
+  ])('falls back to the first scoped dependency with %s', async (name, files) => {
+    const tree = treeOf('yarn', PUBLIC_FIRST)
+    if (name === 'an .npmrc that is a directory') mkdirSync(join(tree.root, '.npmrc'))
+    for (const [file, text] of Object.entries(files)) writeFileSync(join(tree.root, file), text)
+    const answer = await node.probeRegistry(tree, 'lodash', { run: recorder().runner, env: {} })
+    expect(answer.outcome === 'ok' && answer.value.package).toBe('@types/node')
+  })
+
+  it('does not take a mapped scope whose dependency is not in the registry', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22', '@example-org/local': 'workspace:*' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
+  })
+
+  it('does not fail on a field after the first, when no scope is mapped', async () => {
+    const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
+    expect(await chosen(manifest, {})).toBe('@types/node')
+  })
+
+  it('finds a mapped scope in a field after one that is not an object', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22' },
+      devDependencies: [],
+      optionalDependencies: { '@example-org/opt': '^1' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@example-org/opt')
+  })
+
+  it('does not fail on a field after the first, when a scope it does not use is mapped', async () => {
+    const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
+  })
+
+  it('does not read the .npmrc of the user', async () => {
+    const home = createSandbox().join('home')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, '.npmrc'), NPMRC)
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    onTestFinished(() => {
+      vi.unstubAllEnvs()
+    })
+    const tree = treeOf('npm', PUBLIC_FIRST)
+    const answer = await node.probeRegistry(tree, 'lodash', {
+      run: recorder().runner,
+      env: { HOME: home },
+    })
+    expect(answer.outcome === 'ok' && answer.value.package).toBe('@types/node')
   })
 })

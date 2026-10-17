@@ -6,13 +6,21 @@
 // registry token then stops one repository before its agents start, and not
 // each agent at its install. The caller makes the retry and the cause.
 //
-// The package. The first scoped dependency of the root `package.json`, in
+// The package. A scoped dependency of the root `package.json`, in
 // `dependencies`, then `devDependencies`, then `optionalDependencies`.
-// Private registries hold scoped packages. Only a spec with no `:` and no `/`
-// counts, because the registry resolves only a range or a tag. A
-// `workspace:`, `file:`, `link:`, `npm:` or git spec is not in the registry,
-// and a probe of it reads as a 404. With no such dependency, the verb uses
-// the fallback of the caller. With no fallback either, the verb fails.
+// Private registries hold scoped packages. A scope that the repository maps to
+// a registry comes first (#324). The `.npmrc` maps it with a
+// `@<scope>:registry=` line, and `.yarnrc.yml` with a key of `npmScopes`.
+// The verb reads both files by line, with no parser. A file that the verb
+// cannot read maps no scope. The verb does not read the `.npmrc` of the user,
+// so the choice of package depends only on the repository. The package
+// manager still reads that file when it runs the probe. Without a mapped
+// scope, the first scoped dependency applies.
+// Only a spec with no `:` and no `/` counts, because the registry resolves
+// only a range or a tag. A `workspace:`, `file:`, `link:`, `npm:` or git
+// spec is not in the registry, and a probe of it reads as a 404. With no such
+// dependency, the verb uses the fallback of the caller. With no fallback
+// either, the verb fails.
 //
 // The command. `<pm_exec> view <package> version` for pnpm and npm, and
 // `<pm_exec> npm info <package> --fields version` for Yarn Berry. It runs in
@@ -30,7 +38,10 @@
 //   YN0041                         Yarn Berry, for a 401
 //   Response Code: 403, 404        Yarn Berry
 // Yarn Berry writes its errors to stdout. So `output` holds stderr and then
-// stdout.
+// stdout. The verb reads the status from the full text. Then it cuts an
+// `output` of more than 8 KiB to its first 4 KiB and its last 4 KiB (#324).
+// One marker line between them names the bytes cut. The tail keeps the error
+// of Yarn Berry, which comes after a stderr of about 59 KiB of minified source.
 //
 // A non-zero exit is not a failure of the verb. Then `ok` is false, and the
 // caller reads it. Exit 0 with no text on stdout, or with a failed pipe, is
@@ -42,7 +53,7 @@ import { join } from 'node:path'
 
 import { type Envelope, failed, ok } from '../../lib/envelope.ts'
 import type { ProbeSource, RegistryProbeAnswer, Tree } from '../adapter.ts'
-import type { NodeDetection } from './detect.ts'
+import { linesOf, type NodeDetection } from './detect.ts'
 import { isRecord, readManifest } from './manifest.ts'
 
 /** The time limit of one probe. The read-only steps of a fix agent have two minutes for two tries. */
@@ -57,6 +68,23 @@ const SCOPED = /^@[^/]+\/[^/]+$/
 /** A range or a tag. Every other spec has a `:` or a `/`. */
 const REGISTRY_SPEC = /^[^:/]*$/
 
+/** The bytes that `output` keeps at each end. A longer text is cut in the middle. */
+export const OUTPUT_KEEP_BYTES = 4096
+
+/**
+ * `text` with the middle cut when it is longer than two ends of
+ * {@link OUTPUT_KEEP_BYTES}. One marker line names the bytes cut. The ends are
+ * bytes, so a multi-byte character at a cut can become U+FFFD.
+ */
+const bounded = (text: string): string => {
+  const bytes = Buffer.from(text, 'utf8')
+  const cut = bytes.length - 2 * OUTPUT_KEEP_BYTES
+  if (cut <= 0) return text
+  const head = bytes.subarray(0, OUTPUT_KEEP_BYTES).toString('utf8')
+  const tail = bytes.subarray(bytes.length - OUTPUT_KEEP_BYTES).toString('utf8')
+  return `${head}\n[the probe output is cut here: ${cut} bytes]\n${tail}`
+}
+
 /** The HTTP statuses that the probe output can name, with the words that name each. */
 const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
   [401, /\bE401\b|\bYN0041:/],
@@ -64,7 +92,36 @@ const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
   [404, /\bE404\b|Response Code: 404\b/],
 ]
 
-/** The first scoped registry dependency of the manifest at `root`, null, or why it cannot say. */
+/** `@<scope>:registry=<value>` of `.npmrc`. It does not match a comment line, which starts with `;` or `#`. */
+const NPMRC_SCOPE = /^[ \t]*@([^/:\s]+):registry[ \t]*=[ \t]*\S/
+
+/** A scope key of `npmScopes`, as a line: `scope:` or a quoted one, with only a comment after it. */
+const YARN_SCOPE_KEY = /^ +["']?([^\s"':#]+)["']?:([ \t]+#[^\r]*)?[ \t]*\r?$/
+
+/** The scope names, with no `@`, that the repository maps to a registry. */
+const mappedScopes = (root: string): ReadonlySet<string> => {
+  const scopes = new Set<string>()
+  for (const line of linesOf(join(root, '.npmrc'))) {
+    const match = NPMRC_SCOPE.exec(line)
+    if (match !== null) scopes.add(match[1] as string)
+  }
+  const yarnrc = linesOf(join(root, '.yarnrc.yml'))
+  const start = yarnrc.findIndex((line) => /^npmScopes:[ \t]*(#[^\r]*)?\r?$/.test(line))
+  // The keys of the block are the lines at its first indent. A line with no
+  // indent ends the block. A blank line, or a comment, does not.
+  let indent: number | null = null
+  for (const line of start === -1 ? [] : yarnrc.slice(start + 1)) {
+    if (/^[ \t]*(#[^\r]*)?\r?$/.test(line)) continue
+    const width = line.length - line.trimStart().length
+    if (width === 0) break
+    indent ??= width
+    const match = width === indent ? YARN_SCOPE_KEY.exec(line) : null
+    if (match !== null) scopes.add(match[1] as string)
+  }
+  return scopes
+}
+
+/** The scoped registry dependency of the manifest at `root` to probe, null, or why it cannot say. */
 const scopedDependency = (root: string): Envelope<string | null> => {
   const path = join(root, 'package.json')
   let manifest: unknown
@@ -74,16 +131,23 @@ const scopedDependency = (root: string): Envelope<string | null> => {
     return failed(`probeRegistry: cannot read ${path}: ${(error as Error).message}`)
   }
   if (!isRecord(manifest)) return failed(`probeRegistry: ${path} is not a JSON object`)
+  const scopes = mappedScopes(root)
+  let first: string | null = null
   for (const name of DEPENDENCY_FIELDS) {
     const block = manifest[name]
     if (block === undefined) continue
-    if (!isRecord(block)) return failed(`probeRegistry: ${name} in ${path} is not an object`)
-    const found = Object.entries(block).find(
-      ([pkg, spec]) => SCOPED.test(pkg) && typeof spec === 'string' && REGISTRY_SPEC.test(spec),
-    )
-    if (found !== undefined) return ok(found[0])
+    if (!isRecord(block)) {
+      // A candidate came before this field, so the verb skips the field and does not fail.
+      if (first !== null) continue
+      return failed(`probeRegistry: ${name} in ${path} is not an object`)
+    }
+    for (const [pkg, spec] of Object.entries(block)) {
+      if (!SCOPED.test(pkg) || typeof spec !== 'string' || !REGISTRY_SPEC.test(spec)) continue
+      if (scopes.has(pkg.slice(1, pkg.indexOf('/')))) return ok(pkg)
+      first ??= pkg
+    }
   }
-  return ok(null)
+  return ok(first)
 }
 
 /** `probeRegistry`. */
@@ -117,7 +181,7 @@ export const probeRegistry = async (
   const limit = result.timedOut
     ? [`the probe stopped at its limit of ${PROBE_TIMEOUT_MS} ms\n`]
     : []
-  const output = [
+  const full = [
     ...limit,
     ...pipes,
     result.startFailure === null ? `${result.stderr}${result.stdout}` : result.startFailure.message,
@@ -127,7 +191,7 @@ export const probeRegistry = async (
     command: [program, ...args].join(' '),
     ok: result.status === 0 && pipes.length === 0 && result.stdout.trim() !== '',
     started: result.startFailure === null,
-    http_status: STATUS_WORDS.find(([, words]) => words.test(output))?.[0] ?? null,
-    output,
+    http_status: STATUS_WORDS.find(([, words]) => words.test(full))?.[0] ?? null,
+    output: bounded(full),
   })
 }

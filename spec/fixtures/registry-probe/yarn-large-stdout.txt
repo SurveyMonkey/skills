@@ -1,0 +1,6 @@
+➤ YN0001: Error [ERR_SOCKET_CLOSED_BEFORE_CONNECTION]: Socket closed before the connection was established
+    at TLSSocket.onClose (node:net:1243:10)
+    at TLSSocket.wrapper (node:events:639:12)
+    at TLSSocket.emit (node:events:526:24)
+    at node:net:362:12
+    at TCP.done (node:internal/tls/wrap:770:7)

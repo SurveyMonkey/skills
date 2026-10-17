@@ -595,8 +595,8 @@ describe('a signal during fix-group setup', () => {
     expect(log).toEqual(['exit 143'])
     expect(existsSync(join(w.wt, '.git'))).toBe(true)
     // git makes the branch before it refuses the path. The branch stays at
-    // origin/main, and the stale-branch guard of the next setup clears it
-    // while origin/main has not moved.
+    // origin/main, and the stale-branch guard of the next setup clears it,
+    // also after origin/main moves: its tip is an ancestor of origin/main.
     expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main', 'other'])
     const report = stderr.join('')
     expect(report).toMatch(
