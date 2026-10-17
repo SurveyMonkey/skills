@@ -233,7 +233,7 @@ What each step covers, so you can name the phase in a result without re-deriving
 
 | Step | Phase | What it decides |
 |---|---|---|
-| `setup` | 1 | Crashed-run guard, the stale-branch guard's four-case tip classification, `worktree add`, the `<package_path>` slug |
+| `setup` | 1 | Crashed-run guard, the stale-branch guard's three-case tip classification (the TypeScript `fix-group setup` adds a fourth, an ancestor of `origin/<default>`, #325), `worktree add`, the `<package_path>` slug |
 | `classify` | 2 | `why` and `declared_ranges --line`, the `peer_only` stop, the eligible-parent set |
 | `baseline` | 3 | Pre-drift snapshot, control install, drift commit, residual check, post-control baseline |
 | `apply` | 4 | Range derivation, `apply_constraint`, install, `validate`, the fatal-move stop, the no-op vs `lockfile-refresh` split, the remediation ladder |

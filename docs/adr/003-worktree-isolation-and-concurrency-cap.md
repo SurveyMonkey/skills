@@ -4,7 +4,7 @@ description: Fix agents work in per-major-line worktrees under .claude/worktrees
 status: stable
 created: 2026-08-20
 owner: brianespinosa
-related_issues: [5, 35, 84, 94, 161]
+related_issues: [5, 35, 84, 94, 161, 325]
 ---
 
 # ADR 003: Worktree isolation and the concurrency cap
@@ -154,14 +154,16 @@ what was then `origin/main`, and both blocked a rerun until a human deleted them
   refuses to delete a branch checked out in a worktree): the push succeeded with that tip, so the
   remote carries the same commits, or the tip still equals `origin/<default_branch>`, so nothing was
   committed. Anything else is left in place and named in the report.
-- **The guard compares tips instead of stopping on existence.** A local tip equal to
-  `origin/<branch_name>`, an ancestor of `origin/<default_branch>`, or the drift commit alone is
-  this plugin's leftover and is deleted and recreated; only any other tip is unpushed work, and only
-  that stops the run. An ancestor tip holds no commit of its own, whether `origin/<default_branch>`
-  has moved or not ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)): a refused
+- **The guard compares tips instead of stopping on existence.** A local tip that is
+  `origin/<default_branch>` or an ancestor of it, equals `origin/<branch_name>`, or is the drift
+  commit alone is this plugin's leftover. The guard deletes that branch and makes it again. Any
+  other tip can hold unpushed work, and only that tip stops the run. An ancestor tip holds no
+  commit of its own ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)). A refused
   `git worktree add` leaves such a branch, and the default branch can move before the next run.
-  This is the shape `agents/audit-pins.md` already uses for `chore/dependabot-remove-pins`, which proves a
-  remnant against a closed PR's `headRefOid` rather than refusing on sight.
+  The TypeScript `fix-group setup` has the ancestor rule. `fix-group.sh` does not, and #236
+  retires it. This is the shape `agents/audit-pins.md` already uses for
+  `chore/dependabot-remove-pins`, which proves a remnant against a closed PR's `headRefOid` rather
+  than refusing on sight.
 
 The Consequences claim that "stale local fix branches surface as agent failures" now holds only for
 a branch whose tip nobody can account for; the orchestrator's summary still hands that judgment to
