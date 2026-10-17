@@ -993,6 +993,7 @@ describe('judge (phase 5)', () => {
             tested({ collateral_verdict: 'not-checked' }),
             'collateral_not_checked_reason',
             'package',
+            'left_tree',
           ),
           without(tested({ key: 'b', path: ['b'] }), 'collateral_verdict', 'sampled_families'),
           { status: 'still-required' },
