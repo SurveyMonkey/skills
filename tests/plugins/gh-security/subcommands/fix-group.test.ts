@@ -434,7 +434,7 @@ describe('setup (phase 1)', () => {
       expect(w.fixtures.currentBranch(w.worktree)).toBe(BRANCH)
     })
 
-    // Pinning: green when written. A tip behind `origin/main` with one commit of its own is not an ancestor.
+    // Pinning: green when written. A tip with one commit of its own, on an older `origin/main`, is not an ancestor.
     it('refuses a branch with its own commit after origin/main moved, and keeps it', async () => {
       const w = world()
       commitOnBranch(w, 'src.js', 'console.log(1)\n', 'feat: unpushed work')
@@ -445,8 +445,9 @@ describe('setup (phase 1)', () => {
       expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
     })
 
-    // A `merge-base` that fails gives no answer, so the guard keeps the branch.
-    // The stand-in runs a real `merge-base` that exits 128.
+    // A `merge-base` that fails gives no answer, so the guard stops, keeps the
+    // branch and names the git error. The stand-in runs a real `merge-base`
+    // that exits 128.
     it('keeps an ancestor branch when merge-base fails', async () => {
       const w = world()
       w.fixtures.git(w.repo, 'branch', BRANCH)
@@ -465,7 +466,10 @@ describe('setup (phase 1)', () => {
         await fixGroup(context(w.env, setupArgs(w)), { spawn, route: selectAdapter }),
       )
       expect(pick(answer, 'phase')).toEqual({ status: 3, phase: 'worktree' })
-      expect(answer.stderr).toContain('it was not deleted')
+      expect(answer.stderr).toContain(
+        `git merge-base --is-ancestor ${tip} origin/main failed, so the local branch ${BRANCH} was not deleted`,
+      )
+      expect(answer.stderr).toContain('Not a valid object name no-such-ref')
       expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
     })
 

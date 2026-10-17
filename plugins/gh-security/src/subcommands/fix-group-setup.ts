@@ -93,11 +93,12 @@ const readGroup = (file: string): { readonly group: JsonObject } | { readonly er
 const NO_REMOTE_REF = /couldn't find remote ref/i
 
 /**
- * The stale-branch guard. A local branch of the name is deleted only when it
- * is this flow's own leftover: its tip is `origin/<default>` or an ancestor
- * of it, equals `origin/<branch>`, or is the drift commit alone. The answer
- * is null when the branch is gone or was never there, or the failure of the
- * phase.
+ * The stale-branch guard. It deletes a local branch of the name only when the
+ * branch is this flow's own leftover. Then its tip is `origin/<default>` or an
+ * ancestor of it, equals `origin/<branch>`, or is the drift commit alone. The
+ * answer is null when the branch is gone or was never there. Otherwise it is
+ * the failure of the phase. A `merge-base` that exits with neither 0 nor 1
+ * gives no answer, so the guard stops and keeps the branch.
  */
 const clearStaleBranch = async (
   git: Git,
@@ -139,11 +140,22 @@ const clearStaleBranch = async (
   const remote = remoteRead.status === 0 ? chomp(remoteRead.stdout) : ''
 
   let reason: string | null = null
+  const ancestry =
+    tip === dflt || (remote !== '' && tip === remote)
+      ? null
+      : await git(repoRoot, ['merge-base', '--is-ancestor', tip, dflt])
+  if (ancestry !== null && ancestry.status !== 0 && ancestry.status !== 1) {
+    return failPhase(
+      'worktree',
+      `git merge-base --is-ancestor ${tip} origin/${defaultBranch} failed, so the local branch ` +
+        `${branch} was not deleted: ${outputOf(ancestry)}`,
+    )
+  }
   if (tip === dflt) {
     reason = `tip equals origin/${defaultBranch}: a previous run created the branch and committed nothing to it`
   } else if (remote !== '' && tip === remote) {
     reason = `tip equals origin/${branch}: a previous run pushed it and the remote still carries the same commits`
-  } else if ((await git(repoRoot, ['merge-base', '--is-ancestor', tip, dflt])).status === 0) {
+  } else if (ancestry?.status === 0) {
     reason = `tip ${tip} is an ancestor of origin/${defaultBranch}: the branch holds no commit of its own`
   } else if (await onlyDriftCommit(git, repoRoot, defaultBranch, branch)) {
     reason = `the only commit beyond origin/${defaultBranch} is this flow's drift commit, over the lockfile and tracked install artifacts alone`
@@ -264,8 +276,8 @@ export const setup = async (
   //    stale-branch guard of the next `setup` clears it. Its tip is an
   //    ancestor of `origin/<default>`, also after `origin/<default>` moved.
   //    A `worktree add` that a signal stopped has no status, and the reap
-  //    runs. A prefix that does not
-  //    `exec` git can give a status for a signal. Then nothing is reaped,
+  //    runs. A prefix that does not `exec` git can give a status for a
+  //    signal. Then nothing is reaped,
   //    and the guard for a crashed run stops the next `setup`.
   let refused: string | null = null
   return holdSignals(
