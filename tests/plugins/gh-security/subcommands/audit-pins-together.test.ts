@@ -250,6 +250,8 @@ describe('together (phase 7)', () => {
     expect(porcelain(w)).toBe('M package.json')
   })
 
+  // The bash names the versions after the removal of a set `without_pins`
+  // (`run_attempt`), and those of one pin `without_pin` (`test-pin`).
   it('reports the moves of a clean attempt, and the advisory answer of each', async () => {
     const w = world()
     await judged(w, TWO)
@@ -263,7 +265,7 @@ describe('together (phase 7)', () => {
         {
           package: 'express',
           baseline: ['4.18.2'],
-          without_pin: ['4.17.0'],
+          without_pins: ['4.17.0'],
           newly_admitted: ['4.17.0'],
         },
       ],

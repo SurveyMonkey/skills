@@ -208,11 +208,18 @@ const runAttempt = async (
       `${label}'s map could not be diffed against the with-all-pins baseline, so nothing is known about what the set moved.`,
     )
   }
-  const collateral = movesBetween(base, now) as unknown as JsonObject[]
+  // The bash names the versions after the removal of a set `without_pins`
+  // here, and those of one pin `without_pin` in `test-pin`.
+  const collateral = movesBetween(base, now).map((move) => ({
+    package: move.package,
+    baseline: move.baseline,
+    without_pins: move.without_pin,
+    newly_admitted: move.newly_admitted,
+  }))
   const verdicts: JsonObject[] = []
   for (const move of collateral) {
-    const name = move.package as string
-    for (const version of linesOf(move.newly_admitted as string[])) {
+    const name = move.package
+    for (const version of linesOf(move.newly_admitted)) {
       const answer = await advisoryFor(session, deps, name, version)
       verdicts.push({
         package: name,
