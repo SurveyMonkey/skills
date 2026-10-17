@@ -25,7 +25,9 @@
 // `package`, `major_line`, `branch` and `pr_url`, and a no-op or a failure
 // promises the first three, each as text that is not empty. When the result
 // gives none of the three, the dispatch gives them. When both give them and
-// they differ, the result wins and `errors` names each difference.
+// they differ, the result wins and `errors` names each difference. A file
+// that the workflow wrote has no difference: `pairEntry` makes such an entry
+// `mispaired`.
 //
 // **The path.** `worktree_path` is the work directory
 // `<repo_root>/.claude/worktrees/fix-dependabot-<package_path>-<major_line>x`,
@@ -56,6 +58,8 @@
 //   - Each error is one entry. The script split an error at each line break.
 //     So a failed removal of the work directory is one error that quotes
 //     node, where `rm` gave one line for each path.
+//   - An answer of `gh pr view` that is not JSON has the words of the gh
+//     client (`lib/gh.ts`). The script gave the words of `pr-status.sh`.
 //   - An empty pull request state is the empty text. The script gave null.
 //
 // This file ships. It imports nothing outside the plugin.

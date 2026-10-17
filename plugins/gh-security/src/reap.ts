@@ -68,8 +68,9 @@
 //
 // **The report** has the shape of `reap-agent-artifacts.sh`: the paths, the
 // action of each artifact, the branch and its reason, `left_behind` and
-// `errors`. A list of errors that is not empty is the failure outcome: each
-// caller exits non-zero on it.
+// `errors`. A list of errors that is not empty is the failure outcome.
+// `fix-group cleanup` exits non-zero on it. `reap-batch` puts it in the
+// report of the entry, and exits 0.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs` and `path`.
