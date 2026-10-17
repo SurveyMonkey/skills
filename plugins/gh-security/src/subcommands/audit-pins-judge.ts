@@ -28,7 +28,6 @@ import { parseArguments } from '../lib/args.ts'
 import { type Envelope, exitCodeFor, type JsonObject, type JsonValue } from '../lib/envelope.ts'
 import { readOptionalValue } from '../state.ts'
 import {
-  type AuditPinsDeps,
   die,
   FINDINGS_SHAPE,
   failPhase,
@@ -39,6 +38,7 @@ import {
   linesOf,
   loadSession,
   orEmpty,
+  type PhaseDeps,
   type Session,
   setFindings,
   setKey,
@@ -131,7 +131,7 @@ const parsed = (text: string): unknown => {
  */
 export const advisoryFor = async (
   session: Session,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
   pkg: string,
   version: string,
 ): Promise<Advisory> => {
@@ -156,7 +156,7 @@ export const advisoryFor = async (
     {
       args: ['--ecosystem', session.ecosystem, '--version', version, ...prefix, '--', pkg],
       env: session.env,
-      io: { stdout: () => {}, stderr: () => {}, readStdin: () => '' },
+      io: deps.io,
       commandNames: [],
     },
     deps.makeClient,
@@ -251,7 +251,7 @@ interface Own {
 
 const ownVerdict = async (
   session: Session,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
   finding: Finding,
   pkg: string,
 ): Promise<Own> => {
@@ -310,7 +310,7 @@ const ownVerdict = async (
 /** The verdict of the other packages that moved, and the text that it adds. */
 const collateralVerdict = async (
   session: Session,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
   own: Own,
   pkg: string,
 ): Promise<{ readonly verdict: string; readonly finding: Finding; readonly detail: string }> => {
@@ -397,11 +397,7 @@ const collateralVerdict = async (
 }
 
 /** One tested finding, judged. */
-const judgeOne = async (
-  session: Session,
-  deps: AuditPinsDeps,
-  finding: Finding,
-): Promise<Finding> => {
+const judgeOne = async (session: Session, deps: PhaseDeps, finding: Finding): Promise<Finding> => {
   const pkg = toText(finding.package ?? null)
   const own = await ownVerdict(session, deps, finding, pkg)
   const collateral = await collateralVerdict(session, deps, own, pkg)
@@ -513,7 +509,7 @@ const keysWith = (findings: readonly Finding[], status: string): JsonValue[] =>
 export const judge = (
   args: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
 ): Promise<CommandResult> =>
   settle(async () => {
     const parsedArgs = parseArguments(args, { work: { type: 'string', default: '' } })

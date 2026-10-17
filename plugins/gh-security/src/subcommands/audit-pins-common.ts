@@ -17,7 +17,12 @@ import type { Adapter, Environment, Tree } from '../adapters/adapter.ts'
 import type { NodeDetection } from '../adapters/node/detect.ts'
 import { equal, jqType, render, toText } from '../adapters/node/jq-json.ts'
 import { isRecord } from '../adapters/node/manifest.ts'
-import { type CommandResult, type FailedReport, failedReport } from '../cli/command.ts'
+import {
+  type CommandContext,
+  type CommandResult,
+  type FailedReport,
+  failedReport,
+} from '../cli/command.ts'
 import { uniqueJq } from '../jq.ts'
 import { parseEnvPrefix } from '../lib/env-prefix.ts'
 import {
@@ -55,6 +60,11 @@ export type { ClientFactory } from './check-advisories.ts'
  */
 export interface AuditPinsDeps extends FixGroupDeps {
   readonly makeClient: ClientFactory
+}
+
+/** The deps that a phase gets: those of the handler, and the io of its context. */
+export interface PhaseDeps extends AuditPinsDeps {
+  readonly io: CommandContext['io']
 }
 
 /** The phase names of an exit 3. `compose` comes only from `together`. */

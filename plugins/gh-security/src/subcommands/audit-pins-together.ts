@@ -21,7 +21,6 @@ import type { JsonObject, JsonValue } from '../lib/envelope.ts'
 import { readOptionalValue } from '../state.ts'
 import { movesBetween } from './audit-pins-collateral.ts'
 import {
-  type AuditPinsDeps,
   die,
   FINDINGS_SHAPE,
   failPhase,
@@ -36,6 +35,7 @@ import {
   onTree,
   optionalText,
   orEmpty,
+  type PhaseDeps,
   promised,
   requiredText,
   requiredValue,
@@ -113,7 +113,7 @@ const stillListed = (answer: unknown, candidates: readonly Candidate[]): JsonVal
 /** Remove the set, check the edit, install, and judge what moved: `run_attempt`. */
 const runAttempt = async (
   session: Session,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
   attempt: number,
   candidates: readonly Candidate[],
 ): Promise<Attempt> => {
@@ -256,7 +256,7 @@ const reasonOf = (attempt: Attempt): string =>
 export const together = (
   args: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
-  deps: AuditPinsDeps,
+  deps: PhaseDeps,
 ): Promise<CommandResult> =>
   settle(async (): Promise<JsonValue> => {
     const parsed = parseArguments(args, { work: { type: 'string', default: '' } })

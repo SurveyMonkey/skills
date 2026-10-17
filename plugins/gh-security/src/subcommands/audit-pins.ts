@@ -207,7 +207,7 @@ export const auditPins = (context: CommandContext, deps: AuditPinsDeps): Promise
       ),
     )
   }
-  return PHASES[phase as keyof typeof PHASES](args, context.env, deps)
+  return PHASES[phase as keyof typeof PHASES](args, context.env, { ...deps, io: context.io })
 }
 
 export const auditPinsCommand: CommandHandler = (context) =>
