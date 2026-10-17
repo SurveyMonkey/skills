@@ -36,7 +36,8 @@
 //   detect fails         ok false, pm, pm_exec and probe_package null, cause
 //                        `detect`, stderr the error of `detect`.
 //   two failed attempts  ok false, cause as above, stderr the `output` of the
-//                        second attempt. `probeRegistry` cuts it to 8 KiB.
+//                        second attempt. `probeRegistry` keeps its first
+//                        and last 4 KiB.
 // `exclude_error` is null, or the error of step 1.
 //
 // The command fails, with exit 1, for a bad command line, a root that is not

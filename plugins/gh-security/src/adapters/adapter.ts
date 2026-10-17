@@ -361,7 +361,8 @@ export type RegistryProbeAnswer = {
   /**
    * What the probe wrote: stderr, then stdout. Or why it did not start. A text
    * of more than 8 KiB keeps its first 4 KiB and its last 4 KiB, with one marker
-   * line between them that names the bytes cut. `http_status` is read before the cut.
+   * line between them that names the bytes cut. The verb reads `http_status`
+   * before the cut.
    */
   readonly output: string
 }

@@ -11,7 +11,7 @@
 // npm 11.19.0 and Yarn 4.9.2 (`spec/fixtures/registry-probe/`).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { Environment, Tree } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
@@ -380,7 +380,7 @@ describe('probeRegistry: the size of the output', () => {
     return answer.value
   }
 
-  // A real Yarn 4.9.2 network failure: 60818 bytes of minified source on stderr.
+  // A real Yarn 4.9.2 network failure: 60818 bytes on stderr, almost all minified source.
   // Its own error is the short text on stdout, after stderr. The 401 text of
   // another specimen stands in for a status that only the tail carries.
   it('cuts a large output to its first and last 4 KiB, and says how many bytes it cut', async () => {
@@ -389,6 +389,9 @@ describe('probeRegistry: the size of the output', () => {
     const full = Buffer.from(`${stderr}${stdout}`)
     const { output } = await attempt({ status: 1, stderr, stdout })
     const cut = full.length - 2 * KEEP
+    // 60818 + 312 bytes, less two ends of 4096.
+    expect(cut).toBe(52938)
+    expect(output).toContain('\n[the probe output is cut here: 52938 bytes]\n')
     expect(output).toBe(
       `${full.subarray(0, KEEP).toString()}\n[the probe output is cut here: ${cut} bytes]\n${full.subarray(-KEEP).toString()}`,
     )
@@ -404,18 +407,24 @@ describe('probeRegistry: the size of the output', () => {
     expect(output).toContain('YN0041')
   })
 
-  // Pinning: green when written. The status is read before the cut.
   it('reads a status that only the cut part names', async () => {
-    const stderr = `E404 first\n${'x'.repeat(3 * KEEP)}\nlast\n`
+    const stderr = `${'x'.repeat(2 * KEEP)}\nE404\n${'x'.repeat(2 * KEEP)}\n`
     const { output, http_status } = await attempt({ status: 1, stderr, stdout: '' })
     expect(http_status).toBe(404)
-    expect(output).toContain('E404 first')
+    expect(output).not.toContain('E404')
   })
 
   // Pinning: green when written. The limit is on bytes, so text of 8192 bytes stays whole.
   it('does not cut an output of exactly 8 KiB', async () => {
     const stderr = `${'e'.repeat(2 * KEEP - 1)}\n`
     expect((await attempt({ status: 1, stderr, stdout: '' })).output).toBe(stderr)
+  })
+
+  it('cuts an output of one byte more than 8 KiB', async () => {
+    const stderr = `${'e'.repeat(2 * KEEP)}\n`
+    expect((await attempt({ status: 1, stderr, stdout: '' })).output).toContain(
+      '[the probe output is cut here: 1 bytes]',
+    )
   })
 
   it('counts bytes, not characters, and cuts only the output', async () => {
@@ -462,6 +471,10 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
       'a block after other keys',
       'enableTelemetry: false\nnpmScopes:\n  other:\n    npmAlwaysAuth: true\n  example-org:\n    npmAlwaysAuth: true\n',
     ],
+    [
+      'CRLF line ends and a comment',
+      'npmScopes: # the private scopes\r\n  # the registry of the org\r\n# a note\r\n  example-org:\r\n    npmAlwaysAuth: true\r\n',
+    ],
   ])('prefers a scope that .yarnrc.yml maps in npmScopes, with %s', async (_name, yarnrc) => {
     expect(await chosen(PUBLIC_FIRST, { '.yarnrc.yml': yarnrc }, 'yarn')).toBe('@example-org/ui')
   })
@@ -491,11 +504,18 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     ],
     ['an .npmrc with an empty registry', { '.npmrc': '@example-org:registry=\n' }],
     ['an .npmrc that is a directory', {}],
-    ['npmScopes with a value on its own line', { '.yarnrc.yml': 'npmScopes: oops\n' }],
+    [
+      'npmScopes with a value on the same line',
+      { '.yarnrc.yml': 'npmScopes: oops\n  example-org:\n' },
+    ],
     ['npmScopes that holds a list', { '.yarnrc.yml': 'npmScopes:\n  - example-org\n' }],
     [
       'npmScopes with no scope under it',
       { '.yarnrc.yml': 'npmScopes:\nenableTelemetry: false\n  example-org:\n' },
+    ],
+    [
+      'the scope as a key one level down in npmScopes',
+      { '.yarnrc.yml': 'npmScopes:\n  other:\n    example-org:\n      npmAlwaysAuth: true\n' },
     ],
     [
       'the scope mapped under another key',
@@ -516,7 +536,7 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
   })
 
-  it('does not read a field after the first when no scope is mapped', async () => {
+  it('does not fail on a field after the first, when another scope is mapped', async () => {
     const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
     expect(
       await chosen(manifest, { '.npmrc': '@other:registry=https://r.example.invalid/\n' }),
@@ -532,6 +552,11 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     const home = createSandbox().join('home')
     mkdirSync(home, { recursive: true })
     writeFileSync(join(home, '.npmrc'), NPMRC)
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    onTestFinished(() => {
+      vi.unstubAllEnvs()
+    })
     const tree = treeOf('npm', PUBLIC_FIRST)
     const answer = await node.probeRegistry(tree, 'lodash', {
       run: recorder().runner,

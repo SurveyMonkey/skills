@@ -10,14 +10,15 @@
 // `dependencies`, then `devDependencies`, then `optionalDependencies`.
 // Private registries hold scoped packages. A scope that the repository maps to
 // a registry comes first (#324): a `@<scope>:registry=` line of `.npmrc`, or a
-// key of `npmScopes` in `.yarnrc.yml`. Both files are read by line, with no
-// parser, and a file that cannot be read maps nothing. The `.npmrc` of the
-// user is not read, so the answer depends on the repository only. Without a
-// mapped scope, the first scoped dependency applies. Only a spec with no `:` and no `/`
-// counts, because the registry resolves only a range or a tag. A
-// `workspace:`, `file:`, `link:`, `npm:` or git spec is not in the registry,
-// and a probe of it reads as a 404. With no such dependency, the verb uses
-// the fallback of the caller. With no fallback either, the verb fails.
+// key of `npmScopes` in `.yarnrc.yml`. The verb reads both files by line,
+// with no parser. A file that the verb cannot read maps no scope. The verb
+// does not read the `.npmrc` of the user, so the answer depends only on the
+// repository. Without a mapped scope, the first scoped dependency applies.
+// Only a spec with no `:` and no `/` counts, because the registry resolves
+// only a range or a tag. A `workspace:`, `file:`, `link:`, `npm:` or git
+// spec is not in the registry, and a probe of it reads as a 404. With no such
+// dependency, the verb uses the fallback of the caller. With no fallback
+// either, the verb fails.
 //
 // The command. `<pm_exec> view <package> version` for pnpm and npm, and
 // `<pm_exec> npm info <package> --fields version` for Yarn Berry. It runs in
@@ -103,12 +104,12 @@ const mappedScopes = (root: string): ReadonlySet<string> => {
     if (match !== null) scopes.add(match[1] as string)
   }
   const yarnrc = linesOf(join(root, '.yarnrc.yml'))
-  const start = yarnrc.findIndex((line) => /^npmScopes:[ \t\r]*$/.test(line))
+  const start = yarnrc.findIndex((line) => /^npmScopes:[ \t]*(#[^\r]*)?\r?$/.test(line))
   // The keys of the block are the lines at its first indent. A line with no
   // indent ends the block. A blank line, or a comment, does not.
   let indent: number | null = null
   for (const line of start === -1 ? [] : yarnrc.slice(start + 1)) {
-    if (/^[ \t\r]*(#.*)?$/.test(line)) continue
+    if (/^[ \t]*(#[^\r]*)?\r?$/.test(line)) continue
     const width = line.length - line.trimStart().length
     if (width === 0) break
     indent ??= width
@@ -143,8 +144,6 @@ const scopedDependency = (root: string): Envelope<string | null> => {
       if (scopes.has(pkg.slice(1, pkg.indexOf('/')))) return ok(pkg)
       first ??= pkg
     }
-    // With no mapped scope, the first candidate ends the search, as before.
-    if (first !== null && scopes.size === 0) return ok(first)
   }
   return ok(first)
 }
