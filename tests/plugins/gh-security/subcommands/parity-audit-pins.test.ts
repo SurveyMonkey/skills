@@ -1,17 +1,22 @@
-// Parity for `audit-pins list`, `baseline` and `test-pin` (RFC 002, "Parity
-// is the migration strategy", #235). Each row of
-// `spec/fixtures/audit-pins/capture.json` is one run of
+// Parity for `audit-pins` (RFC 002, "Parity is the migration strategy",
+// #235). Each row of `spec/fixtures/audit-pins/capture.json` (`list`,
+// `baseline` and `test-pin`) and of `capture-judge-together.json` (`judge`
+// and `together`, after the steps that lead to them) is one run of
 // `audit-pins-driver.sh` over a real git repository and a real lockfile
 // specimen, with its recipe. A row here makes the same repository with the
 // same bash recipe, runs each step of the port in process, and compares the
 // exit status and the JSON of each step, the state file at the end, what
 // `git status --porcelain` says in the worktree, the files that the stand-in
-// package manager saw, and the count of installs.
+// package manager saw, and the count of installs. For the second capture it
+// also compares the advisory cache in the work directory.
 //
 // The adapter is the real node adapter on both sides: `node.sh` for the
 // capture, and the registry for the port. git is real. The package manager is
 // the stand-in of the capture, on PATH: an install reaches the network
-// (`mocking.md`).
+// (`mocking.md`). `gh` is the one mocked boundary: the capture served its
+// advisory pages from a stand-in on PATH to the real `check-advisories.sh`,
+// and the port gets the same pages, or the same failure, from
+// `createGhMock`.
 //
 // The state is compared without `adapter`, `advisories`, `scripts_dir` and
 // `ecosystem`: the bash keeps paths there, and the port keeps the name of
@@ -40,6 +45,7 @@ import { exitCodeFor, type JsonValue } from '#gh-security/lib/envelope.ts'
 import { run } from '#gh-security/lib/process.ts'
 import { auditPins } from '#gh-security/subcommands/audit-pins.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
+import { createGhMock, ghFails } from '#harness/gh.ts'
 import { pluginFile } from '#harness/paths.ts'
 import { createSandbox } from '#harness/sandbox.ts'
 
@@ -51,8 +57,13 @@ interface Answer {
   readonly stdout: JsonValue
 }
 
+/** The pages of advisories that `gh api advisories` served. */
+type Pages = readonly (readonly Record<string, unknown>[])[]
+
 interface Step {
   readonly args: readonly string[]
+  readonly advisories?: Pages
+  readonly gh_fail?: string
   readonly edit?: string
   readonly install?: string
   readonly install_status?: number
@@ -68,6 +79,8 @@ interface Row {
   readonly porcelain: string
   readonly seen: Record<string, string>
   readonly installs: number
+  readonly advisories?: Pages
+  readonly cache?: Record<string, JsonValue>
 }
 
 interface Capture {
@@ -77,9 +90,11 @@ interface Capture {
   readonly rows: readonly Row[]
 }
 
-const CAPTURE = JSON.parse(
-  readFileSync(join(FIXTURES_ROOT, 'audit-pins', 'capture.json'), 'utf8'),
-) as Capture
+const captureOf = (name: string): Capture =>
+  JSON.parse(readFileSync(join(FIXTURES_ROOT, 'audit-pins', name), 'utf8')) as Capture
+
+const CAPTURE = captureOf('capture.json')
+const JUDGE_TOGETHER = captureOf('capture-judge-together.json')
 
 const PLUGIN = pluginFile('gh-security')
 
@@ -114,6 +129,31 @@ const DECLARED: Readonly<Record<string, Readonly<Record<number, Declared>>>> = {
       }
     },
   },
+  'npm: the guards of judge and together': {
+    // A bad command line is in node's words.
+    9: () => error("Unknown option '--bogus'"),
+    // A phase with no --work names itself. The bash wrote the text of the
+    // shell and no JSON.
+    10: () => error('together: --work is required'),
+    // The state reader of the port names the key with no dot.
+    12: () =>
+      error(
+        "the state file at $ROOT/work/state.json has no usable value for 'lockfile'. Run the earlier steps first; an absent or empty value is never read as a legitimate answer here.",
+      ),
+  },
+  'npm: together refuses a removal that did not land, and a manifest it cannot rewrite': {
+    // The port refuses a candidate path that is not a list of keys. The bash
+    // read a null path as the whole override block, and removed it.
+    6: () => ({
+      status: 3,
+      stdout: {
+        status: 'failure',
+        phase: 'compose',
+        detail:
+          'package.json could not be rewritten to remove the candidate set [null]. Quoting the error: a candidate path is not a list of keys',
+      },
+    }),
+  },
 }
 
 /** Each run-specific path as its placeholder, in each text. */
@@ -141,13 +181,13 @@ const withoutPaths = (state: Record<string, JsonValue> | null): JsonValue => {
 }
 
 /** Run the row's recipe, then each step of the port, and read what it left. */
-const runPort = async (row: Row) => {
+const runPort = async (capture: Capture, row: Row) => {
   const sandbox = createSandbox()
   mkdirSync(sandbox.join('row'))
   const root = realpathSync(sandbox.join('row'))
   const bin = sandbox.stubPath(join(root, 'bin'))
   for (const pm of ['npm', 'pnpm', 'yarn']) {
-    writeFileSync(join(bin, pm), CAPTURE.stand_in_pm)
+    writeFileSync(join(bin, pm), capture.stand_in_pm)
     chmodSync(join(bin, pm), 0o755)
   }
   const env: NodeJS.ProcessEnv = {
@@ -157,18 +197,19 @@ const runPort = async (row: Row) => {
     WORK: join(root, 'work'),
     WT: join(root, 'work', 'audit'),
     PM_DIR: join(root, 'pm'),
+    GH_DIR: join(root, 'gh'),
     FIXTURE: join(FIXTURES_ROOT, row.fixture),
     PRE: row.pre ?? ':',
   }
   const bash = (script: string, cwd?: string) => {
-    const result = spawnSync('bash', ['-c', CAPTURE.prelude + script], {
+    const result = spawnSync('bash', ['-c', capture.prelude + script], {
       env,
       cwd,
       encoding: 'utf8',
     })
     if (result.status !== 0) throw new Error(`${row.name}: ${script}: ${result.stderr}`)
   }
-  bash(CAPTURE.setup)
+  bash(capture.setup)
   const expand = (arg: string) =>
     arg
       .replaceAll('$ROOT', root)
@@ -185,7 +226,17 @@ const runPort = async (row: Row) => {
       io: { stdout: () => {}, stderr: () => {}, readStdin: () => '' },
       commandNames: [],
     }
-    const answer = answerOf(await auditPins(context, { spawn: run, route: selectAdapter }))
+    const pages = step.advisories ?? row.advisories ?? []
+    const replies = {
+      listAdvisories: step.gh_fail === undefined ? pages.flat() : ghFails(step.gh_fail),
+    }
+    const answer = answerOf(
+      await auditPins(context, {
+        spawn: run,
+        route: selectAdapter,
+        makeClient: () => createGhMock(replies),
+      }),
+    )
     answers.push({ status: answer.status, stdout: scrub(answer.stdout, root) })
   }
   const statePath = join(env.WORK as string, 'state.json')
@@ -201,7 +252,15 @@ const runPort = async (row: Row) => {
     if (name.startsWith('seen-')) seen[name] = readFileSync(join(pmDir, name), 'utf8')
   }
   const count = join(pmDir, 'install.n')
+  const cacheDir = join(env.WORK as string, 'advisories')
+  const cache: Record<string, JsonValue> = {}
+  if (existsSync(cacheDir)) {
+    for (const name of readdirSync(cacheDir).sort()) {
+      cache[name] = scrub(JSON.parse(readFileSync(join(cacheDir, name), 'utf8')) as JsonValue, root)
+    }
+  }
   return {
+    cache,
     answers,
     state: withoutPaths(state),
     porcelain: spawnSync('git', ['-C', env.WT as string, 'status', '--porcelain'], {
@@ -224,11 +283,24 @@ const PARSER_FAILED =
 /** The port's quote of node at a failed removal, which the capture cannot know. */
 const NODE_ERROR = /Quoting the error: .*$/s
 
+/** The bash's quote of jq at a failed removal in `together`. */
+const JQ_ERROR = /Quoting jq: .*$/s
+
+/** A map that a parser refused in an attempt, up to the text that follows it. */
+const MAP_REFUSED = /(could not read a whole-tree resolution_map: )[\s\S]*?(?=; attempt 2|$)/
+
+/** The port names the command, not the script, where the query failed. */
+const SCRIPT_NAME = /^check-advisories\.sh exited /
+
 /** A value with each text that quotes a parser cut after its fixed words. */
 const cut = (value: unknown): unknown => {
   if (typeof value === 'string') {
     if (value.startsWith(PARSER_FAILED)) return `${PARSER_FAILED}<parser>`
-    return value.replace(NODE_ERROR, 'Quoting the error: <node>')
+    return value
+      .replace(NODE_ERROR, 'Quoting the error: <node>')
+      .replace(JQ_ERROR, 'Quoting the error: <node>')
+      .replace(MAP_REFUSED, '$1<parser>')
+      .replace(SCRIPT_NAME, 'check-advisories exited ')
   }
   if (Array.isArray(value)) return value.map(cut)
   if (value !== null && typeof value === 'object') {
@@ -237,29 +309,42 @@ const cut = (value: unknown): unknown => {
   return value
 }
 
-describe('audit-pins list, baseline and test-pin against audit-pins-driver.sh', () => {
-  it.each(CAPTURE.rows.map((row) => [row.name, row] as const))('%s', async (_name, row) => {
-    const port = await runPort(row)
-    const declared = DECLARED[row.name] ?? {}
-    const expected = row.steps.map((step, index) => {
-      const captured = { status: step.result.status, stdout: step.result.stdout }
-      return declared[index]?.(captured) ?? captured
-    })
-    expect({ ...port, answers: cut(port.answers), state: cut(port.state) }).toEqual({
-      answers: cut(expected),
-      state: cut(withoutPaths(row.state)),
-      porcelain: row.porcelain,
-      seen: row.seen,
-      installs: row.installs,
-    })
+const compare = async (capture: Capture, row: Row) => {
+  const { cache, ...port } = await runPort(capture, row)
+  const declared = DECLARED[row.name] ?? {}
+  const expected = row.steps.map((step, index) => {
+    const captured = { status: step.result.status, stdout: step.result.stdout }
+    return declared[index]?.(captured) ?? captured
   })
+  expect({ ...port, answers: cut(port.answers), state: cut(port.state) }).toEqual({
+    answers: cut(expected),
+    state: cut(withoutPaths(row.state)),
+    porcelain: row.porcelain,
+    seen: row.seen,
+    installs: row.installs,
+  })
+  expect(cache).toEqual(row.cache ?? {})
+}
 
-  it('declares a difference only for a row and a step that the capture has', () => {
-    const steps = Object.fromEntries(CAPTURE.rows.map((row) => [row.name, row.steps.length]))
+describe('audit-pins list, baseline and test-pin against audit-pins-driver.sh', () => {
+  it.each(CAPTURE.rows.map((row) => [row.name, row] as const))('%s', (_name, row) =>
+    compare(CAPTURE, row),
+  )
+
+  it('declares a difference only for a row and a step that a capture has', () => {
+    const steps = Object.fromEntries(
+      [...CAPTURE.rows, ...JUDGE_TOGETHER.rows].map((row) => [row.name, row.steps.length]),
+    )
     for (const [name, declared] of Object.entries(DECLARED)) {
       for (const index of Object.keys(declared)) {
         expect(Number(index)).toBeLessThan(steps[name] ?? 0)
       }
     }
   })
+})
+
+describe('audit-pins judge and together against audit-pins-driver.sh', () => {
+  it.each(JUDGE_TOGETHER.rows.map((row) => [row.name, row] as const))('%s', (_name, row) =>
+    compare(JUDGE_TOGETHER, row),
+  )
 })

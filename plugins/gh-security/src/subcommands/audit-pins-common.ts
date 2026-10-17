@@ -11,9 +11,11 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import { dirname } from 'node:path'
 import type { Adapter, Environment, Tree } from '../adapters/adapter.ts'
+
 import type { NodeDetection } from '../adapters/node/detect.ts'
-import { equal, render, toText } from '../adapters/node/jq-json.ts'
+import { equal, jqType, render, toText } from '../adapters/node/jq-json.ts'
 import { isRecord } from '../adapters/node/manifest.ts'
 import { type CommandResult, type FailedReport, failedReport } from '../cli/command.ts'
 import { uniqueJq } from '../jq.ts'
@@ -35,6 +37,7 @@ import {
   type StateFile,
   writeKey,
 } from '../state.ts'
+import type { ClientFactory } from './check-advisories.ts'
 import {
   type FixGroupDeps,
   type Git,
@@ -43,11 +46,19 @@ import {
   runners,
 } from './fix-group-common.ts'
 
-/** What the handler is given beside its context: the runner and the registry. */
-export type AuditPinsDeps = FixGroupDeps
+/** How a `gh` client is made. `judge` and `together` give it to `check-advisories`. */
+export type { ClientFactory } from './check-advisories.ts'
 
-/** The phase names of an exit 3 in these three steps. */
-export type AuditPhase = 'list' | 'install' | 'restore'
+/**
+ * What the handler is given beside its context: the runner, the registry,
+ * and the factory of the `gh` client that the advisory query uses.
+ */
+export interface AuditPinsDeps extends FixGroupDeps {
+  readonly makeClient: ClientFactory
+}
+
+/** The phase names of an exit 3. `compose` comes only from `together`. */
+export type AuditPhase = 'list' | 'install' | 'restore' | 'advisories' | 'compose'
 
 /** An answer that ends a phase. */
 type Halt = Failure | FailedReport
@@ -102,6 +113,12 @@ export interface Session {
   /** The state as it is now. Each write replaces it. */
   state: StateFile
   readonly worktree: string
+  /** The work directory, which holds the state file and the advisory cache. */
+  readonly work: string
+  /** The route of the adapter, which the advisory query also takes. */
+  readonly ecosystem: string
+  /** The text of `env_prefix`, or null for none. */
+  readonly prefix: string | null
   readonly overrideFile: string
   readonly adapter: Adapter<NodeDetection>
   readonly git: Git
@@ -122,7 +139,7 @@ export const treeOf = (
 }
 
 /** A required text of the state, or exit 1. */
-const requiredText = (state: StateFile, key: string): string => {
+export const requiredText = (state: StateFile, key: string): string => {
   const value = readString(state, key)
   return value.outcome === 'ok' ? value.value : die(value.error)
 }
@@ -157,7 +174,19 @@ export const loadSession = (work: string, env: Environment, deps: AuditPinsDeps)
   const adapter = route.adapter
   const { git, pm } = runners(deps.spawn, parseEnvPrefix(prefix), env)
   const tree = () => treeOf(adapter, worktree, env)
-  return { state, worktree, overrideFile, adapter, git, pm, env, tree }
+  return {
+    state,
+    worktree,
+    work: dirname(state.path),
+    ecosystem,
+    prefix,
+    overrideFile,
+    adapter,
+    git,
+    pm,
+    env,
+    tree,
+  }
 }
 
 /** Write one key of the state: `state_set` in the bash. */
@@ -236,7 +265,7 @@ export const testOrder = (session: Session): OrderedPin[] =>
  * with a bad `attributable_versions` or `collateral_changes` reaches
  * `removable` with no advisory query run (audit-driver.md).
  */
-const FINDINGS_SHAPE = `type == "array"
+export const FINDINGS_SHAPE = `type == "array"
   and all(.[]; type == "object")
   and all(.[] | select(.status == "tested");
           (.attributable_versions | type) == "array"
@@ -265,7 +294,7 @@ const isTestedShape = (finding: JsonObject): boolean => {
   )
 }
 
-const isFindings = (value: JsonValue): value is JsonObject[] =>
+export const isFindings = (value: JsonValue): value is JsonObject[] =>
   Array.isArray(value) && value.every(isRecord) && (value as JsonObject[]).every(isTestedShape)
 
 /**
@@ -446,3 +475,49 @@ export const inconclusive = (
   attributable_versions: null,
   ...UNJUDGED,
 })
+
+/** jq's `.[]`: the entries of a list, or the values of an object. jq stops on any other value. */
+export const jqValues = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) return value
+  if (isRecord(value)) return Object.values(value)
+  throw new Error(`Cannot iterate over ${jqType(value)}`)
+}
+
+/** jq's `length`. jq stops on a boolean. */
+export const jqLength = (value: unknown): number => {
+  if (value === null) return 0
+  if (typeof value === 'boolean') throw new Error('boolean has no length')
+  if (typeof value === 'number') return Math.abs(value)
+  if (typeof value === 'string') return [...value].length
+  return jqValues(value).length
+}
+
+/**
+ * jq's `join`: null is empty, a number or a boolean is its JSON text. jq
+ * stops on a list or an object inside.
+ */
+export const jqJoin = (value: unknown, separator: string): string =>
+  jqValues(value)
+    .map((each) => {
+      if (each === null) return ''
+      if (typeof each === 'string') return each
+      if (typeof each === 'object') throw new Error(`cannot join a ${jqType(each)}`)
+      return JSON.stringify(each)
+    })
+    .join(separator)
+
+/**
+ * The lines that `jq -r '.[]'` gives a `while read` loop: each value as
+ * text, cut at each line break, with each empty line skipped.
+ */
+export const linesOf = (values: readonly unknown[]): string[] =>
+  values.flatMap((value) => toText(value).split('\n')).filter((line) => line !== '')
+
+/** The text of a jq program whose error the bash does not check: empty, as `$( )` gives it. */
+export const orEmpty = (text: () => string): string => {
+  try {
+    return text()
+  } catch {
+    return ''
+  }
+}
