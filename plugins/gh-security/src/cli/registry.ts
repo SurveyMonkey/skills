@@ -20,7 +20,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'audit-pins': {
     description:
-      'Run one phase of the pin-audit driver for one repository: audit-pins list --work <dir> --worktree <dir> [--ecosystem <eco>] [--env-prefix <prefix>] | audit-pins baseline --work <dir> | audit-pins test-pin --work <dir> (--key <key> | --path <json array>)',
+      'Run one phase of the pin-audit driver for one repository: audit-pins list --work <dir> --worktree <dir> [--ecosystem <eco>] [--env-prefix <prefix>] | audit-pins baseline --work <dir> | audit-pins test-pin --work <dir> (--key <key> | --path <json array>) | audit-pins judge --work <dir> | audit-pins together --work <dir>',
     load: async () => (await import('../subcommands/audit-pins.ts')).auditPinsCommand,
   },
   'build-dispatches': {

@@ -162,7 +162,9 @@ describe('the pin-audit driver entry', () => {
   it.each([
     'audit-pins list --work <dir> --worktree <dir> [--ecosystem <eco>] [--env-prefix <prefix>] |',
     'audit-pins baseline --work <dir> |',
-    'audit-pins test-pin --work <dir> (--key <key> | --path <json array>)',
+    'audit-pins test-pin --work <dir> (--key <key> | --path <json array>) |',
+    'audit-pins judge --work <dir> |',
+    'audit-pins together --work <dir>',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['audit-pins']?.description).toContain(usage)
   })
