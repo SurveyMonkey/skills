@@ -909,6 +909,20 @@ describe('judge (phase 5)', () => {
       })
     })
 
+    it('compares an absent key or path as null in the sibling rule', async () => {
+      const d = desk()
+      const answer = await judged(d, [
+        without(tested({ attributable_versions: [] }), 'key', 'path'),
+        tested({ attributable_versions: [], key: 'x', path: ['x'] }),
+        { package: 'lodash', status: 'inconclusive' },
+      ])
+      expect(project(answer, 'status', 'sibling_pins')).toEqual([
+        { status: 'removable-individually', sibling_pins: ['x'] },
+        { status: 'removable-individually', sibling_pins: [null, null] },
+        { status: 'inconclusive', sibling_pins: undefined },
+      ])
+    })
+
     it('asks with no prefix when the state has none', async () => {
       const d = desk()
       const state = stateWith(d, [tested()])
