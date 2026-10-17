@@ -368,3 +368,60 @@ describe('probeRegistry: the answer of one attempt', () => {
     ).toEqual({ ok: false, started: false })
   })
 })
+
+describe('probeRegistry: the size of the output', () => {
+  const KEEP = 4096
+  const attempt = async (result: Partial<RunResult>) => {
+    const answer = await node.probeRegistry(treeOf('yarn', SCOPED), null, {
+      run: recorder(result).runner,
+      env: {},
+    })
+    if (answer.outcome !== 'ok') throw new Error(answer.error)
+    return answer.value
+  }
+
+  // A real Yarn 4.9.2 network failure: 60818 bytes of minified source on stderr.
+  // Its own error is the short text on stdout, after stderr. The 401 text of
+  // another specimen stands in for a status that only the tail carries.
+  it.fails('cuts a large output to its first and last 4 KiB, and says how many bytes it cut', async () => {
+    const stderr = specimen('yarn-large-stderr.txt')
+    const stdout = specimen('yarn-large-stdout.txt')
+    const full = `${stderr}${stdout}`
+    const { output } = await attempt({ status: 1, stderr, stdout })
+    const cut = Buffer.byteLength(full) - 2 * KEEP
+    expect(output).toBe(
+      `${full.slice(0, KEEP)}\n[the probe output is cut here: ${cut} bytes]\n${full.slice(-KEEP)}`,
+    )
+    expect(output.endsWith(stdout)).toBe(true)
+  })
+
+  it.fails('reads the status from the full text, before the cut', async () => {
+    const stderr = specimen('yarn-large-stderr.txt')
+    const stdout = specimen('yarn-401.txt')
+    const { output, http_status } = await attempt({ status: 1, stderr, stdout })
+    expect(http_status).toBe(401)
+    expect(output.length).toBeLessThan(2 * KEEP + 100)
+    expect(output).toContain('YN0041')
+  })
+
+  // Pinning: green when written. The status is read before the cut.
+  it('reads a status that only the cut part names', async () => {
+    const stderr = `E404 first\n${'x'.repeat(3 * KEEP)}\nlast\n`
+    const { output, http_status } = await attempt({ status: 1, stderr, stdout: '' })
+    expect(http_status).toBe(404)
+    expect(output).toContain('E404 first')
+  })
+
+  // Pinning: green when written. The limit is on bytes, so text of 8192 bytes stays whole.
+  it('does not cut an output of exactly 8 KiB', async () => {
+    const stderr = 'e'.repeat(2 * KEEP - 1) + '\n'
+    expect((await attempt({ status: 1, stderr, stdout: '' })).output).toBe(stderr)
+  })
+
+  it.fails('counts bytes, not characters, and cuts only the output', async () => {
+    const stderr = `${'\u00e9'.repeat(3 * KEEP)}\n`
+    const answer = await attempt({ status: 1, stderr, stdout: '' })
+    expect(answer.output).toContain(`${3 * KEEP * 2 + 1 - 2 * KEEP} bytes]`)
+    expect(answer.command).toBe('yarn npm info @example-org/ui --fields version')
+  })
+})
