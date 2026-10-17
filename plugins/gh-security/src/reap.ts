@@ -95,7 +95,12 @@ export interface ReapTarget {
   readonly recordedWork?: string
 }
 
-/** The target after `contain`: each path resolved and checked. */
+/**
+ * The target after `contain`: each path resolved and checked. It is not a
+ * branded type. Both callers, `fix-group cleanup` and `reap-batch`, give
+ * `reap` the value of `contain` and nothing else, and each has an example
+ * of a refused path that reaps nothing (#229).
+ */
 export interface Contained {
   readonly repoRoot: string
   readonly work: string

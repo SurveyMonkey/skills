@@ -27,6 +27,10 @@
 # was an enumerated branch of that prose first, and a prose re-derivation of
 # it in the skill is a bug, not a fallback.
 #
+# The TypeScript port is `gh-security reap-batch`, which runs this step for
+# each entry of the workflow result (`src/post-agent.ts`, #229). This script
+# stays until #231 removes it.
+#
 # Output (always printed, whatever the outcome — like the adapter's
 # `validate` and every script in this directory, report and continue rather
 # than report-or-abort):

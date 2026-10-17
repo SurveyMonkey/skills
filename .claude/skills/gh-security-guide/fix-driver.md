@@ -46,8 +46,8 @@ What that header does not say, and what belongs here:
   two run the same `rm -rf` on the same directory from opposite sides. Both sides resolved
   physically, no `..` segment, contained under `<repo_root>/.claude/worktrees/`, plus one
   condition available only here: `--work` must name the workspace `setup` recorded. In the port,
-  one module holds these checks for both sides: `src/reap.ts`, which `fix-group cleanup` uses, and
-  `reap-batch` will use (#229). It checks the `..` segment on the path as given, and refuses a
+  one module holds these checks for both sides: `src/reap.ts`, which `fix-group cleanup` and
+  `reap-batch` (#229) use. It checks the `..` segment on the path as given, and refuses a
   resolved worktree that is not `<work>/fix`. The removal's
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
   `worktree_removed: true` with no field naming `$WORK` is the failure `reap-agent-artifacts.sh`
