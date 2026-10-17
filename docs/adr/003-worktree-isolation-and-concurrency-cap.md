@@ -156,7 +156,7 @@ what was then `origin/main`, and both blocked a rerun until a human deleted them
   committed. Anything else is left in place and named in the report.
 - **The guard compares tips instead of stopping on existence.** These local tips are this
   plugin's leftover: `origin/<default_branch>` or an ancestor of it, `origin/<branch_name>`, and
-  the drift commit alone. The guard deletes that branch and makes it again. Any other tip can hold
+  the drift commit alone. The guard deletes such a branch and makes it again. Any other tip can hold
   unpushed work, and only that tip stops the run. An ancestor tip holds no commit of its own
   ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)). A refused
   `git worktree add` leaves such a branch, and the default branch can move before the next run.
