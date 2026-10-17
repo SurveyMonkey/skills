@@ -63,7 +63,9 @@ const isText = (value: unknown): value is string => typeof value === 'string' &&
 /** `major_line` as text: text that is not empty, or a whole number. */
 const lineOf = (value: unknown): string | null => {
   if (isText(value)) return value
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? String(value) : null
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : null
 }
 
 /** One entry, or the reason that it is not an entry. */
