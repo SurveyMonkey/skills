@@ -19,6 +19,7 @@ import { fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.ts'
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
+import { reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
 import { renderPrCommand } from '#gh-security/subcommands/render-pr.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
@@ -51,6 +52,7 @@ describe('the registry', () => {
       "import('../subcommands/pr-status.ts')",
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
+      "import('../subcommands/reap-batch.ts')",
       "import('../subcommands/render-pr.ts')",
       "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/score-merge-risk.ts')",
@@ -72,6 +74,7 @@ describe('the discovery entries', () => {
     ['merge-envelopes', mergeEnvelopesCommand],
     ['preflight-repo', preflightRepoCommand],
     ['prepare-checkout', prepareCheckoutCommand],
+    ['reap-batch', reapBatchCommand],
     ['render-pr-status', renderPrStatusCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
@@ -99,6 +102,7 @@ describe('the discovery entries', () => {
     ['merge-envelopes', 'merge-envelopes <envelope.json>...'],
     ['preflight-repo', 'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'],
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
+    ['reap-batch', 'reap-batch <results.json>'],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
   })

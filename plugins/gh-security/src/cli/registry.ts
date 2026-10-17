@@ -77,6 +77,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
       'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root>',
     load: async () => (await import('../subcommands/prepare-checkout.ts')).prepareCheckoutCommand,
   },
+  'reap-batch': {
+    description:
+      'Verify the pull request of each workflow entry, reap it only when it is open, and report each: reap-batch <results.json>',
+    load: async () => (await import('../subcommands/reap-batch.ts')).reapBatchCommand,
+  },
   'render-pr': {
     description:
       'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
