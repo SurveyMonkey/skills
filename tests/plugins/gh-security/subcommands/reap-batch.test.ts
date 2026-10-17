@@ -178,6 +178,27 @@ describe('a success whose pull request reads OPEN', () => {
     expect(existsSync(work)).toBe(false)
     expect(branches(at)).toEqual(['main'])
   })
+
+  it('reaps a success whose cleanup is not null', async () => {
+    const at = world()
+    fixed(at)
+    const result = success(PLAIN, { cleanup: { left_behind: ['x'], errors: ['y'] } })
+    expect(
+      await only(reapAll(at, [entry(at.repo, result)], { 'octo/app#12': view('OPEN') })),
+    ).toMatchObject({ reaped: true, left_behind: [], errors: [] })
+    expect(branches(at)).toEqual(['main'])
+  })
+
+  it('keeps a branch whose tip is on the default branch and not on origin', async () => {
+    const at = world()
+    fixed(at)
+    // The reap gives no default branch, as reap-agent-artifacts.sh did not.
+    at.fixtures.git(`${workOf(at.repo, PLAIN)}/fix`, 'reset', '-q', '--hard', 'origin/main')
+    expect(
+      await only(reapAll(at, [entry(at.repo, success())], { 'octo/app#12': view('OPEN') })),
+    ).toMatchObject({ reaped: true, left_behind: [PLAIN.branch_name], errors: [] })
+    expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
+  })
 })
 
 /** The report of an entry that was not reaped, with the given fields changed. */
@@ -206,7 +227,7 @@ const only = async (answer: Promise<CommandResult>): Promise<JsonValue> => {
 }
 
 describe('a success whose pull request is not OPEN', () => {
-  it.each(['MERGED', 'CLOSED'])(
+  it.each(['MERGED', 'CLOSED', 'UNKNOWN', ''])(
     'is reported with state %s, and nothing is reaped',
     async (state) => {
       const at = world()
@@ -448,7 +469,36 @@ describe('the loop over the entries', () => {
       ],
       left_behind: [workOf(at.repo, PLAIN), PLAIN.branch_name],
     })
+    expect(reports[1]).toMatchObject({
+      reason: `missing result block at entry 1 of ${join(at.sandbox.path, 'results.json')}`,
+    })
     expect(reports[2]).toMatchObject({ pr_state: 'MERGED' })
+  })
+
+  it('reaps each entry in its own repository', async () => {
+    const at = world()
+    const second: World = {
+      ...at,
+      repo: at.fixtures.create(join(realpathSync(at.sandbox.path), 'r2')),
+    }
+    fixed(at)
+    fixed(second)
+    const result = await reapAll(
+      at,
+      [
+        entry(at.repo, success()),
+        entry(second.repo, success(PLAIN, { pr_url: 'https://github.com/octo/lib/pull/3' })),
+      ],
+      { 'octo/app#12': view('MERGED'), 'octo/lib#3': view('OPEN') },
+    )
+    if (result?.outcome !== 'ok') throw new Error(JSON.stringify(result))
+    expect(
+      (result.value as Record<string, JsonValue>[]).map((report) => report.worktree_path),
+    ).toEqual([workOf(at.repo, PLAIN), workOf(second.repo, PLAIN)])
+    expect(existsSync(`${workOf(at.repo, PLAIN)}/fix`)).toBe(true)
+    expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
+    expect(existsSync(workOf(second.repo, PLAIN))).toBe(false)
+    expect(branches(second)).toEqual(['main'])
   })
 
   it('reports a reap that failed part way, and still reaps the next entry', async () => {
@@ -532,6 +582,42 @@ describe('the env_prefix of an entry', () => {
     ])
     expect(calls.filter((call) => call[0] === 'git').length).toBeGreaterThan(0)
   })
+
+  it('wraps only the read of its own entry', async () => {
+    const at = world()
+    const calls: string[][] = []
+    const spawn: Runner = (command, args = []) => {
+      calls.push([command, ...args])
+      const stdout = JSON.stringify(view('MERGED'))
+      return Promise.resolve({
+        status: 0,
+        signal: null,
+        stdout,
+        stderr: '',
+        combined: stdout,
+        timedOut: false,
+        elapsedMs: 0,
+        startFailure: null,
+        streamErrors: [],
+      })
+    }
+    const file = join(at.sandbox.path, 'results.json')
+    writeFileSync(
+      file,
+      JSON.stringify([
+        entry(at.repo, success(), { envPrefix: 'env GH_SECURITY_EXAMPLE=1' }),
+        entry(at.repo, success(PLAIN, { pr_url: 'https://github.com/octo/lib/pull/3' })),
+      ]),
+    )
+    expect(await reapBatch(context(at, [file]), createGhClient, spawn)).toMatchObject({
+      outcome: 'ok',
+      value: [{ pr_state: 'MERGED' }, { pr_state: 'MERGED' }],
+    })
+    expect(calls.map((call) => call.slice(0, 5))).toEqual([
+      ['env', 'GH_SECURITY_EXAMPLE=1', 'gh', 'pr', 'view'],
+      ['gh', 'pr', 'view', '3', '--repo'],
+    ])
+  })
 })
 
 describe('a results file that is refused', () => {
@@ -595,6 +681,7 @@ describe('a results file that is refused', () => {
     ['has a dispatch.repo_root that is not text', ['dispatch', 'repo_root'], ''],
     ['has a dispatch.env_prefix that is not text', ['dispatch', 'env_prefix'], null],
     ['has no dispatch.group object', ['dispatch', 'group'], GONE],
+    ['has no dispatch.group object', ['dispatch', 'group'], []],
     ['has a dispatch.group.package that is not text', ['dispatch', 'group', 'package'], 5],
     ['has a dispatch.group.branch_name that is not text', ['dispatch', 'group', 'branch_name'], ''],
     [
@@ -606,6 +693,11 @@ describe('a results file that is refused', () => {
       'has a dispatch.group.major_line that is not text or a whole number',
       ['dispatch', 'group', 'major_line'],
       -1,
+    ],
+    [
+      'has a dispatch.group.major_line that is not text or a whole number',
+      ['dispatch', 'group', 'major_line'],
+      '',
     ],
     ['has a mispaired that is not true or false', ['mispaired'], 'no'],
     ['has no result', ['result'], GONE],
@@ -621,9 +713,9 @@ describe('a results file that is refused', () => {
     expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
   })
 
-  it('refuses an entry that is not an object', async () => {
+  it.each(['null', '[]'])('refuses an entry %s, as it is not an object', async (value) => {
     const at = world()
-    const { file, result } = await refused(at, '[null]')
+    const { file, result } = await refused(at, `[${value}]`)
     expect(result).toEqual({
       outcome: 'failed',
       error: `reap-batch: ${file} entry 0 is not an object`,
