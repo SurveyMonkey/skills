@@ -1461,6 +1461,19 @@ describe('test-pin (phase 4, one pin per install)', () => {
       )
     })
 
+    it('reads a null pin after the removal as jq does: not the pin', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      const answer = await testPin(
+        w,
+        ['--key', 'lodash'],
+        stand({
+          listPins: listPinsWith((real) => ({ ...real, count: 1, pins: [null] })),
+        }),
+      )
+      expect(finding(answer).status).toBe('tested')
+    })
+
     it.each([
       ['fell by two', (count: number): unknown => count - 1, '0'],
       ['did not fall', (count: number): unknown => count + 1, '2'],

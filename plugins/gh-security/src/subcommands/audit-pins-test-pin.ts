@@ -117,11 +117,15 @@ const removePin = async (session: Session, pin: OrderedPin): Promise<void> => {
 
 /**
  * Whether `list_pins` still lists a pin at `path`. The answer is an object,
- * which `promised` checked. Pins that cannot be read list it.
+ * which `promised` checked. Pins that cannot be read list it. jq reads
+ * `.path` of a null pin as null, so a null pin is not this pin.
  */
 const stillListed = (answer: unknown, path: readonly string[]): boolean => {
   const pins = (answer as Record<string, unknown>).pins
-  return !Array.isArray(pins) || pins.some((pin) => !isRecord(pin) || equal(pin.path, path))
+  return (
+    !Array.isArray(pins) ||
+    pins.some((pin) => pin !== null && (!isRecord(pin) || equal(pin.path, path)))
+  )
 }
 
 /** Check against phase 2's count that the edit landed, or restore and end the phase. */
