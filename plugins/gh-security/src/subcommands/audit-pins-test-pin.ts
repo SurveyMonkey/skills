@@ -175,8 +175,12 @@ interface MapAfter {
   readonly refusal: string
 }
 
-/** The whole-tree map after the removal, or the reason that there is none. */
-const mapAfter = (session: Session, pin: OrderedPin): MapAfter => {
+/**
+ * The whole-tree map after the removal, or the reason that there is none.
+ * When its `resolutions` are not usable, the tree is restored, then the
+ * phase ends.
+ */
+const mapAfter = async (session: Session, pin: OrderedPin): Promise<MapAfter> => {
   if (readOptionalValue(session.state, 'map_available') !== true) {
     return {
       now: null,
@@ -192,9 +196,11 @@ const mapAfter = (session: Session, pin: OrderedPin): MapAfter => {
     const unreadable = mapUnreadable('install', map.value, description)
     const now = resolutionsOf(map.value)
     if (now === null) {
+      await restoreTree(session, pin.key)
       failPhase(
         'install',
-        `${description} carries no resolutions object, so there is nothing to diff this removal against.`,
+        `${description} carries no resolutions object with a list of versions for each package, ` +
+          'so there is nothing to diff this removal against.',
       )
     }
     return { now, unreadable, refusal: '' }
@@ -240,7 +246,11 @@ export const testPin = (
       'type == "array"',
       "the baseline's inconclusive list",
     )
-    if (refused.some((entry) => isRecord(entry) && entry.package === pin.package)) {
+    // jq stops on `.package` of an entry that is not an object or null, and
+    // the bash then refuses the pin. So does this.
+    if (
+      refused.some((entry) => entry !== null && (!isRecord(entry) || entry.package === pin.package))
+    ) {
       die(
         `test-pin: the baseline recorded ${pin.package} inconclusive (present: false), so this ` +
           "pin is not tested. Recording it and never testing it is the baseline's answer, not a step to redo.",
@@ -305,7 +315,12 @@ export const testPin = (
       'type == "array"',
       'the with-all-pins baseline snapshots',
     )
-    const snapshot = snapshots.find((entry) => isRecord(entry) && entry.package === pin.package)
+    // jq stops on `.package` of an entry that is not an object or null, and
+    // the bash then has no snapshot.
+    const readable = snapshots.every((entry) => entry === null || isRecord(entry))
+    const snapshot = readable
+      ? snapshots.find((entry) => isRecord(entry) && entry.package === pin.package)
+      : undefined
     const withPin = isRecord(snapshot) ? snapshot.versions : null
     if (!Array.isArray(withPin)) {
       failPhase(
@@ -327,7 +342,7 @@ export const testPin = (
       'the with-all-pins baseline resolution_map',
     )
     const baseUnreadable = readOptionalValue(session.state, 'baseline_unreadable_entries')
-    const after = mapAfter(session, pin)
+    const after = await mapAfter(session, pin)
     let refusal = after.refusal
     const wholeTree = after.now !== null && baseUnreadable === 0 && after.unreadable === 0
 

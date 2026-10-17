@@ -563,7 +563,16 @@ describe('baseline (phase 4 head)', () => {
         whole_tree_view: true,
         packages: [{ package: 'lodash', present: true, versions: ['3.10.1', '4.17.21'] }],
         inconclusive: [],
-        test_order: stateOf(w).test_order as JsonValue[],
+        test_order: [
+          { key: 'lodash', path: ['lodash'], package: 'lodash', scope: 'bare', value: '^4.17.21' },
+          {
+            key: 'test-exclude',
+            path: ['test-exclude', 'lodash'],
+            package: 'lodash',
+            scope: 'scoped',
+            value: '3.10.1',
+          },
+        ],
       },
     })
     expect(installCount(w)).toBe(1)
@@ -1123,15 +1132,20 @@ describe('test-pin (phase 4, one pin per install)', () => {
   })
 
   describe('the whole-tree map', () => {
+    const partial = (tree: Parameters<Adapter<NodeDetection>['resolutionMap']>[0]) => {
+      const real = node.resolutionMap(tree)
+      return (real.outcome === 'ok' ? ok({ ...real.value, unreadable_entries: 3 }) : real) as never
+    }
+
     it('maps a partial map onto null collateral and not-checked, naming the counts', async () => {
       const w = world('npm-v3')
-      const partial = (tree: Parameters<Adapter<NodeDetection>['resolutionMap']>[0]) => {
-        const real = node.resolutionMap(tree)
-        return (
-          real.outcome === 'ok' ? ok({ ...real.value, unreadable_entries: 3 }) : real
-        ) as never
-      }
-      await prepare(w, stand({ resolutionMap: partial }))
+      expect((await list(w)).status).toBe(0)
+      expect(pick(await baseline(w, stand({ resolutionMap: partial })), 'whole_tree_view')).toEqual(
+        {
+          status: 0,
+          whole_tree_view: false,
+        },
+      )
       const found = finding(
         await testPin(w, ['--key', 'lodash'], stand({ resolutionMap: partial })),
       )
@@ -1148,6 +1162,38 @@ describe('test-pin (phase 4, one pin per install)', () => {
         r: 'the resolution_map could not read 3 lockfile entries at the baseline and 3 after this removal, so it is not a whole-tree view',
         u: { baseline: 3, without_pin: 3 },
       })
+    })
+
+    it.each([
+      ['the baseline', 3, 0],
+      ['the map after the removal', 0, 3],
+    ])('is no whole-tree view when only %s is partial', async (_name, before, after) => {
+      const w = world('npm-v3')
+      const at = (count: number) => (count === 0 ? undefined : stand({ resolutionMap: partial }))
+      await prepare(w, at(before))
+      const found = finding(await testPin(w, ['--key', 'lodash'], at(after)))
+      expect({
+        c: found.collateral_changes,
+        v: found.collateral_verdict,
+        w: found.whole_tree_view,
+        r: found.collateral_not_checked_reason,
+      }).toEqual({
+        c: null,
+        v: 'not-checked',
+        w: false,
+        r: `the resolution_map could not read ${before} lockfile entries at the baseline and ${after} after this removal, so it is not a whole-tree view`,
+      })
+    })
+
+    it('reads a map_available of the state that is the text "true" as no map', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      editState(w, (state) => {
+        state.map_available = 'true'
+      })
+      expect(finding(await testPin(w, ['--key', 'lodash'])).collateral_not_checked_reason).toBe(
+        "the with-all-pins baseline found no whole-tree resolution_map, so no other package's resolution was re-checked",
+      )
     })
 
     it('records a map refusal after the removal as a refusal, quoting the adapter', async () => {
@@ -1236,17 +1282,17 @@ describe('test-pin (phase 4, one pin per install)', () => {
       )
     })
 
-    it('stops on a map after the removal with no resolutions', async () => {
+    it.each([
+      ['no resolutions', { unreadable_entries: 0 }],
+      ['a package with no list', { unreadable_entries: 0, resolutions: { lodash: null } }],
+    ])('stops on a map after the removal with %s, and restores', async (_name, map) => {
       const w = world('npm-v3')
       await prepare(w)
-      const answer = await testPin(
-        w,
-        ['--key', 'lodash'],
-        stand({ resolutionMap: answers({ unreadable_entries: 0 }) }),
-      )
+      const answer = await testPin(w, ['--key', 'lodash'], stand({ resolutionMap: answers(map) }))
       expect((answer.json as { detail: string }).detail).toBe(
-        'the resolution_map taken after removing lodash carries no resolutions object, so there is nothing to diff this removal against.',
+        'the resolution_map taken after removing lodash carries no resolutions object with a list of versions for each package, so there is nothing to diff this removal against.',
       )
+      expect(GIT_CLEAN(w)).toBe('')
     })
 
     it('stops when the baseline map of the state cannot be diffed', async () => {
@@ -1319,6 +1365,12 @@ describe('test-pin (phase 4, one pin per install)', () => {
   })
 
   describe('the two verbs must agree about the tested package', () => {
+    const ALIAS_DETAIL =
+      'this pin is keyed on an npm: alias of the package named in its value, so the map holds ' +
+      'that copy under the real package name \u2014 the name an advisory query needs \u2014 while ' +
+      'resolved_versions answers under both. The map therefore has no entry for the key this pin ' +
+      'uses, and the two views cannot be compared under one name (#46).'
+
     it('reports an alias-keyed pin inconclusive on [] against a non-empty list', async () => {
       const w = world('npm-alias')
       await prepare(w)
@@ -1338,14 +1390,13 @@ describe('test-pin (phase 4, one pin per install)', () => {
           shape: 'alias-key',
           map: [],
           resolved_versions: ['4.18.1'],
-          detail: found.detail,
+          detail: ALIAS_DETAIL,
         },
-        detail: expect.stringMatching(/^this pin is keyed on an npm: alias/),
+        detail: ALIAS_DETAIL,
         with: ['4.18.1'],
         without: ['4.18.1'],
         delta: null,
       })
-      expect(found.detail).toContain('the name an advisory query needs \u2014 while')
       expect(GIT_CLEAN(w)).toBe('')
     })
 
@@ -1410,18 +1461,23 @@ describe('test-pin (phase 4, one pin per install)', () => {
       )
     })
 
-    it('fails when the count did not fall by exactly one', async () => {
+    it.each([
+      ['fell by two', (count: number): unknown => count - 1, '0'],
+      ['did not fall', (count: number): unknown => count + 1, '2'],
+      ['is the text of one less', (count: number): unknown => String(count), '1'],
+    ])('fails, and restores, when the count %s', async (_name, change, left) => {
       const w = world('npm-v3')
       await prepare(w)
       const answer = await testPin(
         w,
         ['--key', 'lodash'],
-        stand({ listPins: listPinsWith((real) => ({ ...real, count: 0 })) }),
+        stand({ listPins: listPinsWith((real) => ({ ...real, count: change(real.count) })) }),
       )
       expect((answer.json as { detail: string }).detail).toBe(
-        'removing lodash left 0 pins where phase 2 counted 2, and one less is 1. An edit that silently matched nothing, or that matched a similar key elsewhere in the manifest, produces exactly this.',
+        `removing lodash left ${left} pins where phase 2 counted 2, and one less is 1. An edit that silently matched nothing, or that matched a similar key elsewhere in the manifest, produces exactly this.`,
       )
       expect(installCount(w)).toBe(1)
+      expect(GIT_CLEAN(w)).toBe('')
     })
 
     it('fails when list_pins fails after the removal, and restores', async () => {
@@ -1496,6 +1552,18 @@ describe('test-pin (phase 4, one pin per install)', () => {
       )
     })
 
+    it('checks the restore against HEAD, not against the index', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      installs(w, 'git add package.json\n')
+      const shim = w.fixtures.gitShim()
+      const env = { ...w.env, PATH: `${shim.directory}:${w.env.PATH}`, GIT_STUB_SILENT: 'checkout' }
+      expect(pick(await testPin(w, ['--key', 'lodash'], undefined, env), 'phase')).toEqual({
+        status: 3,
+        phase: 'restore',
+      })
+    })
+
     it('ends the run, phase restore, when the restore cannot be verified', async () => {
       const w = world('npm-v3')
       await prepare(w)
@@ -1552,6 +1620,14 @@ describe('test-pin (phase 4, one pin per install)', () => {
       expect(GIT_CLEAN(w)).toBe('')
     })
 
+    it('restores package.json as well as the workspace file', async () => {
+      const w = world('pnpm11-workspace-overrides', presentPins)
+      await prepare(w)
+      installs(w, 'echo " " >> package.json\n')
+      expect(finding(await testPin(w, ['--key', 'minimatch'])).status).toBe('tested')
+      expect(GIT_CLEAN(w)).toBe('')
+    })
+
     it('reports a missing workspace entry as missing, not as an unreadable block', async () => {
       const w = world('pnpm11-workspace-overrides', presentPins)
       await prepare(w)
@@ -1599,17 +1675,31 @@ describe('test-pin (phase 4, one pin per install)', () => {
       })
     })
 
-    it('refuses to run before baseline', async () => {
+    it('takes --path over --key', async () => {
       const w = world('npm-v3')
-      await list(w)
-      expect(await testPin(w, ['--key', 'lodash'])).toEqual({
-        status: 1,
-        json: {
-          error:
-            "test-pin: run 'baseline' first. Without the with-all-pins baseline there is nothing to measure a removal against.",
-        },
-      })
+      await prepare(w)
+      expect(finding(await testPin(w, ['--key', 'nope', '--path', '["lodash"]'])).key).toBe(
+        'lodash',
+      )
     })
+
+    it.each([false, 'true'])(
+      'refuses to run before baseline, on a baseline_done of %j',
+      async (done) => {
+        const w = world('npm-v3')
+        await list(w)
+        editState(w, (state) => {
+          state.baseline_done = done
+        })
+        expect(await testPin(w, ['--key', 'lodash'])).toEqual({
+          status: 1,
+          json: {
+            error:
+              "test-pin: run 'baseline' first. Without the with-all-pins baseline there is nothing to measure a removal against.",
+          },
+        })
+      },
+    )
 
     it('refuses a key that names two pins', async () => {
       const w = world('npm-v3', (repo) =>
@@ -1627,6 +1717,11 @@ describe('test-pin (phase 4, one pin per install)', () => {
         },
       })
       expect(finding(await testPin(w, ['--path', '["test-exclude","."]'])).status).toBe('tested')
+      await testPin(w, ['--path', '["test-exclude","lodash"]'])
+      expect((stateOf(w).findings as { path: JsonValue }[]).map((each) => each.path)).toEqual([
+        ['test-exclude', '.'],
+        ['test-exclude', 'lodash'],
+      ])
     })
 
     it('refuses a state whose pins_count is absent or not a number', async () => {
@@ -1671,18 +1766,25 @@ describe('test-pin (phase 4, one pin per install)', () => {
       },
     )
 
-    it('reads a baseline_inconclusive entry that is not an object as no refusal', async () => {
+    it.each([
+      ['an entry that is not an object', ['x'], 1],
+      ['a null entry', [null], 0],
+    ])('reads a baseline_inconclusive with %s as jq does', async (_name, refused, status) => {
       const w = world('npm-v3')
       await prepare(w)
       editState(w, (state) => {
-        state.baseline_inconclusive = ['x']
+        state.baseline_inconclusive = refused
       })
-      expect((await testPin(w, ['--key', 'lodash'])).status).toBe(0)
+      expect((await testPin(w, ['--key', 'lodash'])).status).toBe(status)
     })
 
     it.each([
       ['no snapshot', []],
       ['a snapshot that is not an object', ['x']],
+      [
+        'an entry that is not an object beside its snapshot',
+        ['x', { package: 'lodash', present: true, versions: ['3.10.1', '4.17.21'] }],
+      ],
       ['a snapshot with no versions list', [{ package: 'lodash', versions: null }]],
     ])('stops the pin when the baseline holds %s for its package', async (_name, packages) => {
       const w = world('npm-v3')

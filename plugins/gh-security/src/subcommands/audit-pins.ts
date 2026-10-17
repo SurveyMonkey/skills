@@ -90,7 +90,9 @@
 //     `resolutions` is an object in `baseline`, and nothing in `test-pin`.
 //     An entry of another type stopped its jq later, or passed. A baseline
 //     map that is not usable in a whole-tree `test-pin` is the bash's
-//     "could not be assembled" failure.
+//     "could not be assembled" failure. When the `resolutions` of the map
+//     after the removal are not usable, `test-pin` restores the tree, then
+//     stops.
 //   - A pin that `list_pins` gives that is not an object stops `list` with
 //     the answer as one line of JSON. The bash quoted the text of `node.sh`.
 //   - `list_pins` after a removal must give its pins as a list. An answer
@@ -117,9 +119,12 @@
 //     parent, and the manifest has one key for the entry. So the removal
 //     finds nothing, and the check after it stops the phase. Two Yarn rows
 //     of the capture show it.
-//   - A failure of a promised field after the removal, of `resolved_versions`
-//     after the install, or of the findings on file, stops the phase before
-//     the restore. The tree keeps the removal and the install.
+//   - Some failures after the removal stop the phase before the restore,
+//     and the tree keeps the removal and the install. They are: a promised
+//     field of an adapter answer, `unreadable_entries` of the map, the
+//     `resolved_versions` answer, the shape of `baseline_packages`,
+//     `baseline_map` or the findings on file, a missing snapshot, the "could
+//     not be assembled" failure, and a failed write of the state.
 //
 // This file ships. It imports nothing outside the plugin.
 
