@@ -309,6 +309,16 @@ describe('judge (phase 5)', () => {
     ])
   })
 
+  it('reports vulnerable as the own verdict over an unknown version', async () => {
+    const d = desk()
+    cached(d, 'lodash@1.0.0', { verdict: 'unknown', unevaluated_ranges: ['x'] })
+    cached(d, 'lodash@2.0.0', { verdict: 'vulnerable', matched_ranges: ['< 3'] })
+    const answer = await judged(d, [tested({ attributable_versions: ['1.0.0', '2.0.0'] })])
+    expect(project(answer, 'status', 'advisory_verdict', 'matched_ranges')).toEqual([
+      { status: 'still-required', advisory_verdict: 'vulnerable', matched_ranges: ['< 3'] },
+    ])
+  })
+
   it('reports no-advisories as the own verdict when no version is unknown', async () => {
     const d = desk()
     cached(d, 'lodash@1.0.0', { verdict: 'safe' })
@@ -339,6 +349,7 @@ describe('judge (phase 5)', () => {
   it('reports an empty delta removable, in the terms the definition sets, and asks nothing', async () => {
     const d = desk()
     const answer = await judged(d, [tested({ attributable_versions: [] })])
+    expect(existsSync(d.cache)).toBe(false)
     expect(project(answer, 'status', 'advisory_verdict', 'detail')).toEqual([
       {
         status: 'removable',
@@ -382,10 +393,11 @@ describe('judge (phase 5)', () => {
   })
 
   describe('the advisory query', () => {
-    it('asks check-advisories about the package, the version and the ecosystem of the state', async () => {
+    it('asks check-advisories about the package and the ecosystem of the state, under its prefix', async () => {
       const d = desk()
       write(d, stateWith(d, [tested()], { env_prefix: 'env AUDIT=1' }))
       const calls: (readonly string[])[] = []
+      const queries: unknown[] = []
       const spawn: Runner = async (command, args = []) => {
         calls.push([command, ...args])
         return run('true')
@@ -403,12 +415,20 @@ describe('judge (phase 5)', () => {
           makeClient: (options) => {
             // The client runs gh through the prefixed runner it was given.
             void options.run?.('gh', ['api', 'probe'])
-            return createGhMock({ listAdvisories: [LODASH_OLD] })
+            const mock = createGhMock({ listAdvisories: [LODASH_OLD] })
+            return {
+              ...mock,
+              listAdvisories: (query) => {
+                queries.push(query)
+                return mock.listAdvisories(query)
+              },
+            }
           },
         },
       )
       expect(answerOf(answer).status).toBe(0)
       expect(calls).toEqual([['env', 'AUDIT=1', 'gh', 'api', 'probe']])
+      expect(queries).toEqual([{ package: 'lodash', ecosystem: 'npm' }])
     })
 
     it('fails phase advisories on a failed query, which is never read as no advisories', async () => {
@@ -443,7 +463,7 @@ describe('judge (phase 5)', () => {
       expect(readdirSync(d.cache).sort()).toEqual([])
     })
 
-    it('caches a fresh answer, whole, and leaves no temporary file', async () => {
+    it('caches a fresh answer under its slug, and leaves no temporary file', async () => {
       const d = desk()
       await judged(d, [tested()], [LODASH_OLD])
       expect(readdirSync(d.cache).sort()).toEqual(['lodash@4.17.19.json'])
@@ -650,6 +670,44 @@ describe('judge (phase 5)', () => {
           },
         ],
       )
+    })
+
+    const MS = {
+      ...READABLE,
+      package: 'ms',
+      baseline: ['2.1.3'],
+      without_pin: ['2.0.0', '2.1.3'],
+      newly_admitted: ['2.0.0'],
+    }
+
+    it('names only the vulnerable collateral versions in the detail of a still-required pin', async () => {
+      const d = desk()
+      cached(d, 'lodash@4.17.19', { verdict: 'safe' })
+      cached(d, 'readable-stream@2.3.8', { verdict: 'vulnerable', matched_ranges: ['< 3'] })
+      cached(d, 'ms@2.0.0', { verdict: 'safe' })
+      const answer = await judged(d, [tested({ collateral_changes: [READABLE, MS] })])
+      expect(project(answer, 'status', 'detail')).toEqual([
+        {
+          status: 'still-required',
+          detail:
+            'this pin is not required for lodash; it is required because removing it newly admits readable-stream 2.3.8 elsewhere in the tree, which a published advisory range admits',
+        },
+      ])
+    })
+
+    it('names only the collateral versions that are not safe in the detail of an inconclusive pin', async () => {
+      const d = desk()
+      cached(d, 'lodash@4.17.19', { verdict: 'safe' })
+      cached(d, 'readable-stream@2.3.8', { verdict: 'no-advisories' })
+      cached(d, 'ms@2.0.0', { verdict: 'safe' })
+      const answer = await judged(d, [tested({ collateral_changes: [READABLE, MS] })])
+      expect(project(answer, 'status', 'detail')).toEqual([
+        {
+          status: 'inconclusive',
+          detail:
+            '4.17.19: safe; a package whose resolution moved with this removal could not be cleared: readable-stream 2.3.8: no-advisories',
+        },
+      ])
     })
 
     it('keeps a still-required pin still-required when a collateral is inconclusive', async () => {
@@ -928,9 +986,31 @@ describe('judge (phase 5)', () => {
       const state = stateWith(d, [tested()])
       delete state.env_prefix
       write(d, state)
-      const made: unknown[] = []
-      const answer = await judge(d, { made, replies: { listAdvisories: [LODASH_OLD] } })
-      expect({ status: answer.status, made: made.length }).toEqual({ status: 0, made: 1 })
+      const calls: (readonly string[])[] = []
+      const spawn: Runner = async (command, args = []) => {
+        calls.push([command, ...args])
+        return run('true')
+      }
+      const answer = answerOf(
+        await auditPins(
+          {
+            args: ['judge', '--work', d.work],
+            env: {},
+            io: { stdout: () => {}, stderr: () => {}, readStdin: () => '' },
+            commandNames: [],
+          },
+          {
+            spawn,
+            route: selectAdapter,
+            makeClient: (options) => {
+              void options.run?.('gh', ['api', 'probe'])
+              return createGhMock({ listAdvisories: [LODASH_OLD] })
+            },
+          },
+        ),
+      )
+      expect(answer.status).toBe(0)
+      expect(calls).toEqual([['gh', 'api', 'probe']])
     })
   })
 

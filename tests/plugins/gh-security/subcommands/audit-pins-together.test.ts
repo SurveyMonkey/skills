@@ -431,7 +431,13 @@ describe('together (phase 7)', () => {
           },
         }),
       })
-      expect((answer.json as { detail: string }).detail.startsWith(start)).toBe(true)
+      const json = answer.json as { status: string; phase: string; detail: string }
+      expect({ exit: answer.status, status: json.status, phase: json.phase }).toEqual({
+        exit: 3,
+        status: 'failure',
+        phase: 'compose',
+      })
+      expect(json.detail.startsWith(start)).toBe(true)
       expect(porcelain(w)).toBe('M package.json')
     })
   })
@@ -540,6 +546,18 @@ describe('together (phase 7)', () => {
       expect(porcelain(w)).toBe('M package.json')
     })
 
+    it('stops, before the restore, when list_pins gives no count after the edit', async () => {
+      const w = world()
+      await judged(w, TWO)
+      const route = stand({ listPins: () => ok({ pins: [] }) as never })
+      expect(await together(w, { route })).toEqual(
+        compose(
+          'list_pins (attempt 1) emitted no \'count\' field. It is part of the adapter contract (docs/adr/001-ecosystem-adapter-contract.md); read straight, an absent field arrives as the string "null" and takes a branch of its own instead of failing.',
+        ),
+      )
+      expect(porcelain(w)).toBe('M package.json')
+    })
+
     it('restores and stops when list_pins fails after the edit', async () => {
       const w = world()
       await judged(w, TWO)
@@ -618,8 +636,10 @@ describe('together (phase 7)', () => {
   it('refuses a baseline map of the state that is not an object or null', async () => {
     const w = world()
     await judged(w, TWO, { baseline_map: [] })
-    expect(((await together(w)).json as Record<string, string>).detail).toBe(
-      'the with-all-pins baseline resolution_map is in the state file but is not the shape the step that wrote it promised (expected: type == "object" or type == "null"). An earlier step failed part-way, or the file was edited by hand. Value: []',
+    expect(await together(w)).toEqual(
+      compose(
+        'the with-all-pins baseline resolution_map is in the state file but is not the shape the step that wrote it promised (expected: type == "object" or type == "null"). An earlier step failed part-way, or the file was edited by hand. Value: []',
+      ),
     )
   })
 
