@@ -8,6 +8,10 @@ prose re-derivation of any of it in the agent definition is a bug. What stays wi
 reads history or writes prose — phase 1's worktree and its two `pr`-mode guards, phase 3's
 provenance, phase 6's report, and phase 8's merge risk and pull request.
 
+The TypeScript port is `gh-security audit-pins` (#235). It has `list`, `baseline` and `test-pin`
+(`src/subcommands/audit-pins*.ts`). `judge` and `together` are still the bash. The agent calls the
+bash for all five steps until #237.
+
 Stepped, with a state file at `$WORK/state.json`, for `fix-group.sh`'s reasons and one of its own:
 this flow runs **one install per pin**, so a repository with a dozen pins cannot fit inside the
 Bash tool's 10-minute ceiling however the work is arranged. `test-pin` is therefore one pin per
@@ -22,7 +26,8 @@ What that header does not say, and what belongs here:
   cannot be edited as one at all, and the adapter's own workspace writer deliberately refuses to
   delete a pre-existing entry, so the driver carries a line-level deleter over exactly the flat
   `key: value` block that writer round-trips, and refuses any line inside the block it cannot read
-  as an entry. A wrong parse there writes a file pnpm reads on every install.
+  as an entry. A wrong parse there writes a file pnpm reads on every install. In the port, the
+  deleter is `audit-pins-removal.ts`.
 - **A pin is identified by its `path`, never by its key alone.** npm nests several entries under
   one key (`{"rimraf": {".": ..., "glob": ...}}`), so `--key` is refused when it names more than
   one pin rather than resolved by position.

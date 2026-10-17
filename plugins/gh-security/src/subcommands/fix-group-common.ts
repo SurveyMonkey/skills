@@ -114,35 +114,45 @@ const recordOf = (value: unknown): Record<string, unknown> | null =>
     : null
 
 /**
- * A field that the adapter contract promises, or the failure of the phase.
- * The port of `adapter_field`. A typed answer has the field, but the check
- * stays: an answer that broke its type fails closed here, and never takes
- * a branch of its own (core.md).
+ * A field that the adapter contract promises, or the detail of the failure.
+ * The port of `adapter_field`, which both drivers have. A typed answer has
+ * the field, but the check stays: an answer that broke its type fails
+ * closed, and never takes a branch of its own (core.md).
  */
+export const promisedFieldOf = (
+  answer: unknown,
+  source: string,
+  key: string,
+): { readonly value: unknown } | { readonly detail: string } => {
+  const record = recordOf(answer)
+  if (record === null) {
+    return {
+      detail:
+        `${source} emitted no JSON object on stdout. It is part of the adapter contract ` +
+        '(docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must exit ' +
+        'non-zero, not answer with nothing and let a downstream check be skipped rather than failed.',
+    }
+  }
+  if (!Object.hasOwn(record, key)) {
+    return {
+      detail:
+        `${source} emitted no '${key}' field. It is part of the adapter contract ` +
+        '(docs/adr/001-ecosystem-adapter-contract.md); read straight, an absent field arrives as ' +
+        'the string "null" and takes a branch of its own instead of failing.',
+    }
+  }
+  return { value: record[key] }
+}
+
+/** {@link promisedFieldOf}, with its failure as the failure of the phase. */
 export const promisedField = (
   phase: FailedPhase,
   answer: unknown,
   source: string,
   key: string,
 ): { readonly value: unknown } | FailedReport => {
-  const record = recordOf(answer)
-  if (record === null) {
-    return failPhase(
-      phase,
-      `${source} emitted no JSON object on stdout. It is part of the adapter contract ` +
-        '(docs/adr/001-ecosystem-adapter-contract.md); an adapter that cannot answer must exit ' +
-        'non-zero, not answer with nothing and let a downstream check be skipped rather than failed.',
-    )
-  }
-  if (!Object.hasOwn(record, key)) {
-    return failPhase(
-      phase,
-      `${source} emitted no '${key}' field. It is part of the adapter contract ` +
-        '(docs/adr/001-ecosystem-adapter-contract.md); read straight, an absent field arrives as ' +
-        'the string "null" and takes a branch of its own instead of failing.',
-    )
-  }
-  return { value: record[key] }
+  const field = promisedFieldOf(answer, source, key)
+  return 'detail' in field ? failPhase(phase, field.detail) : field
 }
 
 /**
@@ -199,8 +209,17 @@ export interface InstallRun {
   readonly signals: readonly string[]
 }
 
-/** One install. A failure of the verb itself is a failed install with its message. */
-const installOnce = async (loaded: Loaded): Promise<{ ok: boolean; output: string }> => {
+/** What one install needs: the adapter, `detect` on the tree, and the runner. */
+export type InstallSite = Pick<Loaded, 'adapter' | 'tree' | 'pm' | 'env'>
+
+/**
+ * One install, with no retry. A failure of the verb itself is a failed
+ * install with its message. The pin audit runs it as it is, because
+ * `audit-pins-driver.sh` has no retry.
+ */
+export const installOnce = async (
+  loaded: InstallSite,
+): Promise<{ ok: boolean; output: string }> => {
   const tree = loaded.tree()
   const answer =
     tree.outcome === 'ok'

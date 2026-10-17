@@ -80,6 +80,21 @@ describe('loadState', () => {
     const envelope = loadState(work)
     expect(envelope.outcome === 'failed' && envelope.error).toContain(code)
   })
+
+  // The pin audit writes its state at `list`, so its failures name that step.
+  it.each([
+    ['a file that is not there', undefined, ". Run 'setup' first.", ". Run 'list' first."],
+    ['a JSON array', '[]', "A crashed 'setup' can leave", "A crashed 'list' can leave"],
+  ])('names the step that writes the file for %s', (_shape, contents, fixGroup, audit) => {
+    const work = scratch()
+    if (contents !== undefined) writeFileSync(join(work, 'state.json'), contents)
+    const words = (envelope: ReturnType<typeof loadState>) =>
+      envelope.outcome === 'failed' ? envelope.error : ''
+    expect([words(loadState(work)), words(loadState(work, 'list'))]).toEqual([
+      expect.stringContaining(fixGroup),
+      expect.stringContaining(audit),
+    ])
+  })
 })
 
 describe('createState and writeKey', () => {
