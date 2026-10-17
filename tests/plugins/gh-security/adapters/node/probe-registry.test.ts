@@ -383,19 +383,19 @@ describe('probeRegistry: the size of the output', () => {
   // A real Yarn 4.9.2 network failure: 60818 bytes of minified source on stderr.
   // Its own error is the short text on stdout, after stderr. The 401 text of
   // another specimen stands in for a status that only the tail carries.
-  it.fails('cuts a large output to its first and last 4 KiB, and says how many bytes it cut', async () => {
+  it('cuts a large output to its first and last 4 KiB, and says how many bytes it cut', async () => {
     const stderr = specimen('yarn-large-stderr.txt')
     const stdout = specimen('yarn-large-stdout.txt')
-    const full = `${stderr}${stdout}`
+    const full = Buffer.from(`${stderr}${stdout}`)
     const { output } = await attempt({ status: 1, stderr, stdout })
-    const cut = Buffer.byteLength(full) - 2 * KEEP
+    const cut = full.length - 2 * KEEP
     expect(output).toBe(
-      `${full.slice(0, KEEP)}\n[the probe output is cut here: ${cut} bytes]\n${full.slice(-KEEP)}`,
+      `${full.subarray(0, KEEP).toString()}\n[the probe output is cut here: ${cut} bytes]\n${full.subarray(-KEEP).toString()}`,
     )
     expect(output.endsWith(stdout)).toBe(true)
   })
 
-  it.fails('reads the status from the full text, before the cut', async () => {
+  it('reads the status from the full text, before the cut', async () => {
     const stderr = specimen('yarn-large-stderr.txt')
     const stdout = specimen('yarn-401.txt')
     const { output, http_status } = await attempt({ status: 1, stderr, stdout })
@@ -418,7 +418,7 @@ describe('probeRegistry: the size of the output', () => {
     expect((await attempt({ status: 1, stderr, stdout: '' })).output).toBe(stderr)
   })
 
-  it.fails('counts bytes, not characters, and cuts only the output', async () => {
+  it('counts bytes, not characters, and cuts only the output', async () => {
     const stderr = `${'\u00e9'.repeat(3 * KEEP)}\n`
     const answer = await attempt({ status: 1, stderr, stdout: '' })
     expect(answer.output).toContain(`${3 * KEEP * 2 + 1 - 2 * KEEP} bytes]`)

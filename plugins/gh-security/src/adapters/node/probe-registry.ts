@@ -30,7 +30,10 @@
 //   YN0041                         Yarn Berry, for a 401
 //   Response Code: 403, 404        Yarn Berry
 // Yarn Berry writes its errors to stdout. So `output` holds stderr and then
-// stdout.
+// stdout. The verb reads the status from the full text, and then cuts
+// `output` to its first 4 KiB and its last 4 KiB (#324). One marker line
+// between them names the bytes cut. The tail keeps the error of Yarn Berry,
+// which comes after a stderr of about 61 KB of minified source.
 //
 // A non-zero exit is not a failure of the verb. Then `ok` is false, and the
 // caller reads it. Exit 0 with no text on stdout, or with a failed pipe, is
@@ -56,6 +59,23 @@ const SCOPED = /^@[^/]+\/[^/]+$/
 
 /** A range or a tag. Every other spec has a `:` or a `/`. */
 const REGISTRY_SPEC = /^[^:/]*$/
+
+/** The bytes that `output` keeps at each end. A longer text is cut in the middle. */
+export const OUTPUT_KEEP_BYTES = 4096
+
+/**
+ * `text` with the middle cut when it is longer than two ends of
+ * {@link OUTPUT_KEEP_BYTES}. One marker line names the bytes cut. The ends are
+ * bytes, so a multi-byte character at a cut can become U+FFFD.
+ */
+const bounded = (text: string): string => {
+  const bytes = Buffer.from(text, 'utf8')
+  const cut = bytes.length - 2 * OUTPUT_KEEP_BYTES
+  if (cut <= 0) return text
+  const head = bytes.subarray(0, OUTPUT_KEEP_BYTES).toString('utf8')
+  const tail = bytes.subarray(bytes.length - OUTPUT_KEEP_BYTES).toString('utf8')
+  return `${head}\n[the probe output is cut here: ${cut} bytes]\n${tail}`
+}
 
 /** The HTTP statuses that the probe output can name, with the words that name each. */
 const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
@@ -117,7 +137,7 @@ export const probeRegistry = async (
   const limit = result.timedOut
     ? [`the probe stopped at its limit of ${PROBE_TIMEOUT_MS} ms\n`]
     : []
-  const output = [
+  const full = [
     ...limit,
     ...pipes,
     result.startFailure === null ? `${result.stderr}${result.stdout}` : result.startFailure.message,
@@ -127,7 +147,7 @@ export const probeRegistry = async (
     command: [program, ...args].join(' '),
     ok: result.status === 0 && pipes.length === 0 && result.stdout.trim() !== '',
     started: result.startFailure === null,
-    http_status: STATUS_WORDS.find(([, words]) => words.test(output))?.[0] ?? null,
-    output,
+    http_status: STATUS_WORDS.find(([, words]) => words.test(full))?.[0] ?? null,
+    output: bounded(full),
   })
 }
