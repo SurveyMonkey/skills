@@ -63,9 +63,10 @@
 //             in `<work>/advisories/`, and a cached answer gets the same
 //             checks as a fresh one.
 //   together  installs the set of removable pins as one (attempt 1). When
-//             the set lets in a version that is not safe, it restores the
-//             tree and tries the set without the removable-individually pins
-//             (attempt 2). It restores a tracked `.yarn/cache` first.
+//             the set lets in a version that is not safe, or the map after
+//             the install is partial, it restores the tree and tries the set
+//             without the removable-individually pins (attempt 2). It
+//             restores a tracked `.yarn/cache` first.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `list` records (env-prefix.md). The prefix sets no
