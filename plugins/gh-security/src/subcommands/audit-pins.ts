@@ -112,9 +112,11 @@
 //   - The deleter of `pnpm-workspace.yaml` (`audit-pins-removal.ts`), with
 //     #327 open.
 //   - A pin's `path` is used as a path of keys in `package.json`. For a
-//     scoped `resolutions` entry of Yarn, such as `express/sha.js`, the path
-//     is `["express", "sha.js"]` and the key is one text. So the removal
-//     finds nothing, and the check after it stops the phase.
+//     scoped entry of Yarn `resolutions` or of `pnpm.overrides`, such as
+//     `express/sha.js` or `vite@7>rollup`, the path has one key for each
+//     parent, and the manifest has one key for the entry. So the removal
+//     finds nothing, and the check after it stops the phase. Two Yarn rows
+//     of the capture show it.
 //   - A failure of a promised field after the removal, of `resolved_versions`
 //     after the install, or of the findings on file, stops the phase before
 //     the restore. The tree keeps the removal and the install.
