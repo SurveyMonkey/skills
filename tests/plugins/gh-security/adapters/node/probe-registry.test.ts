@@ -445,11 +445,11 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     return answer.outcome === 'ok' ? answer.value.package : answer
   }
 
-  it.fails('prefers a scope that .npmrc maps to a registry over an earlier public scope', async () => {
+  it('prefers a scope that .npmrc maps to a registry over an earlier public scope', async () => {
     expect(await chosen(PUBLIC_FIRST, { '.npmrc': NPMRC })).toBe('@example-org/ui')
   })
 
-  it.fails.each([
+  it.each([
     [
       'a bare key',
       'npmScopes:\n  example-org:\n    npmRegistryServer: "https://r.example.invalid/"\n',
@@ -466,7 +466,7 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     expect(await chosen(PUBLIC_FIRST, { '.yarnrc.yml': yarnrc }, 'yarn')).toBe('@example-org/ui')
   })
 
-  it.fails('looks across the dependency fields for a mapped scope', async () => {
+  it('looks across the dependency fields for a mapped scope', async () => {
     const manifest = {
       dependencies: { '@types/node': '^22' },
       devDependencies: { '@example-org/dev': '^1' },

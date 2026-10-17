@@ -6,9 +6,14 @@
 // registry token then stops one repository before its agents start, and not
 // each agent at its install. The caller makes the retry and the cause.
 //
-// The package. The first scoped dependency of the root `package.json`, in
+// The package. A scoped dependency of the root `package.json`, in
 // `dependencies`, then `devDependencies`, then `optionalDependencies`.
-// Private registries hold scoped packages. Only a spec with no `:` and no `/`
+// Private registries hold scoped packages. A scope that the repository maps to
+// a registry comes first (#324): a `@<scope>:registry=` line of `.npmrc`, or a
+// key of `npmScopes` in `.yarnrc.yml`. Both files are read by line, with no
+// parser, and a file that cannot be read maps nothing. The `.npmrc` of the
+// user is not read, so the answer depends on the repository only. Without a
+// mapped scope, the first scoped dependency applies. Only a spec with no `:` and no `/`
 // counts, because the registry resolves only a range or a tag. A
 // `workspace:`, `file:`, `link:`, `npm:` or git spec is not in the registry,
 // and a probe of it reads as a 404. With no such dependency, the verb uses
@@ -45,7 +50,7 @@ import { join } from 'node:path'
 
 import { type Envelope, failed, ok } from '../../lib/envelope.ts'
 import type { ProbeSource, RegistryProbeAnswer, Tree } from '../adapter.ts'
-import type { NodeDetection } from './detect.ts'
+import { linesOf, type NodeDetection } from './detect.ts'
 import { isRecord, readManifest } from './manifest.ts'
 
 /** The time limit of one probe. The read-only steps of a fix agent have two minutes for two tries. */
@@ -84,7 +89,36 @@ const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
   [404, /\bE404\b|Response Code: 404\b/],
 ]
 
-/** The first scoped registry dependency of the manifest at `root`, null, or why it cannot say. */
+/** `@<scope>:registry=<value>` of `.npmrc`. A comment line starts with `;` or `#`. */
+const NPMRC_SCOPE = /^[ \t]*@([^/:\s]+):registry[ \t]*=[ \t]*\S/
+
+/** A scope key of `npmScopes`, as a line: `scope:` or a quoted one, with nothing after it. */
+const YARN_SCOPE_KEY = /^ +["']?([^\s"':]+)["']?:[ \t\r]*$/
+
+/** The scope names, with no `@`, that the repository maps to a registry. */
+const mappedScopes = (root: string): ReadonlySet<string> => {
+  const scopes = new Set<string>()
+  for (const line of linesOf(join(root, '.npmrc'))) {
+    const match = NPMRC_SCOPE.exec(line)
+    if (match !== null) scopes.add(match[1] as string)
+  }
+  const yarnrc = linesOf(join(root, '.yarnrc.yml'))
+  const start = yarnrc.findIndex((line) => /^npmScopes:[ \t\r]*$/.test(line))
+  // The keys of the block are the lines at its first indent. A line with no
+  // indent ends the block. A blank line, or a comment, does not.
+  let indent: number | null = null
+  for (const line of start === -1 ? [] : yarnrc.slice(start + 1)) {
+    if (/^[ \t\r]*(#.*)?$/.test(line)) continue
+    const width = line.length - line.trimStart().length
+    if (width === 0) break
+    indent ??= width
+    const match = width === indent ? YARN_SCOPE_KEY.exec(line) : null
+    if (match !== null) scopes.add(match[1] as string)
+  }
+  return scopes
+}
+
+/** The scoped registry dependency of the manifest at `root` to probe, null, or why it cannot say. */
 const scopedDependency = (root: string): Envelope<string | null> => {
   const path = join(root, 'package.json')
   let manifest: unknown
@@ -94,16 +128,25 @@ const scopedDependency = (root: string): Envelope<string | null> => {
     return failed(`probeRegistry: cannot read ${path}: ${(error as Error).message}`)
   }
   if (!isRecord(manifest)) return failed(`probeRegistry: ${path} is not a JSON object`)
+  const scopes = mappedScopes(root)
+  let first: string | null = null
   for (const name of DEPENDENCY_FIELDS) {
     const block = manifest[name]
     if (block === undefined) continue
-    if (!isRecord(block)) return failed(`probeRegistry: ${name} in ${path} is not an object`)
-    const found = Object.entries(block).find(
-      ([pkg, spec]) => SCOPED.test(pkg) && typeof spec === 'string' && REGISTRY_SPEC.test(spec),
-    )
-    if (found !== undefined) return ok(found[0])
+    if (!isRecord(block)) {
+      // The first candidate was found before this field: it is not read.
+      if (first !== null) continue
+      return failed(`probeRegistry: ${name} in ${path} is not an object`)
+    }
+    for (const [pkg, spec] of Object.entries(block)) {
+      if (!SCOPED.test(pkg) || typeof spec !== 'string' || !REGISTRY_SPEC.test(spec)) continue
+      if (scopes.has(pkg.slice(1, pkg.indexOf('/')))) return ok(pkg)
+      first ??= pkg
+    }
+    // With no mapped scope, the first candidate ends the search, as before.
+    if (first !== null && scopes.size === 0) return ok(first)
   }
-  return ok(null)
+  return ok(first)
 }
 
 /** `probeRegistry`. */

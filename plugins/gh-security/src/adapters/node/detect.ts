@@ -72,7 +72,7 @@ const isFile = (path: string): boolean => statOf(path)?.isFile() === true
  * `sed` find no match in a file that they cannot read, and node.sh reads
  * that as "no match".
  */
-const linesOf = (path: string): readonly string[] => {
+export const linesOf = (path: string): readonly string[] => {
   try {
     return readFileSync(path, 'utf8').split('\n')
   } catch {
