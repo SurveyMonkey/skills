@@ -155,9 +155,12 @@ what was then `origin/main`, and both blocked a rerun until a human deleted them
   remote carries the same commits, or the tip still equals `origin/<default_branch>`, so nothing was
   committed. Anything else is left in place and named in the report.
 - **The guard compares tips instead of stopping on existence.** A local tip equal to
-  `origin/<default_branch>` or to `origin/<branch_name>` is this plugin's leftover and is deleted
-  and recreated; only a tip that is neither is unpushed work, and only that stops the run. This is
-  the shape `agents/audit-pins.md` already uses for `chore/dependabot-remove-pins`, which proves a
+  `origin/<branch_name>`, an ancestor of `origin/<default_branch>`, or the drift commit alone is
+  this plugin's leftover and is deleted and recreated; only any other tip is unpushed work, and only
+  that stops the run. An ancestor tip holds no commit of its own, whether `origin/<default_branch>`
+  has moved or not ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)): a refused
+  `git worktree add` leaves such a branch, and the default branch can move before the next run.
+  This is the shape `agents/audit-pins.md` already uses for `chore/dependabot-remove-pins`, which proves a
   remnant against a closed PR's `headRefOid` rather than refusing on sight.
 
 The Consequences claim that "stale local fix branches surface as agent failures" now holds only for

@@ -94,7 +94,8 @@ const NO_REMOTE_REF = /couldn't find remote ref/i
 
 /**
  * The stale-branch guard. A local branch of the name is deleted only when it
- * is this flow's own leftover. The answer is null when the branch is gone or
+ * is this flow's own leftover: its tip is `origin/<default>` or an ancestor
+ * of it, equals `origin/<branch>`, or is the drift commit alone. The answer is null when the branch is gone or
  * was never there, or the failure of the phase.
  */
 const clearStaleBranch = async (
@@ -141,6 +142,8 @@ const clearStaleBranch = async (
     reason = `tip equals origin/${defaultBranch}: a previous run created the branch and committed nothing to it`
   } else if (remote !== '' && tip === remote) {
     reason = `tip equals origin/${branch}: a previous run pushed it and the remote still carries the same commits`
+  } else if ((await git(repoRoot, ['merge-base', '--is-ancestor', tip, dflt])).status === 0) {
+    reason = `tip ${tip} is an ancestor of origin/${defaultBranch}: the branch holds no commit of its own`
   } else if (await onlyDriftCommit(git, repoRoot, defaultBranch, branch)) {
     reason = `the only commit beyond origin/${defaultBranch} is this flow's drift commit, over the lockfile and tracked install artifacts alone`
   }
@@ -257,9 +260,10 @@ export const setup = async (
   //    When `worktree add` exits with a status, git refused it, or it did not
   //    start. The paths can then be those of another run, so the reap does
   //    not run. A branch that git made stays at `origin/<default>`. The
-  //    stale-branch guard of the next `setup` clears it only while
-  //    `origin/<default>` has not moved. A `worktree add` that a signal
-  //    stopped has no status, and the reap runs. A prefix that does not
+  //    stale-branch guard of the next `setup` clears it. Its tip is an
+  //    ancestor of `origin/<default>`, also after `origin/<default>` moved.
+  //    A `worktree add` that a signal stopped has no status, and the reap
+  //    runs. A prefix that does not
   //    `exec` git can give a status for a signal. Then nothing is reaped,
   //    and the guard for a crashed run stops the next `setup`.
   let refused: string | null = null

@@ -408,9 +408,7 @@ describe('setup (phase 1)', () => {
     // git 2.54 makes the `-b` branch, then exits 128 when the path is a
     // directory with files in it (#325). The branch stays at `origin/main`.
     // Then `origin/main` moves: the tip is behind it, so it holds no work.
-    // `it.fails` while the fix is missing: the pre-commit hook runs this file,
-    // and a red example would stop the commit. The fix commit makes it `it`.
-    it.fails('deletes and makes again a branch that a refused worktree add left, after origin/main moved', async () => {
+    it('deletes and makes again a branch that a refused worktree add left, after origin/main moved', async () => {
       const w = world()
       const taken = join(w.work, '..', 'taken')
       mkdirSync(taken, { recursive: true })
@@ -434,6 +432,17 @@ describe('setup (phase 1)', () => {
         branch: BRANCH,
       })
       expect(w.fixtures.currentBranch(w.worktree)).toBe(BRANCH)
+    })
+
+    // Pinning: green when written. A tip behind `origin/main` with one commit of its own is not an ancestor.
+    it('refuses a branch with its own commit after origin/main moved, and keeps it', async () => {
+      const w = world()
+      commitOnBranch(w, 'src.js', 'console.log(1)\n', 'feat: unpushed work')
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      expect(pick(await setup(w), 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
     })
 
     it.each([
