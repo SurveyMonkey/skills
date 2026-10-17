@@ -354,7 +354,7 @@ directory, so a probe without the `cd` runs in your working directory, resolves 
 registry — the exact failure this preflight exists to catch;
 yarn berry additionally errors outside a project, which would exclude every berry repo. Probe a
 **scoped** dependency from the repo's own manifest when one exists — scoped packages are where
-private registries live — falling back to the top-ranked queued group's `package` for this repo
+private registries live, and a scope that the repo's `.npmrc` or `.yarnrc.yml` maps to a registry comes first, falling back to the top-ranked queued group's `package` for this repo
 when the manifest declares no scoped dependency:
 
 - pnpm: `cd <repo_root> && <env_prefix> <pm_exec> view <package> version`
