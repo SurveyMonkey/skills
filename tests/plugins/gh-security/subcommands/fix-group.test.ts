@@ -405,6 +405,37 @@ describe('setup (phase 1)', () => {
       expect((await setup(w)).status).toBe(0)
     })
 
+    // git 2.54 makes the `-b` branch, then exits 128 when the path is a
+    // directory with files in it (#325). The branch stays at `origin/main`.
+    // Then `origin/main` moves: the tip is behind it, so it holds no work.
+    // `it.fails` while the fix is missing: the pre-commit hook runs this file,
+    // and a red example would stop the commit. The fix commit makes it `it`.
+    it.fails('deletes and makes again a branch that a refused worktree add left, after origin/main moved', async () => {
+      const w = world()
+      const taken = join(w.work, '..', 'taken')
+      mkdirSync(taken, { recursive: true })
+      writeFileSync(join(taken, 'file.txt'), 'x')
+      const refused = w.fixtures.tryGit(
+        w.repo,
+        'worktree',
+        'add',
+        taken,
+        '-b',
+        BRANCH,
+        'origin/main',
+      )
+      expect(refused.status).toBe(128)
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(w.fixtures.sha(w.repo, 'origin/main'))
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      expect(pick(await setup(w), 'step', 'branch')).toEqual({
+        status: 0,
+        step: 'setup',
+        branch: BRANCH,
+      })
+      expect(w.fixtures.currentBranch(w.worktree)).toBe(BRANCH)
+    })
+
     it.each([
       ['a drift subject over package.json', 'package.json', '{"name":"x"}\n', DRIFT_SUBJECT],
       ['a lockfile commit with another subject', 'package-lock.json', '{}\n', 'chore: by hand'],
