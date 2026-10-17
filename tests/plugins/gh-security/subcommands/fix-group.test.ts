@@ -445,6 +445,30 @@ describe('setup (phase 1)', () => {
       expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
     })
 
+    // A `merge-base` that fails gives no answer, so the guard keeps the branch.
+    // The stand-in runs a real `merge-base` that exits 128.
+    it('keeps an ancestor branch when merge-base fails', async () => {
+      const w = world()
+      w.fixtures.git(w.repo, 'branch', BRANCH)
+      w.fixtures.commit(w.repo, 'feat: main moves on', 'moved.txt', 'x')
+      w.fixtures.push(w.repo)
+      const tip = w.fixtures.sha(w.repo, BRANCH)
+      const spawn: typeof run = (command, args, options) =>
+        args?.includes('merge-base') === true
+          ? run(
+              command,
+              ['-C', w.repo, 'merge-base', '--is-ancestor', 'no-such-ref', 'HEAD'],
+              options,
+            )
+          : run(command, args, options)
+      const answer = answerOf(
+        await fixGroup(context(w.env, setupArgs(w)), { spawn, route: selectAdapter }),
+      )
+      expect(pick(answer, 'phase')).toEqual({ status: 3, phase: 'worktree' })
+      expect(answer.stderr).toContain('it was not deleted')
+      expect(w.fixtures.sha(w.repo, BRANCH)).toBe(tip)
+    })
+
     it.each([
       ['a drift subject over package.json', 'package.json', '{"name":"x"}\n', DRIFT_SUBJECT],
       ['a lockfile commit with another subject', 'package-lock.json', '{}\n', 'chore: by hand'],

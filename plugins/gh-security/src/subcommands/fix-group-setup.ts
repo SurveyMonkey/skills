@@ -95,8 +95,9 @@ const NO_REMOTE_REF = /couldn't find remote ref/i
 /**
  * The stale-branch guard. A local branch of the name is deleted only when it
  * is this flow's own leftover: its tip is `origin/<default>` or an ancestor
- * of it, equals `origin/<branch>`, or is the drift commit alone. The answer is null when the branch is gone or
- * was never there, or the failure of the phase.
+ * of it, equals `origin/<branch>`, or is the drift commit alone. The answer
+ * is null when the branch is gone or was never there, or the failure of the
+ * phase.
  */
 const clearStaleBranch = async (
   git: Git,
@@ -163,7 +164,7 @@ const clearStaleBranch = async (
 }
 
 /**
- * The third tip that the guard knows: one commit with the drift subject, over
+ * The last tip that the guard knows: one commit with the drift subject, over
  * the drift paths alone. Both checks, never one of them (#152). A read that
  * fails gives no subject or no path, so the answer is no.
  */
