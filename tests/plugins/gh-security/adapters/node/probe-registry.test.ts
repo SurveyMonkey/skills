@@ -414,7 +414,7 @@ describe('probeRegistry: the size of the output', () => {
 
   // Pinning: green when written. The limit is on bytes, so text of 8192 bytes stays whole.
   it('does not cut an output of exactly 8 KiB', async () => {
-    const stderr = 'e'.repeat(2 * KEEP - 1) + '\n'
+    const stderr = `${'e'.repeat(2 * KEEP - 1)}\n`
     expect((await attempt({ status: 1, stderr, stdout: '' })).output).toBe(stderr)
   })
 
@@ -423,5 +423,120 @@ describe('probeRegistry: the size of the output', () => {
     const answer = await attempt({ status: 1, stderr, stdout: '' })
     expect(answer.output).toContain(`${3 * KEEP * 2 + 1 - 2 * KEEP} bytes]`)
     expect(answer.command).toBe('yarn npm info @example-org/ui --fields version')
+  })
+})
+
+describe('probeRegistry: a scope that the repository maps comes first', () => {
+  const PUBLIC_FIRST = {
+    dependencies: { '@types/node': '^22', '@example-org/ui': '^2' },
+    devDependencies: { '@example-org/dev': '^1' },
+  }
+  const NPMRC = '@example-org:registry=https://registry.example.invalid/\n'
+
+  /** The package that a tree with these files probes. */
+  const chosen = async (
+    manifest: unknown,
+    files: Readonly<Record<string, string>>,
+    pm: 'npm' | 'yarn' = 'npm',
+  ) => {
+    const tree = treeOf(pm, manifest)
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(tree.root, name), text)
+    const answer = await node.probeRegistry(tree, 'lodash', { run: recorder().runner, env: {} })
+    return answer.outcome === 'ok' ? answer.value.package : answer
+  }
+
+  it.fails('prefers a scope that .npmrc maps to a registry over an earlier public scope', async () => {
+    expect(await chosen(PUBLIC_FIRST, { '.npmrc': NPMRC })).toBe('@example-org/ui')
+  })
+
+  it.fails.each([
+    [
+      'a bare key',
+      'npmScopes:\n  example-org:\n    npmRegistryServer: "https://r.example.invalid/"\n',
+    ],
+    [
+      'a double-quoted key',
+      'npmScopes:\n  "example-org":\n    npmRegistryServer: "https://r.example.invalid/"\n',
+    ],
+    [
+      'a block after other keys',
+      'enableTelemetry: false\nnpmScopes:\n  other:\n    npmAlwaysAuth: true\n  example-org:\n    npmAlwaysAuth: true\n',
+    ],
+  ])('prefers a scope that .yarnrc.yml maps in npmScopes, with %s', async (_name, yarnrc) => {
+    expect(await chosen(PUBLIC_FIRST, { '.yarnrc.yml': yarnrc }, 'yarn')).toBe('@example-org/ui')
+  })
+
+  it.fails('looks across the dependency fields for a mapped scope', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22' },
+      devDependencies: { '@example-org/dev': '^1' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@example-org/dev')
+  })
+
+  // Pinning: green when written. Each case maps no scope that the manifest uses.
+  it.each([
+    ['no file', {}],
+    [
+      'an .npmrc that maps another scope',
+      { '.npmrc': '@other:registry=https://r.example.invalid/\n' },
+    ],
+    ['an .npmrc with a token line only', { '.npmrc': '//r.example.invalid/:_authToken=abc\n' }],
+    [
+      'an .npmrc with the mapping in a comment',
+      {
+        '.npmrc':
+          '; @example-org:registry=https://r.example.invalid/\n# @example-org:registry=https://r.example.invalid/\n',
+      },
+    ],
+    ['an .npmrc with an empty registry', { '.npmrc': '@example-org:registry=\n' }],
+    ['an .npmrc that is a directory', {}],
+    ['npmScopes with a value on its own line', { '.yarnrc.yml': 'npmScopes: oops\n' }],
+    ['npmScopes that holds a list', { '.yarnrc.yml': 'npmScopes:\n  - example-org\n' }],
+    [
+      'npmScopes with no scope under it',
+      { '.yarnrc.yml': 'npmScopes:\nenableTelemetry: false\n  example-org:\n' },
+    ],
+    [
+      'the scope mapped under another key',
+      { '.yarnrc.yml': 'npmRegistries:\n  example-org:\n    npmAuthToken: x\n' },
+    ],
+  ])('falls back to the first scoped dependency with %s', async (name, files) => {
+    const tree = treeOf('yarn', PUBLIC_FIRST)
+    if (name === 'an .npmrc that is a directory') mkdirSync(join(tree.root, '.npmrc'))
+    for (const [file, text] of Object.entries(files)) writeFileSync(join(tree.root, file), text)
+    const answer = await node.probeRegistry(tree, 'lodash', { run: recorder().runner, env: {} })
+    expect(answer.outcome === 'ok' && answer.value.package).toBe('@types/node')
+  })
+
+  it('does not take a mapped scope whose dependency is not in the registry', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22', '@example-org/local': 'workspace:*' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
+  })
+
+  it('does not read a field after the first when no scope is mapped', async () => {
+    const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
+    expect(
+      await chosen(manifest, { '.npmrc': '@other:registry=https://r.example.invalid/\n' }),
+    ).toBe('@types/node')
+  })
+
+  it('does not fail on a field after the first, when the first holds a candidate', async () => {
+    const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
+  })
+
+  it('does not read the .npmrc of the user', async () => {
+    const home = createSandbox().join('home')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, '.npmrc'), NPMRC)
+    const tree = treeOf('npm', PUBLIC_FIRST)
+    const answer = await node.probeRegistry(tree, 'lodash', {
+      run: recorder().runner,
+      env: { HOME: home },
+    })
+    expect(answer.outcome === 'ok' && answer.value.package).toBe('@types/node')
   })
 })
