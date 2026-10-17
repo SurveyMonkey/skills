@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { COMMANDS } from '#gh-security/cli/registry.ts'
+import { auditPinsCommand } from '#gh-security/subcommands/audit-pins.ts'
 import { buildDispatchesCommand } from '#gh-security/subcommands/build-dispatches.ts'
 import { checkAdvisoriesCommand } from '#gh-security/subcommands/check-advisories.ts'
 import { classifyLinesCommand } from '#gh-security/subcommands/classify-lines.ts'
@@ -40,6 +41,7 @@ describe('the registry', () => {
   it('reaches each handler through a dynamic import of its own subcommand module', () => {
     expect(source.match(/import\('\.\.\/subcommands\/[a-z-]+\.ts'\)/g)).toEqual([
       "import('../subcommands/allow-own-commands.ts')",
+      "import('../subcommands/audit-pins.ts')",
       "import('../subcommands/build-dispatches.ts')",
       "import('../subcommands/check-advisories.ts')",
       "import('../subcommands/classify-lines.ts')",
@@ -149,5 +151,19 @@ describe('the fix driver entry', () => {
     'fix-group cleanup --work <dir> [--pushed]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
+  })
+})
+
+describe('the pin-audit driver entry', () => {
+  it('loads the handler of audit-pins', async () => {
+    expect(await COMMANDS['audit-pins']?.load()).toBe(auditPinsCommand)
+  })
+
+  it.each([
+    'audit-pins list --work <dir> --worktree <dir> [--ecosystem <eco>] [--env-prefix <prefix>] |',
+    'audit-pins baseline --work <dir> |',
+    'audit-pins test-pin --work <dir> (--key <key> | --path <json array>)',
+  ])('describes the usage %s', (usage) => {
+    expect(COMMANDS['audit-pins']?.description).toContain(usage)
   })
 })

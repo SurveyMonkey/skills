@@ -60,14 +60,16 @@ export const createState = (workDir: string, data: JsonObject): Envelope<StateFi
   writeObject(statePath(workDir), data)
 
 /**
- * Read the state file for a work directory.
+ * Read the state file for a work directory. `firstStep` is the step that
+ * writes the file, which a failure names: `setup` for the fix driver, and
+ * `list` for the pin audit.
  *
  * A file that is absent, unreadable, unparseable, or not a JSON object is a
  * failure with its own wording: a crashed `setup` leaves a zero-byte one, and
  * nothing here can tell an interrupted run from a foreign directory, so the
  * answer is to stop rather than to rerun over it.
  */
-export const loadState = (workDir: string): Envelope<StateFile> => {
+export const loadState = (workDir: string, firstStep = 'setup'): Envelope<StateFile> => {
   const path = statePath(workDir)
   let text: string
   try {
@@ -78,7 +80,7 @@ export const loadState = (workDir: string): Envelope<StateFile> => {
     // it could not read separately, so folding the two into "run 'setup'
     // first" would send a reader after a file that is already there and
     // unreadable for some other reason.
-    return failed(`no readable state file at ${path}: ${String(error)}. Run 'setup' first.`)
+    return failed(`no readable state file at ${path}: ${String(error)}. Run '${firstStep}' first.`)
   }
   let parsed: JsonValue
   try {
@@ -91,7 +93,7 @@ export const loadState = (workDir: string): Envelope<StateFile> => {
   }
   if (!isObject(parsed)) {
     return failed(
-      `the state file at ${path} is not a JSON object. A crashed 'setup' can leave a ` +
+      `the state file at ${path} is not a JSON object. A crashed '${firstStep}' can leave a ` +
         'zero-byte one; inspect the work directory by hand rather than rerunning, because ' +
         'nothing here can tell an interrupted run from a foreign directory.',
     )
