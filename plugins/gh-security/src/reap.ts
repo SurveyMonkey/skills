@@ -68,8 +68,9 @@
 //
 // **The report** has the shape of `reap-agent-artifacts.sh`: the paths, the
 // action of each artifact, the branch and its reason, `left_behind` and
-// `errors`. A list of errors that is not empty is the failure outcome: each
-// caller exits non-zero on it.
+// `errors`. A list of errors that is not empty is the failure outcome.
+// `fix-group cleanup` exits non-zero on it. `reap-batch` puts it in the
+// report of the entry, and exits 0.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs` and `path`.
@@ -95,7 +96,12 @@ export interface ReapTarget {
   readonly recordedWork?: string
 }
 
-/** The target after `contain`: each path resolved and checked. */
+/**
+ * The target after `contain`: each path resolved and checked. It is not a
+ * branded type. Both callers, `fix-group cleanup` and `reap-batch`, give
+ * `reap` the value of `contain` and nothing else, and each has an example
+ * of a refused path that reaps nothing (#229).
+ */
 export interface Contained {
   readonly repoRoot: string
   readonly work: string

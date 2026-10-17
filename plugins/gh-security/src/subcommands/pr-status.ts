@@ -138,8 +138,11 @@ const entryFor = (url: string, repo: string, view: Record<string, unknown>): Jso
 
 const errorEntry = (url: string, error: string): JsonObject => ({ url, error })
 
-/** The entry for one URL. A failure of `gh` is an entry, and any other throw is a defect. */
-const entryForUrl = async (
+/**
+ * The entry for one URL. A failure of `gh` is an entry, and any other throw is
+ * a defect. `reap-batch` reads the pull request of each entry with it.
+ */
+export const entryForUrl = async (
   url: string,
   makeClient: ClientFactory,
   options: Omit<GhClientOptions, 'repository'>,

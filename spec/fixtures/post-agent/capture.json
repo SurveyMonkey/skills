@@ -1,0 +1,2425 @@
+{
+  "about": "The answers of post-agent.sh over real git repositories, one row for each report shape, and the null and mispaired entries of a workflow result. Generated from the script and never edited by hand. Each row holds its recipe: a repository like harness/git.ts create (a bare origin at $ROOT/origin.git, a clone at $ROOT/work with one commit), then the `pre` bash after the prelude, with ROOT, REPO, WORK, WT and BRANCH in the environment. `result_value` is the agent result that the row writes to the --result file as JSON, and null is an empty file, as resolve-alerts phase 6 writes for a null or mispaired entry. `gh` holds the answers of a gh stand-in on PATH for `gh pr view`, by pull request number. A number with no answer fails with exit 1. The run had a neutral HOME and TMPDIR, and no git or gh variable. $ROOT is the physical row root, and $RESULT the result file. <origin/main>, <origin/branch> and <branch> are the commits of those refs before the run, the first label for each commit. `before` and `after` are the disk: each path under $ROOT except the two git directories, the worktree list, the entries under .git/worktrees, and the refs.",
+  "generator": {
+    "git": "git version 2.54.0 (Apple Git-157)",
+    "jq": "jq-1.8.1",
+    "bash": "5.3.9(1)-release",
+    "platform": "darwin"
+  },
+  "prelude": "set -eu\ng() { git -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null \"$@\"; }\ncommit_file() { mkdir -p \"$(dirname \"$1/$2\")\"; printf '%s\\n' \"$3\" > \"$1/$2\"; g -C \"$1\" add -A; g -C \"$1\" commit -qm \"$4\"; }\nadd_worktree() { mkdir -p \"$REPO/.claude/worktrees\"; g -C \"$REPO\" worktree add -q \"$WT\" -b \"$BRANCH\" origin/main; }\npush_branch() { g -C \"$REPO\" push -q origin \"$BRANCH\"; }\nfixed() { add_worktree; commit_file \"$WT\" fix.txt fix 'fix: the fix'; push_branch; }\nlock_dir() { mkdir -p \"$1\"; : > \"$1/held\"; chmod 555 \"$1\"; }\n",
+  "groups": {
+    "plain": {
+      "package": "example-pkg",
+      "major_line": "6",
+      "branch_name": "fix/dependabot-example-pkg-6x",
+      "repo": "octo/app"
+    },
+    "scoped": {
+      "package": "@example-scope/example-pkg",
+      "major_line": "2",
+      "branch_name": "fix/dependabot-@example-scope/example-pkg-2x",
+      "repo": "octo/app"
+    }
+  },
+  "rows": [
+    {
+      "name": "success-open",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-scoped",
+      "group": "scoped",
+      "result_value": {
+        "status": "success",
+        "package": "@example-scope/example-pkg",
+        "major_line": "2",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-@example-scope/example-pkg-2x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-@example-scope/example-pkg-2x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "@example-scope/example-pkg",
+        "--major-line",
+        "2",
+        "--branch",
+        "fix/dependabot-@example-scope/example-pkg-2x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "@example-scope/example-pkg",
+          "major_line": "2",
+          "branch": "fix/dependabot-@example-scope/example-pkg-2x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x",
+          "d work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-@example-scope-example-pkg-2x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-@example-scope/example-pkg-2x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-unpushed",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed\ncommit_file \"$WT\" more.txt more 'fix: not pushed'",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/more.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-nothing-on-disk",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-merged",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"MERGED\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "MERGED",
+          "reaped": false,
+          "reason": "pull request is not open (state=MERGED)",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-closed",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"CLOSED\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "CLOSED",
+          "reaped": false,
+          "reason": "pull request is not open (state=CLOSED)",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-pr-unreadable",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": null,
+          "reaped": false,
+          "reason": "pr-status.sh could not read the pull request: no pull requests found for pull request #12",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "pr-status.sh could not read the pull request: no pull requests found for pull request #12"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-pr-not-a-url",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "not-a-url",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "not-a-url",
+          "pr_state": null,
+          "reaped": false,
+          "reason": "pr-status.sh could not read the pull request: not a GitHub pull request URL",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "pr-status.sh could not read the pull request: not a GitHub pull request URL"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-pr-no-state",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": null,
+          "reaped": false,
+          "reason": "pr-status.sh returned an entry with no usable state for https://github.com/octo/app/pull/12",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "pr-status.sh returned an entry with no usable state for https://github.com/octo/app/pull/12"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-pr-not-json",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "not json"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": null,
+          "reaped": false,
+          "reason": "pr-status.sh could not read the pull request: gh pr view output could not be parsed: not json",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "pr-status.sh could not read the pull request: gh pr view output could not be parsed: not json"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-env-prefix",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "env_prefix": "env GH_SECURITY_EXAMPLE=1",
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--env-prefix",
+        "env GH_SECURITY_EXAMPLE=1",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-disagreement",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "fallback": {
+        "package": "other-pkg"
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "other-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [],
+          "errors": [
+            "the result block's package ('example-pkg') disagrees with the --package fallback ('other-pkg')"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-reap-refused",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "mkdir -p \"$ROOT/elsewhere\" \"$REPO/.claude\"\nln -s \"$ROOT/elsewhere\" \"$REPO/.claude/worktrees\"\nfixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": false,
+          "reason": "reap-agent-artifacts.sh exited without printing a report; nothing was removed",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "reap-agent-artifacts.sh exited without printing a report; nothing was removed: {\"error\":\"work path is not under $ROOT/work/.claude/worktrees/: $ROOT/elsewhere/fix-dependabot-example-pkg-6x\"}"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/fix-dependabot-example-pkg-6x",
+          "d elsewhere/fix-dependabot-example-pkg-6x/fix",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/.git",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work",
+          "d work/.claude",
+          "l work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/elsewhere/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d elsewhere",
+          "d elsewhere/fix-dependabot-example-pkg-6x",
+          "d elsewhere/fix-dependabot-example-pkg-6x/fix",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/.git",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f elsewhere/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work",
+          "d work/.claude",
+          "l work/.claude/worktrees",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/elsewhere/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-open-work-dir-locked",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [
+        {
+          "number": 12,
+          "status": 0,
+          "stdout": "{\"number\":12,\"state\":\"OPEN\",\"isDraft\":false,\"headRefName\":\"fix/dependabot-example-pkg-6x\",\"baseRefName\":\"main\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}"
+        }
+      ],
+      "pre": "fixed\nlock_dir \"$WORK/locked\"",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "success",
+          "pr_url": "https://github.com/octo/app/pull/12",
+          "pr_state": "OPEN",
+          "reaped": true,
+          "reason": null,
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x"
+          ],
+          "errors": [
+            "rm -rf failed: rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held: Permission denied",
+            "rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked: Directory not empty",
+            "rm: $ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x: Directory not empty"
+          ]
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/locked/held",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work"
+        ],
+        "admin": [],
+        "refs": [
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "success-without-pr-url",
+      "result_value": {
+        "status": "success",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "fixed",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "unparsable",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "unparseable result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/fix.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/fix/dependabot-example-pkg-6x <origin/branch>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "no-op",
+      "result_value": {
+        "status": "no-op",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": null,
+        "action": null,
+        "resolved_version": "6.1.0",
+        "risk": null,
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": {
+          "reason": "already-fixed",
+          "evidence": {}
+        },
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "no-op",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "no-op: the agent made no fix, so there is nothing to verify or reap",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "failure",
+      "result_value": {
+        "status": "failure",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": null,
+        "action": null,
+        "resolved_version": null,
+        "risk": null,
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": {
+          "phase": "install",
+          "detail": "the install failed"
+        },
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "failure",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "failure: the agent's result was a failure",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "unknown-status",
+      "result_value": {
+        "status": "pending",
+        "package": "example-pkg",
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "unparsable",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "unparseable result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "package-not-text",
+      "result_value": {
+        "status": "success",
+        "package": 5,
+        "major_line": "6",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-example-pkg-6x",
+        "pr_url": "https://github.com/octo/app/pull/12",
+        "action": "direct-update",
+        "resolved_version": "6.1.0",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "unparsable",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "unparseable result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "result-not-an-object",
+      "result_value": "done",
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "unparsable",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "unparseable result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "null-result",
+      "result_value": null,
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "missing",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "missing result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    },
+    {
+      "name": "mispaired",
+      "result_value": null,
+      "mispaired": true,
+      "gh": [],
+      "pre": "add_worktree",
+      "args": [
+        "--result",
+        "$RESULT",
+        "--repo-root",
+        "$REPO",
+        "--package",
+        "example-pkg",
+        "--major-line",
+        "6",
+        "--branch",
+        "fix/dependabot-example-pkg-6x"
+      ],
+      "result": {
+        "status": 0,
+        "stdout": {
+          "package": "example-pkg",
+          "major_line": "6",
+          "branch": "fix/dependabot-example-pkg-6x",
+          "worktree_path": "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "result_status": "missing",
+          "pr_url": null,
+          "pr_state": null,
+          "reaped": false,
+          "reason": "missing result block at $RESULT",
+          "left_behind": [
+            "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+            "fix/dependabot-example-pkg-6x"
+          ],
+          "errors": []
+        },
+        "stderr": ""
+      },
+      "before": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      },
+      "after": {
+        "paths": [
+          "d work",
+          "d work/.claude",
+          "d work/.claude/worktrees",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x",
+          "d work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git",
+          "f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/file.txt",
+          "f work/file.txt"
+        ],
+        "worktrees": [
+          "$ROOT/work",
+          "$ROOT/work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix"
+        ],
+        "admin": [
+          "fix"
+        ],
+        "refs": [
+          "refs/heads/fix/dependabot-example-pkg-6x <origin/main>",
+          "refs/heads/main <origin/main>",
+          "refs/remotes/origin/HEAD <origin/main>",
+          "refs/remotes/origin/main <origin/main>"
+        ]
+      }
+    }
+  ]
+}
