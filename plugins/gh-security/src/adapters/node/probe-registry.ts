@@ -9,11 +9,13 @@
 // The package. A scoped dependency of the root `package.json`, in
 // `dependencies`, then `devDependencies`, then `optionalDependencies`.
 // Private registries hold scoped packages. A scope that the repository maps to
-// a registry comes first (#324): a `@<scope>:registry=` line of `.npmrc`, or a
-// key of `npmScopes` in `.yarnrc.yml`. The verb reads both files by line,
-// with no parser. A file that the verb cannot read maps no scope. The verb
-// does not read the `.npmrc` of the user, so the answer depends only on the
-// repository. Without a mapped scope, the first scoped dependency applies.
+// a registry comes first (#324). The `.npmrc` maps it with a
+// `@<scope>:registry=` line, and `.yarnrc.yml` with a key of `npmScopes`.
+// The verb reads both files by line, with no parser. A file that the verb
+// cannot read maps no scope. The verb does not read the `.npmrc` of the user,
+// so the choice of package depends only on the repository. The package
+// manager still reads that file when it runs the probe. Without a mapped
+// scope, the first scoped dependency applies.
 // Only a spec with no `:` and no `/` counts, because the registry resolves
 // only a range or a tag. A `workspace:`, `file:`, `link:`, `npm:` or git
 // spec is not in the registry, and a probe of it reads as a 404. With no such
@@ -36,10 +38,10 @@
 //   YN0041                         Yarn Berry, for a 401
 //   Response Code: 403, 404        Yarn Berry
 // Yarn Berry writes its errors to stdout. So `output` holds stderr and then
-// stdout. The verb reads the status from the full text, and then cuts
-// `output` to its first 4 KiB and its last 4 KiB (#324). One marker line
-// between them names the bytes cut. The tail keeps the error of Yarn Berry,
-// which comes after a stderr of about 61 KB of minified source.
+// stdout. The verb reads the status from the full text. Then it cuts an
+// `output` of more than 8 KiB to its first 4 KiB and its last 4 KiB (#324).
+// One marker line between them names the bytes cut. The tail keeps the error
+// of Yarn Berry, which comes after a stderr of about 59 KiB of minified source.
 //
 // A non-zero exit is not a failure of the verb. Then `ok` is false, and the
 // caller reads it. Exit 0 with no text on stdout, or with a failed pipe, is
@@ -90,11 +92,11 @@ const STATUS_WORDS: readonly (readonly [401 | 403 | 404, RegExp])[] = [
   [404, /\bE404\b|Response Code: 404\b/],
 ]
 
-/** `@<scope>:registry=<value>` of `.npmrc`. A comment line starts with `;` or `#`. */
+/** `@<scope>:registry=<value>` of `.npmrc`. It does not match a comment line, which starts with `;` or `#`. */
 const NPMRC_SCOPE = /^[ \t]*@([^/:\s]+):registry[ \t]*=[ \t]*\S/
 
-/** A scope key of `npmScopes`, as a line: `scope:` or a quoted one, with nothing after it. */
-const YARN_SCOPE_KEY = /^ +["']?([^\s"':]+)["']?:[ \t\r]*$/
+/** A scope key of `npmScopes`, as a line: `scope:` or a quoted one, with only a comment after it. */
+const YARN_SCOPE_KEY = /^ +["']?([^\s"':#]+)["']?:([ \t]+#[^\r]*)?[ \t]*\r?$/
 
 /** The scope names, with no `@`, that the repository maps to a registry. */
 const mappedScopes = (root: string): ReadonlySet<string> => {
@@ -135,7 +137,7 @@ const scopedDependency = (root: string): Envelope<string | null> => {
     const block = manifest[name]
     if (block === undefined) continue
     if (!isRecord(block)) {
-      // The first candidate was found before this field: it is not read.
+      // A candidate came before this field, so the verb skips the field and does not fail.
       if (first !== null) continue
       return failed(`probeRegistry: ${name} in ${path} is not an object`)
     }

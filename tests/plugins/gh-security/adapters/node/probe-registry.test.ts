@@ -430,7 +430,8 @@ describe('probeRegistry: the size of the output', () => {
   it('counts bytes, not characters, and cuts only the output', async () => {
     const stderr = `${'\u00e9'.repeat(3 * KEEP)}\n`
     const answer = await attempt({ status: 1, stderr, stdout: '' })
-    expect(answer.output).toContain(`${3 * KEEP * 2 + 1 - 2 * KEEP} bytes]`)
+    // 12288 characters of 2 bytes, and a newline, less two ends of 4096.
+    expect(answer.output).toContain('[the probe output is cut here: 16385 bytes]')
     expect(answer.command).toBe('yarn npm info @example-org/ui --fields version')
   })
 })
@@ -458,6 +459,10 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     expect(await chosen(PUBLIC_FIRST, { '.npmrc': NPMRC })).toBe('@example-org/ui')
   })
 
+  it('reads an indented .npmrc mapping line', async () => {
+    expect(await chosen(PUBLIC_FIRST, { '.npmrc': `  ${NPMRC}` })).toBe('@example-org/ui')
+  })
+
   it.each([
     [
       'a bare key',
@@ -475,6 +480,13 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
       'CRLF line ends and a comment',
       'npmScopes: # the private scopes\r\n  # the registry of the org\r\n# a note\r\n  example-org:\r\n    npmAlwaysAuth: true\r\n',
     ],
+    ['a comment after the key', 'npmScopes:\n  example-org: # the org\n    npmAlwaysAuth: true\n'],
+    ['a comment after the key and CRLF', 'npmScopes:\r\n  example-org: # the org\r\n'],
+    ['a blank line before the key', 'npmScopes:\n\n  example-org:\n'],
+    ['a blank CRLF line before the key', 'npmScopes:\r\n\r\n  example-org:\r\n'],
+    ['a deeper comment before the key', 'npmScopes:\n    # an aside\n  example-org:\n'],
+    ['an indent of four', 'npmScopes:\n    example-org:\n      npmAlwaysAuth: true\n'],
+    ['a single-quoted key', "npmScopes:\n  'example-org':\n    npmAlwaysAuth: true\n"],
   ])('prefers a scope that .yarnrc.yml maps in npmScopes, with %s', async (_name, yarnrc) => {
     expect(await chosen(PUBLIC_FIRST, { '.yarnrc.yml': yarnrc }, 'yarn')).toBe('@example-org/ui')
   })
@@ -518,6 +530,17 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
       { '.yarnrc.yml': 'npmScopes:\n  other:\n    example-org:\n      npmAlwaysAuth: true\n' },
     ],
     [
+      'the scope under a top-level key after npmScopes',
+      {
+        '.yarnrc.yml':
+          'npmScopes:\n  other:\n    npmAlwaysAuth: true\nnpmRegistries:\n  example-org:\n    npmAuthToken: x\n',
+      },
+    ],
+    [
+      'the scope key with text after the colon',
+      { '.yarnrc.yml': 'npmScopes:\n  example-org:#x\n' },
+    ],
+    [
       'the scope mapped under another key',
       { '.yarnrc.yml': 'npmRegistries:\n  example-org:\n    npmAuthToken: x\n' },
     ],
@@ -536,14 +559,21 @@ describe('probeRegistry: a scope that the repository maps comes first', () => {
     expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
   })
 
-  it('does not fail on a field after the first, when another scope is mapped', async () => {
+  it('does not fail on a field after the first, when no scope is mapped', async () => {
     const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
-    expect(
-      await chosen(manifest, { '.npmrc': '@other:registry=https://r.example.invalid/\n' }),
-    ).toBe('@types/node')
+    expect(await chosen(manifest, {})).toBe('@types/node')
   })
 
-  it('does not fail on a field after the first, when the first holds a candidate', async () => {
+  it('finds a mapped scope in a field after one that is not an object', async () => {
+    const manifest = {
+      dependencies: { '@types/node': '^22' },
+      devDependencies: [],
+      optionalDependencies: { '@example-org/opt': '^1' },
+    }
+    expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@example-org/opt')
+  })
+
+  it('does not fail on a field after the first, when a scope it does not use is mapped', async () => {
     const manifest = { dependencies: { '@types/node': '^22' }, devDependencies: [] }
     expect(await chosen(manifest, { '.npmrc': NPMRC })).toBe('@types/node')
   })
