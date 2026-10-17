@@ -133,6 +133,16 @@
 //     there is no such check.
 //   - `judge_done` is read as a JSON value: it must be `true`, as
 //     `baseline_done` must.
+//   - Where the bash read the text of a value with `jq -r`, the port gives
+//     that text with the declared differences of `jq-json.ts`: a
+//     whole-number key moves first, and a number is written as JavaScript
+//     writes it. This is so in each detail, and in each version and key
+//     that a loop reads.
+//   - Some values are compared as JSON, where the bash compared their text
+//     after `$( )` removed the line breaks at the end. So the text
+//     `"tested\n"` is not a tested finding, and a `judge_done` of
+//     `"true\n"` is refused. `judge` reads `left_tree`, `collateral_verdict`
+//     and the verdict of an advisory answer as the bash did.
 //   - The advisory query is the `check-advisories` command in process, not
 //     `check-advisories.sh`, and the texts name it so. A failed query quotes
 //     its error as `{"error": ...}`. The prefix wraps `gh`, as

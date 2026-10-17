@@ -250,6 +250,19 @@ describe('together (phase 7)', () => {
     expect(porcelain(w)).toBe('M package.json')
   })
 
+  // jq's `{key, path, package, value, status}` gives null for an absent key.
+  it('picks an absent key or value of a finding as null', async () => {
+    const w = world()
+    await judged(w, [{ path: ['lodash'], package: 'lodash', status: 'removable' }])
+    const json = (await together(w)).json as Record<string, JsonValue>
+    expect({ keys: json.removed_keys, removed: json.removed }).toEqual({
+      keys: [null],
+      removed: [
+        { key: null, path: ['lodash'], package: 'lodash', value: null, status: 'removable' },
+      ],
+    })
+  })
+
   // The bash names the versions after the removal of a set `without_pins`
   // (`run_attempt`), and those of one pin `without_pin` (`test-pin`).
   it('reports the moves of a clean attempt, and the advisory answer of each', async () => {

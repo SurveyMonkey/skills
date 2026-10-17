@@ -209,7 +209,7 @@ export const setKey = (session: Session, key: string, value: JsonValue): void =>
 /** A key of the state as `state_get_opt` reads it: its text, or empty for none. */
 export const optionalText = (session: Session, key: string): string => {
   const value = readOptionalValue(session.state, key)
-  return value === null ? '' : toText(value)
+  return value === null ? '' : rawText(value)
 }
 
 /** A key that the state must carry, or exit 1: `state_get` and `state_ok`. */
@@ -517,14 +517,19 @@ export const jqJoin = (value: unknown, separator: string): string =>
     .join(separator)
 
 /**
+ * The text that `$(jq -r ...)` gives: a text as it is, and another value as
+ * JSON. jq writes a list or an object over lines, with an indent of two.
+ * `$( )` removes the line breaks at the end.
+ */
+export const rawText = (value: unknown): string =>
+  (typeof value === 'string' ? value : render(value, '  ')).replace(/\n+$/, '')
+
+/**
  * The lines that `jq -r '.[]'` gives a `while read` loop: each value as
- * text, cut at each line break, with each empty line skipped. jq writes a
- * list or an object over lines, with an indent of two.
+ * `rawText` gives it, cut at each line break, with each empty line skipped.
  */
 export const linesOf = (values: readonly unknown[]): string[] =>
-  values
-    .flatMap((value) => (typeof value === 'string' ? value : render(value, '  ')).split('\n'))
-    .filter((line) => line !== '')
+  values.flatMap((value) => rawText(value).split('\n')).filter((line) => line !== '')
 
 /** The text of a jq program whose error the bash does not check: empty, as `$( )` gives it. */
 export const orEmpty = (text: () => string): string => {

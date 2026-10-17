@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { equal, or, render, toText } from '../adapters/node/jq-json.ts'
+import { equal, or, render } from '../adapters/node/jq-json.ts'
 import { isRecord } from '../adapters/node/manifest.ts'
 import type { CommandResult } from '../cli/command.ts'
 import { fieldOf, uniqueJq } from '../jq.ts'
@@ -39,6 +39,7 @@ import {
   loadSession,
   orEmpty,
   type PhaseDeps,
+  rawText,
   type Session,
   setFindings,
   setKey,
@@ -58,7 +59,12 @@ const FIELDS = [
   'adapter_errors',
 ] as const
 
-/** An advisory answer that has all five fields, with a verdict of the four. */
+/**
+ * An advisory answer that has all five fields, with a verdict of the four.
+ * As in the bash, `$( )` removes the line breaks at the end of the verdict
+ * before the check, so `"safe\n"` passes it. The verdict table compares
+ * the whole text, so it is not `safe` there.
+ */
 export type Advisory = JsonObject & { readonly verdict: string }
 
 /**
@@ -93,10 +99,10 @@ const validated = (
     }
   }
   const verdict = value.verdict
-  if (typeof verdict !== 'string' || !VERDICTS.includes(verdict)) {
+  if (typeof verdict !== 'string' || !VERDICTS.includes(rawText(verdict))) {
     failPhase(
       'advisories',
-      `${source} answered verdict '${toText(verdict)}' for ${pkg} ${version}, which is not one of ` +
+      `${source} answered verdict '${rawText(verdict)}' for ${pkg} ${version}, which is not one of ` +
         'safe, vulnerable, unknown or no-advisories. Anything else falls through every verdict ' +
         'test into the last arm, and the last arm cannot be allowed to be a default.',
     )
@@ -255,7 +261,7 @@ const ownVerdict = async (
   finding: Finding,
   pkg: string,
 ): Promise<Own> => {
-  const left = finding.left_tree === true || finding.left_tree === 'true'
+  const left = rawText(finding.left_tree ?? null) === 'true'
   const delta = finding.attributable_versions as string[]
   const quiet = { verdict: null, count: null, matched: [], finding }
   if (left) return { ...quiet, status: 'removable', detail: LEFT_TREE }
@@ -315,11 +321,11 @@ const collateralVerdict = async (
   pkg: string,
 ): Promise<{ readonly verdict: string; readonly finding: Finding; readonly detail: string }> => {
   const finding = own.finding
-  const recorded = finding.collateral_verdict ?? null
+  const recorded = rawText(or(finding.collateral_verdict ?? null, 'null'))
   if (recorded === 'not-checked' || recorded === '"not-checked"') {
     // The reason travels with the finding: an adapter with no map and a
     // parser that refused the lockfile read the same here otherwise.
-    const reason = toText(or(finding.collateral_not_checked_reason ?? null, NO_VIEW))
+    const reason = rawText(or(finding.collateral_not_checked_reason ?? null, NO_VIEW))
     return {
       verdict: 'not-checked',
       finding,
@@ -398,7 +404,7 @@ const collateralVerdict = async (
 
 /** One tested finding, judged. */
 const judgeOne = async (session: Session, deps: PhaseDeps, finding: Finding): Promise<Finding> => {
-  const pkg = toText(finding.package ?? null)
+  const pkg = rawText(finding.package ?? null)
   const own = await ownVerdict(session, deps, finding, pkg)
   const collateral = await collateralVerdict(session, deps, own, pkg)
   // A vulnerable collateral makes the pin still-required. An inconclusive

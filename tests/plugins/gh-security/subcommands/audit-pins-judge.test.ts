@@ -29,6 +29,7 @@ import {
   jqValues,
   linesOf,
   orEmpty,
+  rawText,
 } from '#gh-security/subcommands/audit-pins-common.ts'
 import { createGhMock, type GhReplies, ghFails } from '#harness/gh.ts'
 import { createSandbox } from '#harness/sandbox.ts'
@@ -360,7 +361,8 @@ describe('judge (phase 5)', () => {
     ])
   })
 
-  it.each([true, 'true'])(
+  // `$( )` removes the line breaks at the end of `jq -r '.left_tree'`.
+  it.each([true, 'true', 'true\n'])(
     'reports a package that left the tree (left_tree %j) removable with no version judged',
     async (left) => {
       const d = desk()
@@ -382,6 +384,27 @@ describe('judge (phase 5)', () => {
     const answer = await judged(d, [tested({ package: 7 })])
     expect(project(answer, 'status', 'matched_ranges')).toEqual([
       { status: 'still-required', matched_ranges: ['*'] },
+    ])
+  })
+
+  // jq -r writes a list or an object over lines with an indent of two.
+  it('asks under a package and quotes a reason as jq -r writes them', async () => {
+    const d = desk()
+    const pkg = '[\n  "lo",\n  "dash"\n]'
+    cached(d, `${pkg}@4.17.19`, { verdict: 'unknown' })
+    const answer = await judged(d, [
+      tested({
+        package: ['lo', 'dash'],
+        collateral_changes: null,
+        collateral_verdict: 'not-checked',
+        collateral_not_checked_reason: { a: 1 },
+      }),
+    ])
+    expect(project(answer, 'status', 'detail')).toEqual([
+      {
+        status: 'inconclusive',
+        detail: `4.17.19: unknown. the verdict covers ${pkg} only: {\n  "a": 1\n}`,
+      },
     ])
   })
 
@@ -537,6 +560,7 @@ describe('judge (phase 5)', () => {
       ['probably-fine', 'probably-fine'],
       [null, 'null'],
       [1, '1'],
+      [{ a: 1 }, '{\n  "a": 1\n}'],
     ])('refuses the verdict %j rather than defaulting it to safe', async (verdict, text) => {
       const d = desk()
       cached(d, 'lodash@4.17.19', { verdict })
@@ -545,6 +569,17 @@ describe('judge (phase 5)', () => {
           `${SOURCE(d)} answered verdict '${text}' for lodash 4.17.19, which is not one of safe, vulnerable, unknown or no-advisories. Anything else falls through every verdict test into the last arm, and the last arm cannot be allowed to be a default.`,
         ),
       )
+    })
+
+    // `$( )` removes the line break before the check, and jq then compares
+    // the whole text, so `safe\n` is not safe.
+    it('passes a verdict with a line break at its end, and does not read it as safe', async () => {
+      const d = desk()
+      cached(d, 'lodash@4.17.19', { verdict: 'safe\n' })
+      const answer = await judged(d, [tested()])
+      expect(project(answer, 'status', 'advisory_verdict', 'detail')).toEqual([
+        { status: 'inconclusive', advisory_verdict: 'safe', detail: '4.17.19: safe\n' },
+      ])
     })
 
     it('fails the phase when matched_ranges of a cached answer cannot be read', async () => {
@@ -753,6 +788,12 @@ describe('judge (phase 5)', () => {
         'resolution_map refused this lockfile: parsed 0 entries',
       ],
       ['"not-checked"', 7, '7'],
+      ['not-checked\n', 'r', 'r'],
+      [
+        'not-checked',
+        false,
+        "no whole-tree view was available, so no other package's resolution was re-checked",
+      ],
       [
         'not-checked',
         null,
@@ -818,6 +859,7 @@ describe('judge (phase 5)', () => {
       [-2, 'sampled-family'],
       [[], 'safe'],
       [null, 'safe'],
+      [false, 'safe'],
     ])(
       'reports %j families as %s, and queries only the sampled member',
       async (families, verdict) => {
@@ -848,6 +890,19 @@ describe('judge (phase 5)', () => {
           'the collateral verdict for lodash could not be collapsed out of [{"package":"@esbuild/darwin-arm64","version":"0.23.1","verdict":"safe","matched_ranges":[]}]',
         ),
       )
+    })
+
+    it('skips an empty version of a collateral entry, as the read loop does', async () => {
+      const d = desk()
+      const answer = await judged(
+        d,
+        [tested({ collateral_changes: [{ ...READABLE, newly_admitted: [''] }] })],
+        [LODASH_SAFE],
+      )
+      expect(project(answer, 'collateral_verdict', 'collateral_verdicts')).toEqual([
+        { collateral_verdict: 'safe', collateral_verdicts: [] },
+      ])
+      expect(readdirSync(d.cache)).toEqual(['lodash@4.17.19.json'])
     })
 
     it('refuses a collateral list where nothing at all was judged', async () => {
@@ -1153,6 +1208,16 @@ describe('judge (phase 5)', () => {
       ])
     })
 
+    it('finds a pin of no path in a finding of no path', async () => {
+      const d = desk()
+      const finding = tested({ attributable_versions: [] })
+      delete finding.path
+      const answer = await judged(d, [finding], [], {
+        test_order: [{ key: 'k', package: 'lodash' }],
+      })
+      expect((answer.json as JsonObject).untested).toEqual([])
+    })
+
     it('reads a test_order entry with no fields as nulls, and a null entry as a pin of no path', async () => {
       const d = desk()
       const answer = await judged(d, [tested({ attributable_versions: [] })], [], {
@@ -1230,6 +1295,18 @@ describe('the jq readers', () => {
   it('iterates a list or the values of an object, and stops on anything else', () => {
     expect(jqValues({ b: 1, a: 2 })).toEqual([1, 2])
     expect(() => jqValues('x')).toThrow('Cannot iterate over string')
+  })
+
+  it('gives the text of $(jq -r), with no line break at the end', () => {
+    expect([rawText('a\n\n'), rawText(null), rawText([1, 'a'])]).toEqual([
+      'a',
+      'null',
+      '[\n  1,\n  "a"\n]',
+    ])
+  })
+
+  it('writes a list at the top over lines', () => {
+    expect(linesOf([[1, 'a']])).toEqual(['[', '  1,', '  "a"', ']'])
   })
 
   it('cuts each value at its line breaks, and skips empty lines', () => {
