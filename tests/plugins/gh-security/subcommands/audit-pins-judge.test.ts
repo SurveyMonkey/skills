@@ -1156,6 +1156,21 @@ describe('the jq readers', () => {
     expect(linesOf(['a\nb', '', 3, null])).toEqual(['a', 'b', '3', 'null'])
   })
 
+  // The lines of `jq -r '.[]'` on `[{"a":1,"b":[1,{}]},[],true]`, from jq 1.8.
+  it('writes a list or an object over lines with an indent of two, as jq -r does', () => {
+    expect(linesOf([{ a: 1, b: [1, {}] }, [], true])).toEqual([
+      '{',
+      '  "a": 1,',
+      '  "b": [',
+      '    1,',
+      '    {}',
+      '  ]',
+      '}',
+      '[]',
+      'true',
+    ])
+  })
+
   it('gives empty text where the program stops', () => {
     expect(
       orEmpty(() => {

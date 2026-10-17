@@ -518,10 +518,13 @@ export const jqJoin = (value: unknown, separator: string): string =>
 
 /**
  * The lines that `jq -r '.[]'` gives a `while read` loop: each value as
- * text, cut at each line break, with each empty line skipped.
+ * text, cut at each line break, with each empty line skipped. jq writes a
+ * list or an object over lines, with an indent of two.
  */
 export const linesOf = (values: readonly unknown[]): string[] =>
-  values.flatMap((value) => toText(value).split('\n')).filter((line) => line !== '')
+  values
+    .flatMap((value) => (typeof value === 'string' ? value : render(value, '  ')).split('\n'))
+    .filter((line) => line !== '')
 
 /** The text of a jq program whose error the bash does not check: empty, as `$( )` gives it. */
 export const orEmpty = (text: () => string): string => {
