@@ -95,6 +95,8 @@
 //     stops.
 //   - A pin that `list_pins` gives that is not an object stops `list` with
 //     the answer as one line of JSON. The bash quoted the text of `node.sh`.
+//     A null pin also stops `list`. The bash read it as a pin of no kind,
+//     and went on.
 //   - `list_pins` after a removal must give its pins as a list. An answer
 //     with another `pins` lists the pin still. The bash read the values of
 //     an object.
@@ -124,7 +126,10 @@
 //     field of an adapter answer, `unreadable_entries` of the map, the
 //     `resolved_versions` answer, the shape of `baseline_packages`,
 //     `baseline_map` or the findings on file, a missing snapshot, the "could
-//     not be assembled" failure, and a failed write of the state.
+//     not be assembled" failure, and a failed write of the state. A state
+//     with no text `lockfile` stops each restore with exit 1, before git
+//     runs. Where a check of the port is stricter than the bash (see the
+//     differences above), its stop is also before the restore.
 //
 // This file ships. It imports nothing outside the plugin.
 
