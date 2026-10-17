@@ -18,7 +18,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `lib/git.ts` | Git calls: `runGit`, `gitOut`, `gitOk`, `gitLines`, and repository queries |
 | `lib/gh.ts` | The typed `gh` client |
 | `src/post-agent.ts` | The post-agent step of one workflow entry: read the result, verify the pull request, reap on `OPEN`, report. `reap-batch` runs it for each entry |
-| `src/state.ts` | The fix driver's state file, typed. `loadDriverState` reads the keys that `fix-group setup` writes |
+| `src/state.ts` | The state file of the two drivers, typed. `loadDriverState` reads the keys that `fix-group setup` writes |
 | `src/jq.ts` | The jq order, `unique`, `tostring`, `tonumber`, `//`, field reads and the major trim rule that `discover-alerts`, `classify-lines`, the lockfile readers and the node verbs (`compareJq`) share |
 | `src/semver/` | `versions.ts`, comparison, delta and major distance; `ranges.ts`, the range evaluator and `rangeFacts` |
 | `src/lockfiles/` | npm, pnpm and Yarn Berry parsers |
@@ -26,6 +26,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | `src/render/` | The PR renderer of `render-pr`. `markdown.ts` has the text rules: line, table cell, code fence and percent. `pr-inputs.ts` checks the two parsed inputs, and gives typed inputs. `commit-message.ts` and `pr-body.ts` are the templates |
 | `src/subcommands/` | The PreToolUse allow hook, discovery, the per-checkout steps of `resolve-alerts` (`prepare-checkout`) and their merge (`merge-envelopes`), the registry preflight of each repository (`preflight-repo`), the Workflow `args` (`build-dispatches`), the closing PR table (`render-pr-status`), the post-agent step of each workflow entry (`reap-batch`), scoring, rendering, the drivers |
 | `src/subcommands/fix-group*.ts` | The fix driver. `fix-group.ts` is the command and its contract. `fix-group-setup.ts`, `fix-group-classify.ts`, `fix-group-baseline.ts`, `fix-group-apply.ts` and `fix-group-score.ts` are the ported phases. `fix-group-ladder.ts` has the decisions of `apply` as pure functions. `fix-group-common.ts` has what the phases share |
+| `src/subcommands/audit-pins*.ts` | The pin-audit driver. `audit-pins.ts` is the command and its contract. `audit-pins-list.ts`, `audit-pins-baseline.ts` and `audit-pins-test-pin.ts` are the ported phases. `audit-pins-removal.ts` removes one pin from the override file. `audit-pins-collateral.ts` reads the two maps. `audit-pins-common.ts` has what the phases share |
 | `scripts/common/` | The two bash scripts that stay: `detect-capacity.sh` and `notice-scan.sh` |
 | `workflows/` | `fix-groups.mjs`, evaluated by the harness (ADR 010) |
 
