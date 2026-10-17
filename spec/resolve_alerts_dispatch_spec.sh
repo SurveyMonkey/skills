@@ -302,43 +302,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    # pin: mechanical, retired by reap-batch.sh
-    It 'treats a null entry as that group failure report, still reported'
-      When call phrase_in "$SKILL" 'is a failure report for that group, and is still reported'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by reap-batch.sh
-    It 'reaps a null entry with an empty result file so post-agent.sh reports it missing'
-      When call phrase_in "$SKILL" 'with an empty result file, and .post-agent.sh. reports it .missing'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by reap-batch.sh
-    It 'never drops, hand-retries, or counts a null or mispaired entry as a success'
-      When call blob_in "$SKILL" 'never dropped, never retried by hand, and never counted as a success, and neither is a .mispaired. one'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The script empties a mispaired result (spec/js/); the model still has
-    # to route the group somewhere, and this is where that is said.
-    # pin: mechanical, retired by reap-batch.sh
-    It 'handles a mispaired entry exactly like a null one'
-      When call blob_in "$SKILL" 'Treat a .mispaired. entry exactly like a .null. one'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by reap-batch.sh
-    It 'never reads a mispaired entry pr_url or branch'
-      When call blob_in "$SKILL" 'never read its .pr_url. or .branch., which belong to a different group'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'says no bounded pool can make the dispatch order repeat'
       When call blob_in "$SKILL" 'no bounded pool can make that order repeat'
       The status should be success
@@ -402,23 +365,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    # Layer 1's handoff: the reap must still run on a success whose cleanup
-    # failed. Gating it on `cleanup == null` would skip exactly the groups
-    # whose leftovers the agent already failed to remove.
-    # pin: mechanical, retired by reap-batch.sh
-    It 'never gates the reap on cleanup being null'
-      When call blob_in "$SKILL" 'A non-null .cleanup. on the result never changes whether this call runs'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by reap-batch.sh
-    It 'says a leaked success is the group that most needs reaping'
-      When call blob_in "$SKILL" 'exactly the group whose leftovers most need collecting'
-      The status should be success
-      The output should equal '1'
-    End
-
     # The driver reports RESOLVED paths; post-agent.sh derives an unresolved
     # one. On macOS that is /private/var against /var for one directory, so a
     # string comparison reports one leak as two.
@@ -470,26 +416,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   End
 
   Describe 'the reap timing this layer changed'
-    # Precisely the sentence a later editor would "restore" to the old
-    # wording. The reap moved from per-completion (inside a refill motion the
-    # model kept) to per-returned-entry after the workflow returns, and both
-    # binding documents that carried the old reason were corrected with it.
-    # pin: mechanical, retired by reap-batch.sh
-    It 'ties the reap to the result being in hand, not to a completion notification'
-      When call phrase_in "$SKILL" 'Reap each group.s local artifacts once its result is in hand'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by reap-batch.sh
-    It 'no longer claims in the plugin guide that the reap runs on each completion'
-      # Every guide file, not just git.md: the claim must not return anywhere in the guide.
-      no_completion_reap() { cat "$(dirname "$1")"/*.md | grep -c 'on each completion' || true; }
-      When call no_completion_reap "$GIT_DOC"
-      The status should be success
-      The output should equal '0'
-    End
-
     It 'keeps the never-prune rule in the plugin guide on the entitlement, not the timing'
       When call phrase_in "$GIT_DOC" 'the local-scope[ ]*rule is what makes it safe, not the timing'
       The status should be success
