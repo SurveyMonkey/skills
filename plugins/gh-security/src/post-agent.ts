@@ -175,10 +175,12 @@ export const postAgent = async (
   const worktreePath =
     `${input.repoRoot}/.claude/worktrees/fix-dependabot-` +
     `${named.package.replaceAll('/', '-')}-${named.major_line}x`
-  const report = (
-    changes: Partial<Pick<PostAgentReport, 'pr_url' | 'pr_state' | 'reaped' | 'reason'>> &
-      Pick<PostAgentReport, 'left_behind'>,
-  ): PostAgentReport => ({
+  // The keys are in the order of the script. A change keeps the place of its key.
+  const report = ({
+    left_behind,
+    ...changes
+  }: Partial<Pick<PostAgentReport, 'pr_url' | 'pr_state' | 'reaped' | 'reason'>> &
+    Pick<PostAgentReport, 'left_behind'>): PostAgentReport => ({
     package: named.package,
     major_line: named.major_line,
     branch: named.branch,
@@ -188,8 +190,9 @@ export const postAgent = async (
     pr_state: null,
     reaped: false,
     reason: null,
-    errors,
     ...changes,
+    left_behind,
+    errors,
   })
   const stays = [worktreePath, named.branch]
 

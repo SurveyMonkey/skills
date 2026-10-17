@@ -640,3 +640,23 @@ describe('the command', () => {
     })
   })
 })
+
+describe('the report', () => {
+  it('has the keys of post-agent.sh, in its order', async () => {
+    const at = world()
+    const report = await only(reapAll(at, [entry(at.repo, null)]))
+    expect(Object.keys(report as Record<string, JsonValue>)).toEqual([
+      'package',
+      'major_line',
+      'branch',
+      'worktree_path',
+      'result_status',
+      'pr_url',
+      'pr_state',
+      'reaped',
+      'reason',
+      'left_behind',
+      'errors',
+    ])
+  })
+})
