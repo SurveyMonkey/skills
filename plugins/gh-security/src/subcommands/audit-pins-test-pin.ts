@@ -115,9 +115,12 @@ const removePin = async (session: Session, pin: OrderedPin): Promise<void> => {
   )
 }
 
-/** Whether `list_pins` still lists a pin at `path`. An answer that cannot be read lists it. */
+/**
+ * Whether `list_pins` still lists a pin at `path`. The answer is an object,
+ * which `promised` checked. Pins that cannot be read list it.
+ */
 const stillListed = (answer: unknown, path: readonly string[]): boolean => {
-  const pins = isRecord(answer) ? answer.pins : null
+  const pins = (answer as Record<string, unknown>).pins
   return !Array.isArray(pins) || pins.some((pin) => !isRecord(pin) || equal(pin.path, path))
 }
 

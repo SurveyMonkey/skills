@@ -94,15 +94,13 @@ export const removeManifestPaths = (
 const BLOCK_START = /^overrides:[ \t\n\v\f\r]*($|#)/
 const BLOCK_END = /^[^ \t\n\v\f\r]/
 const BLANK_OR_COMMENT = /^[ \t\n\v\f\r]*(#|$)/
-const TRAILING_SPACE = /[ \t\n\v\f\r]+$/
 
-/** `strip_scalar`: the text of a plain, single-quoted or double-quoted scalar. */
-const scalarOf = (text: string): string => {
-  const trimmed = text.replace(TRAILING_SPACE, '')
-  if (/^'.*'$/s.test(trimmed)) return trimmed.slice(1, -1).replaceAll("''", "'")
-  if (/^".*"$/s.test(trimmed)) return trimmed.slice(1, -1)
-  return trimmed
-}
+/**
+ * `strip_scalar` on a quoted key: the text between the quotes. A doubled
+ * single quote in a single-quoted key is one quote.
+ */
+const unquote = (text: string): string =>
+  text.startsWith("'") ? text.slice(1, -1).replaceAll("''", "'") : text.slice(1, -1)
 
 /**
  * `key_of`: the key of one line of the block, or empty for a line that is
@@ -113,7 +111,7 @@ const keyOf = (line: string): string => {
   const quote = rest.charAt(0)
   if (quote === "'" || quote === '"') {
     const close = rest.slice(1).indexOf(`${quote}: `)
-    return close === -1 ? '' : scalarOf(rest.slice(0, close + 2))
+    return close === -1 ? '' : unquote(rest.slice(0, close + 2))
   }
   const colon = rest.indexOf(':')
   return colon === -1 ? '' : rest.slice(0, colon)
