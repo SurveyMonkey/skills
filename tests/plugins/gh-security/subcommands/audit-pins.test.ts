@@ -738,6 +738,8 @@ describe('baseline (phase 4 head)', () => {
     ],
     ['a text', '0', "reported unreadable_entries '0', which is not a non-negative integer"],
     ['null', null, "reported unreadable_entries 'null', which is not a non-negative integer"],
+    ['below zero', -1, "reported unreadable_entries '-1', which is not a non-negative integer"],
+    ['a fraction', 1.5, "reported unreadable_entries '1.5', which is not a non-negative integer"],
   ])('refuses a map whose unreadable_entries is %s', async (_name, value, words) => {
     const w = world('npm-v3')
     await list(w)
@@ -1788,7 +1790,51 @@ describe('test-pin (phase 4, one pin per install)', () => {
       editState(w, (state) => {
         state.baseline_inconclusive = refused
       })
-      expect((await testPin(w, ['--key', 'lodash'])).status).toBe(status)
+      expect(await testPin(w, ['--key', 'lodash'])).toEqual(
+        status === 0
+          ? expect.objectContaining({ status: 0 })
+          : {
+              status: 1,
+              json: {
+                error:
+                  "test-pin: the baseline recorded lodash inconclusive (present: false), so this pin is not tested. Recording it and never testing it is the baseline's answer, not a step to redo.",
+              },
+            },
+      )
+    })
+
+    it('reads a null entry beside the snapshot of the baseline as jq does', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      editState(w, (state) => {
+        state.baseline_packages = [
+          null,
+          { package: 'lodash', present: true, versions: ['3.10.1', '4.17.21'] },
+        ]
+      })
+      expect(finding(await testPin(w, ['--key', 'lodash'])).status).toBe('tested')
+    })
+
+    it('reads a baseline_unreadable_entries below zero as no count', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      editState(w, (state) => {
+        state.baseline_unreadable_entries = -1
+      })
+      const found = finding(await testPin(w, ['--key', 'lodash']))
+      expect({ u: found.unreadable_entries, w: found.whole_tree_view }).toEqual({
+        u: { baseline: null, without_pin: 0 },
+        w: false,
+      })
+    })
+
+    it('reads a state with no env_prefix as no prefix', async () => {
+      const w = world('npm-v3')
+      await prepare(w)
+      editState(w, (state) => {
+        delete state.env_prefix
+      })
+      expect(finding(await testPin(w, ['--key', 'lodash'])).status).toBe('tested')
     })
 
     it.each([
@@ -1799,6 +1845,7 @@ describe('test-pin (phase 4, one pin per install)', () => {
         ['x', { package: 'lodash', present: true, versions: ['3.10.1', '4.17.21'] }],
       ],
       ['a snapshot with no versions list', [{ package: 'lodash', versions: null }]],
+      ['a snapshot whose versions is text', [{ package: 'lodash', versions: 'x' }]],
     ])('stops the pin when the baseline holds %s for its package', async (_name, packages) => {
       const w = world('npm-v3')
       await prepare(w)
