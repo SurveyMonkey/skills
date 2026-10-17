@@ -154,16 +154,16 @@ what was then `origin/main`, and both blocked a rerun until a human deleted them
   refuses to delete a branch checked out in a worktree): the push succeeded with that tip, so the
   remote carries the same commits, or the tip still equals `origin/<default_branch>`, so nothing was
   committed. Anything else is left in place and named in the report.
-- **The guard compares tips instead of stopping on existence.** A local tip that is
-  `origin/<default_branch>` or an ancestor of it, equals `origin/<branch_name>`, or is the drift
-  commit alone is this plugin's leftover. The guard deletes that branch and makes it again. Any
-  other tip can hold unpushed work, and only that tip stops the run. An ancestor tip holds no
-  commit of its own ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)). A refused
+- **The guard compares tips instead of stopping on existence.** These local tips are this
+  plugin's leftover: `origin/<default_branch>` or an ancestor of it, `origin/<branch_name>`, and
+  the drift commit alone. The guard deletes that branch and makes it again. Any other tip can hold
+  unpushed work, and only that tip stops the run. An ancestor tip holds no commit of its own
+  ([issue #325](https://github.com/SurveyMonkey/skills/issues/325)). A refused
   `git worktree add` leaves such a branch, and the default branch can move before the next run.
-  The TypeScript `fix-group setup` has the ancestor rule. `fix-group.sh` does not, and #236
-  retires it. This is the shape `agents/audit-pins.md` already uses for
-  `chore/dependabot-remove-pins`, which proves a remnant against a closed PR's `headRefOid` rather
-  than refusing on sight.
+  The TypeScript `fix-group setup` has the ancestor rule. `fix-group.sh` does not have it, and
+  [#236](https://github.com/SurveyMonkey/skills/issues/236) retires that script. This is the shape
+  that `agents/audit-pins.md` already uses for `chore/dependabot-remove-pins`. That agent proves a
+  remnant against the `headRefOid` of a closed PR, and does not refuse it on sight.
 
 The Consequences claim that "stale local fix branches surface as agent failures" now holds only for
 a branch whose tip nobody can account for; the orchestrator's summary still hands that judgment to

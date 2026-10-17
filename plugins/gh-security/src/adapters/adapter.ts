@@ -360,8 +360,8 @@ export type RegistryProbeAnswer = {
   readonly http_status: 401 | 403 | 404 | null
   /**
    * What the probe wrote: stderr, then stdout. Or why it did not start. A text
-   * of more than 8 KiB keeps its first 4 KiB and its last 4 KiB, with one marker
-   * line between them that names the bytes cut. The verb reads `http_status`
+   * of more than 8 KiB keeps only its first 4 KiB and its last 4 KiB. One
+   * marker line between them names the bytes cut. The verb reads `http_status`
    * before the cut.
    */
   readonly output: string
