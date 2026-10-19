@@ -16,7 +16,7 @@
 //     give the detail.
 //   - `reason` says why nothing was reaped. It is null when the reap ran.
 //   - `left_behind` names each path and branch that stays: the report of the
-//     reap, or the work directory and the branch when no reap ran.
+//     reap, or, when no reap ran, what is on disk (below).
 //
 // **The result.** A `null` result is `missing`. So is a `mispaired` entry:
 // its result names another group, so it is never read (`fix-groups.mjs`,
@@ -43,6 +43,13 @@
 // branch whose tip is on origin goes. `defaultBranch` is null, as in
 // `reap-agent-artifacts.sh`.
 //
+// **What stays when no reap ran** (round 7 ruling 12 on #229). `left_behind`
+// names the work directory only when its path exists, and the branch only
+// when `git rev-parse --verify --quiet refs/heads/<branch>` finds it in the
+// repository root. A repository root that is not a directory holds neither.
+// A read of the ref that fails is not an absent branch: the branch stays, and
+// `errors` names the read, as in `src/reap.ts`.
+//
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script
 //     read a file that held the JSON or a whole transcript, and found the
@@ -61,8 +68,14 @@
 //   - An answer of `gh pr view` that is not JSON has the words of the gh
 //     client (`lib/gh.ts`). The script gave the words of `pr-status.sh`.
 //   - An empty pull request state is the empty text. The script gave null.
+//   - When no reap ran, `left_behind` names only a path or a branch that
+//     exists (ruling 12). The script named both from the names of the group,
+//     so a failure before setup reported a worktree and a branch that were
+//     never made.
 //
 // This file ships. It imports nothing outside the plugin.
+
+import { existsSync, statSync } from 'node:fs'
 
 import type { JsonObject } from './lib/envelope.ts'
 import { contain, type Git, reap } from './reap.ts'
@@ -163,6 +176,40 @@ const verify = async (
     : { state: null, problem: `pr-status returned an entry with no usable state for ${url}` }
 }
 
+/** A directory, after links. A path that cannot be read is not one. */
+const isDirectory = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What stays of the group when no reap ran: each of the work directory and
+ * the branch that is on disk, and the error of a ref read that failed.
+ */
+const onDisk = async (
+  git: Git,
+  repoRoot: string,
+  work: string,
+  branch: string,
+): Promise<{ readonly left: string[]; readonly errors: string[] }> => {
+  const left = existsSync(work) ? [work] : []
+  if (!isDirectory(repoRoot)) return { left, errors: [] }
+  const ref = `refs/heads/${branch}`
+  const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
+  if (read.status === 0) return { left: [...left, branch], errors: [] }
+  // `--quiet` answers a missing ref with exit 1 and no text. Any text, or a
+  // git that did not start, is a failed read.
+  const text = (read.startFailure === null ? read.combined : read.startFailure.message)
+    .replace(/\s+$/, '')
+    .replace(/\n/g, ' ')
+  return text === ''
+    ? { left, errors: [] }
+    : { left: [...left, branch], errors: [`git rev-parse ${ref} failed: ${text}`] }
+}
+
 const REASONS: Readonly<Record<'no-op' | 'failure', string>> = {
   'no-op': 'no-op: the agent made no fix, so there is nothing to verify or reap',
   failure: "failure: the agent's result was a failure",
@@ -198,33 +245,37 @@ export const postAgent = async (
     left_behind,
     errors,
   })
-  const stays = [worktreePath, named.branch]
+  /** The report of an entry that no reap ran for. */
+  const unreaped = async (
+    changes: Partial<Pick<PostAgentReport, 'pr_url' | 'pr_state'>> & { readonly reason: string },
+  ): Promise<PostAgentReport> => {
+    const stays = await onDisk(deps.git, input.repoRoot, worktreePath, named.branch)
+    errors.push(...stays.errors)
+    return report({ ...changes, left_behind: stays.left })
+  }
 
   if (parsed.status === 'missing') {
     const reason = input.mispaired
       ? `mispaired result at ${input.where}: it names another group, so it was not read`
       : `missing result block at ${input.where}`
-    return report({ reason, left_behind: stays })
+    return unreaped({ reason })
   }
   if (parsed.status === 'unparsable') {
-    return report({ reason: `unparseable result block at ${input.where}`, left_behind: stays })
+    return unreaped({ reason: `unparseable result block at ${input.where}` })
   }
-  if (parsed.status !== 'success') {
-    return report({ reason: REASONS[parsed.status], left_behind: stays })
-  }
+  if (parsed.status !== 'success') return unreaped({ reason: REASONS[parsed.status] })
 
   const { url } = parsed
   const { state, problem } = await verify(url, deps.readPullRequest)
   if (problem !== null) {
     errors.push(problem)
-    return report({ pr_url: url, reason: problem, left_behind: stays })
+    return unreaped({ pr_url: url, reason: problem })
   }
   if (state !== 'OPEN') {
-    return report({
+    return unreaped({
       pr_url: url,
       pr_state: state,
       reason: `pull request is not open (state=${state})`,
-      left_behind: stays,
     })
   }
 
@@ -240,7 +291,7 @@ export const postAgent = async (
   if (target.outcome !== 'ok') {
     const reason = 'the reap refused the paths, so nothing was removed'
     errors.push(`${reason}: ${target.error}`)
-    return report({ pr_url: url, pr_state: state, reason, left_behind: stays })
+    return unreaped({ pr_url: url, pr_state: state, reason })
   }
   const reaped = await reap(target.value, { pushed: true, defaultBranch: null }, deps.git)
   errors.push(...reaped.errors)
