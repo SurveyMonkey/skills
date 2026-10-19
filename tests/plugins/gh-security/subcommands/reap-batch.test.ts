@@ -826,6 +826,32 @@ describe('what stays when no reap ran', () => {
     }
   })
 
+  it.each([
+    ['is there', true],
+    ['is absent', false],
+  ])(
+    'keeps the work directory whose stat fails, and reads a branch that %s',
+    async (_name, has) => {
+      // The root reads, but the parent of the work directory does not.
+      const at = world()
+      if (has) at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+      const worktrees = join(at.repo, '.claude', 'worktrees')
+      mkdirSync(worktrees, { recursive: true })
+      chmodSync(worktrees, 0)
+      try {
+        const report = (await only(reapAll(at, [entry(at.repo, failure)]))) as Record<
+          string,
+          JsonValue
+        >
+        const work = report.worktree_path as string
+        expect(report.left_behind).toEqual(has ? [work, PLAIN.branch_name] : [work])
+        expect(report.errors).toEqual([`stat failed: EACCES: permission denied, stat '${work}'`])
+      } finally {
+        chmodSync(worktrees, 0o755)
+      }
+    },
+  )
+
   it('names nothing under a repository root that is a file', async () => {
     const at = world()
     const root = join(at.sandbox.path, 'a-file')
