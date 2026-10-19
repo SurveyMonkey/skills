@@ -712,8 +712,14 @@ describe('what stays when no reap ran', () => {
     mkdirSync(root)
     const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
     expect(report.left_behind).toEqual([PLAIN.branch_name])
+    // git names the parent it stopped at in words that depend on the file
+    // system, so the example checks the start and the end of one line.
     expect(report.errors).toEqual([
-      `git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository (or any of the parent directories): .git`,
+      expect.stringMatching(
+        new RegExp(
+          `^git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository [^\\n]*\\S$`,
+        ),
+      ),
     ])
   })
 
