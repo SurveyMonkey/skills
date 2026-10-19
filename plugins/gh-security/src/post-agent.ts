@@ -73,9 +73,9 @@
 //     client (`lib/gh.ts`). The script gave the words of `pr-status.sh`.
 //   - An empty pull request state is the empty text. The script gave null.
 //   - When no reap ran, `left_behind` names only a path or a branch that
-//     exists (ruling 12). The script named both from the names of the group,
-//     so a failure before setup reported a worktree and a branch that were
-//     never made.
+//     exists, or whose read failed (ruling 12). The script named both from
+//     the names of the group, so a failure before setup reported a worktree
+//     and a branch that were never made.
 //
 // This file ships. It imports nothing outside the plugin.
 
