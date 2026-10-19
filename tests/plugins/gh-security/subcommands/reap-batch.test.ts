@@ -763,6 +763,17 @@ describe('what stays when no reap ran', () => {
     )
   })
 
+  it('reads the branch through a repository root that is a link', async () => {
+    const at = world()
+    at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+    const link = join(realpathSync(at.sandbox.path), 'link')
+    symlinkSync(at.repo, link)
+    expect(await only(reapAll(at, [entry(link, failure)]))).toMatchObject({
+      left_behind: [PLAIN.branch_name],
+      errors: [],
+    })
+  })
+
   it('names nothing under a repository root that is a file', async () => {
     const at = world()
     const root = join(at.sandbox.path, 'a-file')

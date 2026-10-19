@@ -915,6 +915,7 @@ describe('the checkouts and repositories that the batch never touched', () => {
       'The probe of `a` failed with a network problem, such as a time limit, DNS or a reset.',
     ],
     ['start', 'a', null, 'The package manager did not start for the probe of `a`.'],
+    ['start', null, null, 'The package manager did not start for the probe of the package.'],
     [
       'detect',
       null,
@@ -1170,6 +1171,24 @@ describe('the reap', () => {
     }
     expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
       `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (failed in the agent's cleanup). Not reaped: failure: the agent's result was a failure. The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted): git worktree remove --force failed: locked.`,
+    )
+  })
+
+  it('says it once when the cleanup path is the shorter one', () => {
+    // The reverse of the example above: the report has the longer text.
+    const run: Run = {
+      entries: [
+        entry(
+          PKG,
+          failure(PKG, 'pr', 'gh failed', {
+            cleanup: cleanup({ work_dir: { path: WORK, action: 'skipped' } }),
+          }),
+        ),
+      ],
+      reports: [report(PKG, 'failure', { left_behind: [`/private${WORK}`] })],
+    }
+    expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (skipped in the agent's cleanup). The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted): git worktree remove --force failed: locked.`,
     )
   })
 
@@ -1682,6 +1701,7 @@ describe('an input that is refused', () => {
       'result[0].result.requires_major_bump[0].vulnerable_ranges[0] is not text',
     ],
     ['workflow.json', [...R0, 'cleanup'], 'leaked', 'result[0].result.cleanup is not an object'],
+    ['workflow.json', [...R0, 'cleanup'], GONE, 'result[0].result.cleanup is not an object'],
     [
       'workflow.json',
       [...R0, 'cleanup', 'worktree'],
@@ -1720,6 +1740,12 @@ describe('an input that is refused', () => {
     ],
     [
       'workflow.json',
+      [...R0, 'cleanup', 'branch_deleted'],
+      null,
+      'result[0].result.cleanup.branch_deleted is not true or false',
+    ],
+    [
+      'workflow.json',
       [...R0, 'cleanup', 'reason'],
       5,
       'result[0].result.cleanup.reason is not text',
@@ -1749,6 +1775,7 @@ describe('an input that is refused', () => {
       'result[0].result.bare_override is not one of none, added, tightened',
     ],
     ['workflow.json', [...R0, 'risk'], 'Low', 'result[0].result.risk is not an object'],
+    ['workflow.json', [...R0, 'risk'], GONE, 'result[0].result.risk is not an object'],
     ['workflow.json', [...R0, 'risk', 'band'], GONE, 'result[0].result.risk.band is not text'],
     ['workflow.json', [...R0, 'risk', 'score'], '4', 'result[0].result.risk.score is not a number'],
     ['workflow.json', [...R0, 'risk', 'f4'], GONE, 'result[0].result.risk.f4 is not a number'],
@@ -1941,6 +1968,17 @@ describe('an input that is refused', () => {
     )
   })
 
+  it('names the entry by its place in the Workflow result, not by its dispatch', () => {
+    // The entry of the last dispatch comes first in the result.
+    expect(
+      withFile('workflow.json', (w: Workflow) => {
+        const last = structuredClone(w.result[2]) as { result: Record<string, unknown> }
+        Reflect.deleteProperty(last.result, 'branch')
+        return { ...w, result: [last, w.result[0], w.result[1]] }
+      }),
+    ).toBe('summarize-run: workflow.json: result[0].result.branch is not text')
+  })
+
   it('refuses a count of reports that is not the count of groups', () => {
     expect(withFile('reports.json', (r: unknown[]) => r.slice(0, 2))).toBe(
       'summarize-run: reports.json has 2 reports for 3 groups',
@@ -1973,7 +2011,7 @@ describe('an input that is refused', () => {
 
   it.each([
     ['the branch of its result', 'reports.json', [0, 'branch'], 'fix/other'],
-    ['the branch of its group', 'reports.json', [2, 'branch'], 'fix/other'],
+    ['the branch of its failure result', 'reports.json', [2, 'branch'], 'fix/other'],
   ])('refuses a report that does not name %s', (_name, file, path, to) => {
     const index = path[0]
     const branch = index === 0 ? PKG.branch_name : BAD.branch_name
