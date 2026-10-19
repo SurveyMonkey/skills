@@ -771,6 +771,25 @@ describe('an interrupted run', () => {
     expect(section(text, 'Failures')).toBeNull()
   })
 
+  it('pairs an entry by its repository and its branch, not its branch alone', () => {
+    const lib = grp('example-pkg', '6', 'octo/lib')
+    const run: Run = {
+      entries: [entry(lib, success(lib), { root: '/Users/example/src/octo/lib' })],
+      reports: [report(PKG, 'missing'), reaped(lib)],
+      args: args(PKG, lib),
+      discovery: discovery({
+        checkouts: [
+          CHECKOUT,
+          { ...CHECKOUT, checkout: '/Users/example/src/octo/lib', nwo: 'octo/lib' },
+        ],
+      }),
+    }
+    expect(sectionOf(run, 'Groups')?.split('\n').slice(2)).toEqual([
+      '| octo/app | example-pkg | 6.x | none | n/a | n/a | unknown: no entry |',
+      `| octo/lib | example-pkg | 6.x | ${URL} | Medium (4) | 1/2 | scoped override |`,
+    ])
+  })
+
   it('says nothing of an interruption when each dispatch has its entry', () => {
     const run: Run = { ...CLEAN, args: args(PKG) }
     expect(markdown(summarize(run))).toBe(markdown(summarize(CLEAN)))
@@ -808,6 +827,16 @@ describe('a no-op', () => {
     const run: Run = { entries: [entry(PKG, noOp(PKG, evidence))], reports: [report(PKG, 'no-op')] }
     expect(sectionOf(run, 'Already fixed')?.split('\n')[0]).toBe(
       '- `example-pkg` 6.x in `octo/app`: the scoped overrides are already on main.',
+    )
+  })
+})
+
+describe('a result that disagrees with its dispatch', () => {
+  it('reads the report that names the branch of the result, as reap-batch gives it', () => {
+    const dispatched = { ...PKG, branch_name: 'fix/other' }
+    const run: Run = { entries: [entry(dispatched, success(PKG))], reports: [reaped(PKG)] }
+    expect(sectionOf(run, 'Groups')?.split('\n')[2]).toBe(
+      `| example-pkg | 6.x | ${URL} | Medium (4) | 1/2 | scoped override |`,
     )
   })
 })
