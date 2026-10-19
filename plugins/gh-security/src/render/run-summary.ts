@@ -15,6 +15,7 @@ import {
   type Cleanup,
   type Discovery,
   type Group,
+  isOpenPr,
   type Preflight,
   REQUIRES_MAJOR,
   type Report,
@@ -303,11 +304,7 @@ const otherSkips = (summary: Summary): string[] =>
     .filter((group) => group.reason !== REQUIRES_MAJOR && group.reason !== SHARED_PARENT)
     .map((group: Skipped) => {
       const more =
-        group.more === null
-          ? ''
-          : group.reason === 'open PR exists'
-            ? ` (${group.more})`
-            : `: ${group.more}`
+        group.more === null ? '' : isOpenPr(group.reason) ? ` (${group.more})` : `: ${group.more}`
       return `- ${who(group)}: ${group.reason}${more}.`
     })
 

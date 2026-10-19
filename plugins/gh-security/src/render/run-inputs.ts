@@ -377,6 +377,13 @@ export interface Skipped {
 export const REQUIRES_MAJOR = 'requires major version bump'
 export const SHARED_PARENT = 'shared parent across major lines'
 const OPEN_PR = 'open PR exists'
+
+/**
+ * A skip for an open PR of the group. For a flat-scheme twin or a legacy
+ * branch, the reason adds the branch in brackets (`discover-alerts.ts`).
+ */
+export const isOpenPr = (reason: string): boolean =>
+  reason === OPEN_PR || reason.startsWith(`${OPEN_PR} (`)
 const PR_CHECK_FAILED = 'PR check failed'
 
 export interface Discovery {
@@ -421,12 +428,11 @@ export const discoveryOf = (value: unknown): Discovery => {
         reason === SHARED_PARENT
           ? textList(group.collision_parents, `${at}.collision_parents`)
           : [],
-      more:
-        reason === OPEN_PR
-          ? text(group.open_pr_url, `${at}.open_pr_url`)
-          : reason === PR_CHECK_FAILED
-            ? text(group.error, `${at}.error`)
-            : null,
+      more: isOpenPr(reason)
+        ? text(group.open_pr_url, `${at}.open_pr_url`)
+        : reason === PR_CHECK_FAILED
+          ? text(group.error, `${at}.error`)
+          : null,
     }
   })
   return { checkouts, excluded, skipped }

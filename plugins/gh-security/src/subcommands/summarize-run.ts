@@ -106,7 +106,8 @@
 //     names a group with no result at all unknown.
 //   - The other skips of phase 2 (`no fix available`, `open PR exists`,
 //     `ecosystem not supported yet`, `PR check failed`) have a section. Phase
-//     7 does not name them.
+//     7 does not name them. An `open PR exists` reason that names a
+//     flat-scheme or legacy branch also gives its open PR.
 //   - An observation of a type that phase 7 does not name is counted, and
 //     not dropped.
 //   - A `cleanup` with an empty `left_behind` says that the reap cleared what

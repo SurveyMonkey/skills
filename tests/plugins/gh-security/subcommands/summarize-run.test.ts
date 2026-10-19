@@ -1051,6 +1051,52 @@ describe('the skips of phase 2', () => {
   })
 })
 
+describe('an open PR on another branch scheme', () => {
+  // `discover-alerts` gives the open PR of a flat-scheme twin or of a legacy
+  // branch under its own reason, with `open_pr_url`.
+  it.each([
+    ['open PR exists (flat-scheme branch fix-dependabot-b-2x)'],
+    ['open PR exists (legacy branch fix/dependabot-b)'],
+  ])('names the pull request of %s', (reason) => {
+    const run: Run = {
+      ...CLEAN,
+      discovery: discovery({
+        skipped: [
+          {
+            package: 'b',
+            major_line: '2',
+            repo: 'octo/app',
+            reason,
+            open_pr_url: 'https://github.com/octo/app/pull/9',
+          },
+        ],
+      }),
+    }
+    expect(sectionOf(run, 'Other skips')).toBe(
+      `- \`b\` 2.x in \`octo/app\`: ${reason} (https://github.com/octo/app/pull/9).`,
+    )
+  })
+
+  it('refuses one with no open_pr_url', () => {
+    const run: Run = {
+      ...CLEAN,
+      discovery: discovery({
+        skipped: [
+          {
+            package: 'b',
+            major_line: '2',
+            repo: 'octo/app',
+            reason: 'open PR exists (legacy branch fix/dependabot-b)',
+          },
+        ],
+      }),
+    }
+    expect(message(summarize(run))).toBe(
+      'summarize-run: merged.json: skipped[0].open_pr_url is not text',
+    )
+  })
+})
+
 describe('the reap', () => {
   const WORK = workOf(PKG)
   const HINT =
