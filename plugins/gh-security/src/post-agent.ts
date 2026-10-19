@@ -48,7 +48,8 @@
 // when `git rev-parse --verify --quiet refs/heads/<branch>` finds it in the
 // repository root. A repository root that is not a directory holds neither.
 // A read of the ref that fails is not an absent branch: the branch stays, and
-// `errors` names the read, as in `src/reap.ts`.
+// `errors` names the read, as in `src/reap.ts`. Only exit 1 with no text is
+// an absent branch. A signal, or another exit with no text, is a failed read.
 //
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script
@@ -200,14 +201,15 @@ const onDisk = async (
   const ref = `refs/heads/${branch}`
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
   if (read.status === 0) return { left: [...left, branch], errors: [] }
-  // `--quiet` answers a missing ref with exit 1 and no text. Any text, or a
-  // git that did not start, is a failed read.
+  // `--quiet` answers a missing ref with exit 1 and no text. Any text, any
+  // other exit, a signal, or a git that did not start, is a failed read.
   const text = (read.startFailure === null ? read.combined : read.startFailure.message)
     .replace(/\s+$/, '')
     .replace(/\n/g, ' ')
-  return text === ''
-    ? { left, errors: [] }
-    : { left: [...left, branch], errors: [`git rev-parse ${ref} failed: ${text}`] }
+  if (text === '' && read.status === 1) return { left, errors: [] }
+  const why =
+    text !== '' ? text : read.status === null ? `killed by ${read.signal}` : `exit ${read.status}`
+  return { left: [...left, branch], errors: [`git rev-parse ${ref} failed: ${why}`] }
 }
 
 const REASONS: Readonly<Record<'no-op' | 'failure', string>> = {

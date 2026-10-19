@@ -728,13 +728,28 @@ describe('what stays when no reap ran', () => {
   it.each([
     [
       'git does not start',
-      { status: null, text: '', startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' } },
+      {
+        status: null,
+        signal: null,
+        text: '',
+        startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' },
+      },
       'spawn git ENOENT',
     ],
     [
       'git writes two lines',
-      { status: 128, text: 'fatal: one\nfatal: two\n', startFailure: null },
+      { status: 128, signal: null, text: 'fatal: one\nfatal: two\n', startFailure: null },
       'fatal: one fatal: two',
+    ],
+    [
+      'a signal ends git',
+      { status: null, signal: 'SIGKILL', text: '', startFailure: null },
+      'killed by SIGKILL',
+    ],
+    [
+      'git exits 128 with no text',
+      { status: 128, signal: null, text: '', startFailure: null },
+      'exit 128',
     ],
   ])('keeps the branch, and names the read on one line, when %s', async (_name, answer, words) => {
     const at = world()
@@ -742,7 +757,7 @@ describe('what stays when no reap ran', () => {
       args.includes('rev-parse')
         ? Promise.resolve({
             status: answer.status,
-            signal: null,
+            signal: answer.signal as NodeJS.Signals | null,
             stdout: '',
             stderr: answer.text,
             combined: answer.text,
