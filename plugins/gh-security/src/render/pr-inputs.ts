@@ -44,7 +44,12 @@ import { type Envelope, failed, ok } from '../lib/envelope.ts'
 import { DASH, shown } from './markdown.ts'
 
 /** The actions of the fix driver that a PR can follow. */
-const ACTIONS = ['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh'] as const
+export const ACTIONS = [
+  'direct-update',
+  'scoped-override',
+  'bare-override',
+  'lockfile-refresh',
+] as const
 export type Action = (typeof ACTIONS)[number]
 
 const BARE_OVERRIDES = ['none', 'added', 'tightened'] as const

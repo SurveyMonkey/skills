@@ -7,7 +7,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import type { ResultStatus } from '../post-agent.ts'
-import type { Action } from './pr-inputs.ts'
+import { ACTIONS, type Action } from './pr-inputs.ts'
 
 /** A bad input. The message names the path of the value. */
 export class Refusal extends Error {}
@@ -231,13 +231,6 @@ export interface MajorBump {
   readonly version: string
   readonly ranges: readonly string[]
 }
-
-const ACTIONS: readonly Action[] = [
-  'direct-update',
-  'scoped-override',
-  'bare-override',
-  'lockfile-refresh',
-]
 
 export interface Risk {
   readonly band: string

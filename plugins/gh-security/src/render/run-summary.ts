@@ -11,6 +11,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { cell, inline } from './markdown.ts'
+import type { Action } from './pr-inputs.ts'
 import {
   type Cause,
   type Cleanup,
@@ -86,7 +87,7 @@ const stillVulnerable = (summary: Summary): string[] => {
 
 // Section 2: the table of the batch.
 
-const ACTION_NOTES: Readonly<Record<string, string>> = {
+const ACTION_NOTES: Readonly<Record<Exclude<Action, 'bare-override'>, string>> = {
   'direct-update': 'direct update',
   'scoped-override': 'scoped override',
   'lockfile-refresh': 'lockfile refresh, no manifest edit',
@@ -127,7 +128,9 @@ const notesOf = (row: Row): string => {
       ? [KIND_NOTES[row.kind as Exclude<Kind, 'read'>]]
       : result.status === 'success'
         ? [
-            ACTION_NOTES[result.action] ?? `bare override ${result.bareOverride}`,
+            result.action === 'bare-override'
+              ? `bare override ${result.bareOverride}`
+              : ACTION_NOTES[result.action],
             ...(result.cleanup === null
               ? []
               : ['shipped, and its cleanup did not finish (see Reap)']),
