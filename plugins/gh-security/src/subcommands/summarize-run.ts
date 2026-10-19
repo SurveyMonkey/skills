@@ -244,7 +244,6 @@ const rowOf = (
   }
   return {
     group,
-    repoRoot: dispatch.repoRoot,
     kind,
     result: read?.result ?? null,
     report,

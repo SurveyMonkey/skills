@@ -32,7 +32,6 @@ export type Kind = 'read' | 'null' | 'mispaired' | 'unparsable' | 'unknown'
 /** One group of the batch, with its entry, its result and its report. */
 export interface Row {
   readonly group: Group
-  readonly repoRoot: string
   readonly kind: Kind
   /** The result, when `kind` is `read`. */
   readonly result: Result | null
