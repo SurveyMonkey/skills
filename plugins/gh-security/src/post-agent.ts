@@ -46,13 +46,13 @@
 // **What stays when no reap ran** (round 7 ruling 12 on #229). `left_behind`
 // names the work directory only when its path exists, and the branch only
 // when `git rev-parse --verify --quiet refs/heads/<branch>` finds it in the
-// repository root. A repository root that is not a directory holds neither.
-// A read that fails is not an absent path or branch: what it read stays in
-// `left_behind`, and `errors` names the read. Only exit 1 with no text and no
+// repository root. A repository root that is absent, or not a directory,
+// holds neither. A read that fails is not an absent path or branch: the path
+// or the branch stays in `left_behind`, and `errors` names the read. Only
+// `ENOENT` and `ENOTDIR` make a path absent. A stat that fails for another
+// reason, such as `EACCES`, is a failed read. Only exit 1 with no text and no
 // stream error is an absent branch. A signal, another exit, or a lost stream
-// is a failed read, which `src/reap.ts` reads as absent. Only `ENOENT` and
-// `ENOTDIR` make a path absent. A stat that fails for another reason, such
-// as `EACCES`, is a failed read.
+// is a failed read, which `src/reap.ts` reads as absent.
 //
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script
