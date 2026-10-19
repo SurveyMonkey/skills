@@ -106,6 +106,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description: 'Check that the tools this plugin needs are present (SessionStart hook)',
     load: async () => (await import('../subcommands/session-start.ts')).sessionStartCommand,
   },
+  'summarize-run': {
+    description:
+      'Write the phase 7 summary of a resolve-alerts run from the workflow result, the reap reports and the exclusions: summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
+    load: async () => (await import('../subcommands/summarize-run.ts')).summarizeRunCommand,
+  },
   version: {
     description: 'Print the installed plugin version',
     load: async () => (await import('../subcommands/version.ts')).version,

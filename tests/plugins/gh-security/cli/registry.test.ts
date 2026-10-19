@@ -24,6 +24,7 @@ import { reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
 import { renderPrCommand } from '#gh-security/subcommands/render-pr.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
+import { summarizeRunCommand } from '#gh-security/subcommands/summarize-run.ts'
 import { pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ROOT = pluginFile('gh-security')
@@ -59,6 +60,7 @@ describe('the registry', () => {
       "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/score-merge-risk.ts')",
       "import('../subcommands/session-start.ts')",
+      "import('../subcommands/summarize-run.ts')",
       "import('../subcommands/version.ts')",
     ])
   })
@@ -78,6 +80,7 @@ describe('the discovery entries', () => {
     ['prepare-checkout', prepareCheckoutCommand],
     ['reap-batch', reapBatchCommand],
     ['render-pr-status', renderPrStatusCommand],
+    ['summarize-run', summarizeRunCommand],
   ])('loads the handler of %s', async (name, handler) => {
     expect(await COMMANDS[name]?.load()).toBe(handler)
   })
@@ -105,6 +108,10 @@ describe('the discovery entries', () => {
     ['preflight-repo', 'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'],
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
     ['reap-batch', 'reap-batch <results.json>'],
+    [
+      'summarize-run',
+      'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
+    ],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
   })
