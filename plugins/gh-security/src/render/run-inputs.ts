@@ -6,6 +6,9 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import type { ResultStatus } from '../post-agent.ts'
+import type { Action } from './pr-inputs.ts'
+
 /** A bad input. The message names the path of the value. */
 export class Refusal extends Error {}
 
@@ -120,8 +123,6 @@ export const argsOf = (value: unknown): readonly Dispatch[] => {
   return dispatches.map((element, index) => dispatchOf(element, `dispatches[${index}]`))
 }
 
-export type ResultStatus = 'success' | 'no-op' | 'failure' | 'unparsable' | 'missing'
-
 /** One report of `reap-batch`, as far as the summary reads it. */
 export interface Report {
   readonly branch: string
@@ -231,7 +232,12 @@ export interface MajorBump {
   readonly ranges: readonly string[]
 }
 
-const ACTIONS = ['direct-update', 'scoped-override', 'bare-override', 'lockfile-refresh'] as const
+const ACTIONS: readonly Action[] = [
+  'direct-update',
+  'scoped-override',
+  'bare-override',
+  'lockfile-refresh',
+]
 
 export interface Risk {
   readonly band: string
@@ -252,7 +258,7 @@ export type Result =
   | (Common & {
       readonly status: 'success'
       readonly prUrl: string
-      readonly action: (typeof ACTIONS)[number]
+      readonly action: Action
       readonly bareOverride: string
       readonly risk: Risk | null
     })
@@ -440,16 +446,22 @@ export const discoveryOf = (value: unknown): Discovery => {
 
 export type Cause = 'auth' | 'not-found' | 'network' | 'start' | 'detect'
 
-/** The answer of `preflight-repo` for one checkout that it excluded. */
+const CAUSES: readonly Cause[] = ['auth', 'not-found', 'network', 'start', 'detect']
+
+/**
+ * The answer of `preflight-repo` for one checkout that it excluded, with the
+ * `nwo` of that checkout.
+ */
 export type Preflight =
   | {
       readonly checkout: string
+      readonly nwo: string
       readonly error: null
       readonly cause: Cause
       readonly probe: string | null
       readonly stderr: string | null
     }
-  | { readonly checkout: string; readonly error: string }
+  | { readonly checkout: string; readonly nwo: string; readonly error: string }
 
 /**
  * The preflight file: from the `checkout` of a kept checkout to the answer
@@ -461,25 +473,20 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
   const excluded: Preflight[] = []
   for (const [checkout, element] of Object.entries(file)) {
     const at = JSON.stringify(checkout)
-    if (!kept.some((entry) => entry.checkout === checkout)) {
+    const { nwo } =
+      kept.find((entry) => entry.checkout === checkout) ??
       refuse(`${at} is not a kept checkout of the discovery`)
-    }
     const answer = record(element, at)
     if ('error' in answer) {
-      excluded.push({ checkout, error: text(answer.error, `${at}.error`) })
+      excluded.push({ checkout, nwo, error: text(answer.error, `${at}.error`) })
       continue
     }
     if (flag(answer.ok, `${at}.ok`)) continue
     excluded.push({
       checkout,
+      nwo,
       error: null,
-      cause: oneOf(answer.cause, `${at}.cause`, [
-        'auth',
-        'not-found',
-        'network',
-        'start',
-        'detect',
-      ]),
+      cause: oneOf(answer.cause, `${at}.cause`, CAUSES),
       probe: textOrNull(answer.probe_package, `${at}.probe_package`),
       stderr: answer.stderr === null ? null : words(answer.stderr, `${at}.stderr`),
     })

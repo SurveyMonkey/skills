@@ -12,6 +12,7 @@
 
 import { cell, inline } from './markdown.ts'
 import {
+  type Cause,
   type Cleanup,
   type Discovery,
   type Group,
@@ -239,7 +240,7 @@ const unknown = (summary: Summary): string[] => {
 
 // Section 6: the checkouts and repositories that the batch never touched.
 
-const CAUSES: Readonly<Record<string, (probe: string) => string>> = {
+const CAUSES: Readonly<Record<Cause, (probe: string) => string>> = {
   auth: (probe) =>
     `The probe of ${probe} got an auth failure (HTTP 401 or 403): the registry credentials ` +
     'are dead. Run the login flow of that registry.',
@@ -253,30 +254,26 @@ const CAUSES: Readonly<Record<string, (probe: string) => string>> = {
 }
 
 const excluded = (summary: Summary): string[] => {
-  const { checkouts } = summary.discovery
   const checkoutLines = summary.discovery.excluded.map(
     (entry) =>
       `- ${code(entry.checkout)}: ${entry.reason}.` +
       (entry.stderr === '' ? '' : ` Output: ${entry.stderr}`),
   )
   const preflightLines = summary.preflights.map((entry) => {
-    const nwo = (
-      checkouts.find((checkout) => checkout.checkout === entry.checkout) as {
-        nwo: string
-      }
-    ).nwo
     const cause =
       entry.error === null
-        ? `${(CAUSES[entry.cause] as (probe: string) => string)(entry.probe === null ? 'the package' : code(entry.probe))}` +
+        ? CAUSES[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
           (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${entry.stderr}`)
         : `preflight-repo failed: ${entry.error}.`
     return (
-      `- \`${nwo}\` (${code(entry.checkout)}): the registry preflight excluded each group of ` +
+      `- \`${entry.nwo}\` (${code(entry.checkout)}): the registry preflight excluded each group of ` +
       `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`
     )
   })
   return [...checkoutLines, ...preflightLines]
 }
+
+// Section 7: the checkouts under the flat branch scheme.
 
 const flat = (summary: Summary): string[] =>
   summary.discovery.checkouts
@@ -287,7 +284,7 @@ const flat = (summary: Summary): string[] =>
         'so the pull requests of this repository come from `fix-dependabot-...` branches.',
     )
 
-// Sections 7 and 8: the skips of phase 2.
+// Sections 8 and 9: the skips of phase 2.
 
 const sharedParent = (summary: Summary): string[] =>
   summary.discovery.skipped
@@ -308,7 +305,7 @@ const otherSkips = (summary: Summary): string[] =>
       return `- ${who(group)}: ${group.reason}${more}.`
     })
 
-// Section 9: what the reap removed and what it left.
+// Section 10: what the reap removed and what it left.
 
 /** One path ends with the other at a `/`: the same directory, resolved or not. */
 const samePath = (a: string, b: string): boolean => {
@@ -387,7 +384,7 @@ const reapSection = (summary: Summary): string[] => {
   return [head, ...(lines.length === 0 ? [] : ['', ...lines]), ...hint]
 }
 
-// Section 10: the observations, deduplicated and split by type.
+// Section 11: the observations, deduplicated and split by type.
 
 const observations = (summary: Summary): string[] => {
   const seen = new Set<string>()
