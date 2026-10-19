@@ -951,6 +951,21 @@ describe('the checkouts and repositories that the batch never touched', () => {
     )
   })
 
+  it('names the repository of the checkout that the preflight excluded', () => {
+    // The second kept checkout is the one excluded, so its own nwo is named.
+    const LIB = '/Users/example/src/octo/lib'
+    const run: Run = {
+      ...CLEAN,
+      discovery: discovery({
+        checkouts: [CHECKOUT, { ...CHECKOUT, checkout: LIB, nwo: 'octo/lib' }],
+      }),
+      preflight: { [LIB]: { error: 'a manifest that cannot be read' } },
+    }
+    expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
+      `- \`octo/lib\` (\`${LIB}\`): the registry preflight excluded each group of this repository. preflight-repo failed: a manifest that cannot be read. ${TAIL}`,
+    )
+  })
+
   it('says nothing of a preflight that answered', () => {
     const run: Run = {
       ...CLEAN,
@@ -1222,7 +1237,8 @@ describe('the reap', () => {
   })
 
   it('says it once when the cleanup path is the shorter one', () => {
-    // The reverse of the example above: the report has the longer text.
+    // The reverse of the example that says it once with the resolved path:
+    // here the report has the longer text.
     const run: Run = {
       entries: [
         entry(
@@ -1274,6 +1290,8 @@ describe('the reap', () => {
     expect(sectionOf(run, 'Groups')?.split('\n')[2]).toBe(
       `| example-pkg | 6.x | ${URL} | Medium (4) | 1/2 | scoped override; shipped, and its cleanup did not finish (see Reap) |`,
     )
+    // A shipped pull request with a leak is never a failed group.
+    expect(sectionOf(run, 'Failures')).toBeNull()
   })
 
   it('gives the reason, the errors and the detail of a cleanup in that order, and no branch state when it has none', () => {
