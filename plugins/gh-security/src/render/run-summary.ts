@@ -347,7 +347,7 @@ const reapLine = (row: Row): string | null => {
   const shown: string[] = []
   const items = report.leftBehind.map((left) => {
     if (left === report.branch) {
-      shown.push(cleanup?.branch === left ? left : '')
+      if (cleanup?.branch === left) shown.push(left)
       return `branch ${code(left)}`
     }
     const match = [cleanup?.worktree, cleanup?.workDir].find(
