@@ -713,27 +713,36 @@ describe('what stays when no reap ran', () => {
     const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
     expect(report.left_behind).toEqual([PLAIN.branch_name])
     expect(report.errors).toEqual([
-      expect.stringMatching(
-        new RegExp(
-          `^git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository`,
-        ),
-      ),
+      `git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository (or any of the parent directories): .git`,
     ])
   })
 
-  it('keeps the branch, and names the start failure, when git does not start', async () => {
+  // A runner stands in for the git of the ref read only, so the example can
+  // give an answer that real git gives rarely.
+  it.each([
+    [
+      'git does not start',
+      { status: null, text: '', startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' } },
+      'spawn git ENOENT',
+    ],
+    [
+      'git writes two lines',
+      { status: 128, text: 'fatal: one\nfatal: two\n', startFailure: null },
+      'fatal: one fatal: two',
+    ],
+  ])('keeps the branch, and names the read on one line, when %s', async (_name, answer, words) => {
     const at = world()
     const spawn: Runner = (command, args = [], options) =>
       args.includes('rev-parse')
         ? Promise.resolve({
-            status: null,
+            status: answer.status,
             signal: null,
             stdout: '',
-            stderr: '',
-            combined: '',
+            stderr: answer.text,
+            combined: answer.text,
             timedOut: false,
             elapsedMs: 0,
-            startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' },
+            startFailure: answer.startFailure,
             streamErrors: [],
           })
         : run(command, args, options)
@@ -743,7 +752,7 @@ describe('what stays when no reap ran', () => {
       failed(
         at,
         [PLAIN.branch_name],
-        [`git rev-parse refs/heads/${PLAIN.branch_name} failed: spawn git ENOENT`],
+        [`git rev-parse refs/heads/${PLAIN.branch_name} failed: ${words}`],
       ),
     )
   })
