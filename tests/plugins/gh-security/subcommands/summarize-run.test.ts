@@ -575,6 +575,8 @@ describe('the table', () => {
     ],
     ['push', 'the hook rejected the push', 'failure: push'],
     ['validate', 'peer_only_dependency', 'failure: validate'],
+    ['install', 'this is the shared-parent shape', 'failure: install'],
+    ['validate', 'directory file conflict', 'failure: validate'],
     ['worktree', 'setup failed', 'failure: worktree'],
   ])('labels a %s failure whose detail is %j as %s', (phase, detail, label) => {
     const run: Run = {
@@ -976,6 +978,7 @@ describe('the skips of phase 2', () => {
     expect(sectionOf(run, 'Shared-parent skips')).toBe(
       '- `qs` 6.x in `octo/app`: the line shares the parents `express`, `body-parser` with another major line, and no override key can scope them apart. Bump the shared parent past the old line, or remove the dependent that pins it.',
     )
+    expect(sectionOf(run, 'Other skips')).toBeNull()
   })
 
   it('names each other skip with its open PR or its error', () => {
@@ -1050,6 +1053,48 @@ describe('the reap', () => {
         '',
         HINT,
       ].join('\n'),
+    )
+  })
+
+  it('gives the count alone for a run that left nothing', () => {
+    expect(sectionOf(CLEAN, 'Reap')).toBe(
+      '1 of 1 groups came back with an empty `left_behind`: nothing was left behind.',
+    )
+  })
+
+  it('names the errors of a report that left nothing', () => {
+    const run: Run = {
+      entries: [entry(PKG, success(PKG))],
+      reports: [reaped(PKG, { errors: ["the result's package disagrees"] })],
+    }
+    expect(sectionOf(run, 'Reap')).toBe(
+      [
+        '1 of 1 groups came back with an empty `left_behind`: nothing was left behind.',
+        '',
+        "- `example-pkg` 6.x in `octo/app`: nothing is left on disk. Errors: the result's package disagrees.",
+      ].join('\n'),
+    )
+  })
+
+  it('names two artifacts when one path ends with the text of the other inside a name', () => {
+    const glued = `/x${WORK.slice(1)}`
+    const run: Run = {
+      entries: [
+        entry(
+          PKG,
+          failure(PKG, 'pr', 'failed', {
+            cleanup: cleanup({
+              errors: [],
+              work_dir: { path: glued, action: 'failed' },
+              worktree: { path: `${glued}/fix`, action: 'failed' },
+            }),
+          }),
+        ),
+      ],
+      reports: [report(PKG, 'failure', { left_behind: [WORK] })],
+    }
+    expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\`. The agent's cleanup: worktree \`${glued}/fix\` (failed), work directory \`${glued}\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted).`,
     )
   })
 
@@ -1281,6 +1326,40 @@ describe('the observations', () => {
         '- Note: `octo/app` contains 2 unscoped global override(s): `minimatch`, `semver`. These may be removable or convertible to scoped pins. `/gh-security:audit-pins` tests removability.',
         '- Note: `octo/lib` contains 1 unscoped global override(s): `minimatch`. These may be removable or convertible to scoped pins. `/gh-security:audit-pins` tests removability.',
         '- `pnpm_major_unknown` in `octo/lib`: 2 observation(s).',
+      ].join('\n'),
+    )
+  })
+
+  it('keeps one of each identical observation of one repository, and counts each type by repository', () => {
+    const again = grp('again-pkg', '4')
+    const observations: JsonValue[] = [
+      { type: 'unscoped_override_added', key: 'sharp', range: '<1', reason: 'r' },
+      { type: 'pnpm_major_unknown' },
+    ]
+    const run: Run = {
+      entries: [
+        entry(PKG, success(PKG, { action: 'bare-override', bare_override: 'added', observations })),
+        entry(
+          again,
+          success(again, {
+            action: 'bare-override',
+            bare_override: 'added',
+            observations: [...observations, { type: 'pnpm_major_unknown' }],
+          }),
+        ),
+        entry(lib, success(lib, { observations: [{ type: 'pnpm_major_unknown' }] }), { root: LIB }),
+      ],
+      reports: [reaped(PKG), reaped(again), reaped(lib)],
+      discovery: twoRepos,
+    }
+    expect(sectionOf(run, 'Observations')).toBe(
+      [
+        'This batch added 1 unscoped global override(s):',
+        '',
+        `- \`sharp\` \`<1\` in \`octo/app\` (${URL}), because r. It pins \`sharp\` for every consumer in that repository, including copies that were never vulnerable.`,
+        '',
+        '- `pnpm_major_unknown` in `octo/app`: 1 observation(s).',
+        '- `pnpm_major_unknown` in `octo/lib`: 1 observation(s).',
       ].join('\n'),
     )
   })
