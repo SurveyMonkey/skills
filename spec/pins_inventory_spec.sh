@@ -9,10 +9,11 @@
 # header, and a marker naming a script that was never proposed is a false
 # trail for whichever PR comes looking for it.
 #
-# The two checks below are independent: "every marker names a real successor
-# script" catches a typo or an invented name; "every prose-pin example nets
-# out to (its file's marker count) + (its file's judgment count)" catches a
-# pin added, removed, or reclassified without PINS.md following it. Neither
+# The checks below are independent. "No spec file carries a mechanical
+# marker" holds since #229 retired the last successor's pins: a new marker is
+# a mechanical pin with no successor to retire it. "Every prose-pin example
+# nets out to (its file's marker count) + (its file's judgment count)" catches
+# a pin added, removed, or reclassified without PINS.md following it. Neither
 # needs the file's exact `It` text, only counts, so both stay dialect-safe
 # and immune to a title being reworded in a later tightening pass.
 #
@@ -26,20 +27,11 @@ Describe 'the prose pin inventory (issue #197)'
   SPEC_DIR="$SHELLSPEC_PROJECT_ROOT/spec"
   PINS="$SPEC_DIR/PINS.md"
 
-  # The successor scripts issue #193 names whose pins are still open. The other
-  # five landed as TypeScript commands, and their pins went with them:
-  # prepare-checkout.sh and merge-envelopes.sh in #227, preflight-repo.sh and
-  # build-dispatches.sh in #228, pr-status.sh --env-prefix in #230. Not a
-  # superset from elsewhere in the repo: a marker naming a real script this
-  # list omits is exactly the drift this spec exists to catch.
-  SUCCESSORS='reap-batch.sh
-summarize-run.sh'
-
-  # Every spec file except this one: this file's own comments and code
-  # necessarily quote the marker grammar verbatim, which would otherwise
-  # match itself.
+  # Every spec file of a directory, `$SPEC_DIR` by default, except this one:
+  # this file's own comments and code necessarily quote the marker grammar
+  # verbatim, which would otherwise match itself.
   other_spec_files() {
-    for f in "$SPEC_DIR"/*.sh; do
+    for f in "${1:-$SPEC_DIR}"/*.sh; do
       case "$f" in
         */pins_inventory_spec.sh) ;;
         *) printf '%s\n' "$f" ;;
@@ -47,31 +39,34 @@ summarize-run.sh'
     done
   }
 
-  # Every mechanical marker's successor name, across all of spec/ (this file
-  # excepted), one per line.
+  # Every mechanical marker's successor name, across the spec files of a
+  # directory (this file excepted), one per line.
   marker_scripts() {
-    other_spec_files | while IFS= read -r f; do
+    other_spec_files "$1" | while IFS= read -r f; do
       grep -ho 'pin: mechanical, retired by .*' "$f"
     done | sed 's/^pin: mechanical, retired by //'
   }
 
-  # Marker names not found, verbatim, among the two successors.
-  unrecognized_successors() {
-    marker_scripts | while IFS= read -r script; do
-      printf '%s\n' "$SUCCESSORS" | grep -qxF "$script" || printf '%s\n' "$script"
-    done
+  # The successor that the scan finds in a scratch directory with one marked
+  # spec file.
+  scan_of_one_marker() {
+    dir=$(mktemp -d) || return 1
+    printf '%s\n' '# pin: mechanical, retired by example.sh' > "$dir/example_spec.sh"
+    marker_scripts "$dir"
+    rm -rf "$dir"
   }
 
-  It 'names, on every mechanical marker, one of the two #193 successors with open pins'
-    When call unrecognized_successors
+  It 'carries no mechanical marker, as every #193 successor has landed'
+    When call marker_scripts
+    The status should be success
     The output should equal ''
   End
 
-  It 'carries at least one mechanical marker' # positive control: a scan
-    # finding nothing would pass the check above vacuously.
-    When call marker_scripts
+  It 'finds the marker of a spec file that has one' # positive control: a scan
+    # that reads nothing would pass the check above vacuously.
+    When call scan_of_one_marker
     The status should be success
-    The output should not equal ''
+    The output should equal 'example.sh'
   End
 
   # Every `It` block in one spec file that is a prose pin: it calls

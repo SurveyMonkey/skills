@@ -280,13 +280,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports groups with no result as unknown rather than as failures'
-      When call phrase_in "$SKILL" 'names the groups with no result at all as unknown rather than as'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'is reachable from phase 7, which otherwise keys on one entry per group'
       When call phrase_in "$SKILL" "phase 6.s interruption contract is what fills the gap"
       The status should be success
@@ -295,13 +288,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   End
 
   Describe 'how the model handles the entries it gets back'
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reads phase 7 off the returned entries rather than a fence'
-      When call phrase_in "$SKILL" 'The workflow returns .*one entry per approved group'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'says no bounded pool can make the dispatch order repeat'
       When call blob_in "$SKILL" 'no bounded pool can make that order repeat'
       The status should be success
@@ -311,87 +297,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # The prose must not claim more than the schema does.
     It 'says plainly what the schema cannot check'
       When call phrase_in "$SKILL" 'It does not and cannot check that a .pr_url. names a real pull request'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'the cleanup report a shipped PR can still carry'
-    # fix-group.sh cleanup runs after the commit, push and gh pr create, and
-    # exits 3 when it leaves a worktree behind. A success carrying a cleanup
-    # report is the expected shape, and burying it would hide exactly the
-    # leak that exit code exists to surface.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports every non-null cleanup alongside the reap accounting'
-      When call blob_in "$SKILL" 'report every non-null .cleanup. on a result, in the same breath'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'singles out a success whose cleanup failed'
-      When call blob_in "$SKILL" 'A .success. with a non-null .cleanup. is the case to say out loud'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'refuses to report a leaked worktree as a failed group'
-      When call blob_in "$SKILL" 'never as a failed group, and never let the leak go unmentioned'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The two sources must be related, not printed twice: left_behind stays
-    # the key, cleanup explains it and covers what the reap never saw.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'relates cleanup to post-agent.sh left_behind rather than duplicating it'
-      When call blob_in "$SKILL" 'two views of the same disk, not two lists to print twice'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'keeps left_behind as the key and cleanup as the explanation'
-      When call blob_in "$SKILL" 'key the report on .left_behind., as above, and use .cleanup. to explain it'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'names the case where the reap cleared what the agent could not'
-      When call blob_in "$SKILL" 'the reap cleared what the agent could not'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The driver reports RESOLVED paths; post-agent.sh derives an unresolved
-    # one. On macOS that is /private/var against /var for one directory, so a
-    # string comparison reports one leak as two.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'warns that the same directory is not the same string'
-      When call blob_in "$SKILL" 'The same path. is not the same string'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'names the consequence of comparing the two as text'
-      When call blob_in "$SKILL" 'comparing them as text reports one leaked worktree as two'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'prescribes suffix matching or resolution before comparing'
-      When call blob_in "$SKILL" 'Match on suffix, or resolve both before.*comparing'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports one artifact when the two agree, showing the resolved path'
-      When call blob_in "$SKILL" 'the resolved path is the one to show'
       The status should be success
       The output should equal '1'
     End

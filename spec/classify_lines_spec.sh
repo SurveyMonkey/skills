@@ -861,26 +861,4 @@ STUB_EOF
       The stderr should include 'origin/<branch>'
     End
   End
-
-  # The orchestration halves of the fix: the sentences SKILL.md acts on,
-  # pinned the way spec/audit_pins_rules_spec.sh pins agent prose. The phase 2
-  # half is code since #227: the `prepare-checkout` command runs the
-  # classification against origin/<default_branch>, excludes the checkout
-  # when it fails, and keeps a requires_major_bump group in `skipped`.
-  # tests/plugins/gh-security/subcommands/prepare-checkout.test.ts has those
-  # examples. SKILL.md still states them in prose, with no pin, until #237.
-  Describe 'the SKILL.md prose that consumes the classification'
-    SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
-
-    phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
-
-    # Title narrowed to drop the unproven "first" claim: the assertion checks
-    # only that the sentence exists once, not where it sits in phase 7.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports both requires_major_bump senses together in phase 7'
-      When call phrase_in "$SKILL" 'two different senses of the same name'
-      The status should be success
-      The output should equal '1'
-    End
-  End
 End

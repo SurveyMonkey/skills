@@ -558,31 +558,6 @@ Describe 'the orchestrator-side reap (issue #131)'
     End
   End
 
-  Describe 'the report in phase 7'
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports the reaped count and everything left in place, from the script'"'"'s own reports'
-      When call phrase_in "$SKILL" 'say what phase 6.s reap removed and what it left, from .post-agent.sh..s own reports'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'says a leftover is recoverable only if the summary names it'
-      When call phrase_in "$SKILL" 'but only if this summary says it is there'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Every report already carries the derived path and branch; phase 7 is
-    # told not to rebuild either from a template of its own.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'says nothing here recomputes a path or branch from a template'
-      When call phrase_in "$SKILL" 'nothing here recomputes a path or a branch name from a template'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
   Describe 'the agent definition agrees with it'
     # Phase 1 still stops on a pre-existing $WORK. What changes is the
     # diagnosis it offers, now that a well-behaved success no longer leaves one.

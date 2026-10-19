@@ -27,12 +27,12 @@ grammar:
 # pin: mechanical, retired by <script>
 ```
 
-where `<script>` is `summarize-run.sh`, the one successor script named in issue #193 whose pins
-are still open. The other six are TypeScript commands now, and their pins are gone:
-`prepare-checkout.sh` and `merge-envelopes.sh` are `prepare-checkout` and `merge-envelopes`
-(#227), `preflight-repo.sh` and `build-dispatches.sh` are `preflight-repo` and `build-dispatches`
-(#228), `pr-status.sh --env-prefix` is `render-pr-status` (#230), and `reap-batch.sh` is
-`reap-batch` (#229).
+where `<script>` is a successor script named in issue #193. No successor has open pins now. All
+seven are TypeScript commands, and their pins are gone: `prepare-checkout.sh` and
+`merge-envelopes.sh` are `prepare-checkout` and `merge-envelopes` (#227), `preflight-repo.sh` and
+`build-dispatches.sh` are `preflight-repo` and `build-dispatches` (#228),
+`pr-status.sh --env-prefix` is `render-pr-status` (#230), and `reap-batch.sh` and
+`summarize-run.sh` are `reap-batch` and `summarize-run` (#229).
 
 The change that lands the equivalent of one of those scripts (the TypeScript port of gh-security,
 which took over issue #193; the script name is the mapping key) finds every pin it must delete
@@ -42,25 +42,18 @@ with one grep:
 grep -rn 'pin: mechanical, retired by <script>' spec/
 ```
 
-`spec/pins_inventory_spec.sh` keeps this file and the markers honest: every
-`phrase_in`/`count_in`/`rule_in`-style example either carries the marker or is listed below as
-`judgment`, and every marker names a script of its successor list.
+`spec/pins_inventory_spec.sh` keeps this file honest: every
+`phrase_in`/`count_in`/`rule_in`-style example is listed below as `judgment`, and no spec file
+carries the marker. A new mechanical pin needs a new successor script, and a change to that spec.
 
 ## Totals
 
-305 pins across 16 files: 284 `judgment`, 21 `mechanical`.
+284 pins across 15 files: 284 `judgment`, 0 `mechanical`.
 
-Mechanical pins by successor script:
+Each mechanical pin was retired in the same change that landed its successor, a command in the
+TypeScript port of gh-security. No mechanical pin remains.
 
-| Successor script | Pins |
-|---|---|
-| `summarize-run.sh` | 21 |
-
-Each mechanical pin is retired in the same change that lands its successor, which is now a
-command in the TypeScript port of gh-security rather than a bash script in this repository;
-until then it stays here, marked, as the record of the rule the port must reproduce.
-
-### `spec/resolve_alerts_scope_spec.sh`: 44 pins (42 judgment, 2 mechanical)
+### `spec/resolve_alerts_scope_spec.sh`: 42 pins (42 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -98,25 +91,22 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 309 | continues with the others and stops only when none survive | judgment | - |
 | 316 | reads a lone excluded checkout as the old report-and-stop | judgment | - |
 | 324 | reports every excluded checkout by name in phase 2 | judgment | - |
-| 331 | re-reports every excluded checkout in the phase 7 summary | mechanical | summarize-run.sh |
-| 338 | carries the registry exclusions into the phase 8 closing report | mechanical | summarize-run.sh |
-| 348 | omits the column for one checkout and shows it for several | judgment | - |
-| 354 | no longer keys the column on a scope mode | judgment | - |
-| 362 | branches on a null scope | judgment | - |
-| 368 | drops the git_remote cross-check it can no longer make | judgment | - |
-| 374 | stops on a null nwo | judgment | - |
-| 384 | re-runs detect-scope against the checkout the user names | judgment | - |
-| 390 | reads the second output rather than the first | judgment | - |
-| 398 | stays repo-scoped in the checkout vocabulary | judgment | - |
+| 334 | omits the column for one checkout and shows it for several | judgment | - |
+| 340 | no longer keys the column on a scope mode | judgment | - |
+| 348 | branches on a null scope | judgment | - |
+| 354 | drops the git_remote cross-check it can no longer make | judgment | - |
+| 360 | stops on a null nwo | judgment | - |
+| 370 | re-runs detect-scope against the checkout the user names | judgment | - |
+| 376 | reads the second output rather than the first | judgment | - |
+| 384 | stays repo-scoped in the checkout vocabulary | judgment | - |
 
-### `spec/resolve_alerts_branch_style_spec.sh`: 4 pins (3 judgment, 1 mechanical)
+### `spec/resolve_alerts_branch_style_spec.sh`: 3 pins (3 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 31 | reports every flat-scheme repo in the phase 7 summary | mechanical | summarize-run.sh |
-| 39 | consumes either spelling verbatim | judgment | - |
-| 50 | carries the field push-rejection specimen verbatim | judgment | - |
-| 56 | forbids improvising a branch name at push time | judgment | - |
+| 30 | consumes either spelling verbatim | judgment | - |
+| 41 | carries the field push-rejection specimen verbatim | judgment | - |
+| 47 | forbids improvising a branch name at push time | judgment | - |
 
 ### `spec/audit_pins_scratch_spec.sh`: 7 pins (7 judgment, 0 mechanical)
 
@@ -130,7 +120,7 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 70 | gives the slug rule the concrete scoped-package example | judgment | - |
 | 80 | grounds the slug rule in scoring many packages in the same WORK | judgment | - |
 
-### `spec/resolve_alerts_dispatch_spec.sh`: 52 pins (40 judgment, 12 mechanical)
+### `spec/resolve_alerts_dispatch_spec.sh`: 40 pins (40 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
@@ -158,34 +148,22 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 262 | says a plain relaunch duplicates the branches and PRs that already succeeded | judgment | - |
 | 271 | asks before resuming a run the user deliberately interrupted | judgment | - |
 | 277 | reaps the whole dispatch list anyway when resume is impossible or declined | judgment | - |
-| 284 | reports groups with no result as unknown rather than as failures | mechanical | summarize-run.sh |
-| 290 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
-| 299 | reads phase 7 off the returned entries rather than a fence | mechanical | summarize-run.sh |
-| 305 | says no bounded pool can make the dispatch order repeat | judgment | - |
-| 312 | says plainly what the schema cannot check | judgment | - |
-| 325 | reports every non-null cleanup alongside the reap accounting | mechanical | summarize-run.sh |
-| 332 | singles out a success whose cleanup failed | mechanical | summarize-run.sh |
-| 339 | refuses to report a leaked worktree as a failed group | mechanical | summarize-run.sh |
-| 348 | relates cleanup to post-agent.sh left_behind rather than duplicating it | mechanical | summarize-run.sh |
-| 355 | keeps left_behind as the key and cleanup as the explanation | mechanical | summarize-run.sh |
-| 362 | names the case where the reap cleared what the agent could not | mechanical | summarize-run.sh |
-| 372 | warns that the same directory is not the same string | mechanical | summarize-run.sh |
-| 379 | names the consequence of comparing the two as text | mechanical | summarize-run.sh |
-| 386 | prescribes suffix matching or resolution before comparing | mechanical | summarize-run.sh |
-| 393 | reports one artifact when the two agree, showing the resolved path | mechanical | summarize-run.sh |
-| 405 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
-| 411 | still allows two lines of the same package to run together | judgment | - |
-| 419 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
-| 425 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
-| 431 | records the widened pull-request read window in ADR 003 | judgment | - |
-| 440 | no longer describes the fix agent as running from a rolling pool | judgment | - |
-| 447 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
-| 453 | keeps the headline bullet on the same mechanism | judgment | - |
-| 465 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
-| 471 | rests the decision on the harness already being node | judgment | - |
-| 477 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
-| 485 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
-| 491 | forbids the shipped code from importing the workflow file | judgment | - |
+| 283 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
+| 291 | says no bounded pool can make the dispatch order repeat | judgment | - |
+| 298 | says plainly what the schema cannot check | judgment | - |
+| 310 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
+| 316 | still allows two lines of the same package to run together | judgment | - |
+| 324 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
+| 330 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
+| 336 | records the widened pull-request read window in ADR 003 | judgment | - |
+| 345 | no longer describes the fix agent as running from a rolling pool | judgment | - |
+| 352 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
+| 358 | keeps the headline bullet on the same mechanism | judgment | - |
+| 370 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
+| 376 | rests the decision on the harness already being node | judgment | - |
+| 382 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
+| 390 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
+| 396 | forbids the shipped code from importing the workflow file | judgment | - |
 
 ### `spec/audit_pins_rules_spec.sh`: 53 pins (53 judgment, 0 mechanical)
 
@@ -245,21 +223,18 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 637 | is stated in the audit agent | judgment | - |
 | 643 | is stated in the fix agent | judgment | - |
 
-### `spec/reap_agent_artifacts_spec.sh`: 11 pins (8 judgment, 3 mechanical)
+### `spec/reap_agent_artifacts_spec.sh`: 8 pins (8 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
 | 545 | still defines <package_path> in the agent workspace definition (untouched by the collapse) | judgment | - |
 | 551 | never interpolates the raw package name into a worktree path in either document | judgment | - |
-| 563 | reports the reaped count and everything left in place, from the script'"'"'s own reports | mechanical | summarize-run.sh |
-| 570 | says a leftover is recoverable only if the summary names it | mechanical | summarize-run.sh |
-| 579 | says nothing here recomputes a path or branch from a template | mechanical | summarize-run.sh |
-| 589 | reads a surviving work directory as a failed, crashed, or foreign run | judgment | - |
-| 595 | keeps the guard from clearing it anyway | judgment | - |
-| 603 | keeps agent Cleanup as the first line of defense | judgment | - |
-| 609 | says the reap covers only the verified-PR exit path | judgment | - |
-| 620 | tells the agent the reap re-checks only the origin tip, a narrower test | judgment | - |
-| 626 | does not promise a deliberately left branch is reaped later | judgment | - |
+| 564 | reads a surviving work directory as a failed, crashed, or foreign run | judgment | - |
+| 570 | keeps the guard from clearing it anyway | judgment | - |
+| 578 | keeps agent Cleanup as the first line of defense | judgment | - |
+| 584 | says the reap covers only the verified-PR exit path | judgment | - |
+| 595 | tells the agent the reap re-checks only the origin tip, a narrower test | judgment | - |
+| 601 | does not promise a deliberately left branch is reaped later | judgment | - |
 
 ### `spec/resolve_alerts_defect_reports_spec.sh`: 25 pins (25 judgment, 0 mechanical)
 
@@ -313,12 +288,6 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 179 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
 | 185 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
 
-### `spec/classify_lines_spec.sh`: 1 pin (0 judgment, 1 mechanical)
-
-| Line | `It` title | Class | Successor script |
-|---|---|---|---|
-| 880 | reports both requires_major_bump senses together in phase 7 | mechanical | summarize-run.sh |
-
 ### `spec/fix_dependency_result_spec.sh`: 29 pins (29 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
@@ -353,22 +322,20 @@ until then it stays here, marked, as the record of the rule the port must reprod
 | 217 | lists the failure phase enum without a commit member | judgment | - |
 | 223 | routes a phase-6 hook commit failure to push, matching audit-pins | judgment | - |
 
-### `spec/fix_dependency_baseline_spec.sh`: 12 pins (10 judgment, 2 mechanical)
+### `spec/fix_dependency_baseline_spec.sh`: 10 pins (10 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 32 | spells the drift-commit subject exactly once, as one constant | judgment | - |
-| 38 | grounds the post-control ordering in the attribution it protects | judgment | - |
-| 44 | keeps the never-stage-package.json rule beside the staging code | judgment | - |
-| 50 | preserves residual porcelain as evidence rather than absorbing it | judgment | - |
-| 56 | reports a control-install failure as phase baseline, never phase install | judgment | - |
-| 66 | sanctions one retry per install invocation, on a registry-timeout shape only | judgment | - |
-| 72 | keeps the drift-cleared subcase a real fix, not a no-op | judgment | - |
-| 80 | names the baseline failure as ambient rather than group-specific | judgment | - |
-| 86 | keeps the hook rules governing the drift commit too | judgment | - |
-| 92 | carries lockfile-refresh in the result action enum | judgment | - |
-| 101 | recognizes a lockfile-refresh action | mechanical | summarize-run.sh |
-| 111 | routes every ambient baseline failure shape to one repo-level triage label | mechanical | summarize-run.sh |
+| 33 | spells the drift-commit subject exactly once, as one constant | judgment | - |
+| 39 | grounds the post-control ordering in the attribution it protects | judgment | - |
+| 45 | keeps the never-stage-package.json rule beside the staging code | judgment | - |
+| 51 | preserves residual porcelain as evidence rather than absorbing it | judgment | - |
+| 57 | reports a control-install failure as phase baseline, never phase install | judgment | - |
+| 67 | sanctions one retry per install invocation, on a registry-timeout shape only | judgment | - |
+| 73 | keeps the drift-cleared subcase a real fix, not a no-op | judgment | - |
+| 81 | names the baseline failure as ambient rather than group-specific | judgment | - |
+| 87 | keeps the hook rules governing the drift commit too | judgment | - |
+| 93 | carries lockfile-refresh in the result action enum | judgment | - |
 
 ### `spec/fix_dependency_branch_spec.sh`: 13 pins (13 judgment, 0 mechanical)
 
@@ -433,9 +400,9 @@ until then it stays here, marked, as the record of the rule the port must reprod
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 170 | anchors its paths glob the way every other rule in this repo does | judgment | - |
-| 182 | names the skill it points at | judgment | - |
-| 197 | links from the root CLAUDE.md to the New script section | judgment | - |
+| 168 | anchors its paths glob the way every other rule in this repo does | judgment | - |
+| 180 | names the skill it points at | judgment | - |
+| 195 | links from the root CLAUDE.md to the New script section | judgment | - |
 
 ### `spec/node_apply_constraint_spec.sh`: 3 pins (3 judgment, 0 mechanical)
 
