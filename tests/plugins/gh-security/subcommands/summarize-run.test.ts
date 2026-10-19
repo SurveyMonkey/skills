@@ -1266,6 +1266,20 @@ describe('the reap', () => {
     )
   })
 
+  it('reads a cleanup with no reason and no detail key, and skips an empty reason', () => {
+    const { reason: _r, detail: _d, ...bare } = cleanup({ errors: ['e'] })
+    const empty = cleanup({ reason: '', errors: ['e'] })
+    for (const given of [bare, empty]) {
+      const run: Run = {
+        entries: [entry(PKG, failure(PKG, 'worktree', 'failed', { cleanup: given }))],
+        reports: [report(PKG, 'failure')],
+      }
+      expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
+        `- \`example-pkg\` 6.x in \`octo/app\`: nothing is left on disk. The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), work directory \`/private${WORK}\` (skipped), branch \`fix/dependabot-example-pkg-6x\` (not deleted): e.`,
+      )
+    }
+  })
+
   it('gives no reason when the cleanup has none', () => {
     const run: Run = {
       entries: [
@@ -1390,6 +1404,26 @@ describe('the observations', () => {
         '- `pnpm_major_unknown` in `octo/app`: 1 observation(s).',
         '- `pnpm_major_unknown` in `octo/lib`: 1 observation(s).',
       ].join('\n'),
+    )
+  })
+
+  it('keeps one of two observations that differ only in the order of their keys', () => {
+    const run: Run = {
+      entries: [
+        entry(
+          PKG,
+          success(PKG, {
+            observations: [
+              { type: 'pnpm_major_unknown', package: 'a', line: '1' },
+              { line: '1', package: 'a', type: 'pnpm_major_unknown' },
+            ],
+          }),
+        ),
+      ],
+      reports: [reaped(PKG)],
+    }
+    expect(sectionOf(run, 'Observations')).toBe(
+      '- `pnpm_major_unknown` in `octo/app`: 1 observation(s).',
     )
   })
 
