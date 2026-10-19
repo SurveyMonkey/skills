@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "package": "nx",
+  "major_line": "22",
+  "repo": "octo/app",
+  "branch": "fix/dependabot-nx-22x",
+  "pr_url": "https://github.com/octo/app/pull/2502",
+  "action": "scoped-override",
+  "resolved_version": "22.7.10",
+  "risk": {
+    "band": "Low",
+    "score": 1,
+    "f4": 0,
+    "f5": 0
+  },
+  "observations": [
+    {
+      "type": "unscoped_override",
+      "key": "minimatch",
+      "range": "^9.0.7",
+      "targets_this_package": false
+    }
+  ],
+  "requires_major_bump": [
+    {
+      "version": "20.8.4",
+      "vulnerable_ranges": [
+        ">= 13.10.0, < 22.7.10",
+        ">= 14.0.0, < 22.7.8",
+        ">= 14.6.0, < 22.7.9",
+        ">= 17.0.4, < 22.7.2",
+        ">= 20.8.0, < 22.7.7"
+      ]
+    }
+  ],
+  "bare_override": "none",
+  "no_op": null,
+  "failure": null,
+  "cleanup": null
+}

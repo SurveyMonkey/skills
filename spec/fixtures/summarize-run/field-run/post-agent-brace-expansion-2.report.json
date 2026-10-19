@@ -1,0 +1,16 @@
+{
+  "package": "brace-expansion",
+  "major_line": "2",
+  "branch": "fix/dependabot-brace-expansion-2x",
+  "worktree_path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+  "result_status": "failure",
+  "pr_url": null,
+  "pr_state": null,
+  "reaped": false,
+  "reason": "failure: the agent's result was a failure",
+  "left_behind": [
+    "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+    "fix/dependabot-brace-expansion-2x"
+  ],
+  "errors": []
+}

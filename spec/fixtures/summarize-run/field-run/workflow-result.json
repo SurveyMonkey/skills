@@ -1,0 +1,407 @@
+{
+  "summary": "Fix each approved Dependabot alert group with its own subagent, bounded by the machine capacity cap",
+  "agentCount": 3,
+  "logs": [
+    "Dispatching 3 group(s), 3 at a time"
+  ],
+  "result": [
+    {
+      "dispatch": {
+        "group": {
+          "package": "nx",
+          "ecosystem": "npm",
+          "major_line": "22",
+          "max_severity": "high",
+          "max_epss_percentile": 0.67661,
+          "alert_count": 5,
+          "alerts": [
+            {
+              "number": 346,
+              "cve": null,
+              "ghsa": "GHSA-w2vw-w76x-qr89",
+              "severity": "high",
+              "summary": "Nx: OS command injection via git revisions and remote refs",
+              "vulnerable_range": ">= 14.0.0, < 22.7.8",
+              "fixed_in": "22.7.8",
+              "epss_percentile": 0,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 345,
+              "cve": "CVE-2026-104854",
+              "ghsa": "GHSA-w3vv-58gj-gw77",
+              "severity": "high",
+              "summary": "Nx daemon and plugin worker sockets are accessible to other local users",
+              "vulnerable_range": ">= 14.6.0, < 22.7.9",
+              "fixed_in": "22.7.9",
+              "epss_percentile": 0.02878,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 344,
+              "cve": "CVE-2026-104853",
+              "ghsa": "GHSA-hrvq-x7jp-36xv",
+              "severity": "medium",
+              "summary": "Nx: Path traversal in nx migrate package-migrations extraction",
+              "vulnerable_range": ">= 13.10.0, < 22.7.10",
+              "fixed_in": "22.7.10",
+              "epss_percentile": 0.06188,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 265,
+              "cve": "CVE-2026-71476",
+              "ghsa": "GHSA-vp3h-ghgh-jr7g",
+              "severity": "high",
+              "summary": "Nx: Zip-Slip in the self-hosted remote cache",
+              "vulnerable_range": ">= 20.8.0, < 22.7.7",
+              "fixed_in": "22.7.7",
+              "epss_percentile": 0.57504,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 250,
+              "cve": "CVE-2026-54753",
+              "ghsa": "GHSA-g2r8-wvmj-jf5w",
+              "severity": "medium",
+              "summary": "`nx graph` dev server permissive CORS policy",
+              "vulnerable_range": ">= 17.0.4, < 22.7.2",
+              "fixed_in": "22.7.2",
+              "epss_percentile": 0.67661,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            }
+          ],
+          "sibling_alerts": [],
+          "highest_fixed_version": "22.7.10",
+          "branch_name": "fix/dependabot-nx-22x",
+          "repo": "octo/app",
+          "adapter": "node",
+          "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+          "supported": true,
+          "resolved_majors": [
+            "20",
+            "22"
+          ],
+          "line_status": "resolved"
+        },
+        "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+        "nwo": "octo/app",
+        "default_branch": "main",
+        "repo_root": "/Users/example/src/octo/app",
+        "scripts_dir": "/Users/example/src/skills/plugins/gh-security/scripts/common"
+      },
+      "result": {
+        "status": "success",
+        "package": "nx",
+        "major_line": "22",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-nx-22x",
+        "pr_url": "https://github.com/octo/app/pull/2502",
+        "action": "scoped-override",
+        "resolved_version": "22.7.10",
+        "risk": {
+          "band": "Low",
+          "score": 1,
+          "f4": 0,
+          "f5": 0
+        },
+        "observations": [
+          {
+            "type": "unscoped_override",
+            "key": "minimatch",
+            "range": "^9.0.7",
+            "targets_this_package": false
+          }
+        ],
+        "requires_major_bump": [
+          {
+            "version": "20.8.4",
+            "vulnerable_ranges": [
+              ">= 13.10.0, < 22.7.10",
+              ">= 14.0.0, < 22.7.8",
+              ">= 14.6.0, < 22.7.9",
+              ">= 17.0.4, < 22.7.2",
+              ">= 20.8.0, < 22.7.7"
+            ]
+          }
+        ],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": null,
+        "cleanup": null
+      },
+      "mispaired": false
+    },
+    {
+      "dispatch": {
+        "group": {
+          "package": "smol-toml",
+          "ecosystem": "npm",
+          "major_line": "1",
+          "max_severity": "high",
+          "max_epss_percentile": 0.4251,
+          "alert_count": 2,
+          "alerts": [
+            {
+              "number": 350,
+              "cve": null,
+              "ghsa": "GHSA-r4xh-jqrq-34v2",
+              "severity": "medium",
+              "summary": "smol-toml: Quadratic-time parse() from parseKey rescanning to end of document on each key line",
+              "vulnerable_range": "<= 1.8.0",
+              "fixed_in": "1.9.0",
+              "epss_percentile": 0,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 305,
+              "cve": "CVE-2026-85730",
+              "ghsa": "GHSA-7w5x-hrqm-74c2",
+              "severity": "high",
+              "summary": "smol-toml: Denial of Service via malformed TOML documents",
+              "vulnerable_range": "<= 1.7.0",
+              "fixed_in": "1.7.1",
+              "epss_percentile": 0.4251,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            }
+          ],
+          "sibling_alerts": [],
+          "highest_fixed_version": "1.9.0",
+          "branch_name": "fix/dependabot-smol-toml-1x",
+          "repo": "octo/app",
+          "adapter": "node",
+          "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+          "supported": true,
+          "resolved_majors": [
+            "1"
+          ],
+          "line_status": "resolved"
+        },
+        "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+        "nwo": "octo/app",
+        "default_branch": "main",
+        "repo_root": "/Users/example/src/octo/app",
+        "scripts_dir": "/Users/example/src/skills/plugins/gh-security/scripts/common"
+      },
+      "result": {
+        "status": "failure",
+        "package": "smol-toml",
+        "major_line": "1",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-smol-toml-1x",
+        "pr_url": null,
+        "action": null,
+        "resolved_version": null,
+        "risk": null,
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": {
+          "phase": "validate",
+          "detail": "validate_failed_after_ladder: the scoped override overrides.nx.smol-toml = '>=1.9.0 <2' was written to package.json, but the install left smol-toml 1.6.1 at node_modules/smol-toml (npm ls shows nx@22.7.7 'overridden' yet smol-toml@1.6.1; nx declares it as exact 1.6.1). Violations: 1.6.1 at node_modules/smol-toml, unresolved for <=1.7.0 and <=1.8.0 (alerts 305, 350). Only parent was nx; tighten-bare was applied but no bare entry ended up written. smol-toml 1.9.0 and 1.9.1 do exist in the registry, so this is not a missing version. The lockfile did not change after the install. Needs manual reconciliation (e.g. a regenerated lockfile or an nx bump) by a human."
+        },
+        "cleanup": null
+      },
+      "mispaired": false
+    },
+    {
+      "dispatch": {
+        "group": {
+          "package": "brace-expansion",
+          "ecosystem": "npm",
+          "major_line": "2",
+          "max_severity": "high",
+          "max_epss_percentile": 0.26576,
+          "alert_count": 3,
+          "alerts": [
+            {
+              "number": 320,
+              "cve": "CVE-2026-102277",
+              "ghsa": "GHSA-q2hr-2g5m-vwhr",
+              "severity": "medium",
+              "summary": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+              "vulnerable_range": ">= 2.0.0, < 2.1.7",
+              "fixed_in": "2.1.7",
+              "epss_percentile": 0.20535,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 317,
+              "cve": "CVE-2026-102278",
+              "ghsa": "GHSA-qhr7-859c-m2p7",
+              "severity": "high",
+              "summary": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+              "vulnerable_range": ">= 2.0.0, < 2.1.6",
+              "fixed_in": "2.1.6",
+              "epss_percentile": 0.26576,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            },
+            {
+              "number": 314,
+              "cve": "CVE-2026-102276",
+              "ghsa": "GHSA-6j4f-fj2g-mc7p",
+              "severity": "high",
+              "summary": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+              "vulnerable_range": ">= 2.0.0, < 2.1.5",
+              "fixed_in": "2.1.5",
+              "epss_percentile": 0.26575,
+              "relationship": "transitive",
+              "manifest": "package-lock.json"
+            }
+          ],
+          "sibling_alerts": [
+            {
+              "major": 5,
+              "vulnerable_ranges": [
+                ">= 4.0.0, < 5.0.10",
+                ">= 4.0.0, < 5.0.11",
+                ">= 4.0.0, < 5.0.12"
+              ]
+            }
+          ],
+          "highest_fixed_version": "2.1.7",
+          "branch_name": "fix/dependabot-brace-expansion-2x",
+          "repo": "octo/app",
+          "adapter": "node",
+          "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+          "supported": true,
+          "resolved_majors": [
+            "1",
+            "2",
+            "5"
+          ],
+          "line_status": "resolved"
+        },
+        "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+        "nwo": "octo/app",
+        "default_branch": "main",
+        "repo_root": "/Users/example/src/octo/app",
+        "scripts_dir": "/Users/example/src/skills/plugins/gh-security/scripts/common"
+      },
+      "result": {
+        "status": "failure",
+        "package": "brace-expansion",
+        "major_line": "2",
+        "repo": "octo/app",
+        "branch": "fix/dependabot-brace-expansion-2x",
+        "pr_url": null,
+        "action": null,
+        "resolved_version": null,
+        "risk": null,
+        "observations": [],
+        "requires_major_bump": [],
+        "bare_override": "none",
+        "no_op": null,
+        "failure": {
+          "phase": "worktree",
+          "detail": "setup failed: git fetch origin fix/dependabot-brace-expansion-2x failed, so origin/fix/dependabot-brace-expansion-2x may be stale and cannot be used to judge whether a local branch of that name is a duplicate of pushed work: fatal: unable to access 'https://github.com/octo/app.git/': Failed to connect to github.com port 443 after 75002 ms: Couldn't connect to server. This looks like a network or sandbox problem affecting every group in this repo. No worktree was created and I did not retry."
+        },
+        "cleanup": {
+          "worktree": {
+            "path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+            "action": "not created"
+          },
+          "work_dir": {
+            "path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+            "action": "not created"
+          },
+          "branch": "fix/dependabot-brace-expansion-2x",
+          "branch_deleted": false,
+          "branch_tip": null,
+          "reason": "setup failed before any worktree or branch was created",
+          "detail": null,
+          "errors": []
+        }
+      },
+      "mispaired": false
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Fix groups"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "octo/app nx 22",
+      "phaseIndex": 1,
+      "phaseTitle": "Fix groups",
+      "agentId": "a6d84e700f1dfd159",
+      "agentType": "gh-security:fix-dependency",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1792440310250,
+      "queuedAt": 1792440310231,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "success",
+      "promptPreview": "Follow your agent definition end to end and finish with its JSON result block.\nDispatch payload:\n{\n  \"group\": {\n    \"package\": \"nx\",\n    \"ecosystem\": \"npm\",\n    \"major_line\": \"22\",\n    \"max_severity\": \"high\",\n    \"max_epss_percentile\": 0.67661,\n    \"alert_count\": 5,\n    \"alerts\": [\n      {\n        \"number\": 346,\n        \"cve\": null,\n        \"ghsa\": \"GHSA-w2vw-w76x-qr89\",\n        \"severity\": \"high\"…",
+      "promptFramed": true,
+      "lastProgressAt": 1792440549197,
+      "tokens": 47327,
+      "toolCalls": 19,
+      "durationMs": 238947,
+      "resultPreview": "{\"status\":\"success\",\"package\":\"nx\",\"major_line\":\"22\",\"repo\":\"octo/app\",\"branch\":\"fix/dependabot-nx-22x\",\"pr_url\":\"https://github.com/octo/app/pull/2502\",\"action\":\"scoped-override\",\"resolved_version\":\"22.7.10\",\"risk\":{\"band\":\"Low\",\"score\":1,\"f4\":0,\"f5\":0},\"observations\":[{\"type\":\"unscoped_override\",\"key\":\"minimatch\",\"range\":\"^9.0.7\",\"targets_this_package\":false}]…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "octo/app smol-toml 1",
+      "phaseIndex": 1,
+      "phaseTitle": "Fix groups",
+      "agentId": "a0b795d8083440bf4",
+      "agentType": "gh-security:fix-dependency",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1792440310250,
+      "queuedAt": 1792440310232,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "failure",
+      "promptPreview": "Follow your agent definition end to end and finish with its JSON result block.\nDispatch payload:\n{\n  \"group\": {\n    \"package\": \"smol-toml\",\n    \"ecosystem\": \"npm\",\n    \"major_line\": \"1\",\n    \"max_severity\": \"high\",\n    \"max_epss_percentile\": 0.4251,\n    \"alert_count\": 2,\n    \"alerts\": [\n      {\n        \"number\": 350,\n        \"cve\": null,\n        \"ghsa\": \"GHSA-r4xh-jqrq-34v2\",\n        \"severity\": \"…",
+      "promptFramed": true,
+      "lastProgressAt": 1792440418377,
+      "tokens": 44099,
+      "toolCalls": 11,
+      "durationMs": 105018,
+      "resultPreview": "{\"status\":\"failure\",\"package\":\"smol-toml\",\"major_line\":\"1\",\"repo\":\"octo/app\",\"branch\":\"fix/dependabot-smol-toml-1x\",\"pr_url\":null,\"action\":null,\"resolved_version\":null,\"risk\":null,\"observations\":[],\"requires_major_bump\":[],\"bare_override\":\"none\",\"no_op\":null,\"failure\":{\"phase\":\"validate\",\"detail\":\"validate_failed_after_ladder: the scoped override overrides.nx.smol-toml = '>=1.9.0…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "octo/app brace-expansion 2",
+      "phaseIndex": 1,
+      "phaseTitle": "Fix groups",
+      "agentId": "a33a75d4494686ff1",
+      "agentType": "gh-security:fix-dependency",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1792440310250,
+      "queuedAt": 1792440310232,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "failure",
+      "promptPreview": "Follow your agent definition end to end and finish with its JSON result block.\nDispatch payload:\n{\n  \"group\": {\n    \"package\": \"brace-expansion\",\n    \"ecosystem\": \"npm\",\n    \"major_line\": \"2\",\n    \"max_severity\": \"high\",\n    \"max_epss_percentile\": 0.26576,\n    \"alert_count\": 3,\n    \"alerts\": [\n      {\n        \"number\": 320,\n        \"cve\": \"CVE-2026-102277\",\n        \"ghsa\": \"GHSA-q2hr-2g5m-vwhr\",\n …",
+      "promptFramed": true,
+      "lastProgressAt": 1792440417101,
+      "tokens": 41613,
+      "toolCalls": 4,
+      "durationMs": 103742,
+      "resultPreview": "{\"status\":\"failure\",\"package\":\"brace-expansion\",\"major_line\":\"2\",\"repo\":\"octo/app\",\"branch\":\"fix/dependabot-brace-expansion-2x\",\"pr_url\":null,\"action\":null,\"resolved_version\":null,\"risk\":null,\"observations\":[],\"requires_major_bump\":[],\"bare_override\":\"none\",\"no_op\":null,\"failure\":{\"phase\":\"worktree\",\"detail\":\"setup failed: git fetch origin fix/dependabot-brace-expansion-2x failed…"
+    }
+  ],
+  "totalTokens": 133039,
+  "totalToolCalls": 34
+}

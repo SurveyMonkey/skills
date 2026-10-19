@@ -1,0 +1,35 @@
+{
+  "status": "failure",
+  "package": "brace-expansion",
+  "major_line": "2",
+  "repo": "octo/app",
+  "branch": "fix/dependabot-brace-expansion-2x",
+  "pr_url": null,
+  "action": null,
+  "resolved_version": null,
+  "risk": null,
+  "observations": [],
+  "requires_major_bump": [],
+  "bare_override": "none",
+  "no_op": null,
+  "failure": {
+    "phase": "worktree",
+    "detail": "setup failed: git fetch origin fix/dependabot-brace-expansion-2x failed, so origin/fix/dependabot-brace-expansion-2x may be stale and cannot be used to judge whether a local branch of that name is a duplicate of pushed work: fatal: unable to access 'https://github.com/octo/app.git/': Failed to connect to github.com port 443 after 75002 ms: Couldn't connect to server. This looks like a network or sandbox problem affecting every group in this repo. No worktree was created and I did not retry."
+  },
+  "cleanup": {
+    "worktree": {
+      "path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+      "action": "not created"
+    },
+    "work_dir": {
+      "path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x",
+      "action": "not created"
+    },
+    "branch": "fix/dependabot-brace-expansion-2x",
+    "branch_deleted": false,
+    "branch_tip": null,
+    "reason": "setup failed before any worktree or branch was created",
+    "detail": null,
+    "errors": []
+  }
+}

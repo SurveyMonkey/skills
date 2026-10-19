@@ -1,0 +1,16 @@
+{
+  "package": "smol-toml",
+  "major_line": "1",
+  "branch": "fix/dependabot-smol-toml-1x",
+  "worktree_path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-smol-toml-1x",
+  "result_status": "failure",
+  "pr_url": null,
+  "pr_state": null,
+  "reaped": false,
+  "reason": "failure: the agent's result was a failure",
+  "left_behind": [
+    "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-smol-toml-1x",
+    "fix/dependabot-smol-toml-1x"
+  ],
+  "errors": []
+}

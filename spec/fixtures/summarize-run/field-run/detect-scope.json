@@ -1,0 +1,9 @@
+{
+  "scope": "repo",
+  "owner": "octo",
+  "repo": "app",
+  "nwo": "octo/app",
+  "path": "/Users/example/src/octo/app",
+  "git_remote": "https://github.com/octo/app.git",
+  "default_branch": "main"
+}
