@@ -2043,6 +2043,14 @@ describe('an input that is refused', () => {
     )
   })
 
+  it('refuses an unparsable report with no reason', () => {
+    const files = structuredClone(base())
+    ;(files['reports.json'] as Record<string, unknown>[])[2] = report(BAD, 'unparsable')
+    expect(message(summarizeRun(context(ARGS), inputs(files)))).toBe(
+      'summarize-run: report 2 gives result_status unparsable with no reason',
+    )
+  })
+
   it('refuses a missing report for a result that is there', () => {
     expect(refusal('reports.json', [0, 'result_status'], 'missing')).toBe(
       'summarize-run: report 0 gives result_status missing, which does not fit group 0',

@@ -96,6 +96,7 @@
 //   - a count of reports that is not the count of groups,
 //   - a report whose `result_status` does not fit its entry, or whose
 //     `branch` is not the branch of its group or of its result,
+//   - an `unparsable` report with no `reason`,
 //   - a result whose `status` is not the `result_status` of its report,
 //   - a log warning about a group that is not in the batch,
 //   - a preflight entry for a path that is not a kept checkout.
@@ -219,6 +220,9 @@ const rowOf = (
     throw new Refusal(
       `report ${index} gives result_status ${report.status}, which does not fit group ${index}`,
     )
+  }
+  if (kind === 'unparsable' && report.reason === null) {
+    throw new Refusal(`report ${index} gives result_status unparsable with no reason`)
   }
   const read =
     kind === 'read'
