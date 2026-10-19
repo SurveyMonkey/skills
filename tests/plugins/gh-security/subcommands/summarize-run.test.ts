@@ -180,7 +180,7 @@ describe('the field run', () => {
 
 ## Reap
 
-All 3 groups came back with an empty \`left_behind\`: nothing was left behind.
+3 of 3 groups came back with an empty \`left_behind\`: nothing was left behind.
 
 - \`brace-expansion\` 2.x in \`octo/app\`: nothing is left on disk. The agent's cleanup: worktree \`/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x\` (not created), work directory \`/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x\` (not created), branch \`fix/dependabot-brace-expansion-2x\` (not deleted): setup failed before any worktree or branch was created.
 
@@ -825,6 +825,18 @@ describe('a warning of the Workflow log', () => {
   })
 })
 
+describe('the text of an input', () => {
+  it('escapes a pipe in a table cell', () => {
+    const run: Run = {
+      ...CLEAN,
+      logs: ['Cross-field inconsistency in the result for octo/app example-pkg 6: a | b'],
+    }
+    expect(sectionOf(run, 'Groups')?.split('\n')[2]).toBe(
+      `| example-pkg | 6.x | ${URL} | Medium (4) | 1/2 | scoped override; unverified bookkeeping: a \\| b |`,
+    )
+  })
+})
+
 describe('the checkouts and repositories that the batch never touched', () => {
   it('names each excluded checkout with its reason, and its output when there is one', () => {
     const run: Run = {
@@ -1114,7 +1126,7 @@ describe('the reap', () => {
     }
     expect(sectionOf(run, 'Reap')).toBe(
       [
-        'All 1 groups came back with an empty `left_behind`: nothing was left behind.',
+        '1 of 1 groups came back with an empty `left_behind`: nothing was left behind.',
         '',
         `- \`example-pkg\` 6.x in \`octo/app\` shipped ${URL}, and its own cleanup did not finish: the reap cleared what the agent could not. The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), work directory \`/private${WORK}\` (skipped), branch \`fix/dependabot-example-pkg-6x\` (deleted): git worktree remove --force failed: locked.`,
       ].join('\n'),

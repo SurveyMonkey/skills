@@ -4,8 +4,9 @@
 // difference from the prose of phase 7 are in the header of
 // `subcommands/summarize-run.ts`.
 //
-// Text from input reaches a table cell through `cell`, and a line through
-// `inline` (`markdown.ts`).
+// Each line of a section goes through `inline`, and each table cell through
+// `cell` (`markdown.ts`), so a line break or a pipe from input cannot split a
+// line or end a cell.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -52,11 +53,11 @@ const lineText = (line: string): string => (line === 'none' ? '(no fix line)' : 
 const who = (group: Pick<Group, 'package' | 'line' | 'repo'>): string =>
   `\`${group.package}\` ${lineText(group.line)} in \`${group.repo}\``
 
-const code = (text: string): string => `\`${inline(text)}\``
+const code = (text: string): string => `\`${text}\``
 
 /** A section: its heading, then its lines. */
 const sectionOf = (heading: string, lines: readonly string[]): string =>
-  [`## ${heading}`, '', ...lines].join('\n')
+  [`## ${heading}`, '', ...lines.map(inline)].join('\n')
 
 // Section 1: every alert that stays open because its only fix crosses a major.
 
@@ -136,7 +137,7 @@ const notesOf = (row: Row): string => {
             ]
           : [NO_OP_NOTE]
   if (row.warning !== null) notes.push(`unverified bookkeeping: ${row.warning}`)
-  return cell(notes.join('; '))
+  return notes.join('; ')
 }
 
 const tableOf = (summary: Summary): string[] => {
@@ -147,14 +148,14 @@ const tableOf = (summary: Summary): string[] => {
     const { result } = row
     const risk = result?.status === 'success' ? result.risk : null
     const cells = [
-      cell(row.group.package),
-      cell(lineText(row.group.line)),
-      cell(result?.prUrl ?? 'none'),
-      risk === null ? 'n/a' : cell(`${risk.band} (${risk.score})`),
+      row.group.package,
+      lineText(row.group.line),
+      result?.prUrl ?? 'none',
+      risk === null ? 'n/a' : `${risk.band} (${risk.score})`,
       risk === null ? 'n/a' : `${risk.f4}/${risk.f5}`,
       notesOf(row),
     ]
-    return `| ${(oneCheckout ? cells : [cell(row.group.repo), ...cells]).join(' | ')} |`
+    return `| ${(oneCheckout ? cells : [row.group.repo, ...cells]).map(cell).join(' | ')} |`
   })
   return [`| ${columns.join(' | ')} |`, `| ${columns.map(() => '---').join(' | ')} |`, ...rows]
 }
@@ -165,7 +166,7 @@ const alreadyFixed = (summary: Summary): string[] => {
   const lines = summary.rows.flatMap((row) =>
     row.result?.status === 'no-op'
       ? [
-          `- ${who(row.group)}: ${inline(row.result.reason)}.` +
+          `- ${who(row.group)}: ${row.result.reason}.` +
             (row.result.mergedPrUrl === null
               ? ''
               : ` The fix merged in ${row.result.mergedPrUrl}.`),
@@ -193,7 +194,7 @@ const failures = (summary: Summary): string[] =>
           ? ''
           : ` gh opened the pull request ${result.prUrl} before the failure.`
       return [
-        `- ${who(row.group)}: ${failureLabel(result.phase, result.detail)}. ${inline(result.detail)}${opened}`,
+        `- ${who(row.group)}: ${failureLabel(result.phase, result.detail)}. ${result.detail}${opened}`,
       ]
     }
     if (row.kind === 'null') {
@@ -202,7 +203,7 @@ const failures = (summary: Summary): string[] =>
       ]
     }
     if (row.kind === 'unparsable') {
-      return [`- ${who(row.group)}: the result was not read: ${inline(String(row.report.reason))}.`]
+      return [`- ${who(row.group)}: the result was not read: ${String(row.report.reason)}.`]
     }
     return []
   })
@@ -254,8 +255,8 @@ const excluded = (summary: Summary): string[] => {
   const { checkouts } = summary.discovery
   const checkoutLines = summary.discovery.excluded.map(
     (entry) =>
-      `- ${code(entry.checkout)}: ${inline(entry.reason)}.` +
-      (entry.stderr === '' ? '' : ` Output: ${inline(entry.stderr)}`),
+      `- ${code(entry.checkout)}: ${entry.reason}.` +
+      (entry.stderr === '' ? '' : ` Output: ${entry.stderr}`),
   )
   const preflightLines = summary.preflights.map((entry) => {
     const nwo = (
@@ -266,8 +267,8 @@ const excluded = (summary: Summary): string[] => {
     const cause =
       entry.error === null
         ? `${(CAUSES[entry.cause] as (probe: string) => string)(entry.probe === null ? 'the package' : code(entry.probe))}` +
-          (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${inline(entry.stderr)}`)
-        : `preflight-repo failed: ${inline(entry.error)}.`
+          (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${entry.stderr}`)
+        : `preflight-repo failed: ${entry.error}.`
     return (
       `- \`${nwo}\` (${code(entry.checkout)}): the registry preflight excluded each group of ` +
       `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`
@@ -306,8 +307,8 @@ const otherSkips = (summary: Summary): string[] =>
           ? ''
           : group.reason === 'open PR exists'
             ? ` (${group.more})`
-            : `: ${inline(group.more)}`
-      return `- ${who(group)}: ${inline(group.reason)}${more}.`
+            : `: ${group.more}`
+      return `- ${who(group)}: ${group.reason}${more}.`
     })
 
 // Section 9: what the reap removed and what it left.
@@ -329,11 +330,11 @@ const cleanupText = (cleanup: Cleanup, shown: readonly string[]): string => {
   ] as const
   const parts = items
     .filter(([, artifact]) => !shown.includes(artifact.path))
-    .map(([name, artifact]) => `${name} ${code(artifact.path)} (${inline(artifact.action)})`)
+    .map(([name, artifact]) => `${name} ${code(artifact.path)} (${artifact.action})`)
   if (!shown.includes(cleanup.branch)) {
     parts.push(`branch ${code(cleanup.branch)}${deletedText(cleanup.branchDeleted)}`)
   }
-  const why = cleanup.why.map(inline).join('; ')
+  const why = cleanup.why.join('; ')
   if (parts.length === 0) return why === '' ? '' : ` The agent's cleanup: ${why}.`
   return ` The agent's cleanup: ${parts.join(', ')}${why === '' ? '' : `: ${why}`}.`
 }
@@ -354,7 +355,7 @@ const reapLine = (row: Row): string | null => {
     )
     if (match === undefined) return code(left)
     shown.push(match.path)
-    return `${code(match.path)} (${inline(match.action)} in the agent's cleanup)`
+    return `${code(match.path)} (${match.action} in the agent's cleanup)`
   })
   const shipped =
     row.result?.status === 'success' && cleanup !== null
@@ -363,12 +364,11 @@ const reapLine = (row: Row): string | null => {
   const state =
     items.length > 0
       ? `left on disk: ${items.join(', ')}.` +
-        (report.reason === null ? '' : ` Not reaped: ${inline(report.reason)}.`)
+        (report.reason === null ? '' : ` Not reaped: ${report.reason}.`)
       : cleanup !== null && report.reaped
         ? 'the reap cleared what the agent could not.'
         : 'nothing is left on disk.'
-  const errors =
-    report.errors.length === 0 ? '' : ` Errors: ${report.errors.map(inline).join('; ')}.`
+  const errors = report.errors.length === 0 ? '' : ` Errors: ${report.errors.join('; ')}.`
   return `- ${who(row.group)}${shipped}: ${state}${errors}${cleanup === null ? '' : cleanupText(cleanup, shown)}`
 }
 
@@ -377,9 +377,8 @@ const reapSection = (summary: Summary): string[] => {
   const clean = summary.rows.filter((row) => row.report.leftBehind.length === 0).length
   const lines = summary.rows.map(reapLine).filter((line): line is string => line !== null)
   const head =
-    clean === total
-      ? `All ${total} groups came back with an empty \`left_behind\`: nothing was left behind.`
-      : `${clean} of ${total} groups came back with an empty \`left_behind\`.`
+    `${clean} of ${total} groups came back with an empty \`left_behind\`` +
+    (clean === total ? ': nothing was left behind.' : '.')
   const hint =
     clean === total
       ? []
@@ -415,7 +414,7 @@ const observations = (summary: Summary): string[] => {
             const key = code(String(observation.key))
             return (
               `- ${key} ${code(String(observation.range))} in \`${row.group.repo}\` ` +
-              `(${row.result?.prUrl ?? 'no pull request'}), because ${inline(String(observation.reason))}. ` +
+              `(${row.result?.prUrl ?? 'no pull request'}), because ${String(observation.reason)}. ` +
               `It pins ${key} for every consumer in that repository, including copies that were never vulnerable.`
             )
           }),
