@@ -852,6 +852,30 @@ describe('what stays when no reap ran', () => {
     },
   )
 
+  it('names the failed stat and the failed ref read together', async () => {
+    // The root is a plain directory, so the ref read fails too.
+    const at = world()
+    const root = join(realpathSync(at.sandbox.path), 'plain')
+    const worktrees = join(root, '.claude', 'worktrees')
+    mkdirSync(worktrees, { recursive: true })
+    chmodSync(worktrees, 0)
+    try {
+      const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
+      const work = report.worktree_path as string
+      expect(report.left_behind).toEqual([work, PLAIN.branch_name])
+      expect(report.errors).toEqual([
+        `stat failed: EACCES: permission denied, stat '${work}'`,
+        expect.stringMatching(
+          new RegExp(
+            `^git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository`,
+          ),
+        ),
+      ])
+    } finally {
+      chmodSync(worktrees, 0o755)
+    }
+  })
+
   it('names nothing under a repository root that is a file', async () => {
     const at = world()
     const root = join(at.sandbox.path, 'a-file')
