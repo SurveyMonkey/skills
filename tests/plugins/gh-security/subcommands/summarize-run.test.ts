@@ -310,6 +310,7 @@ const noOp = (group: Grp, evidence: Record<string, JsonValue>) =>
     no_op: { reason: 'the scoped overrides are already on main', evidence },
   })
 
+// A report that no reap ran for gives a reason, as `post-agent` does.
 const report = (group: Grp, status: string, changes: Record<string, JsonValue> = {}) => ({
   package: group.package,
   major_line: String(group.major_line),
@@ -319,7 +320,7 @@ const report = (group: Grp, status: string, changes: Record<string, JsonValue> =
   pr_url: null,
   pr_state: null,
   reaped: false,
-  reason: null,
+  reason: changes.reaped === true ? null : `the result is ${status}`,
   left_behind: [],
   errors: [],
   ...changes,
@@ -1170,7 +1171,7 @@ describe('the reap', () => {
       reports: [report(PKG, 'failure', { left_behind: [WORK] })],
     }
     expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
-      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\`. The agent's cleanup: worktree \`${glued}/fix\` (failed), work directory \`${glued}\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted).`,
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\`. Not reaped: the result is failure. The agent's cleanup: worktree \`${glued}/fix\` (failed), work directory \`${glued}\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted).`,
     )
   })
 
@@ -1234,7 +1235,7 @@ describe('the reap', () => {
       reports: [report(PKG, 'failure', { left_behind: [`/private${WORK}`] })],
     }
     expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
-      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (skipped in the agent's cleanup). The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted): git worktree remove --force failed: locked.`,
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (skipped in the agent's cleanup). Not reaped: the result is failure. The agent's cleanup: worktree \`/private${WORK}/fix\` (failed), branch \`fix/dependabot-example-pkg-6x\` (not deleted): git worktree remove --force failed: locked.`,
     )
   })
 
@@ -1306,7 +1307,7 @@ describe('the reap', () => {
       reports: [report(PKG, 'failure', { left_behind: [WORK, PKG.branch_name] })],
     }
     expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
-      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (failed in the agent's cleanup), branch \`fix/dependabot-example-pkg-6x\`. The agent's cleanup: git worktree remove --force failed: locked.`,
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (failed in the agent's cleanup), branch \`fix/dependabot-example-pkg-6x\`. Not reaped: the result is failure. The agent's cleanup: git worktree remove --force failed: locked.`,
     )
   })
 
@@ -1327,7 +1328,7 @@ describe('the reap', () => {
       reports: [report(PKG, 'failure', { left_behind: [WORK, PKG.branch_name] })],
     }
     expect(sectionOf(run, 'Reap')?.split('\n')[2]).toBe(
-      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (failed in the agent's cleanup), branch \`fix/dependabot-example-pkg-6x\`.`,
+      `- \`example-pkg\` 6.x in \`octo/app\`: left on disk: \`${WORK}\` (failed in the agent's cleanup), branch \`fix/dependabot-example-pkg-6x\`. Not reaped: the result is failure.`,
     )
   })
 
@@ -2045,9 +2046,18 @@ describe('an input that is refused', () => {
 
   it('refuses an unparsable report with no reason', () => {
     const files = structuredClone(base())
-    ;(files['reports.json'] as Record<string, unknown>[])[2] = report(BAD, 'unparsable')
+    ;(files['reports.json'] as Record<string, unknown>[])[2] = report(BAD, 'unparsable', {
+      reason: null,
+    })
     expect(message(summarizeRun(context(ARGS), inputs(files)))).toBe(
-      'summarize-run: report 2 gives result_status unparsable with no reason',
+      'summarize-run: report 2 gives reaped false, and no reason',
+    )
+  })
+
+  it('refuses a reaped report that gives a reason', () => {
+    // `post-agent` gives a reason only when no reap ran.
+    expect(refusal('reports.json', [0, 'reason'], 'pull request is not open (state=MERGED)')).toBe(
+      'summarize-run: report 0 gives reaped true, and a reason',
     )
   })
 
