@@ -19,8 +19,8 @@
 # and the PR) stay with the agent, because each of them reads history or writes
 # prose.
 #
-# `gh-security audit-pins list|baseline|test-pin` is the TypeScript port of
-# the first three steps (#235). The agent calls this script until #237.
+# `gh-security audit-pins` is the TypeScript port of the five steps (#235).
+# The agent calls this script until #237.
 #
 # Stepped, with a state file at `$WORK/state.json`, rather than one run, for
 # `fix-group.sh`'s reasons and one of its own: this flow runs **one install per

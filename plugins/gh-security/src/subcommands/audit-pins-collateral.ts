@@ -120,12 +120,28 @@ export const platformTail = (name: string, key: string): boolean => {
 }
 
 /** One package that moved, before the family rule. */
-interface Move {
+export interface Move {
   readonly package: string
   readonly baseline: string[]
   readonly without_pin: string[]
   readonly newly_admitted: string[]
 }
+
+/**
+ * Each package whose versions differ between the two maps, sorted by
+ * package. `together` reads this list for a set of removals, with no family
+ * rule.
+ */
+export const movesBetween = (base: Resolutions, now: Resolutions): Move[] =>
+  uniqueJq([...Object.keys(base), ...Object.keys(now)])
+    .map((name) => ({ name, before: versionsIn(base, name), after: versionsIn(now, name) }))
+    .filter(({ before, after }) => !equal(before, after))
+    .map(({ name, before, after }) => ({
+      package: name,
+      baseline: before,
+      without_pin: after,
+      newly_admitted: minus(after, before),
+    }))
 
 const byPackage = (a: { readonly package?: unknown }, b: { readonly package?: unknown }): number =>
   compareJq(a.package, b.package)
@@ -141,16 +157,7 @@ export const collateralOf = (
   pkg: string,
 ): { readonly changes: JsonObject[]; readonly families: JsonObject[] } => {
   const all = uniqueJq([...Object.keys(base), ...Object.keys(now)])
-  const moves: Move[] = all
-    .filter((name) => name !== pkg)
-    .map((name) => ({ name, before: versionsIn(base, name), after: versionsIn(now, name) }))
-    .filter(({ before, after }) => !equal(before, after))
-    .map(({ name, before, after }) => ({
-      package: name,
-      baseline: before,
-      without_pin: after,
-      newly_admitted: minus(after, before),
-    }))
+  const moves = movesBetween(base, now).filter((move) => move.package !== pkg)
   const groups = new Map<string, Move[]>()
   for (const move of moves) {
     const key = familyKey(move.package)

@@ -34,6 +34,7 @@ import { run } from '#gh-security/lib/process.ts'
 import { auditPins, auditPinsCommand } from '#gh-security/subcommands/audit-pins.ts'
 import { Stop, settle } from '#gh-security/subcommands/audit-pins-common.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
+import { createGhMock } from '#harness/gh.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
 
@@ -115,7 +116,10 @@ const call = async (
   args: readonly string[],
   route: Route = selectAdapter,
   env: NodeJS.ProcessEnv = w.env,
-): Promise<Answer> => answerOf(await auditPins(context(env, args), { spawn: run, route }))
+): Promise<Answer> =>
+  answerOf(
+    await auditPins(context(env, args), { spawn: run, route, makeClient: () => createGhMock() }),
+  )
 
 const list = (w: World, route?: Route, ...extra: string[]) =>
   call(w, ['list', '--work', w.work, '--worktree', w.wt, ...extra], route)
@@ -198,21 +202,20 @@ describe('the command', () => {
   it('refuses a call with no phase', async () => {
     expect(answerOf(await auditPinsCommand(context({}, [])))).toEqual({
       status: 1,
-      json: { error: 'usage: gh-security audit-pins <list|baseline|test-pin> [options]' },
+      json: {
+        error: 'usage: gh-security audit-pins <list|baseline|test-pin|judge|together> [options]',
+      },
     })
   })
 
-  it.each(['judge', 'together', 'constructor'])(
-    'refuses %s as a phase it does not port',
-    async (phase) => {
-      expect(answerOf(await auditPinsCommand(context({}, [phase])))).toEqual({
-        status: 1,
-        json: {
-          error: `audit-pins: '${phase}' is not a phase of this command. It ports list, baseline and test-pin; judge and together are still audit-pins-driver.sh.`,
-        },
-      })
-    },
-  )
+  it.each(['score', 'constructor'])('refuses %s as a phase it does not have', async (phase) => {
+    expect(answerOf(await auditPinsCommand(context({}, [phase])))).toEqual({
+      status: 1,
+      json: {
+        error: `audit-pins: '${phase}' is not a phase of this command. The phases are list, baseline, test-pin, judge and together.`,
+      },
+    })
+  })
 
   it('gives a throw that is not a stop to its caller, as a defect', async () => {
     await expect(settle(async () => Promise.reject(new Error('a defect')))).rejects.toThrow(

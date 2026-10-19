@@ -1,31 +1,41 @@
 // `gh-security audit-pins <phase>`: the driver for the pin audit of one
 // repository. This is the port of `scripts/common/audit-pins-driver.sh`
-// (#235), one phase at a time. This layer ports the first three phases:
+// (#235). It has the five phases:
 //
 //   audit-pins list     --work <dir> --worktree <dir> [--ecosystem <eco>]
 //                       [--env-prefix "<string>"]
 //   audit-pins baseline --work <dir>
 //   audit-pins test-pin --work <dir> (--key <key> | --path <json array>)
+//   audit-pins judge    --work <dir>
+//   audit-pins together --work <dir>
 //
-// `judge` and `together` come in the next layer of #235. Until then this
-// command refuses them as phases that it does not have, and the agent calls
-// `audit-pins-driver.sh` for all five steps until #237 moves it here.
+// The agent calls `audit-pins-driver.sh` for all five steps until #237
+// moves it here.
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `list` writes it, and each later phase reads it first.
 //
-// Contract, for these three phases:
-//   exit 0  {"status":"ok","step":"list|baseline|test-pin", ...}  a step
-//           completed. A pin whose install failed is a finding, not a
+// Contract:
+//   exit 0  {"status":"ok","step":"list|baseline|test-pin|judge", ...}  a
+//           step completed. A pin whose install failed is a finding, not a
 //           failure.
 //           {"status":"no_pins", ...}  terminal: `list` found no pins.
-//   exit 3  {"status":"failure","phase":"list|install|restore","detail":"..."}
-//           a terminal failure. The agent copies it to its result block.
-//           stderr has `audit-pins: <phase> failure: <detail>`. A restore
-//           that cannot be checked ends the run (`restore`).
+//           {"status":"no_candidates", ...}  terminal: nothing came back
+//           removable.
+//           {"status":"partial_map", ...}  terminal: the baseline map is
+//           partial.
+//           {"status":"combined_failed", ...}  terminal: no attempt was
+//           clean.
+//           {"status":"ready_for_pr", ...}  terminal: hand to phase 8. The
+//           removals stay in the tree.
+//   exit 3  {"status":"failure","phase":"list|install|restore|advisories|
+//           compose","detail":"..."}  a terminal failure. The agent copies
+//           it to its result block. stderr has `audit-pins: <phase> failure:
+//           <detail>`. A restore that cannot be checked ends the run
+//           (`restore`). `compose` comes only from `together`.
 //   exit 1  {"error":"..."}  a usage error, or an internal error. A state
 //           file that cannot be read is one.
-// Exit 2 is reserved, as in the bash: these phases have no decision for the
+// Exit 2 is reserved, as in the bash: no phase has a decision for the
 // agent.
 //
 // What each phase does:
@@ -46,6 +56,17 @@
 //             and the other packages that moved, with the platform-binary
 //             family rule (audit-driver.md). Last, it returns the manifest,
 //             the workspace file and the lockfile to HEAD, and checks them.
+//   judge     asks `check-advisories` in process (ADR 012) about each
+//             version that a tested pin let in, and each version of another
+//             package that moved with it. It gives each tested finding its
+//             verdict, then applies the sibling rule. Each answer is cached
+//             in `<work>/advisories/`, and a cached answer gets the same
+//             checks as a fresh one.
+//   together  installs the set of removable pins as one (attempt 1). When
+//             the set lets in a version that is not safe, or the map after
+//             the install is partial, it restores the tree and tries the set
+//             without the removable-individually pins (attempt 2). It
+//             restores a tracked `.yarn/cache` first.
 //
 // Each git call and each package-manager call runs under `--env-prefix`, the
 // opaque prefix that `list` records (env-prefix.md). The prefix sets no
@@ -110,7 +131,36 @@
 //   - The bash checked with jq that `package.json` parses after the removal.
 //     The port writes the file from a parsed value, so it always parses, and
 //     there is no such check.
-//   - Two texts of the bash have an em dash. The port gives them as they are.
+//   - `judge_done` is read as a JSON value: it must be `true`, as
+//     `baseline_done` must.
+//   - Where the bash read the text of a value with `jq -r`, the port gives
+//     that text with the declared differences of `jq-json.ts`: a
+//     whole-number key moves first, and a number is written as JavaScript
+//     writes it. This is so in each detail, and in each version and key
+//     that a loop reads.
+//   - Some values are compared as JSON, where the bash compared their text
+//     after `$( )` removed the line breaks at the end. So the text
+//     `"tested\n"` is not a tested finding, and a `judge_done` of
+//     `"true\n"` is refused. `judge` reads `left_tree`, `collateral_verdict`
+//     and the verdict of an advisory answer as the bash did.
+//   - The advisory query is the `check-advisories` command in process, not
+//     `check-advisories.sh`, and the texts name it so. A failed query quotes
+//     its error as `{"error": ...}`. The prefix wraps `gh`, as
+//     `check-advisories --env-prefix` does. The bash wrapped the script, and
+//     ran it in the worktree.
+//   - A cached advisory answer is read as one JSON text. A file of two
+//     objects is not an object. The bash read each of them.
+//   - An advisory cache entry that is a directory stops with exit 1, as the
+//     rename fails. The bash moved the answer into the directory.
+//   - In `together`, a candidate path that is not a list of keys restores
+//     the tree and stops, phase `compose`. The bash gave a null path to jq
+//     as the path of the whole override block, and removed the block.
+//   - In `together`, the removal from `package.json` quotes node after
+//     `Quoting the error:`, as in `test-pin`.
+//   - In `together`, the baseline map and the map of an attempt must hold a
+//     list of texts for each package, as in `test-pin`.
+//   - Some texts of the bash have an em dash. The port gives them as they
+//     are.
 //
 // Copied from the bash as they are (round 7 ruling 5):
 //   - The deleter of `pnpm-workspace.yaml` (`audit-pins-removal.ts`), with
@@ -126,7 +176,12 @@
 //     field of an adapter answer, `unreadable_entries` of the map, the
 //     `resolved_versions` answer, the shape of `baseline_packages`,
 //     `baseline_map` or the findings on file, a missing snapshot, the "could
-//     not be assembled" failure, and a failed write of the state. A state
+//     not be assembled" failure, and a failed write of the state. In
+//     `together`, after the removal of a set: a promised field of
+//     `list_pins` or of the map, `pins_count`, a `list_pins` answer that jq
+//     cannot read, the baseline map, a map that cannot be diffed, and each
+//     failure of the advisory query. The tree keeps the removal there, and
+//     after the install, the install. A state
 //     with no text `lockfile` stops each restore with exit 1, before git
 //     runs. Where a check of the port is stricter than the bash (see the
 //     differences above), its stop is also before the restore.
@@ -136,17 +191,20 @@
 import { selectAdapter } from '../adapters/registry.ts'
 import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
 import { failed } from '../lib/envelope.ts'
+import { createGhClient } from '../lib/gh.ts'
 import { run } from '../lib/process.ts'
 import { baseline } from './audit-pins-baseline.ts'
 import type { AuditPinsDeps } from './audit-pins-common.ts'
+import { judge } from './audit-pins-judge.ts'
 import { list } from './audit-pins-list.ts'
 import { testPin } from './audit-pins-test-pin.ts'
+import { together } from './audit-pins-together.ts'
 
 export type { AuditPinsDeps } from './audit-pins-common.ts'
 
-const USAGE = 'usage: gh-security audit-pins <list|baseline|test-pin> [options]'
+const USAGE = 'usage: gh-security audit-pins <list|baseline|test-pin|judge|together> [options]'
 
-const PHASES = { list, baseline, 'test-pin': testPin } as const
+const PHASES = { list, baseline, 'test-pin': testPin, judge, together } as const
 
 /** The handler. The runner and the registry are parameters. */
 export const auditPins = (context: CommandContext, deps: AuditPinsDeps): Promise<CommandResult> => {
@@ -155,13 +213,13 @@ export const auditPins = (context: CommandContext, deps: AuditPinsDeps): Promise
   if (!Object.hasOwn(PHASES, phase)) {
     return Promise.resolve(
       failed(
-        `audit-pins: '${phase}' is not a phase of this command. It ports list, baseline and ` +
-          'test-pin; judge and together are still audit-pins-driver.sh.',
+        `audit-pins: '${phase}' is not a phase of this command. The phases are list, baseline, ` +
+          'test-pin, judge and together.',
       ),
     )
   }
-  return PHASES[phase as keyof typeof PHASES](args, context.env, deps)
+  return PHASES[phase as keyof typeof PHASES](args, context.env, { ...deps, io: context.io })
 }
 
 export const auditPinsCommand: CommandHandler = (context) =>
-  auditPins(context, { spawn: run, route: selectAdapter })
+  auditPins(context, { spawn: run, route: selectAdapter, makeClient: createGhClient })

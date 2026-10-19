@@ -8,8 +8,8 @@ prose re-derivation of any of it in the agent definition is a bug. What stays wi
 reads history or writes prose — phase 1's worktree and its two `pr`-mode guards, phase 3's
 provenance, phase 6's report, and phase 8's merge risk and pull request.
 
-The TypeScript port is `gh-security audit-pins` (#235). It has `list`, `baseline` and `test-pin`
-(`src/subcommands/audit-pins*.ts`). `judge` and `together` are still the bash. The agent calls the
+The TypeScript port is `gh-security audit-pins` (#235), with all five steps
+(`src/subcommands/audit-pins*.ts`). `judge` calls `check-advisories` in process. The agent calls the
 bash for all five steps until #237.
 
 Stepped, with a state file at `$WORK/state.json`, for `fix-group.sh`'s reasons and one of its own:
