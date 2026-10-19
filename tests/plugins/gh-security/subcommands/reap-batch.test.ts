@@ -751,6 +751,22 @@ describe('what stays when no reap ran', () => {
       { status: 128, signal: null, text: '', startFailure: null },
       'exit 128',
     ],
+    [
+      'git exits 1 with text',
+      { status: 1, signal: null, text: 'warning: x\n', startFailure: null },
+      'warning: x',
+    ],
+    [
+      'git exits 1 and a stream is lost',
+      {
+        status: 1,
+        signal: null,
+        text: '',
+        startFailure: null,
+        streamErrors: [{ code: 'EIO', message: 'read EIO' }],
+      },
+      'a pipe failed: EIO, read EIO',
+    ],
   ])('keeps the branch, and names the read on one line, when %s', async (_name, answer, words) => {
     const at = world()
     const spawn: Runner = (command, args = [], options) =>
@@ -764,7 +780,7 @@ describe('what stays when no reap ran', () => {
             timedOut: false,
             elapsedMs: 0,
             startFailure: answer.startFailure,
-            streamErrors: [],
+            streamErrors: 'streamErrors' in answer ? answer.streamErrors : [],
           })
         : run(command, args, options)
     const file = join(at.sandbox.path, 'results.json')
@@ -787,6 +803,27 @@ describe('what stays when no reap ran', () => {
       left_behind: [PLAIN.branch_name],
       errors: [],
     })
+  })
+
+  it('keeps both, and names each stat, when a stat fails for another reason than an absent path', async () => {
+    // A parent with no search permission makes each stat under it fail with
+    // EACCES. That is not an absent path.
+    const at = world()
+    const locked = join(realpathSync(at.sandbox.path), 'locked')
+    const root = join(locked, 'repo')
+    mkdirSync(root, { recursive: true })
+    chmodSync(locked, 0)
+    try {
+      const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
+      const work = report.worktree_path as string
+      expect(report.left_behind).toEqual([work, PLAIN.branch_name])
+      expect(report.errors).toEqual([
+        `stat failed: EACCES: permission denied, stat '${work}'`,
+        `stat failed: EACCES: permission denied, stat '${root}'`,
+      ])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
   })
 
   it('names nothing under a repository root that is a file', async () => {

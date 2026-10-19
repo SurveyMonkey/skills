@@ -47,9 +47,12 @@
 // names the work directory only when its path exists, and the branch only
 // when `git rev-parse --verify --quiet refs/heads/<branch>` finds it in the
 // repository root. A repository root that is not a directory holds neither.
-// A read of the ref that fails is not an absent branch: the branch stays, and
-// `errors` names the read, as in `src/reap.ts`. Only exit 1 with no text is
-// an absent branch. A signal, or another exit with no text, is a failed read.
+// A read that fails is not an absent path or branch: what it read stays in
+// `left_behind`, and `errors` names the read. Only exit 1 with no text and no
+// stream error is an absent branch. A signal, another exit, or a lost stream
+// is a failed read, which `src/reap.ts` reads as absent. Only `ENOENT` and
+// `ENOTDIR` make a path absent. A stat that fails for another reason, such
+// as `EACCES`, is a failed read.
 //
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script
@@ -76,7 +79,7 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import { existsSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 
 import type { JsonObject } from './lib/envelope.ts'
 import { contain, type Git, reap } from './reap.ts'
@@ -177,12 +180,13 @@ const verify = async (
     : { state: null, problem: `pr-status returned an entry with no usable state for ${url}` }
 }
 
-/** A directory, after links. A path that cannot be read is not one. */
-const isDirectory = (path: string): boolean => {
+/** What is at a path, after links, or the failure of the stat. */
+const look = (path: string): 'absent' | 'file' | 'directory' | { readonly failed: string } => {
   try {
-    return statSync(path).isDirectory()
-  } catch {
-    return false
+    return statSync(path).isDirectory() ? 'directory' : 'file'
+  } catch (error) {
+    const { code, message } = error as NodeJS.ErrnoException
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : { failed: message }
   }
 }
 
@@ -196,20 +200,31 @@ const onDisk = async (
   work: string,
   branch: string,
 ): Promise<{ readonly left: string[]; readonly errors: string[] }> => {
-  const left = existsSync(work) ? [work] : []
-  if (!isDirectory(repoRoot)) return { left, errors: [] }
+  const atWork = look(work)
+  const left = atWork === 'absent' ? [] : [work]
+  const errors = typeof atWork === 'object' ? [`stat failed: ${atWork.failed}`] : []
+  const atRoot = look(repoRoot)
+  if (typeof atRoot === 'object') {
+    return { left: [...left, branch], errors: [...errors, `stat failed: ${atRoot.failed}`] }
+  }
+  if (atRoot !== 'directory') return { left, errors }
   const ref = `refs/heads/${branch}`
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
-  if (read.status === 0) return { left: [...left, branch], errors: [] }
+  if (read.status === 0) return { left: [...left, branch], errors }
   // `--quiet` answers a missing ref with exit 1 and no text. Any text, any
-  // other exit, a signal, or a git that did not start, is a failed read.
-  const text = (read.startFailure === null ? read.combined : read.startFailure.message)
+  // other exit, a signal, a lost stream, or a git that did not start, is a
+  // failed read.
+  const text = [
+    ...read.streamErrors.map((broke) => `a pipe failed: ${broke.code}, ${broke.message}`),
+    read.startFailure === null ? read.combined : read.startFailure.message,
+  ]
+    .join(' ')
     .replace(/\s+$/, '')
     .replace(/\n/g, ' ')
-  if (text === '' && read.status === 1) return { left, errors: [] }
+  if (text === '' && read.status === 1) return { left, errors }
   const why =
     text !== '' ? text : read.status === null ? `killed by ${read.signal}` : `exit ${read.status}`
-  return { left: [...left, branch], errors: [`git rev-parse ${ref} failed: ${why}`] }
+  return { left: [...left, branch], errors: [...errors, `git rev-parse ${ref} failed: ${why}`] }
 }
 
 const REASONS: Readonly<Record<'no-op' | 'failure', string>> = {
