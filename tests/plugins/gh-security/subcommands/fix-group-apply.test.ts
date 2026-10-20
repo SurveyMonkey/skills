@@ -138,6 +138,8 @@ interface Script {
   on: Partial<Record<'apply' | 'validate', Record<number, () => void>>>
   /** The call of `detect`, counted from the start of `apply`, that fails. */
   failDetectAt: number | null
+  /** The outcome of the call of `failDetectAt`. */
+  failDetectAs: 'failed' | 'unsupported'
   /**
    * The `fixEffects` answer: written, `{ error }` for a failure, `real` for
    * the node verb, `unsupported`, or `{ read }`, which reads one file of the
@@ -179,6 +181,7 @@ const script = (): Script => ({
   validateFallback: null,
   on: {},
   failDetectAt: null,
+  failDetectAs: 'failed',
   effects: { pm: 'npm', package: 'lodash', observations: [] },
 })
 
@@ -255,7 +258,9 @@ const route = (w: World): typeof selectAdapter => {
     detect: (root, env) => {
       if (w.applying) w.detects += 1
       if (w.script.failDetectAt !== null && w.detects === w.script.failDetectAt) {
-        return failed('detect: the stand-in found no lockfile')
+        return w.script.failDetectAs === 'failed'
+          ? failed('detect: the stand-in found no lockfile')
+          : unsupported('yarn', 'detect: the stand-in found a yarn.lock.')
       }
       return node.detect(root, env)
     },
@@ -1956,6 +1961,22 @@ describe('the effects of the fix (#334)', () => {
       answer: [{ type: 'fix_effects_failed', error: 'detect: the stand-in found no lockfile' }],
       state: [{ type: 'fix_effects_failed', error: 'detect: the stand-in found no lockfile' }],
     })
+  })
+
+  // Only the verb may answer unsupported for no effect. A tree that detect
+  // refuses after the fix install is a check that did not run.
+  it('names a detect that is unsupported before the check', async () => {
+    const w = await ready((s) => {
+      s.failDetectAt = 4
+      s.failDetectAs = 'unsupported'
+    })
+    const failure = {
+      type: 'fix_effects_failed',
+      error:
+        'detect: the stand-in found a yarn.lock. See .github/CONTRIBUTING.md to request support.',
+    }
+    expect(observed(w, await apply(w))).toEqual({ exit: 0, answer: [failure], state: [failure] })
+    expect(callsOf(w, 'effects')).toEqual([])
   })
 })
 

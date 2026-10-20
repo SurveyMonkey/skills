@@ -609,9 +609,11 @@ const effectsOf = async (run: Run): Promise<JsonValue[]> => {
       ? ok(shown.stdout)
       : failed(`git show HEAD:./${file} failed: ${outputOf(shown)}`)
   }
+  // Only the verb may answer `unsupported` for no effect. A tree that
+  // `detect` refuses here is a check that did not run.
   const tree = run.loaded.tree()
-  const answer =
-    tree.outcome === 'ok' ? await adapter.fixEffects(tree.value, driver.package, before) : tree
+  if (tree.outcome !== 'ok') return [{ type: 'fix_effects_failed', error: tree.error }]
+  const answer = await adapter.fixEffects(tree.value, driver.package, before)
   if (answer.outcome === 'ok') return answer.value.observations as unknown as JsonValue[]
   if (answer.outcome === 'unsupported') return []
   return [{ type: 'fix_effects_failed', error: answer.error }]
