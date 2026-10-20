@@ -27,11 +27,12 @@
 //     `fix-group.sh`, which the module keeps.
 // Two rows make `git worktree remove` fail part way: `worktree-remove-fails`
 // and `reap-worktree-remove-fails`. git deletes the files of the worktree in
-// the order that the file system lists them, so on Linux the `.git` file of
-// the worktree can go before the locked directory stops git. The capture was
-// made on macOS, where it stayed. For these two rows, the disk after is
-// compared without that one file, on both sides. This is git and the file
-// system, and not the port.
+// the order that the file system lists them, and stops at the locked
+// directory. So which files beside that directory stay is a matter of the
+// list order. The capture was made on macOS. On Linux the order changes from
+// one runner to the next (#340). For these two rows, the disk after is
+// compared without the files beside the locked directory, on both sides.
+// This is git and the file system, and not the port.
 //
 // The row `reap-no-work-flag` is a usage error of the script. The module has
 // no command line: `reap-batch` (#229) has one. So no row of the port runs it.
@@ -447,15 +448,13 @@ const comparable = (row: Row, result: Result): Result =>
 /** The rows where git stops part way through `worktree remove`. */
 const PART_WAY = new Set(['worktree-remove-fails', 'reap-worktree-remove-fails'])
 
-/** The disk after, without the `.git` file of a worktree that git removed part way. */
+/** The files of a worktree that git removed part way, beside its locked directory. */
+const BESIDE_LOCKED = /^f work\/\.claude\/worktrees\/fix-dependabot-example-pkg-6x\/fix\/[^/]+$/
+
+/** The disk after, without the files that the list order alone keeps or removes. */
 const afterOf = (row: Row, disk: Disk): Disk =>
   PART_WAY.has(row.name)
-    ? {
-        ...disk,
-        paths: disk.paths.filter(
-          (path) => path !== 'f work/.claude/worktrees/fix-dependabot-example-pkg-6x/fix/.git',
-        ),
-      }
+    ? { ...disk, paths: disk.paths.filter((path) => !BESIDE_LOCKED.test(path)) }
     : disk
 
 describe('parity with the capture of fix-group.sh cleanup and reap-agent-artifacts.sh', () => {
