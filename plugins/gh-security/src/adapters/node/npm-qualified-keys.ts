@@ -240,7 +240,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
         ),
       }))
       return failed(
-        `apply_constraint: cannot scope '${pkg}': npm can match a pre-existing version-qualified override key for its parent through the range of an edge into a copy, and the lockfile cannot show which key it matches: ${render(detail, null)}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
+        `apply_constraint: cannot scope '${pkg}': npm can match a pre-existing version-qualified override key for its parent through an edge into a copy, and the lockfile cannot show which key it matches: ${render(detail, null)}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
       )
     }
     const served = unique(

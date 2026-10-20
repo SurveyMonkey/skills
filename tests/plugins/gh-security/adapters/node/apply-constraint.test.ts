@@ -1108,7 +1108,7 @@ const rootSpec = (spec: string): Setup =>
   )
 
 const UNSURE = (detail: string): string =>
-  `apply_constraint: cannot scope 'smol-toml': npm can match a pre-existing version-qualified override key for its parent through the range of an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
+  `apply_constraint: cannot scope 'smol-toml': npm can match a pre-existing version-qualified override key for its parent through an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
 const OTHER = (detail: string): string =>
   `apply_constraint: cannot scope 'smol-toml': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
