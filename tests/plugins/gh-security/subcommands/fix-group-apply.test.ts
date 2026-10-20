@@ -9,7 +9,8 @@
 // real node adapter, with `why`, `declared_ranges`, `resolved_versions`,
 // `apply_constraint` and `validate` replaced. `install` is real. `detect`
 // is real too, with a count of its calls and a failure that an example can
-// put at one call. The package manager is a stand-in on PATH, because an install
+// put at one call. `fixEffects` gives a written answer, or runs the real verb
+// where an example asks for it. The package manager is a stand-in on PATH, because an install
 // reaches the network. git is real: each example runs in a repository with a
 // bare origin from `harness/git.ts`. The expected values are written by hand
 // from the contract in the header of `fix-group.ts`.
@@ -29,7 +30,7 @@ import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
 import { node } from '#gh-security/adapters/node.ts'
 import type { selectAdapter } from '#gh-security/adapters/registry.ts'
 import type { CommandContext, CommandResult } from '#gh-security/cli/command.ts'
-import { exitCodeFor, failed, type JsonValue, ok } from '#gh-security/lib/envelope.ts'
+import { exitCodeFor, failed, type JsonValue, ok, unsupported } from '#gh-security/lib/envelope.ts'
 import { run } from '#gh-security/lib/process.ts'
 import { fixGroup, fixGroupCommand } from '#gh-security/subcommands/fix-group.ts'
 import { FIXTURES_ROOT } from '#harness/fixtures.ts'
@@ -137,6 +138,12 @@ interface Script {
   on: Partial<Record<'apply' | 'validate', Record<number, () => void>>>
   /** The call of `detect`, counted from the start of `apply`, that fails. */
   failDetectAt: number | null
+  /**
+   * The `fixEffects` answer: written, `{ error }` for a failure, `real` for
+   * the node verb, `unsupported`, or `{ read }`, which reads one file of the
+   * last commit and records its text.
+   */
+  effects: Json | 'real' | 'unsupported' | { readonly read: string }
 }
 
 const script = (): Script => ({
@@ -172,10 +179,11 @@ const script = (): Script => ({
   validateFallback: null,
   on: {},
   failDetectAt: null,
+  effects: { pm: 'npm', package: 'lodash', observations: [] },
 })
 
 interface Call {
-  readonly verb: 'apply' | 'validate'
+  readonly verb: 'apply' | 'validate' | 'effects'
   readonly request: JsonValue
 }
 
@@ -195,11 +203,11 @@ interface World {
   detects: number
 }
 
-const world = (payload: Json = group()): World => {
+const world = (payload: Json = group(), fixture = 'npm-v3'): World => {
   const sandbox = createSandbox()
   const fixtures = createGitFixtures(sandbox)
   const repo = fixtures.create(join(realpathSync(sandbox.path), 'r'))
-  fixtures.importTree(repo, join(FIXTURES_ROOT, 'npm-v3'))
+  fixtures.importTree(repo, join(FIXTURES_ROOT, fixture))
   fixtures.push(repo)
   const bin = sandbox.stubPath(sandbox.join('bin'))
   writeFileSync(join(bin, 'npm'), FAKE_PM)
@@ -276,6 +284,20 @@ const route = (w: World): typeof selectAdapter => {
       if ('error' in answer) return failed(String(answer.error))
       return ok(answer as never)
     },
+    fixEffects: async (tree, pkg, before) => {
+      w.calls.push({ verb: 'effects', request: { root: tree.root, pkg } })
+      const effects = w.script.effects
+      if (effects === 'real') return node.fixEffects(tree, pkg, before)
+      if (effects === 'unsupported') return unsupported('npm', 'the stand-in does not check.')
+      if ('read' in effects) {
+        const file = String(effects.read)
+        const read = await before(file)
+        if (read.outcome !== 'ok') return read
+        w.calls.push({ verb: 'effects', request: { file, text: read.value } })
+        return ok({ pm: 'npm', package: pkg, observations: [] })
+      }
+      return 'error' in effects ? failed(String(effects.error)) : ok(effects as never)
+    },
   }
   return ((ecosystem: string) => ({
     supported: true,
@@ -351,8 +373,12 @@ const apply = (w: World, env = w.env): Promise<Answer> => {
 }
 
 /** A world through `baseline`, ready for `apply`. */
-const ready = async (edit: (s: Script) => void = () => {}, payload?: Json): Promise<World> => {
-  const w = world(payload)
+const ready = async (
+  edit: (s: Script) => void = () => {},
+  payload?: Json,
+  fixture?: string,
+): Promise<World> => {
+  const w = world(payload, fixture)
   edit(w.script)
   await throughBaseline(w)
   return w
@@ -1793,6 +1819,146 @@ describe('the remediation ladder', () => {
   })
 })
 
+describe('the effects of the fix (#334)', () => {
+  const OBSERVED = [
+    { type: 'unscoped_override', key: 'lodash', range: '^4', targets_this_package: true },
+  ]
+  const STALE = {
+    type: 'stale_qualified_override',
+    key: 'nx@22.7.7',
+    parent: 'nx',
+    selector: '22.7.7',
+    installed: ['22.7.10'],
+  }
+
+  /** The observations of the answer, and of `apply_result` in the state. */
+  const observed = (w: World, answer: Answer) => ({
+    exit: answer.status,
+    answer: answer.json.observations,
+    state: (stateOf(w).apply_result as Json).observations,
+  })
+
+  // The tree before the fix is the specimen of the field run. The fix install
+  // writes the lockfile of the field fix, and `apply_constraint` its manifest.
+  it('names the stale key and each downgrade of the field fix, on real npm runs', async () => {
+    const after = join(FIXTURES_ROOT, 'npm-stale-qualified-key')
+    // The group stays the lodash group. nx moves up, so the target that the
+    // verb leaves out changes nothing here.
+    const w = world(group(), 'npm-stale-qualified-key-before')
+    w.script.effects = 'real'
+    w.script.on.apply = {
+      1: () =>
+        writeFileSync(join(w.worktree, 'package.json'), readFileSync(join(after, 'package.json'))),
+    }
+    install(w, 1, ':\n')
+    install(w, 2, `cp '${join(after, 'package-lock.json')}' package-lock.json\n`)
+    await throughBaseline(w)
+    const answer = await apply(w)
+    const effects = [
+      STALE,
+      {
+        type: 'untargeted_downgrade',
+        package: 'axios',
+        path: 'node_modules/axios',
+        before: '1.20.0',
+        after: '1.18.1',
+      },
+      {
+        type: 'untargeted_downgrade',
+        package: 'brace-expansion',
+        path: 'node_modules/nx/node_modules/brace-expansion',
+        before: '5.0.12',
+        after: '5.0.8',
+      },
+    ]
+    expect(observed(w, answer)).toEqual({ exit: 0, answer: effects, state: effects })
+    // A report only: the labels stay as they were (ruling 4).
+    expect(pick(answer, 'action', 'bare_override')).toEqual({
+      exit: 0,
+      action: 'scoped-override',
+      bare_override: 'none',
+    })
+  })
+
+  it('puts the effects after the observations of apply_constraint', async () => {
+    const w = await ready((s) => {
+      s.apply = [applyAnswer(SCOPED, OBSERVED)]
+      s.effects = { pm: 'npm', package: 'lodash', observations: [STALE] }
+    })
+    expect(observed(w, await apply(w))).toEqual({
+      exit: 0,
+      answer: [...OBSERVED, STALE],
+      state: [...OBSERVED, STALE],
+    })
+    // The pre-fix observations are those of the first apply_constraint.
+    expect(stateOf(w).observations_first).toEqual(OBSERVED)
+  })
+
+  it('names a check that fails, and still answers ok', async () => {
+    const w = await ready((s) => {
+      s.effects = { error: 'fix_effects: the stand-in cannot read.' }
+    })
+    const failure = { type: 'fix_effects_failed', error: 'fix_effects: the stand-in cannot read.' }
+    expect(observed(w, await apply(w))).toEqual({ exit: 0, answer: [failure], state: [failure] })
+  })
+
+  // The stand-in install writes a lockfile with no packages.
+  it('names the failure of the real verb on a lockfile with no packages', async () => {
+    const w = await ready((s) => {
+      s.effects = 'real'
+    })
+    const failure = {
+      type: 'fix_effects_failed',
+      error: 'fix_effects: the package-lock.json of the last commit holds no packages.',
+    }
+    expect(observed(w, await apply(w))).toEqual({ exit: 0, answer: [failure], state: [failure] })
+  })
+
+  it('names a file that the last commit does not have', async () => {
+    const w = await ready((s) => {
+      s.effects = { read: 'no-such-file' }
+    })
+    const answer = await apply(w)
+    expect(answer.status).toBe(0)
+    expect(answer.json.observations).toEqual([
+      {
+        type: 'fix_effects_failed',
+        error: expect.stringMatching(/^git show HEAD:\.\/no-such-file failed: fatal: /),
+      },
+    ])
+  })
+
+  // The last commit is the drift commit of the control install.
+  it('reads each file as the last commit has it', async () => {
+    const w = await ready((s) => {
+      s.effects = { read: 'package-lock.json' }
+    })
+    expect((await apply(w)).status).toBe(0)
+    expect(callsOf(w, 'effects')).toEqual([
+      { root: w.worktree, pkg: 'lodash' },
+      { file: 'package-lock.json', text: '{"lockfileVersion":3,"n":1}\n' },
+    ])
+  })
+
+  it('adds nothing when the adapter does not support the check', async () => {
+    const w = await ready((s) => {
+      s.effects = 'unsupported'
+    })
+    expect(observed(w, await apply(w))).toEqual({ exit: 0, answer: [], state: [] })
+  })
+
+  it('names the failure of detect before the check', async () => {
+    const w = await ready((s) => {
+      s.failDetectAt = 4
+    })
+    expect(observed(w, await apply(w))).toEqual({
+      exit: 0,
+      answer: [{ type: 'fix_effects_failed', error: 'detect: the stand-in found no lockfile' }],
+      state: [{ type: 'fix_effects_failed', error: 'detect: the stand-in found no lockfile' }],
+    })
+  })
+})
+
 describe('the empty diff', () => {
   // The drift commit of `baseline` took any ambient drift. So an empty
   // porcelain here means that the fix install changed nothing (#146).
@@ -1924,6 +2090,8 @@ describe('the empty diff', () => {
       bare_override: 'none',
     })
     expect(stateOf(w).action).toBe('lockfile-refresh')
+    // The fix changed nothing, so it has no effect to compare (#334).
+    expect(callsOf(w, 'effects')).toEqual([])
   })
 
   // The specimen is the field shape: two versions of the line before the
