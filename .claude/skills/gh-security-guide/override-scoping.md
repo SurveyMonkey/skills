@@ -79,6 +79,15 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   when that key pins a DIFFERENT line, since deleting it strips that line's protection and
   keeping it smothers this fix.
 
+  npm uses the first key of the block that matches a copy of a parent, and the other keys for
+  that parent have no effect on it (npm 11.19.0, issues #333 and #295). So a version-qualified
+  key that the manifest already has, such as `"nx@22.7.7": {...}`, wins over a new bare key
+  after it. When such a key comes first for a copy on the line, `apply_constraint` writes the
+  constraint inside it, with the `"."` rule of a placing rule for a text value, and drops each new
+  key that would reach no other copy. A bare pair on the line after it is superseded. The call
+  refuses when that key also comes first for a copy on another line, or holds a pin on another
+  line. A key with an object value and no `"."` also sets the copy it matches to its selector.
+
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
   such a node to the rule that placed it, so a top-level key never matches it, qualified or bare,
