@@ -253,7 +253,7 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     }
     const existing = query.qualifiedKeys.get(parent)
     if (existing !== undefined) {
-      // A bare pair after the keys has no effect when they serve each copy.
+      // A bare pair after the keys has no effect when they serve each copy on the line.
       if (existing.supersedeBare) supersedePair(parent, key)
       for (const outer of existing.keys) putRuleNested(parent, [outer], key, value)
       if (!existing.rest) return

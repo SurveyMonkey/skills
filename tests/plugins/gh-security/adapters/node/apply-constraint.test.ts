@@ -1071,8 +1071,8 @@ describe('npm constraint nests inside a pre-existing override that places the pa
 // is. The fixture keeps the root, nx, smol-toml and axios entries of that
 // lockfile, each as npm wrote it. nx 22.7.7 pins smol-toml at 1.6.1. In the
 // same runs, a bare `nx` key after the `nx@22.7.7` key kept smol-toml at
-// 1.6.1, and the constraint inside `nx@22.7.7` gave 1.9.1. npm uses the
-// first key of the block that matches a copy of the parent.
+// 1.6.1. The constraint inside `nx@22.7.7` gave 1.9.1. npm uses the first
+// key of the block that matches a copy of the parent.
 const QUALIFIED = 'npm-qualified-parent-key'
 
 const smolToml = ['smol-toml', '>=1.9.0 <2', 'nx']

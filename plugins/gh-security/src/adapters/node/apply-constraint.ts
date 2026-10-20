@@ -8,7 +8,7 @@
 //   alias-keys.ts               the declared keys of the root and the parents
 //   npm-placement.ts            the npm parents that a rule places
 //   parent-qualifiers.ts        the version qualifiers of pnpm and npm
-//   npm-qualified-keys.ts       the qualified npm parent keys that are there
+//   npm-qualified-keys.ts       the qualified npm parent keys that npm matches first
 //   override-pass.ts            the write of the manifest
 //   workspace-write.ts          the write of pnpm-workspace.yaml
 //   lockfile-invalidation.ts    the stale npm lockfile entries
@@ -30,12 +30,13 @@
 // `@`, node.sh writes a qualified key for each copy there.
 //
 // Declared parity exception (#333, #295). npm uses the first key of the
-// block that matches a copy of a parent. Where the manifest has a
-// version-qualified key for an npm parent, such as `"nx@22.7.7": {...}`, and
-// that key comes first for a copy, the port writes the constraint inside it.
-// node.sh writes a new key after it, which has no effect on that copy. The
-// port also refuses where such a key matches a copy on another major line,
-// or has a pin for the package on another line.
+// block that matches a copy of a parent. The manifest can have a
+// version-qualified key for an npm parent, such as `"nx@22.7.7": {...}`.
+// When that key comes first for a copy, the port writes the constraint
+// inside it. node.sh writes a new key after it, which has no effect on that
+// copy. The port refuses four shapes that `npm-qualified-keys.ts` names.
+// One is such a key that also comes first for a copy whose child is on
+// another major line. Another is a pin in that key on another line.
 //
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
@@ -240,7 +241,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       if (refusal !== null) throw new Error(refusal.error)
     }
   }
-  // The qualified npm parent keys that are there come first for a copy (#333).
+  // Find the qualified npm parent keys that npm matches first for a copy (#333).
   let qualifiedKeys: ReadonlyMap<string, QualifiedKeys> = new Map()
   if (location === 'overrides' && parents.length > 0) {
     const found = orStop(

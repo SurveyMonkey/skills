@@ -79,14 +79,22 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   when that key pins a DIFFERENT line, since deleting it strips that line's protection and
   keeping it smothers this fix.
 
-  npm uses the first key of the block that matches a copy of a parent, and the other keys for
-  that parent have no effect on it (npm 11.19.0, issues #333 and #295). So a version-qualified
-  key that the manifest already has, such as `"nx@22.7.7": {...}`, wins over a new bare key
-  after it. When such a key comes first for a copy on the line, `apply_constraint` writes the
-  constraint inside it, with the `"."` rule of a placing rule for a text value, and drops each new
-  key that would reach no other copy. A bare pair on the line after it is superseded. The call
-  refuses when that key also comes first for a copy on another line, or holds a pin on another
-  line. A key with an object value and no `"."` also sets the copy it matches to its selector.
+  npm uses the first key of the block that matches a copy of a parent. The other keys for that
+  parent have no effect on it (npm 11.19.0, issues #333 and #295). So a version-qualified key
+  that the manifest has, such as `"nx@22.7.7": {...}`, wins over a new bare key after it. When
+  such a key comes first for a copy on the line, `apply_constraint` writes the constraint inside
+  it. A text value moves to the `"."` entry, as for a rule that places a parent. The call drops
+  each new key that would reach no other copy. When the keys serve each copy on the line, the
+  call supersedes a bare pair on the line after them.
+
+  npm matches a key by the range of the edge to the copy, and the lockfile does not give that
+  range. So `apply_constraint` reads the version of the copy. The two agree when the selector
+  admits the copy. In npm, a matched key also moves the copy to its `"."` value, or to its
+  selector when it has no `"."`. A key whose selector does not admit the copy, but whose value
+  does, can match through the edge. Real runs showed both results, so the call refuses that key.
+  It also refuses when the key comes first for a copy whose child is on another line, or holds
+  a pin on another line. It refuses a key that serves a copy when the parent also has a copy
+  with no version in the lockfile.
 
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
