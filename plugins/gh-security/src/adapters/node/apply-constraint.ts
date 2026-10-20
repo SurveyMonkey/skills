@@ -16,8 +16,9 @@
 // The observations of this verb are the entries that it saw before the
 // install that follows it (`constraint-observations.ts`). A
 // version-qualified key that a parent bump makes stale, and a package that
-// the install moves down, show only after the install. `fixEffects` (`fix-effects.ts`) names them, as
-// `stale_qualified_override` and `untargeted_downgrade` (#334).
+// the install moves down, show only after the install. `fixEffects`
+// (`fix-effects.ts`) names them, as `stale_qualified_override` and
+// `untargeted_downgrade` (#334).
 //
 // It is a write verb, so it refuses outside a linked worktree (ADR 001,
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh

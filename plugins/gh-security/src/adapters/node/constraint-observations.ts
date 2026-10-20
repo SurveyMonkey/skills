@@ -12,10 +12,11 @@
 //   - `pnpm_major_unknown`: the block is in package.json only because
 //     `packageManager` pins no pnpm major (#159).
 //
-// The fix driver adds more kinds after the fix install, which this verb
-// cannot see (#334). `fixEffects` (`fix-effects.ts`) gives
-// `stale_qualified_override` and `untargeted_downgrade`. `fix-group apply`
-// gives `fix_effects_failed` when that check fails.
+// The fix driver adds more kinds after validate passes on a changed
+// worktree, which this verb cannot see (#334). `fixEffects`
+// (`fix-effects.ts`) gives `stale_qualified_override` and
+// `untargeted_downgrade`. `fix-group apply` gives `fix_effects_failed` when
+// that check fails, or when `detect` refuses the tree.
 //
 // This file ships. It imports nothing outside the plugin.
 

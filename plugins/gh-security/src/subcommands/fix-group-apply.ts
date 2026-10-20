@@ -18,13 +18,13 @@
 // tree with the last commit (#334). That commit is the tree after the
 // control install. The verb names each version-qualified key that the fix
 // made stale. It also names each package that went down, and that the fix
-// did not target. These observations go after those of `apply_constraint`,
-// in the answer and in `apply_result`. So `score` gives them to the PR body.
-// They are a report only, and change no label and no step (ruling 4). A
-// check that fails is one more observation, `fix_effects_failed`, with the
-// error. A tree that `detect` refuses gives `fix_effects_failed` too. A
-// check that the adapter does not support for the package manager adds
-// nothing.
+// did not target.
+//
+// These observations go after those of `apply_constraint`, in the answer
+// and in `apply_result`. So `score` gives them to the PR body. They are a
+// report only, and change no label and no step (ruling 4). A check that
+// fails, or a tree that `detect` refuses, gives `fix_effects_failed` with
+// the error. A check that the adapter does not support adds nothing.
 //
 // The adapter verbs run in process. The package manager that `install`
 // starts and the git calls run under the prefix. `apply` runs two git
@@ -599,7 +599,7 @@ const unchanged = (run: Run, drift: boolean): Stop | CommandResult | null => {
   return verdict === 'no_op' ? noOp(run, drift) : null
 }
 
-/** The observation of a check that did not run, with its error. */
+/** The observation of a check that failed or did not run, with its error. */
 const failedCheck = (error: string): JsonObject => {
   const failure: FixEffectsFailed = { type: 'fix_effects_failed', error }
   return failure
