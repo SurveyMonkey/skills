@@ -3,8 +3,7 @@
 // an example gives a client from `harness/gh.ts` and real git. `gh` is the one
 // mock boundary (`mocking.md`). Each repository is real (`harness/git.ts`), and
 // each expected report is written by hand from the contract in the header of
-// the command. `parity-reap-batch.test.ts` compares the command with the
-// capture of `post-agent.sh`.
+// the command.
 import {
   chmodSync,
   existsSync,

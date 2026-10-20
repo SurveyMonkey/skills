@@ -10,11 +10,10 @@ rather than a tidier version of them.
 Everything else is used for real:
 
 - **Not a collaborator you own**, a module the caller imports or a sibling script it resolves by
-  path. `post-agent.sh` resolves `pr-status.sh` and `reap-agent-artifacts.sh` as siblings of
-  its own path: run the real one. `spec/post_agent_spec.sh` does exactly that, copying both
-  collaborators verbatim next to a scratch copy of the script under test. A mocked collaborator
-  tests the caller against a shape nothing emits, which is how two scripts that each pass their
-  own suite disagree in the field.
+  path. `src/post-agent.ts` imports the `pr-status` reader and the reap of `src/reap.ts`: run the
+  real ones. The `reap-batch` examples do exactly that, with real git and a mocked `gh`. A mocked
+  collaborator tests the caller against a shape nothing emits, which is how two units that each
+  pass their own suite disagree in the field.
   Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh` and
   `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their own
   seam and never against a mock of the other.

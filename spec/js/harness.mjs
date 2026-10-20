@@ -132,9 +132,9 @@ export function noOpResult(over = {}) {
   }
 }
 
-// A `fix-group.sh cleanup` report as the driver emits it on exit 3, minus
-// the `status`/`step` the Result contract strips. Trimmed from the driver's
-// own jq output rather than invented.
+// A `fix-group cleanup` report as the command emits it on exit 3, minus
+// the `status`/`step` the Result contract strips. Trimmed from the real
+// output rather than invented.
 export function cleanupReport(over = {}) {
   return {
     // Resolved paths, as the driver emits them: on macOS the same directory

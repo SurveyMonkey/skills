@@ -3,7 +3,6 @@
 // in its own sandbox. A git failure comes from the git shim of that harness
 // on PATH. The expected values are written by hand from the header of
 // `src/reap.ts`. Each refusal also proves that the disk did not change.
-// `parity-reap.test.ts` compares the module with the capture of the bash.
 import {
   chmodSync,
   existsSync,

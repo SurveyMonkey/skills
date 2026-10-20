@@ -4,8 +4,6 @@
 // worktree in a repository with a bare origin from `harness/git.ts`. A git
 // failure comes from the git shim of that harness on PATH. The expected
 // values are written by hand from the header of `fix-group.ts`.
-// `parity-reap.test.ts` compares the port with the capture of
-// `fix-group.sh cleanup`.
 import {
   chmodSync,
   cpSync,
