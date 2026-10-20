@@ -330,7 +330,7 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     # means reading a second output, or the two paragraphs below stop the
     # audit on a null that describes the wrong path.
     It 're-runs detect-scope against the checkout the user names'
-      When call phrase_in "$CMD" 'Re-run .detect-scope.sh <that checkout>. and read .nwo., .default_branch.'
+      When call phrase_in "$CMD" 'Re-run .detect-scope. against that checkout and read .nwo., .default_branch.'
       The status should be success
       The output should equal '1'
     End

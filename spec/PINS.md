@@ -247,8 +247,8 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 160 | grants gh issue create | judgment | - |
 | 166 | grants gh issue comment | judgment | - |
 | 174 | points at the same practice for a contract-violation-shaped defect | judgment | - |
-| 180 | gives a readable path to resolve-alerts/SKILL.md | judgment | - |
-| 186 | refers to the named Filing a skill-defect report section, not "Phase 7" generally, and says to read it first | judgment | - |
+| 180 | gives a readable path to resolve-alerts/defect-report.md | judgment | - |
+| 186 | forbids re-deriving the rules in the audit skill | judgment | - |
 
 ### `spec/merge_risk_labels_spec.sh`: 17 pins (17 judgment, 0 mechanical)
 

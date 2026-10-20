@@ -4,7 +4,7 @@
 # (issue #148). Nothing in a script enforces this: the guidance is prose in
 # resolve-alerts/defect-report.md, which SKILL.md's phase 7 links (#237),
 # referenced (not duplicated) from
-# audit-pins.md, so the sentences are the whole implementation and their
+# skills/audit-pins/SKILL.md, so the sentences are the whole implementation and their
 # absence is the whole regression. reference_scrub_spec.sh already gates the
 # real internal slugs this guidance must never spell; this file asserts the
 # guidance itself exists and states its scrub, consent, and identity rules
@@ -170,21 +170,21 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
     End
   End
 
-  Describe 'audit-pins.md carries a reference block, not a duplicate'
+  Describe 'skills/audit-pins/SKILL.md carries a reference, not a duplicate'
     It 'points at the same practice for a contract-violation-shaped defect'
-      When call phrase_in "$AUDIT_CMD" 'checked against this repository'"'"'s issues and filed or'
+      When call phrase_in "$AUDIT_CMD" 'shows the audit'"'"'s own logic misbehaved rather than the target repo'"'"'s state'
       The status should be success
       The output should equal '1'
     End
 
-    It 'gives a readable path to resolve-alerts/SKILL.md'
-      When call phrase_in "$AUDIT_CMD" 'rules .*{CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/SKILL\.md. states in its'
+    It 'gives a readable path to resolve-alerts/defect-report.md'
+      When call phrase_in "$AUDIT_CMD" '{CLAUDE_PLUGIN_ROOT}/skills/resolve-alerts/defect-report\.md. first, and follow it'
       The status should be success
       The output should equal '1'
     End
 
-    It 'refers to the named Filing a skill-defect report section, not "Phase 7" generally, and says to read it first'
-      When call phrase_in "$AUDIT_CMD" 'Filing a skill-defect report section — read that section before drafting anything, and never re-derive the rules here'
+    It 'forbids re-deriving the rules in the audit skill'
+      When call phrase_in "$AUDIT_CMD" 'Never re-derive its rules here'
       The status should be success
       The output should equal '1'
     End
