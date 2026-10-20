@@ -17,7 +17,8 @@ fix agent it dispatches has its own flow, [fix-dependency-agent-flow.md](fix-dep
 |---|---|
 | [`plugins/gh-security/skills/resolve-alerts/SKILL.md`](../../../../plugins/gh-security/skills/resolve-alerts/SKILL.md) | The orchestrator's phases. |
 
-**A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
+**A boxed region is executed, not instructed.** Everything inside one runs as a tested CLI command
+(`node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" <command>`, written `node <entry>` below) or
 workflow (`workflows/fix-groups.mjs`), with
 its branches decided in code and covered by the suite. Everything outside is prose a model reads
 and follows, which is why the unboxed nodes are the ones that ask the user something, write PR
@@ -33,7 +34,7 @@ them.
 Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
 decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
 approval, and phase 8's offer of the groups declined at phase 3. Phase 1 asks nothing: scope is the
-checkouts on disk, read by `discover-repos.sh`, and nothing is ever cloned
+checkouts on disk, read by `discover-repos`, and nothing is ever cloned
 ([ADR 011](../../../adr/011-scope-is-the-checkouts-on-disk.md)).
 
 **No ask is about a pull request that already exists.** Phase 4 is the last one that gates a fix PR
@@ -46,11 +47,11 @@ all ([issue #108](https://github.com/SurveyMonkey/skills/issues/108)): it is ent
 
 Three branches exclude a whole checkout's groups without ending the run: phase 1's unusable
 checkouts (no `nwo` from origin, no resolvable default branch, or a branch-namespace probe that
-failed twice), phase 2's pipeline failing for that checkout (a non-zero exit from
-`discover-alerts.sh`, `select-adapter.sh` or `classify-lines.sh`), and phase 5's registry probe
-failing twice for that repo, the adapter `detect` that resolves the probe's package manager
-included. They are drawn as plain nodes for that reason, and the excluded checkout is reported by
-name while the others carry on. Separately, `classify-lines.sh` withdraws individual groups
+failed twice), the discovery or classification of that checkout failing (both are steps of
+`prepare-checkout`, which answers `excluded: true` with the reason), and `preflight-repo` failing
+for that repo (a non-zero exit, or `ok: false`: the adapter `detect` or a registry probe that failed
+twice). The excluded checkout is reported by name while the others carry on. Separately,
+`prepare-checkout`'s classification withdraws individual groups
 (`requires_major_bump`, `cross_line_collision`) without excluding their checkout; those are drawn at
 `P2W` and `P2WC`. Everything that can withdraw a group now runs before the ranked table, so the
 plan approved at phase 4 is final rather than provisional.
@@ -58,21 +59,19 @@ plan approved at phase 4 is final rather than provisional.
 ```mermaid
 flowchart TD
     START["/gh-security:resolve-alerts, or a natural-language ask"] --> P1
-    P1["Phase 1: discover-repos.sh"] --> P1F{"discover-repos.sh exit status"}
+    P1["Phase 1: node &lt;entry&gt; discover-repos CWD"] --> P1F{"discover-repos exit status"}
     P1F -->|"non-zero: a git failure, or a target that is<br/>unreadable or not a directory"| STOPD(["Stop: report the script's error;<br/>nothing is in scope"])
     P1F -->|zero| P1Q{"any checkout roots?"}
     P1Q -->|"none"| STOP0(["Stop: no git repositories<br/>directly inside the current directory"])
-    P1Q -->|"one or more"| P1E["Per checkout root: env_prefix first, from what session context<br/>states for that tree, then detect-scope.sh for nwo and<br/>default_branch, then the ls-remote branch-namespace probe.<br/>The orchestrator's own gh/git/script calls for that repo<br/>run under its prefix from the start"]
-    P1E --> P1R{"per root: nwo, default_branch<br/>and probe all usable?"}
-    P1R -->|"null nwo, null default_branch,<br/>or the probe failed twice"| P1X["Reported by name and excluded;<br/>the other roots continue"]
+    P1Q -->|"one or more"| P1E["Per checkout root: env_prefix first, from what session context<br/>states for that tree, then node &lt;entry&gt; prepare-checkout<br/>[--env-prefix P] ROOT: identity, default branch, the branch-namespace<br/>probe, discovery and classification, all under the prefix"]
+    P1E --> P1R{"per root: excluded: true?"}
+    P1R -->|"no usable origin, no default branch,<br/>probe failed twice, or discovery<br/>or classification failed"| P1X["Reported by name with reason and stderr,<br/>and excluded; the other roots continue"]
     P1X --> P1S{"any root left?"}
     P1S -->|no| STOP1(["Stop: every checkout was excluded,<br/>each reported by name"])
     P1S -->|yes| P2
-    P1R -->|yes| P2
+    P1R -->|"no: kept"| P2
 
-    P2["Phase 2: per surviving checkout: discover-alerts.sh<br/>| select-adapter.sh | classify-lines.sh --base-ref"] --> P2F{"pipeline exit status<br/>for that checkout"}
-    P2F -->|"non-zero from discover-alerts.sh,<br/>select-adapter.sh or classify-lines.sh"| P2FX["That checkout is reported by name and excluded;<br/>the other checkouts continue"] --> P7AGG
-    P2F -->|zero| P2R{"classify-lines verdict<br/>per group, before the table"}
+    P2["Phase 2: node &lt;entry&gt; merge-envelopes<br/>CHECKOUT-1.json CHECKOUT-2.json ..."] --> P2R{"classification verdict<br/>per group, before the table"}
     P2R -->|requires_major_bump| P2W["Withdrawn before the plan is shown;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
     P2R -->|cross_line_collision| P2WC["Withdrawn before the plan is shown; reported in<br/>phase 7 under 'shared parent across major lines'<br/>with collision_parents"] --> P7AGG
     P2R -->|"remaining groups"| P2REP["Report every excluded checkout by name"]
@@ -85,19 +84,23 @@ flowchart TD
     P3ASK -->|"Highest tier"| P4
     P3ASK -->|Everything| P4
 
-    P4["Phase 4: detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve the batch?"}
+    P4["Phase 4: scripts/common/detect-capacity.sh, present the plan"] --> P4ASK1{"ask: approve the batch?"}
     P4ASK1 -->|approve| P4OK
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
     P4OK["Batch approved"] --> P5
 
-    P5["Phase 5: per distinct repo in the approved batch:<br/>ensure-worktree-exclude.sh before the first agent for that repo<br/>(failure non-fatal, dispatch anyway), then the registry probe"] --> P6P{"Registry probe per repo, from inside repo_root,<br/>under env_prefix: pm_exec view on a scoped dependency,<br/>or the top-ranked package; one retry"}
-    P6P -->|"fails twice: auth 401/403, not-found 404,<br/>or network"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
-    P6P -->|green| P6Q["Phase 6 dispatch list: every approved group across<br/>every repo, in ranked order, one payload each"]
+    P5["Phase 5: per distinct repo in the approved batch:<br/>node &lt;entry&gt; preflight-repo [--env-prefix P]<br/>--fallback-package PKG ROOT: worktree exclude (a failure is<br/>reported, not fatal), detect, registry probe with one retry"] --> P6P{"preflight answer"}
+    P6P -->|"non-zero exit, or ok: false<br/>(detect, start, auth, not-found or network)"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
+    P6P -->|"ok: true"| P6Q["Phase 6: node &lt;entry&gt; build-dispatches --envelope MERGED.json<br/>--cap N [--env-prefixes PREFIXES.json] REPO:BRANCH ...:<br/>every approved group across every repo, in ranked order"]
     P6Q --> P6D["One Workflow call, machine-wide: cap workers over the list,<br/>one fix-dependency agent per group, each result<br/>schema-validated against the agent Result contract"]
-    P6D --> P6R["Per returned entry: one post-agent.sh call<br/>(PR verified, then reap or leave, always reported)"]
+    P6D --> P6I{"returned one entry per dispatch?"}
+    P6I -->|"threw, cancelled or short"| P6J{"resume from runId?<br/>(ask first if the user interrupted)"}
+    P6J -->|yes| P6D
+    P6J -->|"no: a null entry for each<br/>dispatch with none"| P6R
+    P6I -->|yes| P6R["node &lt;entry&gt; reap-batch RESULTS.json<br/>(PR verified, then reap or leave, always reported)"]
     P6R --> P7
 
-    P7["Phase 7: read the workflow's returned entries"] --> P7Q{"per entry"}
+    P7["Phase 7: node &lt;entry&gt; summarize-run --workflow WORKFLOW.json<br/>--reports REPORTS.json --discovery MERGED.json<br/>--preflight PREFLIGHTS.json --args ARGS.json"] --> P7Q{"per entry"}
     P7Q -->|success| P7S["Fix table row: PR, risk, F4/F5, bare-override note"]
     P7Q -->|"no-op"| P7N["Its own 'already fixed' line,<br/>never the failure list"]
     P7Q -->|failure| P7F["Failure list: phase + detail"]
@@ -112,12 +115,21 @@ flowchart TD
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
     P8ASK0 -->|yes| P3
     P8ASK0 -->|no| P8REP
-    P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); pr-status.sh on every success PR:<br/>checks, merge_state, reported as information"]
+    P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); per repo node &lt;entry&gt; pr-status<br/>[--env-prefix P] URL ..., then node &lt;entry&gt; render-pr-status<br/>--bands BANDS.json PR-STATUS-1.json ...:<br/>reported as information"]
     P8REP --> DONE
     DONE(["Done: every PR URL with its band and check state,<br/>every excluded checkout, and what would unblock each"])
 
-    subgraph WFBOX["workflows/fix-groups.mjs — tested JavaScript, not model-executed prose"]
+    subgraph WFBOX["workflows/fix-groups.mjs: tested JavaScript, not model-executed prose"]
         P6D
+    end
+
+    subgraph CLIBOX["gh-security CLI commands: tested TypeScript"]
+        P1
+        P2
+        P5
+        P6Q
+        P6R
+        P7
     end
 ```
 
@@ -149,9 +161,8 @@ Run outcomes for the orchestrator:
 | Batch declined | Phase 4 | Nothing dispatched; no agent ever ran |
 | Done | Phase 8 | Every PR URL with its band and check state, remaining skipped repos, what unblocks each |
 
-Everything else is per repo, and the run continues past it: a phase 5 checkout conflict, an
-unresolvable default branch, or a phase 6 registry probe that fails twice excludes that repo's
-groups only. Nothing about a PR can withhold
+Everything else is per repo, and the run continues past it: an excluded checkout in phase 1, or a
+`preflight-repo` failure in phase 5, excludes that repo's groups only. Nothing about a PR can withhold
 anything any more — there is no offer left to withhold, so a red check is reported and the run ends
 normally.
 
