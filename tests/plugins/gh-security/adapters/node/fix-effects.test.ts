@@ -372,7 +372,7 @@ describe('fixEffects, the dependents it compares', () => {
       const text = await BEFORE(file)
       if (file !== 'package-lock.json' || text.outcome !== 'ok') return text
       const lock = JSON.parse(text.value) as Json
-      ;((lock.packages as Record<string, Json>)['node_modules/axios'] as Json).version = 'latest'
+      ;((lock.packages as Record<string, Json>)['node_modules/axios'] as Json).version = '2.x'
       return ok(JSON.stringify(lock))
     }
     const found = await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), before))
