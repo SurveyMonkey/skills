@@ -657,6 +657,16 @@ describe('reap', () => {
       { streamErrors: [{ code: 'EIO', message: 'read EIO' }] },
       'a pipe failed: EIO, read EIO',
     ],
+    [
+      'git exits 0 and a stream is lost',
+      { status: 0, streamErrors: [{ code: 'EIO', message: 'read EIO' }] },
+      'a pipe failed: EIO, read EIO',
+    ],
+    [
+      'git does not start',
+      { status: null, startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' } },
+      'spawn git ENOENT',
+    ],
   ])('keeps the branch, and names the read, when %s', async (_name, answer, words) => {
     const w = world()
     addWorktree(w)

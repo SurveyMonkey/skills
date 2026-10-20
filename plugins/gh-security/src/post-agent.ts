@@ -52,7 +52,8 @@
 // `ENOENT` and `ENOTDIR` make a path absent. A stat that fails for another
 // reason, such as `EACCES`, is a failed read. Only exit 1 with no text and no
 // stream error is an absent branch. A signal, another exit, or a lost stream
-// is a failed read, which `src/reap.ts` reads as absent.
+// is a failed read. `refReadFailure` in `src/reap.ts` holds this rule for
+// both files.
 //
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script

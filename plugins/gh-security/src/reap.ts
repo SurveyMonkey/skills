@@ -322,11 +322,11 @@ const removeWork = (work: string, blocked: boolean): Step<WorkDirAction> => {
 }
 
 /**
- * Why a failed `git rev-parse --verify --quiet` read of a ref is a failed
- * read, or `null` when the ref is absent. `--quiet` answers a missing ref
- * with exit 1 and no text. Any text, any other exit, a signal, a lost
- * stream, or a git that did not start, is a failed read. A caller handles
- * exit 0 before it calls this.
+ * The failure of a `git rev-parse --verify --quiet` read of a ref, or `null`
+ * when the ref is absent. `--quiet` answers a missing ref with exit 1 and no
+ * text. Any text, any other exit, a signal, a lost stream, or a git that did
+ * not start, is a failed read. A caller handles a good read before it calls
+ * this.
  */
 export const refReadFailure = (read: RunResult): string | null => {
   const text = oneLine(
@@ -347,7 +347,10 @@ const readRef = async (
   ref: string,
 ): Promise<{ readonly tip: string | null; readonly error: string | null }> => {
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
-  if (read.status === 0) return { tip: read.stdout.trim(), error: null }
+  // A lost stream on exit 0 can lose the tip. The read then failed.
+  if (read.status === 0 && read.streamErrors.length === 0) {
+    return { tip: read.stdout.trim(), error: null }
+  }
   const failure = refReadFailure(read)
   return failure === null
     ? { tip: null, error: null }
