@@ -114,7 +114,7 @@ const reaches = ({ lock, overrides }: Side, parent: string, selector: string): b
     tighten: true,
   }).get(parent)
   return lock.entries
-    .filter(([path]) => path !== '' && lastSegment(path) === parent)
+    .filter(([path]) => lastSegment(path) === parent)
     .filter(
       ([, entry]) =>
         placement === undefined ||
@@ -130,7 +130,7 @@ const staleKeys = (before: Side, after: Side): FixObservation[] =>
     if (selector === null || reaches(after, name, selector)) return []
     if (has(before.overrides, key) && !reaches(before, name, selector)) return []
     const installed = after.lock.entries
-      .filter(([path]) => path !== '' && lastSegment(path) === name)
+      .filter(([path]) => lastSegment(path) === name)
       .map(([, entry]) => or(get(entry, 'version'), null))
       .filter((version): version is string => typeof version === 'string')
     return [

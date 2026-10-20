@@ -331,6 +331,58 @@ describe('fixEffects, the versions it compares', () => {
   })
 })
 
+describe('fixEffects, the dependents it compares', () => {
+  // The direct bump moved the root semver from 7.8.5 to 7.7.4. No dependent
+  // at the same path got the lower copy, so the verb names none.
+  it('does not compare a dependent at a new path', async () => {
+    const dir = copyOf(
+      'npm-stale-qualified-key-direct',
+      editJson('package-lock.json', (lock) => {
+        const packages = lock.packages as Record<string, Json>
+        packages['node_modules/zed'] = { version: '1.0.0', dependencies: { semver: '^7.0.0' } }
+      }),
+    )
+    const found = await observationsOf(effects(dir, BEFORE))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'axios',
+      'balanced-match',
+      'brace-expansion',
+    ])
+  })
+
+  // An alias key can resolve to another package after the fix.
+  it('does not compare two copies of different packages', async () => {
+    const dir = copyOf(
+      SPECIMEN,
+      editJson('package-lock.json', (lock) => {
+        const axios = (lock.packages as Record<string, Json>)['node_modules/axios'] as Json
+        axios.name = 'axios-fork'
+      }),
+    )
+    const found = await observationsOf(effects(dir, BEFORE))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'brace-expansion',
+    ])
+  })
+
+  it('does not compare a copy whose version before the fix does not parse', async () => {
+    const before: CommitSource = async (file) => {
+      const text = await BEFORE(file)
+      if (file !== 'package-lock.json' || text.outcome !== 'ok') return text
+      const lock = JSON.parse(text.value) as Json
+      ;((lock.packages as Record<string, Json>)['node_modules/axios'] as Json).version = 'latest'
+      return ok(JSON.stringify(lock))
+    }
+    const found = await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), before))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'brace-expansion',
+    ])
+  })
+})
+
 describe('fixEffects, a read that fails', () => {
   it.each(['package-lock.json', 'package.json'])(
     'names %s when the last commit cannot give it',
