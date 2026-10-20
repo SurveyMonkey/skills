@@ -226,7 +226,7 @@ const effects = (inputs: BodyInputs): string[] => {
     ...(stale.length === 0
       ? []
       : [
-          'These version-qualified overrides matched a copy before this fix, and match no copy after it. So they have no effect now:',
+          'These version-qualified overrides match no copy after this fix. So they have no effect now:',
           '',
           ...stale.map(staleLine),
           '',

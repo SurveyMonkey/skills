@@ -359,9 +359,10 @@ export type CommitSource = (file: string) => Promise<Envelope<string>>
  * Each is for a person to review. None changes the risk score (ruling 4).
  *
  *   - `stale_qualified_override`: a version-qualified override key of the
- *     manifest, such as `"nx@22.7.7"`. npm matched it for a copy before the
- *     fix, and matches it for no copy after it. `installed` has the
- *     versions of the parent after the fix.
+ *     manifest, such as `"nx@22.7.7"`, that matches no copy after the
+ *     fix. Before the fix, it matched a copy, or the verb could not tell,
+ *     or the manifest did not have it. `installed` has the versions of the
+ *     parent after the fix.
  *   - `untargeted_downgrade`: a package that the fix did not target. A
  *     dependent at the same path before and after the fix now gets a lower
  *     version of it. `path` is the copy after the fix.

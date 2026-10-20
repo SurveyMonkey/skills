@@ -1674,7 +1674,7 @@ describe('body', () => {
       'This fix moves these packages, which it does not target, to a lower version. Check each one before you merge. The merge risk above does not count them.\n\n' +
       '| Package | Path | Before | After |\n|---|---|---|---|\n'
     const STALE_TEXT =
-      'These version-qualified overrides matched a copy before this fix, and match no copy after it. So they have no effect now:\n\n'
+      'These version-qualified overrides match no copy after this fix. So they have no effect now:\n\n'
     const FAILED =
       'The check for downgrades and stale overrides did not run, so this PR makes no claim about them: '
     // The reviewed body of the scoped state, with `section` just before the
