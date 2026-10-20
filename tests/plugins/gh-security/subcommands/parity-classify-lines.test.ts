@@ -31,6 +31,8 @@
 //     it. A row below shows the two answers.
 //   - The own-range check of the port (#168). A row at the end shows the two
 //     answers.
+//   - The relationship check of the port (#335). A row at the end shows the
+//     two answers.
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -519,5 +521,34 @@ describe('classify-lines: the declared exception of #168', () => {
       group('marked', '4', { alerts: [{ vulnerable_range: '< 4.0.10' }], sibling_alerts: [] }),
     ])
     await withFixture('npm-major-bump-sole', (root) => expectSame(input, ['--repo-root', root]))
+  })
+})
+
+// The declared exception of #335 (ruling 10). On the lockfile, the root
+// declares `debug` in `devDependencies`, and `ms` comes only through `debug`.
+// The script gives each alert as discovery wrote it. The port makes the
+// `debug` alert direct, and keeps the value of Dependabot. For `ms`, the two
+// agree.
+describe('classify-lines: the declared exception of #335', () => {
+  const ALERT = { number: 7, relationship: 'transitive', manifest: 'package-lock.json' }
+
+  it('keeps the alert in the script, and makes it direct in the port', async () => {
+    const input = envelope([group('debug', '4', { alerts: [ALERT] })])
+    const answers = await withFixture('npm-dev-direct', async (root) => {
+      const bash = bashSide(input, ['--repo-root', root])
+      const port = answerOf(await typescriptSide(input, ['--repo-root', root]))
+      return { bash: JSON.parse(bash.stdout) as { [key: string]: JsonValue }, port: port.json }
+    })
+    const alertsOf = (answer: JsonValue | undefined) =>
+      ((answer as { actionable: Group[] }).actionable[0] as Group).alerts
+    expect({ bash: alertsOf(answers.bash), port: alertsOf(answers.port) }).toEqual({
+      bash: [ALERT],
+      port: [{ ...ALERT, relationship: 'direct', dependabot_relationship: 'transitive' }],
+    })
+  })
+
+  it('agrees where the root does not declare the package', async () => {
+    const input = envelope([group('ms', '2', { alerts: [ALERT] })])
+    await withFixture('npm-dev-direct', (root) => expectSame(input, ['--repo-root', root]))
   })
 })
