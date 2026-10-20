@@ -149,14 +149,13 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       }
       return { first: null, unsure }
     }
-    const edges = query.edges
+    // A copy with no version matches no selector here. The last refusal stops on it.
+    const copies: Copy[] = query.edges
       .filter(({ parent: name }) => name === parent)
       .filter(
         ({ pver }) =>
           placement === undefined || placement.normal_pvers.some((each) => equal(each, pver)),
       )
-    const copies: Copy[] = edges
-      .filter(({ pver }) => pver !== MISSING)
       .map(({ pver, cver }) => {
         const version = toText(pver)
         return {
@@ -212,7 +211,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       )
     }
     const ordered = block.map(([key]) => key).filter((key) => served.includes(key))
-    if (edges.some(({ pver }) => pver === MISSING)) {
+    if (copies.some(({ pver }) => pver === MISSING)) {
       return failed(
         `apply_constraint: cannot scope '${pkg}': its parent has a copy with no version in the lockfile, beside pre-existing version-qualified override keys that npm matches first for other copies: ${render([{ parent, keys: ordered }], null)}. npm can match such a key for the copy with no version, so neither a constraint inside it nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
       )

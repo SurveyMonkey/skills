@@ -1289,6 +1289,7 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
   it.each([
     ['an object with a "." value', { 'nx@22.7.6': { '.': '22.7.7', axios: AXIOS } }],
     ['a text value', { 'nx@22.7.6': '22.7.7' }],
+    ['a text value before a bare key', { 'nx@22.7.6': '22.7.7', nx: { minimist: '^1.2.8' } }],
   ])(
     'refuses a key whose selector does not admit the copy but whose value does: %s',
     (_title, overrides) => {
@@ -1302,6 +1303,21 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     expect(manifestAfter(QUALIFIED, smolToml, rule({ 'nx@22.7.6': '22.7.6' })).overrides).toEqual({
       'nx@22.7.6': '22.7.6',
       nx: { 'smol-toml': SMOL },
+    })
+  })
+
+  it('writes the normal key beside a key whose value admits only a copy on another line', () => {
+    const setup = both(rule({ 'nx@22.6.1': '22.6.0' }), secondNx('22.6.0', '0.9.0'))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@22.6.1': '22.6.0',
+      'nx@22.7.7': { 'smol-toml': SMOL },
+    })
+  })
+
+  it('writes inside a key that serves each copy, for a range with no floor major', () => {
+    const setup = both(rule({ 'nx@>=22.6.0 <23': { axios: AXIOS } }), secondNx('22.6.0', '0.9.0'))
+    expect(manifestAfter(QUALIFIED, ['smol-toml', '<2', 'nx'], setup).overrides).toEqual({
+      'nx@>=22.6.0 <23': { axios: AXIOS, 'smol-toml': '<2' },
     })
   })
 
