@@ -20,10 +20,14 @@ in parallel, and report the pull requests they open.
 
 **Each step is one command; run it, read its JSON, and decide.** Do not reimplement a command.
 Write every call on one line, as shown, with literal paths and no variable, quote, pipe or
-redirection, so the plugin's allow hook passes it. Save an answer that a later command reads with
+redirection, so the plugin's allow hook passes it. A call with `--env-prefix "<env_prefix>"`
+cannot pass the hook, and prompts. Save an answer that a later command reads with
 the Write tool, under `<run>`: the directory `.gh-security-dispatch/` at the root of the working
 directory. **What a failure costs depends on what the script was run for.** A run-level script
-(`discover-repos`, `detect-capacity.sh`) failing means report its error and stop. A command run
+(`discover-repos`, `detect-capacity.sh`) failing means report its error and stop.
+`merge-envelopes` and `build-dispatches` are run-level too. After the dispatch, pull requests
+exist: when `reap-batch`, `summarize-run` or `render-pr-status` fails, report its error and each
+`pr_url` in `<run>/results.json`, verbatim. A command run
 for one checkout or one repo failing means report its error and exclude that checkout, and carry
 on with the others.
 
@@ -75,8 +79,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" prepare-checkout <repo_root>
 
 Add `--env-prefix "<env_prefix>"` before `<repo_root>` when the checkout has one. Write each answer
 to `<run>/checkout-<n>.json`. An answer with `excluded: true` names its `reason` and `stderr`:
-report both, verbatim, and go on. The command resolves the repo, probes the branch namespace,
-discovers the alerts and classifies each group against `origin/<default_branch>`.
+report both, verbatim, and go on. A non-zero exit also excludes the checkout: report its
+error by name, leave its file out of phase 2, and name it again in phase 8. The command resolves
+the repo, probes the branch namespace, discovers the alerts and classifies each group against `origin/<default_branch>`.
 
 ## Phase 2: Merge and rank
 
@@ -139,8 +144,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" preflight-repo --fallback-pa
 `<package>` is the top-ranked approved package of that repo. Add `--env-prefix "<env_prefix>"`
 when the repo has one. The command writes the worktree exclude, detects the package manager, and
 probes the registry with one retry. A non-zero exit, or an answer with `ok: false`, excludes every
-group of that repo: report the `probe_package`, the `cause` (`auth` is the one case where the
-remedy is your login flow for that registry) and that a new run probes again. A non-null
+group of that repo: report the `probe_package`, the `stderr`, the `cause` (`auth` is the one
+case where the remedy is your login flow for that registry) and that a new run probes again. A non-null
 `exclude_error` is not fatal: report it and dispatch anyway. There is no proceed-anyway machinery:
 a user who wants to dispatch past a failed probe says so in conversation.
 
@@ -255,5 +260,6 @@ two flows edit the same overrides block (#108).
 mark anything ready, merge anything, arm auto-merge, or re-check later (ADR 008). This prohibition
 is scoped to PR actions; it does not withdraw phase 7's defect-report offer.
 
-Remove `<run>` once the closing report is delivered, or once the user declines to resume an
-interrupted run.
+Remove `<run>` when the run ends at any phase: after the closing report, at each stop before it,
+and when the user declines to resume an interrupted run. When the working directory is a
+checkout, `<run>` is an untracked directory in the user's tree.
