@@ -295,8 +295,9 @@ node <cli> audit-pins together --work <work>
 - **`ready_for_pr`**: the removals are left in the tree. It names `attempt`, `removed_keys[]`,
   `left_behind[]`, `collateral`, `advisory_verdicts`, `lockfile` and `override_file`. Go to phase 8.
 - **`no_candidates`**, **`partial_map`** and **`combined_failed`** are findings, not failures:
-  set `pr` to `null`, copy `pr_skipped_reason` and `pr_skipped_detail` (with the `attempt`, which
-  has no field of its own when `pr` is `null`), and go to Cleanup.
+  set `pr` to `null`, copy `pr_skipped_reason` and `pr_skipped_detail`, and go to Cleanup. Add a
+  `combined_failed` answer's `attempt` to `pr_skipped_detail`: it has no field of its own when
+  `pr` is `null`.
 - **Exit 3 phase `compose`** is a failure result (phase `compose`) quoting the install error. It
   never falls through to attempt 2: an install that did not finish is a fact about the
   environment, not the pins.
