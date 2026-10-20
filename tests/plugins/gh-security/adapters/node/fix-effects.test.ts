@@ -81,16 +81,13 @@ const observationsOf = async (
 const SPECIMEN = 'npm-stale-qualified-key'
 const BEFORE = commitOf('npm-stale-qualified-key-before')
 
-const stale = (key: string, installed: string[]): FixObservation => {
-  const at = key.lastIndexOf('@')
-  return {
-    type: 'stale_qualified_override',
-    key,
-    parent: key.slice(0, at),
-    selector: key.slice(at + 1),
-    installed,
-  }
-}
+const stale = (parent: string, selector: string, installed: string[]): FixObservation => ({
+  type: 'stale_qualified_override',
+  key: `${parent}@${selector}`,
+  parent,
+  selector,
+  installed,
+})
 
 const down = (pkg: string, path: string, before: string, after: string): FixObservation => ({
   type: 'untargeted_downgrade',
@@ -105,7 +102,7 @@ const AXIOS = down('axios', 'node_modules/axios', '1.20.0', '1.18.1')
 describe('fixEffects on real npm runs', () => {
   it('names the stale key and both downgrades of the field fix', async () => {
     expect(await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), BEFORE))).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
+      stale('nx', '22.7.7', ['22.7.10']),
       AXIOS,
       down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
     ])
@@ -124,7 +121,7 @@ describe('fixEffects on real npm runs', () => {
   it('names the stale key and each downgrade of a direct bump', async () => {
     const dir = join(FIXTURES_ROOT, 'npm-stale-qualified-key-direct')
     expect(await observationsOf(effects(dir, BEFORE))).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
+      stale('nx', '22.7.7', ['22.7.10']),
       AXIOS,
       down('balanced-match', 'node_modules/balanced-match', '4.0.4', '4.0.3'),
       down('brace-expansion', 'node_modules/brace-expansion', '5.0.12', '5.0.8'),
@@ -146,7 +143,7 @@ describe('fixEffects on real npm runs', () => {
 
   it('does not name the target of the fix', async () => {
     expect(await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), BEFORE, 'axios'))).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
+      stale('nx', '22.7.7', ['22.7.10']),
       down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
     ])
   })
@@ -247,6 +244,27 @@ const beforeWith =
     return ok(JSON.stringify(manifest))
   }
 
+/** The specimen before the fix, with `edit` on its lockfile. */
+const beforeLock =
+  (edit: (lock: Json) => void): CommitSource =>
+  async (file) => {
+    const text = await BEFORE(file)
+    if (file !== 'package-lock.json' || text.outcome !== 'ok') return text
+    const lock = JSON.parse(text.value) as Json
+    edit(lock)
+    return ok(JSON.stringify(lock))
+  }
+
+/** A lockfile edit that adds one package, with a dependent at `from` in `block`. */
+const addCopy =
+  (from: string, block: string, name: string, path: string, version: string) =>
+  (lock: Json): void => {
+    const packages = lock.packages as Record<string, Json>
+    const entry = packages[from] as Json
+    entry[block] = { ...(entry[block] as Json | undefined), [name]: '^0.9.0' }
+    packages[path] = { version }
+  }
+
 /** A manifest edit that adds one key to the block. */
 const addKey =
   (key: string, value: unknown) =>
@@ -262,8 +280,8 @@ describe('fixEffects, the keys of each side', () => {
     const dir = copyOf('npm-stale-qualified-key-direct', editJson('package.json', edit))
     const found = await observationsOf(effects(dir, beforeWith(edit)))
     expect(found.filter(({ type }) => type === 'stale_qualified_override')).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
-      stale('@nx/workspace@22.7.7', []),
+      stale('nx', '22.7.7', ['22.7.10']),
+      stale('@nx/workspace', '22.7.7', []),
     ])
   })
 
@@ -274,8 +292,8 @@ describe('fixEffects, the keys of each side', () => {
       effects(copyOf(SPECIMEN, editJson('package.json', edit)), BEFORE),
     )
     expect(found.filter(({ type }) => type === 'stale_qualified_override')).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
-      stale('left-pad@1.3.0', []),
+      stale('nx', '22.7.7', ['22.7.10']),
+      stale('left-pad', '1.3.0', []),
     ])
   })
 
@@ -303,7 +321,7 @@ describe('fixEffects, the keys of each side', () => {
     const dir = copyOf(SPECIMEN, editJson('package.json', edit))
     const found = await observationsOf(effects(dir, beforeWith(edit)))
     expect(found.filter(({ type }) => type === 'stale_qualified_override')).toEqual([
-      stale('nx@22.7.7', ['22.7.10']),
+      stale('nx', '22.7.7', ['22.7.10']),
     ])
   })
 })
@@ -329,9 +347,90 @@ describe('fixEffects, the versions it compares', () => {
       'brace-expansion',
     ])
   })
+
+  // With no version on the copy before the fix, nothing is compared, and the
+  // check does not fail.
+  it('does not compare a copy with no version before the fix', async () => {
+    const before = beforeLock((lock) => {
+      delete ((lock.packages as Record<string, Json>)['node_modules/axios'] as Json).version
+    })
+    const found = await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), before))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'brace-expansion',
+    ])
+  })
+
+  // jq reads a byte order mark at the start of the file.
+  it('reads a lockfile of the last commit that starts with a byte order mark', async () => {
+    const before: CommitSource = async (file) => {
+      const text = await BEFORE(file)
+      return file === 'package-lock.json' && text.outcome === 'ok'
+        ? ok(`\uFEFF${text.value}`)
+        : text
+    }
+    expect(await observationsOf(effects(join(FIXTURES_ROOT, SPECIMEN), before))).toEqual([
+      stale('nx', '22.7.7', ['22.7.10']),
+      AXIOS,
+      down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
+    ])
+  })
+
+  // Two more copies of nx after the direct bump: one at 22.7.10, and one
+  // with no version. No edge goes into either one.
+  it('lists each version of the parent once, and no copy with no version', async () => {
+    const dir = copyOf(
+      'npm-stale-qualified-key-direct',
+      editJson('package-lock.json', (lock) => {
+        const packages = lock.packages as Record<string, Json>
+        packages['node_modules/zed/node_modules/nx'] = { version: '22.7.10' }
+        packages['node_modules/yak/node_modules/nx'] = {}
+      }),
+    )
+    const found = await observationsOf(effects(dir, BEFORE))
+    expect(found.filter(({ type }) => type === 'stale_qualified_override')).toEqual([
+      stale('nx', '22.7.7', ['22.7.10']),
+    ])
+  })
 })
 
 describe('fixEffects, the dependents it compares', () => {
+  // The root declares zed only as a dev dependency.
+  it('names a downgrade through a devDependencies edge', async () => {
+    const edit = addCopy('', 'devDependencies', 'zed', 'node_modules/zed', '1.0.0')
+    const dir = copyOf(
+      SPECIMEN,
+      editJson('package-lock.json', (lock) => {
+        addCopy('', 'devDependencies', 'zed', 'node_modules/zed', '0.9.0')(lock)
+      }),
+    )
+    const found = await observationsOf(effects(dir, beforeLock(edit)))
+    expect(found.filter(({ type }) => type === 'untargeted_downgrade')).toEqual([
+      AXIOS,
+      down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
+      down('zed', 'node_modules/zed', '1.0.0', '0.9.0'),
+    ])
+  })
+
+  // By path, axios at node_modules/axios would come before aaa under nx.
+  it('lists the downgrades by package, then by path', async () => {
+    const path = 'node_modules/nx/node_modules/aaa'
+    const dir = copyOf(
+      SPECIMEN,
+      editJson(
+        'package-lock.json',
+        addCopy('node_modules/nx', 'dependencies', 'aaa', path, '0.9.0'),
+      ),
+    )
+    const before = beforeLock(addCopy('node_modules/nx', 'dependencies', 'aaa', path, '1.0.0'))
+    const found = await observationsOf(effects(dir, before))
+    expect(found.filter(({ type }) => type === 'untargeted_downgrade')).toEqual([
+      down('aaa', path, '1.0.0', '0.9.0'),
+      AXIOS,
+      down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
+    ])
+  })
+
   // The direct bump moved the root semver from 7.8.5 to 7.7.4. No dependent
   // at the same path got the lower copy, so the verb names none.
   it('does not compare a dependent at a new path', async () => {
@@ -456,8 +555,15 @@ describe('fixEffects, a read that fails', () => {
     )
   })
 
-  it('is unsupported for a tree that is not npm', async () => {
-    const answer = await node.fixEffects(treeAt(join(FIXTURES_ROOT, 'pnpm-v9')), 'nx', BEFORE)
-    expect(answer.outcome).toBe('unsupported')
+  it.each([
+    ['pnpm-v9', 'pnpm'],
+    ['yarn-berry', 'yarn'],
+  ])('is unsupported for the tree %s', async (fixture, pm) => {
+    const answer = await node.fixEffects(treeAt(join(FIXTURES_ROOT, fixture)), 'nx', BEFORE)
+    expect(answer).toEqual({
+      outcome: 'unsupported',
+      unsupported: pm,
+      error: `fix_effects reads npm override keys and package-lock.json only, not ${pm}. See .github/CONTRIBUTING.md to request support.`,
+    })
   })
 })
