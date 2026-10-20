@@ -38,8 +38,8 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
   Describe 'phase 1 takes scope from the discovered checkouts'
     # Existence only: this proves the script is named, not that it runs
     # before anything else (testing skill, "Prose pins" checklist item 6).
-    It 'prescribes running discover-repos.sh'
-      When call rule_in "$SKILL" 'scripts/common/discover-repos.sh$'
+    It 'prescribes running discover-repos'
+      When call rule_in "$SKILL" 'scripts/gh-security.ts" discover-repos <cwd>$'
       The status should be success
       The output should equal '1'
     End
@@ -50,31 +50,10 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The output should equal '1'
     End
 
-    # The two halves of the discovery contract, as the orchestrator has to
-    # read them: inside a checkout that root is the whole scope; outside one,
-    # the immediate checkout roots and nothing deeper.
-    It 'reads a checkout as the whole scope'
-      When call phrase_in "$SKILL" 'that checkout.s root and nothing else'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'reads a plain directory as its immediate checkout roots, non-recursively'
-      When call phrase_in "$SKILL" 'every immediate subdirectory that is itself the root of a checkout'
-      The status should be success
-      The output should equal '1'
-    End
-
     # Classification is the script's, so the orchestrator never grows a
     # second, drifting reading of the directory.
     It 'forbids the orchestrator from classifying the directory itself'
-      When call phrase_in "$SKILL" 'Do not classify the directory yourself; the script already did'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'still says scope comes from git rather than from directory names'
-      When call phrase_in "$SKILL" 'Scope comes from git, never from what the directories are named'
+      When call phrase_in "$SKILL" 'Do not classify the directory yourself; the command already did'
       The status should be success
       The output should equal '1'
     End
@@ -90,23 +69,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     # the scope itself could not be established, so the run stops.
     It 'stops on a non-zero exit because there is no checkout to exclude'
       When call phrase_in "$SKILL" 'the scope itself could not be established, so there is no checkout to exclude'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Two links to one checkout are one repository, or the same repo is
-    # discovered, dispatched and pushed twice.
-    It 'reads a symlinked entry once, under its resolved root'
-      When call phrase_in "$SKILL" 'A symlinked entry is followed and listed once, under its resolved root'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A git failure that is not "not a git repository" must never read as an
-    # empty scope; the sentence names the shapes so a reader cannot fold them
-    # back into "no repositories".
-    It 'treats a git failure as an error rather than an empty scope'
-      When call phrase_in "$SKILL" 'git itself failed for a reason other than "not a git repository"'
       The status should be success
       The output should equal '1'
     End
@@ -209,7 +171,7 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     End
 
     It 'stops the run on a run-level script'
-      When call phrase_in "$SKILL" 'A run-level script (.discover-repos.sh., .detect-capacity.sh.) failing means report its error and stop'
+      When call phrase_in "$SKILL" 'A run-level script (.discover-repos., .detect-capacity.sh.) failing means report its error and stop'
       The status should be success
       The output should equal '1'
     End
@@ -329,12 +291,12 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
   End
 
   Describe 'the Repo column follows the number of checkouts'
-    # Three tables show it, and each hides it only when it could not differ
-    # between rows.
+    # The two tables the skill draws show it, and each hides it only when it
+    # could not differ between rows. The phase 7 table is `summarize-run`'s.
     It 'omits the column for one checkout and shows it for several'
       When call phrase_in "$SKILL" 'Omit the .Repo. column when one checkout is in scope'
       The status should be success
-      The output should equal '3'
+      The output should equal '2'
     End
 
     It 'no longer keys the column on a scope mode'

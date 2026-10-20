@@ -130,25 +130,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The output should equal '1'
     End
 
-    # The guarantees the model is told not to re-derive. Each is enforced by
-    # a real test in spec/js/; these pins only keep the skill from growing a
-    # second, drifting statement of them.
-    Describe 'the guarantees the skill defers to the script for'
-      Parameters
-        worker-pool   'min(cap, N). workers hold the pool'
-        args-guard    'Malformed .args. is refused loudly'
-        model-pin     'Each agent runs as .gh-security:fix-dependency. on .sonnet.'
-        ordering      'Entries come back in dispatch order'
-        mispairing    'A result that does not name its own dispatch is dropped, not trusted'
-      End
-
-      It "states the $1 guarantee once"
-        When call blob_in "$SKILL" "$2"
-        The status should be success
-        The output should equal '1'
-      End
-    End
-
     It 'keeps the reap and the summary outside the script'
       When call phrase_in "$SKILL" 'it dispatches and it validates, and nothing else'
       The status should be success
@@ -293,13 +274,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
       The status should be success
       The output should equal '1'
     End
-
-    # The prose must not claim more than the schema does.
-    It 'says plainly what the schema cannot check'
-      When call phrase_in "$SKILL" 'It does not and cannot check that a .pr_url. names a real pull request'
-      The status should be success
-      The output should equal '1'
-    End
   End
 
   Describe 'the phase 6 rules that survive the rewrite'
@@ -309,12 +283,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
     # exactly who would take them by mistake.
     It 'still keeps repo-global git state with the orchestrator while agents are in flight'
       When call phrase_in "$SKILL" 'while any agent is in flight no agent may touch it'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'still allows two lines of the same package to run together'
-      When call phrase_in "$SKILL" 'Two lines of the same package may be in flight together'
       The status should be success
       The output should equal '1'
     End

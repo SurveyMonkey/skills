@@ -140,9 +140,9 @@ hook. A hook that fails is a failure (phase `push`, which covers both the commit
 here), quoting its output.
 
 A push rejected with `(directory file conflict)` means the remote blocks `<branch_name>`
-([#123](https://github.com/SurveyMonkey/skills/issues/123)). Do not retry, and never rename the
-branch. Fail (phase `push`) with `detail` `branch-namespace collision (directory file
-conflict): <rejection line>`.
+([#123](https://github.com/SurveyMonkey/skills/issues/123)). Do not retry, and
+never rename the branch yourself. Fail (phase `push`) with `detail`
+`branch-namespace collision (directory file conflict): <rejection line>`.
 
 `<band>` is the scorer's `band`, lowercased. The label is `merge-risk:<band>`,
 never a bare `risk:<band>`, which would read as alert severity rather than merge risk. Pass each

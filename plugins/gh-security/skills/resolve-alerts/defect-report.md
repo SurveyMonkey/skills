@@ -4,7 +4,7 @@
 this repository, not against the target.** The signal is a fail-close, a written key, or a probe
 result that the run's own evidence contradicts: a false `baseline` or `validate` fail-close, an
 override key the install then proved ineffective, a probe with the wrong verdict, a `mispaired`
-entry, or an agent that worked around its own tooling. A target repo's own defect (a stale
+entry, or an agent that worked around its own tooling. But a target repo's own defect (a stale
 lockfile, a dead registry token, a blocked branch namespace) is never filed here; report it to the
 user only. When in doubt, the absence of a plausible repo-side explanation tips it toward the
 skill.

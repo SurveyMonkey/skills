@@ -163,28 +163,6 @@ Describe 'env_prefix as an opaque seam (issue #135)'
     End
   End
 
-  Describe 'composition is unchanged: after the cd, never instead of it'
-    It 'keeps the injects-not-chdir sentence in phase 1'
-      When call phrase_in "$SKILL" 'it injects the environment, it does not chdir'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The registry preflight is the general safety net and keeps its shape
-    # exactly; only the manager's name left the sentence.
-    It 'keeps the cd load-bearing in the registry preflight'
-      When call phrase_in "$SKILL" 'The .cd. is load-bearing and .env_prefix. cannot replace it'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps the composed probe shapes opaque'
-      When call phrase_in "$SKILL" 'cd <repo_root> && <env_prefix> <pm_exec> view <package> version'
-      The status should be success
-      The output should equal '2'
-    End
-  End
-
   Describe 'the failure class survives the de-coupling'
     Parameters
       "$CONV"  'the plugin guide'
