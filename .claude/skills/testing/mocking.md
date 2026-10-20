@@ -38,7 +38,7 @@ answers from environment variables so one mock serves every `Parameters` row.
 ## The injected collaborator
 
 **A collaborator a command accepts as a parameter is substituted through that parameter, not mocked
-around.** Where running the real one would run a package manager or reach the network, the
+around.** Where the real one would run a package manager or reach the network, the
 command's own seam carries the substitution: the examples of `fix-group` and `audit-pins` in
 `tests/plugins/gh-security/subcommands/` pass an adapter through the registry parameter. This is
 not a hole in the rule above. The CLI binding of each command passes the real registry. A test
