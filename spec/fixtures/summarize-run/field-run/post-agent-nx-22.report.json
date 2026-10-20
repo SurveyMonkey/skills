@@ -1,0 +1,13 @@
+{
+  "package": "nx",
+  "major_line": "22",
+  "branch": "fix/dependabot-nx-22x",
+  "worktree_path": "/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-nx-22x",
+  "result_status": "success",
+  "pr_url": "https://github.com/octo/app/pull/2502",
+  "pr_state": "OPEN",
+  "reaped": true,
+  "reason": null,
+  "left_behind": [],
+  "errors": []
+}

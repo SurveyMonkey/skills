@@ -1,0 +1,665 @@
+{
+  "actionable": [
+    {
+      "package": "nx",
+      "ecosystem": "npm",
+      "major_line": "22",
+      "max_severity": "high",
+      "max_epss_percentile": 0.67661,
+      "alert_count": 5,
+      "alerts": [
+        {
+          "number": 346,
+          "cve": null,
+          "ghsa": "GHSA-w2vw-w76x-qr89",
+          "severity": "high",
+          "summary": "Nx: OS command injection via git revisions and remote refs",
+          "vulnerable_range": ">= 14.0.0, < 22.7.8",
+          "fixed_in": "22.7.8",
+          "epss_percentile": 0,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 345,
+          "cve": "CVE-2026-104854",
+          "ghsa": "GHSA-w3vv-58gj-gw77",
+          "severity": "high",
+          "summary": "Nx daemon and plugin worker sockets are accessible to other local users",
+          "vulnerable_range": ">= 14.6.0, < 22.7.9",
+          "fixed_in": "22.7.9",
+          "epss_percentile": 0.02878,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 344,
+          "cve": "CVE-2026-104853",
+          "ghsa": "GHSA-hrvq-x7jp-36xv",
+          "severity": "medium",
+          "summary": "Nx: Path traversal in nx migrate package-migrations extraction",
+          "vulnerable_range": ">= 13.10.0, < 22.7.10",
+          "fixed_in": "22.7.10",
+          "epss_percentile": 0.06188,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 265,
+          "cve": "CVE-2026-71476",
+          "ghsa": "GHSA-vp3h-ghgh-jr7g",
+          "severity": "high",
+          "summary": "Nx: Zip-Slip in the self-hosted remote cache",
+          "vulnerable_range": ">= 20.8.0, < 22.7.7",
+          "fixed_in": "22.7.7",
+          "epss_percentile": 0.57504,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 250,
+          "cve": "CVE-2026-54753",
+          "ghsa": "GHSA-g2r8-wvmj-jf5w",
+          "severity": "medium",
+          "summary": "`nx graph` dev server permissive CORS policy",
+          "vulnerable_range": ">= 17.0.4, < 22.7.2",
+          "fixed_in": "22.7.2",
+          "epss_percentile": 0.67661,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "22.7.10",
+      "branch_name": "fix/dependabot-nx-22x",
+      "repo": "octo/app",
+      "adapter": "node",
+      "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+      "supported": true,
+      "resolved_majors": [
+        "20",
+        "22"
+      ],
+      "line_status": "resolved"
+    },
+    {
+      "package": "smol-toml",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.4251,
+      "alert_count": 2,
+      "alerts": [
+        {
+          "number": 350,
+          "cve": null,
+          "ghsa": "GHSA-r4xh-jqrq-34v2",
+          "severity": "medium",
+          "summary": "smol-toml: Quadratic-time parse() from parseKey rescanning to end of document on each key line",
+          "vulnerable_range": "<= 1.8.0",
+          "fixed_in": "1.9.0",
+          "epss_percentile": 0,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 305,
+          "cve": "CVE-2026-85730",
+          "ghsa": "GHSA-7w5x-hrqm-74c2",
+          "severity": "high",
+          "summary": "smol-toml: Denial of Service via malformed TOML documents",
+          "vulnerable_range": "<= 1.7.0",
+          "fixed_in": "1.7.1",
+          "epss_percentile": 0.4251,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "1.9.0",
+      "branch_name": "fix/dependabot-smol-toml-1x",
+      "repo": "octo/app",
+      "adapter": "node",
+      "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+      "supported": true,
+      "resolved_majors": [
+        "1"
+      ],
+      "line_status": "resolved"
+    },
+    {
+      "package": "brace-expansion",
+      "ecosystem": "npm",
+      "major_line": "2",
+      "max_severity": "high",
+      "max_epss_percentile": 0.26576,
+      "alert_count": 3,
+      "alerts": [
+        {
+          "number": 320,
+          "cve": "CVE-2026-102277",
+          "ghsa": "GHSA-q2hr-2g5m-vwhr",
+          "severity": "medium",
+          "summary": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+          "vulnerable_range": ">= 2.0.0, < 2.1.7",
+          "fixed_in": "2.1.7",
+          "epss_percentile": 0.20535,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 317,
+          "cve": "CVE-2026-102278",
+          "ghsa": "GHSA-qhr7-859c-m2p7",
+          "severity": "high",
+          "summary": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+          "vulnerable_range": ">= 2.0.0, < 2.1.6",
+          "fixed_in": "2.1.6",
+          "epss_percentile": 0.26576,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 314,
+          "cve": "CVE-2026-102276",
+          "ghsa": "GHSA-6j4f-fj2g-mc7p",
+          "severity": "high",
+          "summary": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+          "vulnerable_range": ">= 2.0.0, < 2.1.5",
+          "fixed_in": "2.1.5",
+          "epss_percentile": 0.26575,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [
+        {
+          "major": 5,
+          "vulnerable_ranges": [
+            ">= 4.0.0, < 5.0.10",
+            ">= 4.0.0, < 5.0.11",
+            ">= 4.0.0, < 5.0.12"
+          ]
+        }
+      ],
+      "highest_fixed_version": "2.1.7",
+      "branch_name": "fix/dependabot-brace-expansion-2x",
+      "repo": "octo/app",
+      "adapter": "node",
+      "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+      "supported": true,
+      "resolved_majors": [
+        "1",
+        "2",
+        "5"
+      ],
+      "line_status": "resolved"
+    }
+  ],
+  "skipped": [
+    {
+      "package": "braces",
+      "ecosystem": "npm",
+      "major_line": "none",
+      "max_severity": "high",
+      "max_epss_percentile": 0.53919,
+      "alert_count": 2,
+      "alerts": [
+        {
+          "number": 340,
+          "cve": "CVE-2026-93687",
+          "ghsa": "GHSA-vfj7-8cjw-p6xm",
+          "severity": "high",
+          "summary": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+          "vulnerable_range": "<= 3.0.3",
+          "fixed_in": "none",
+          "epss_percentile": 0.53919,
+          "relationship": "transitive",
+          "manifest": "scripts/migration/package-lock.json"
+        },
+        {
+          "number": 338,
+          "cve": "CVE-2026-93687",
+          "ghsa": "GHSA-vfj7-8cjw-p6xm",
+          "severity": "high",
+          "summary": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+          "vulnerable_range": "<= 3.0.3",
+          "fixed_in": "none",
+          "epss_percentile": 0.53919,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "none",
+      "branch_name": "fix/dependabot-braces-unfixed",
+      "repo": "octo/app",
+      "reason": "no fix available"
+    },
+    {
+      "package": "webpack-dev-middleware",
+      "ecosystem": "npm",
+      "major_line": "7",
+      "max_severity": "high",
+      "max_epss_percentile": 0.46525,
+      "alert_count": 1,
+      "alerts": [
+        {
+          "number": 310,
+          "cve": "CVE-2026-76844",
+          "ghsa": "GHSA-g84c-rxfj-3j2c",
+          "severity": "high",
+          "summary": "webpack-dev-middleware vulnerable to Path Traversal via non-slash-terminated publicPath",
+          "vulnerable_range": "< 7.4.5",
+          "fixed_in": "7.4.6",
+          "epss_percentile": 0.46525,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "7.4.6",
+      "branch_name": "fix/dependabot-webpack-dev-middleware-7x",
+      "repo": "octo/app",
+      "reason": "open PR exists",
+      "open_pr_url": "https://github.com/octo/app/pull/2435"
+    },
+    {
+      "package": "http-cache-semantics",
+      "ecosystem": "npm",
+      "major_line": "none",
+      "max_severity": "high",
+      "max_epss_percentile": 0.45545,
+      "alert_count": 1,
+      "alerts": [
+        {
+          "number": 339,
+          "cve": "CVE-2026-93748",
+          "ghsa": "GHSA-ch52-4w7c-c8xp",
+          "severity": "high",
+          "summary": "http-cache-semantics max-stale handling can disclose cross-user cached responses",
+          "vulnerable_range": "<= 4.2.0",
+          "fixed_in": "none",
+          "epss_percentile": 0.45545,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "none",
+      "branch_name": "fix/dependabot-http-cache-semantics-unfixed",
+      "repo": "octo/app",
+      "reason": "no fix available"
+    },
+    {
+      "package": "axios",
+      "ecosystem": "npm",
+      "major_line": "1",
+      "max_severity": "high",
+      "max_epss_percentile": 0.4454,
+      "alert_count": 12,
+      "alerts": [
+        {
+          "number": 337,
+          "cve": "CVE-2026-101904",
+          "ghsa": "GHSA-j8rh-479h-cp32",
+          "severity": "medium",
+          "summary": "Axios: Header Injection via Inherited headers After Minimal Interceptor",
+          "vulnerable_range": ">= 1.0.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.35565,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 336,
+          "cve": "CVE-2026-101900",
+          "ghsa": "GHSA-4hqw-qxg8-jxx2",
+          "severity": "medium",
+          "summary": "Axios: Fetch Adapter Header Injection via Inherited FormData getHeaders",
+          "vulnerable_range": ">= 1.12.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.4454,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 335,
+          "cve": "CVE-2026-101905",
+          "ghsa": "GHSA-m8m8-qj5v-23w3",
+          "severity": "high",
+          "summary": "Axios: Node HTTP adapter prototype-pollution gadget allows request socket hijack via inherited createConnection",
+          "vulnerable_range": ">= 1.15.2, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.19504,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 334,
+          "cve": "CVE-2026-101899",
+          "ghsa": "GHSA-44g4-m2mj-wpvx",
+          "severity": "medium",
+          "summary": "Axios: CIDR-form NO_PROXY entries are ignored, causing proxy exclusion bypass for internal IP ranges",
+          "vulnerable_range": ">= 1.15.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.43199,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 333,
+          "cve": "CVE-2026-101907",
+          "ghsa": "GHSA-r4gj-5m52-g5wh",
+          "severity": "high",
+          "summary": "Axios: maxRedirects: 0 is not enforced by the fetch adapter, allowing redirect-based SSRF",
+          "vulnerable_range": ">= 1.17.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.33524,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 332,
+          "cve": "CVE-2026-101908",
+          "ghsa": "GHSA-vh66-26gq-q6x8",
+          "severity": "medium",
+          "summary": "Axios: Prototype pollution gadget in fetch adapter can alter outbound requests",
+          "vulnerable_range": ">= 1.7.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.33524,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 331,
+          "cve": "CVE-2026-101902",
+          "ghsa": "GHSA-9fr6-4gfg-395g",
+          "severity": "medium",
+          "summary": "Axios: Prototype-Pollution Gadget in the Default Instance Allows Inherited Object.prototype.method to Override HTTP Method",
+          "vulnerable_range": ">= 1.0.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.33524,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 330,
+          "cve": "CVE-2026-101903",
+          "ghsa": "GHSA-c29m-xwm3-cm6r",
+          "severity": "high",
+          "summary": "Axios: ReDoS in fromDataURI data: URL parser freezes the Node event loop (DoS)",
+          "vulnerable_range": ">= 1.16.1, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.30579,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 329,
+          "cve": "CVE-2026-101906",
+          "ghsa": "GHSA-mghh-pgcx-3jjj",
+          "severity": "high",
+          "summary": "Axios: ReDoS (O(N²)) in shouldBypassProxy host normalization, reachable via untrusted redirect Location",
+          "vulnerable_range": ">= 1.15.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.32543,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 328,
+          "cve": "CVE-2026-101909",
+          "ghsa": "GHSA-x97p-jq2g-jp4f",
+          "severity": "high",
+          "summary": "Axios: Prototype Pollution Gadget in axios toFormData Options",
+          "vulnerable_range": ">= 1.15.1, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.27533,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 327,
+          "cve": "CVE-2026-101898",
+          "ghsa": "GHSA-3pq3-5fj3-cg6v",
+          "severity": "high",
+          "summary": "Axios: HTTP/2 adapter bypasses configured DNS lookup and proxy controls",
+          "vulnerable_range": ">= 1.13.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.42543,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 326,
+          "cve": "CVE-2026-101901",
+          "ghsa": "GHSA-542g-h47m-68v8",
+          "severity": "high",
+          "summary": "Axios: Denial of Service via Unhandled 'error' Event in HTTP/2 ClientHttp2Session Initialization",
+          "vulnerable_range": ">= 1.13.0, < 1.20.0",
+          "fixed_in": "1.20.0",
+          "epss_percentile": 0.30539,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "1.20.0",
+      "branch_name": "fix/dependabot-axios-1x",
+      "repo": "octo/app",
+      "reason": "open PR exists",
+      "open_pr_url": "https://github.com/octo/app/pull/2436"
+    },
+    {
+      "package": "brace-expansion",
+      "ecosystem": "npm",
+      "major_line": "5",
+      "max_severity": "high",
+      "max_epss_percentile": 0.26576,
+      "alert_count": 3,
+      "alerts": [
+        {
+          "number": 319,
+          "cve": "CVE-2026-102277",
+          "ghsa": "GHSA-q2hr-2g5m-vwhr",
+          "severity": "medium",
+          "summary": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+          "vulnerable_range": ">= 4.0.0, < 5.0.12",
+          "fixed_in": "5.0.12",
+          "epss_percentile": 0.20535,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 316,
+          "cve": "CVE-2026-102278",
+          "ghsa": "GHSA-qhr7-859c-m2p7",
+          "severity": "high",
+          "summary": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+          "vulnerable_range": ">= 4.0.0, < 5.0.11",
+          "fixed_in": "5.0.11",
+          "epss_percentile": 0.26576,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 313,
+          "cve": "CVE-2026-102276",
+          "ghsa": "GHSA-6j4f-fj2g-mc7p",
+          "severity": "high",
+          "summary": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+          "vulnerable_range": ">= 4.0.0, < 5.0.10",
+          "fixed_in": "5.0.10",
+          "epss_percentile": 0.26575,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [
+        {
+          "major": 2,
+          "vulnerable_ranges": [
+            ">= 2.0.0, < 2.1.5",
+            ">= 2.0.0, < 2.1.6",
+            ">= 2.0.0, < 2.1.7"
+          ]
+        }
+      ],
+      "highest_fixed_version": "5.0.12",
+      "branch_name": "fix/dependabot-brace-expansion-5x",
+      "repo": "octo/app",
+      "reason": "open PR exists",
+      "open_pr_url": "https://github.com/octo/app/pull/2439"
+    },
+    {
+      "package": "qs",
+      "ecosystem": "npm",
+      "major_line": "6",
+      "max_severity": "medium",
+      "max_epss_percentile": 0.43567,
+      "alert_count": 2,
+      "alerts": [
+        {
+          "number": 291,
+          "cve": "CVE-2026-82562",
+          "ghsa": "GHSA-x5fp-wj9c-mxmx",
+          "severity": "medium",
+          "summary": "qs array-limit bypass via bracket-key comma parsing",
+          "vulnerable_range": ">= 6.14.2, <= 6.15.3",
+          "fixed_in": "6.16.0",
+          "epss_percentile": 0.43567,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        },
+        {
+          "number": 290,
+          "cve": "CVE-2026-82417",
+          "ghsa": "GHSA-4mjr-xmp4-gh2g",
+          "severity": "medium",
+          "summary": "qs: Denial of Service via Attacker Controlled isBuffer",
+          "vulnerable_range": ">= 2.2.5, < 6.16.0",
+          "fixed_in": "6.16.0",
+          "epss_percentile": 0.345,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "6.16.0",
+      "branch_name": "fix/dependabot-qs-6x",
+      "repo": "octo/app",
+      "reason": "open PR exists",
+      "open_pr_url": "https://github.com/octo/app/pull/2437"
+    },
+    {
+      "package": "sprintf-js",
+      "ecosystem": "npm",
+      "major_line": "none",
+      "max_severity": "medium",
+      "max_epss_percentile": 0.32038,
+      "alert_count": 1,
+      "alerts": [
+        {
+          "number": 351,
+          "cve": "CVE-2026-97058",
+          "ghsa": "GHSA-hp3w-g68c-fv3c",
+          "severity": "medium",
+          "summary": "sprintf-js vulnerable to denial of service through unbounded precision specifiers",
+          "vulnerable_range": "<= 1.1.3",
+          "fixed_in": "none",
+          "epss_percentile": 0.32038,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "none",
+      "branch_name": "fix/dependabot-sprintf-js-unfixed",
+      "repo": "octo/app",
+      "reason": "no fix available"
+    },
+    {
+      "package": "uuid",
+      "ecosystem": "npm",
+      "major_line": "11",
+      "max_severity": "medium",
+      "max_epss_percentile": 0.29519,
+      "alert_count": 1,
+      "alerts": [
+        {
+          "number": 185,
+          "cve": "CVE-2026-41907",
+          "ghsa": "GHSA-w5hq-g745-h8pq",
+          "severity": "medium",
+          "summary": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+          "vulnerable_range": "< 11.1.1",
+          "fixed_in": "11.1.1",
+          "epss_percentile": 0.29519,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "11.1.1",
+      "branch_name": "fix/dependabot-uuid-11x",
+      "repo": "octo/app",
+      "adapter": "node",
+      "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+      "supported": true,
+      "resolved_majors": [
+        "8",
+        "9"
+      ],
+      "line_status": "requires_major_bump",
+      "reason": "requires major version bump"
+    },
+    {
+      "package": "@tiptap/core",
+      "ecosystem": "npm",
+      "major_line": "3",
+      "max_severity": "medium",
+      "max_epss_percentile": 0,
+      "alert_count": 2,
+      "alerts": [
+        {
+          "number": 296,
+          "cve": null,
+          "ghsa": "GHSA-cp6q-959q-f8rh",
+          "severity": "medium",
+          "summary": "Tiptap: mergeAttributes() turns an own __proto__ key into inherited executable DOM attributes",
+          "vulnerable_range": ">= 2.0.0-alpha.0, < 3.30.4",
+          "fixed_in": "3.30.4",
+          "epss_percentile": 0,
+          "relationship": "direct",
+          "manifest": "packages/rich-text-input/package.json"
+        },
+        {
+          "number": 289,
+          "cve": null,
+          "ghsa": "GHSA-cp6q-959q-f8rh",
+          "severity": "medium",
+          "summary": "Tiptap: mergeAttributes() turns an own __proto__ key into inherited executable DOM attributes",
+          "vulnerable_range": ">= 2.0.0-alpha.0, < 3.30.4",
+          "fixed_in": "3.30.4",
+          "epss_percentile": 0,
+          "relationship": "transitive",
+          "manifest": "package-lock.json"
+        }
+      ],
+      "sibling_alerts": [],
+      "highest_fixed_version": "3.30.4",
+      "branch_name": "fix/dependabot-@tiptap/core-3x",
+      "repo": "octo/app",
+      "adapter": "node",
+      "adapter_path": "/Users/example/src/skills/plugins/gh-security/scripts/ecosystems/node.sh",
+      "supported": true,
+      "resolved_majors": [
+        "2"
+      ],
+      "line_status": "requires_major_bump",
+      "reason": "requires major version bump"
+    }
+  ],
+  "classify_errors": []
+}

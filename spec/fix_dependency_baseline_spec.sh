@@ -10,16 +10,17 @@
 # ordering now, and spec/fix_group_spec.sh asserts it by running the steps and
 # reading the adapter's call order back.
 #
-# What stays here is the contract's other two ends: the driver's own grounding
-# for the ordering, and the orchestrator prose that reads the results. The
+# What stays here is the driver's own grounding for the ordering, and the agent
+# prose. The orchestrator half is code since #229: `summarize-run` labels a
+# baseline failure and a lockfile-refresh action
+# (tests/plugins/gh-security/subcommands/summarize-run.test.ts). The
 # drift-cleared subcase (the control install itself resolving the vulnerable
-# copy) is pinned in both, because losing it silently reverts a real fix into a
+# copy) stays pinned, because losing it silently reverts a real fix into a
 # false "already fixed" no-op.
 
 Describe 'the control-install baseline rules (#146, #171)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/fix-group.sh"
-  SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
 
   # Same two readers as spec/fix_dependency_result_spec.sh: `rule_in` counts
   # lines and suits a prescribed command or a sentence that fits on one,
@@ -91,25 +92,6 @@ Describe 'the control-install baseline rules (#146, #171)'
 
     It 'carries lockfile-refresh in the result action enum'
       When call rule_in "$AGENT" 'direct-update | scoped-override | bare-override | lockfile-refresh'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'the orchestrator reads both outcomes'
-    # pin: mechanical, retired by summarize-run.sh
-    It 'recognizes a lockfile-refresh action'
-      When call phrase_in "$SKILL" 'lockfile-refresh'
-      The status should be success
-      The output should not equal '0'
-    End
-
-    # Every ambient phase-baseline shape — a failed control install, residual
-    # non-lockfile changes, a hook that failed the drift commit — says the
-    # repository, not the group, is the problem.
-    # pin: mechanical, retired by summarize-run.sh
-    It 'routes every ambient baseline failure shape to one repo-level triage label'
-      When call phrase_in "$SKILL" 'baseline could not be established (ambient, affects every group)'
       The status should be success
       The output should equal '1'
     End

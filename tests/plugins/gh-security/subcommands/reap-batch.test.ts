@@ -9,6 +9,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -23,6 +24,7 @@ import { createGhClient } from '#gh-security/lib/gh.ts'
 import { type Runner, run } from '#gh-security/lib/process.ts'
 import type { ClientFactory } from '#gh-security/subcommands/pr-status.ts'
 import { reapBatch, reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
+import { FIXTURES_ROOT } from '#harness/fixtures.ts'
 import { createGhMock, ghFails } from '#harness/gh.ts'
 import { createGitFixtures, type GitFixtures } from '#harness/git.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
@@ -212,10 +214,16 @@ const kept = (at: World, changes: Record<string, JsonValue>, group: Group = PLAI
   pr_state: null,
   reaped: false,
   reason: null,
-  left_behind: [workOf(at.repo, group), group.branch_name],
+  left_behind: [],
   errors: [],
   ...changes,
 })
+
+/** What stays of a group whose worktree and branch are on disk, when no reap ran. */
+const stays = (at: World, group: Group = PLAIN): JsonValue[] => [
+  workOf(at.repo, group),
+  group.branch_name,
+]
 
 /** The one report of a run over one entry. */
 const only = async (answer: Promise<CommandResult>): Promise<JsonValue> => {
@@ -239,6 +247,7 @@ describe('a success whose pull request is not OPEN', () => {
           pr_url: URL,
           pr_state: state,
           reason: `pull request is not open (state=${state})`,
+          left_behind: stays(at),
         }),
       )
       expect(existsSync(`${workOf(at.repo, PLAIN)}/fix`)).toBe(true)
@@ -258,7 +267,7 @@ describe('a pull request that cannot be read', () => {
           'octo/app#12': ghFails('no pull requests found'),
         }),
       ),
-    ).toEqual(kept(at, { pr_url: URL, reason, errors: [reason] }))
+    ).toEqual(kept(at, { pr_url: URL, reason, errors: [reason], left_behind: stays(at) }))
     expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
   })
 
@@ -346,6 +355,7 @@ describe('an entry with no result', () => {
       kept(at, {
         result_status: 'missing',
         reason: `missing result block at entry 0 of ${file}`,
+        left_behind: stays(at),
       }),
     )
     expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
@@ -366,6 +376,7 @@ describe('an entry with no result', () => {
       kept(at, {
         result_status: 'missing',
         reason: `mispaired result at entry 0 of ${file}: it names another group, so it was not read`,
+        left_behind: stays(at),
       }),
     )
     expect(branches(at)).toEqual(['fix/dependabot-example-pkg-6x', 'main'])
@@ -467,7 +478,8 @@ describe('the loop over the entries', () => {
       errors: [
         `the reap refused the paths, so nothing was removed: the work path is not under ${at.repo}/.claude/worktrees/: ${elsewhere}/fix-dependabot-example-pkg-6x. Nothing was removed.`,
       ],
-      left_behind: [workOf(at.repo, PLAIN), PLAIN.branch_name],
+      // Nothing of the first group is on disk, so nothing stays.
+      left_behind: [],
     })
     expect(reports[1]).toMatchObject({
       reason: `missing result block at entry 1 of ${join(at.sandbox.path, 'results.json')}`,
@@ -613,10 +625,283 @@ describe('the env_prefix of an entry', () => {
       outcome: 'ok',
       value: [{ pr_state: 'MERGED' }, { pr_state: 'MERGED' }],
     })
-    expect(calls.map((call) => call.slice(0, 5))).toEqual([
+    // The git of each check of what stays runs with no prefix.
+    expect(calls.filter((call) => call[0] !== 'git').map((call) => call.slice(0, 5))).toEqual([
       ['env', 'GH_SECURITY_EXAMPLE=1', 'gh', 'pr', 'view'],
       ['gh', 'pr', 'view', '3', '--repo'],
     ])
+  })
+})
+
+// Round 7 ruling 12 on #229. When no reap ran, `left_behind` names only what
+// is on disk: the work directory when the path exists, and the branch when
+// `refs/heads/<branch>` exists in the repository root of the entry.
+describe('what stays when no reap ran', () => {
+  const FIELD = join(FIXTURES_ROOT, 'summarize-run', 'field-run')
+  const specimen = (name: string): JsonValue =>
+    JSON.parse(readFileSync(join(FIELD, name), 'utf8')) as JsonValue
+
+  it('names nothing for the brace-expansion entry of the field run, where neither was made', async () => {
+    // The entry is the third of the Workflow result, unchanged. Its repository
+    // root is not on this machine, so no path under it exists, and no branch.
+    // The report of post-agent.sh named both (the specimen). The port names
+    // neither, and that is the one difference.
+    const at = world()
+    const field = specimen('workflow-result.json') as { result: JsonValue[] }
+    const before = specimen('post-agent-brace-expansion-2.report.json') as Record<string, JsonValue>
+    expect(before.left_behind).toEqual([
+      '/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-brace-expansion-2x',
+      'fix/dependabot-brace-expansion-2x',
+    ])
+    expect(await only(reapAll(at, [field.result[2] as JsonValue]))).toEqual({
+      ...before,
+      left_behind: [],
+    })
+  })
+
+  const failure = success(PLAIN, {
+    status: 'failure',
+    pr_url: null,
+    action: null,
+    resolved_version: null,
+    risk: null,
+    failure: { phase: 'worktree', detail: 'setup failed' },
+  })
+
+  /** The failure report, with `left_behind` and `errors` as given. */
+  const failed = (at: World, left: JsonValue[], errors: JsonValue[] = []) =>
+    kept(at, {
+      result_status: 'failure',
+      reason: "failure: the agent's result was a failure",
+      left_behind: left,
+      errors,
+    })
+
+  it('names nothing when neither the work directory nor the branch exists', async () => {
+    const at = world()
+    expect(await only(reapAll(at, [entry(at.repo, failure)]))).toEqual(failed(at, []))
+  })
+
+  it('names the work directory alone when only the directory exists', async () => {
+    const at = world()
+    mkdirSync(workOf(at.repo, PLAIN), { recursive: true })
+    expect(await only(reapAll(at, [entry(at.repo, failure)]))).toEqual(
+      failed(at, [workOf(at.repo, PLAIN)]),
+    )
+  })
+
+  it('names the branch alone when only the branch exists', async () => {
+    const at = world()
+    at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+    expect(await only(reapAll(at, [entry(at.repo, failure)]))).toEqual(
+      failed(at, [PLAIN.branch_name]),
+    )
+  })
+
+  it('names both when both exist', async () => {
+    const at = world()
+    fixed(at)
+    expect(await only(reapAll(at, [entry(at.repo, failure)]))).toEqual(failed(at, stays(at)))
+  })
+
+  it('keeps the branch, and names the read, when git cannot read the ref', async () => {
+    // The root is a directory, but not a repository, so the read fails. A
+    // read that failed is never an absent branch.
+    const at = world()
+    const root = join(realpathSync(at.sandbox.path), 'plain')
+    mkdirSync(root)
+    const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
+    expect(report.left_behind).toEqual([PLAIN.branch_name])
+    // git names the parent it stopped at in words that depend on the file
+    // system, so the example checks the start and the end of one line.
+    expect(report.errors).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `^git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository [^\\n]*\\S$`,
+        ),
+      ),
+    ])
+  })
+
+  // A runner stands in for the git of the ref read only, so the example can
+  // give an answer that real git gives rarely.
+  it.each([
+    [
+      'git does not start',
+      {
+        status: null,
+        signal: null,
+        text: '',
+        startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' },
+      },
+      'spawn git ENOENT',
+    ],
+    [
+      'git writes two lines',
+      { status: 128, signal: null, text: 'fatal: one\nfatal: two\n', startFailure: null },
+      'fatal: one fatal: two',
+    ],
+    [
+      'a signal ends git',
+      { status: null, signal: 'SIGKILL', text: '', startFailure: null },
+      'killed by SIGKILL',
+    ],
+    [
+      'git exits 128 with no text',
+      { status: 128, signal: null, text: '', startFailure: null },
+      'exit 128',
+    ],
+    [
+      'git exits 1 with text',
+      { status: 1, signal: null, text: 'warning: x\n', startFailure: null },
+      'warning: x',
+    ],
+    [
+      'git exits 1 and a stream is lost',
+      {
+        status: 1,
+        signal: null,
+        text: '',
+        startFailure: null,
+        streamErrors: [{ code: 'EIO', message: 'read EIO' }],
+      },
+      'a pipe failed: EIO, read EIO',
+    ],
+  ])('keeps the branch, and names the read on one line, when %s', async (_name, answer, words) => {
+    const at = world()
+    const spawn: Runner = (command, args = [], options) =>
+      args.includes('rev-parse')
+        ? Promise.resolve({
+            status: answer.status,
+            signal: answer.signal as NodeJS.Signals | null,
+            stdout: '',
+            stderr: answer.text,
+            combined: answer.text,
+            timedOut: false,
+            elapsedMs: 0,
+            startFailure: answer.startFailure,
+            streamErrors: 'streamErrors' in answer ? answer.streamErrors : [],
+          })
+        : run(command, args, options)
+    const file = join(at.sandbox.path, 'results.json')
+    writeFileSync(file, JSON.stringify([entry(at.repo, failure)]))
+    expect(await only(reapBatch(context(at, [file]), viewing({}), spawn))).toEqual(
+      failed(
+        at,
+        [PLAIN.branch_name],
+        [`git rev-parse refs/heads/${PLAIN.branch_name} failed: ${words}`],
+      ),
+    )
+  })
+
+  it('reads the branch through a repository root that is a link', async () => {
+    const at = world()
+    at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+    const link = join(realpathSync(at.sandbox.path), 'link')
+    symlinkSync(at.repo, link)
+    expect(await only(reapAll(at, [entry(link, failure)]))).toMatchObject({
+      left_behind: [PLAIN.branch_name],
+      errors: [],
+    })
+  })
+
+  it('keeps both, and names each stat, when a stat fails for another reason than an absent path', async () => {
+    // A parent with no search permission makes each stat under it fail with
+    // EACCES. That is not an absent path.
+    const at = world()
+    const locked = join(realpathSync(at.sandbox.path), 'locked')
+    const root = join(locked, 'repo')
+    mkdirSync(root, { recursive: true })
+    chmodSync(locked, 0)
+    try {
+      const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
+      const work = report.worktree_path as string
+      expect(report.left_behind).toEqual([work, PLAIN.branch_name])
+      expect(report.errors).toEqual([
+        `stat failed: EACCES: permission denied, stat '${work}'`,
+        `stat failed: EACCES: permission denied, stat '${root}'`,
+      ])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
+
+  it.each([
+    ['is there', true],
+    ['is absent', false],
+  ])(
+    'keeps the work directory whose stat fails, and reads a branch that %s',
+    async (_name, has) => {
+      // The root reads, but the parent of the work directory does not.
+      const at = world()
+      if (has) at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+      const worktrees = join(at.repo, '.claude', 'worktrees')
+      mkdirSync(worktrees, { recursive: true })
+      chmodSync(worktrees, 0)
+      try {
+        const report = (await only(reapAll(at, [entry(at.repo, failure)]))) as Record<
+          string,
+          JsonValue
+        >
+        const work = report.worktree_path as string
+        expect(report.left_behind).toEqual(has ? [work, PLAIN.branch_name] : [work])
+        expect(report.errors).toEqual([`stat failed: EACCES: permission denied, stat '${work}'`])
+      } finally {
+        chmodSync(worktrees, 0o755)
+      }
+    },
+  )
+
+  it('names the failed stat and the failed ref read together', async () => {
+    // The root is a plain directory, so the ref read fails too.
+    const at = world()
+    const root = join(realpathSync(at.sandbox.path), 'plain')
+    const worktrees = join(root, '.claude', 'worktrees')
+    mkdirSync(worktrees, { recursive: true })
+    chmodSync(worktrees, 0)
+    try {
+      const report = (await only(reapAll(at, [entry(root, failure)]))) as Record<string, JsonValue>
+      const work = report.worktree_path as string
+      expect(report.left_behind).toEqual([work, PLAIN.branch_name])
+      expect(report.errors).toEqual([
+        `stat failed: EACCES: permission denied, stat '${work}'`,
+        expect.stringMatching(
+          new RegExp(
+            `^git rev-parse refs/heads/${PLAIN.branch_name} failed: fatal: not a git repository`,
+          ),
+        ),
+      ])
+    } finally {
+      chmodSync(worktrees, 0o755)
+    }
+  })
+
+  it('names nothing under a repository root that is a file', async () => {
+    const at = world()
+    const root = join(at.sandbox.path, 'a-file')
+    writeFileSync(root, '')
+    expect(await only(reapAll(at, [entry(root, failure)]))).toMatchObject({
+      left_behind: [],
+      errors: [],
+    })
+  })
+
+  it('names only what exists for a refused reap', async () => {
+    // The worktree root is a link out of the repository, so contain refuses
+    // the paths. The branch exists, and no work directory does.
+    const at = world()
+    const elsewhere = join(realpathSync(at.sandbox.path), 'elsewhere')
+    mkdirSync(elsewhere)
+    mkdirSync(join(at.repo, '.claude'))
+    symlinkSync(elsewhere, join(at.repo, '.claude', 'worktrees'))
+    at.fixtures.git(at.repo, 'branch', PLAIN.branch_name, 'origin/main')
+    expect(
+      await only(reapAll(at, [entry(at.repo, success())], { 'octo/app#12': view('OPEN') })),
+    ).toMatchObject({
+      reaped: false,
+      reason: 'the reap refused the paths, so nothing was removed',
+      left_behind: [PLAIN.branch_name],
+    })
   })
 })
 

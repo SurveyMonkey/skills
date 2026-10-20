@@ -326,20 +326,6 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
       The status should be success
       The output should equal '1'
     End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 're-reports every excluded checkout in the phase 7 summary'
-      When call phrase_in "$SKILL" 're-report every checkout phase 1 or phase 2 excluded, by name, and every repo phase 5.s registry preflight excluded'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # pin: mechanical, retired by summarize-run.sh
-    It 'carries the registry exclusions into the phase 8 closing report'
-      When call phrase_in "$SKILL" 'every repo phase 5.s registry preflight excluded, and what would unblock each'
-      The status should be success
-      The output should equal '1'
-    End
   End
 
   Describe 'the Repo column follows the number of checkouts'

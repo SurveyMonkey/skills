@@ -1,0 +1,20 @@
+{
+  "status": "failure",
+  "package": "smol-toml",
+  "major_line": "1",
+  "repo": "octo/app",
+  "branch": "fix/dependabot-smol-toml-1x",
+  "pr_url": null,
+  "action": null,
+  "resolved_version": null,
+  "risk": null,
+  "observations": [],
+  "requires_major_bump": [],
+  "bare_override": "none",
+  "no_op": null,
+  "failure": {
+    "phase": "validate",
+    "detail": "validate_failed_after_ladder: the scoped override overrides.nx.smol-toml = '>=1.9.0 <2' was written to package.json, but the install left smol-toml 1.6.1 at node_modules/smol-toml (npm ls shows nx@22.7.7 'overridden' yet smol-toml@1.6.1; nx declares it as exact 1.6.1). Violations: 1.6.1 at node_modules/smol-toml, unresolved for <=1.7.0 and <=1.8.0 (alerts 305, 350). Only parent was nx; tighten-bare was applied but no bare entry ended up written. smol-toml 1.9.0 and 1.9.1 do exist in the registry, so this is not a missing version. The lockfile did not change after the install. Needs manual reconciliation (e.g. a regenerated lockfile or an nx bump) by a human."
+  },
+  "cleanup": null
+}

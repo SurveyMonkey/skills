@@ -16,24 +16,15 @@
 # makes the skill call the command. The scheme itself is in discover-alerts
 # --branch-style (tests/plugins/gh-security/subcommands/discover-alerts.test.ts),
 # in classify-lines --branch-style, and in the notice hook
-# (spec/notice_scan_spec.sh). This file keeps the prose that is
-# not code: the phase 7 summary, and the fix agent, which uses the branch
-# name as it is.
+# (spec/notice_scan_spec.sh). The phase 7 line for a flat repository is in
+# summarize-run (tests/plugins/gh-security/subcommands/summarize-run.test.ts).
+# This file keeps the prose that is not code: the fix agent, which uses the
+# branch name as it is.
 
 Describe 'the branch-namespace preflight (issue #123)'
-  SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
 
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
-
-  Describe 'the flat scheme in the SKILL.md summary'
-    # pin: mechanical, retired by summarize-run.sh
-    It 'reports every flat-scheme repo in the phase 7 summary'
-      When call phrase_in "$SKILL" 'name every repo whose batch ran under the flat branch scheme'
-      The status should be success
-      The output should equal '1'
-    End
-  End
 
   Describe 'the fix agent stays a dumb consumer of branch_name'
     It 'consumes either spelling verbatim'

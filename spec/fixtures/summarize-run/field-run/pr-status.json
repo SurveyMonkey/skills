@@ -1,0 +1,24 @@
+{
+  "prs": [
+    {
+      "url": "https://github.com/octo/app/pull/2502",
+      "number": 2502,
+      "repo": "octo/app",
+      "state": "OPEN",
+      "is_draft": false,
+      "head": "fix/dependabot-nx-22x",
+      "base": "main",
+      "merge_state": "BLOCKED",
+      "behind": false,
+      "conflict": false,
+      "checks": "pending",
+      "check_counts": {
+        "total": 12,
+        "passed": 7,
+        "failed": 0,
+        "pending": 5
+      },
+      "failing_checks": []
+    }
+  ]
+}
