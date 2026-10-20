@@ -37,7 +37,8 @@ arguments: no variable, quote, pipe or `;`. The plugin's allow hook then passes 
 - **Scratch files live under `<work>`, never `/tmp`.** Cleanup removes `<work>`. Anything
   written elsewhere outlives you,
   the session scratchpad is shared with agents running beside you, and
-  a predictable filename there lets a sibling overwrite yours mid-run.
+  a predictable filename there lets a sibling overwrite yours mid-run. The one exception is the
+  group file of `setup`, because `<work>` does not exist before it.
 - **Never modify machine-global state** (`corepack enable`, `npm install -g`, `git config
   --global`). If the commit failed on a missing bare `yarn` or `pnpm`, run
   `cd <work>/fix && <adapter_path> shim <work>/bin` once and put its `path_prefix` in front of
@@ -76,7 +77,8 @@ arguments: no variable, quote, pipe or `;`. The plugin's allow hook then passes 
 
 ## Phases 1 to 5: run the driver
 
-Write `group` as JSON to the session scratchpad, named for `branch_name` with each `/` as `-`.
+Write `group` as JSON to the session scratchpad, named for `<nwo>-<branch_name>` with each `/`
+as `-`. `branch_name` alone repeats across repositories.
 Then run each step in its own Bash call:
 
 ```bash
@@ -103,11 +105,14 @@ file. Each step answers JSON on stdout:
   prose, point the human at a required peer parent, never an optional one.
   - **`cleanup` is the one exception, and the only one.** It runs after the push and the PR, so
     its exit 3 says something leaked. Map it by what actually shipped:
-    **if you hold a `pr_url`**, your result is `"status": "success"`, with the report in `cleanup`.
+    **if you hold a `pr_url` from a `create` that succeeded**, your result is
+    `"status": "success"`, with the report in `cleanup`.
     **If no PR was opened**, it is `"status": "failure"` with `failure.phase: "worktree"`.
     A failure with an open PR hides a real open PR from phase 7 *and* suppresses the orchestrator's
     reap.
-- **Exit 1, `{"error": ...}`**: a failure at the phase of that step, with the error quoted.
+- **Exit 1, `{"error": ...}`**: a failure, with the error quoted. The phase is `worktree` for
+  `setup`, `validate` for `score`, and the name of the step for `classify`, `baseline` and
+  `apply`. Map an exit 1 from `cleanup` as its exit 3.
 
 ### Where judgment reaches you
 
@@ -122,7 +127,10 @@ file. Each step answers JSON on stdout:
 ## Phase 6: Commit, push, open the PR
 
 Write the `ready_for_pr` answer to `<work>/ready-for-pr.json` and `group` to `<work>/group.json`.
-Stage `pnpm-workspace.yaml` too when `override_file` names it:
+**On a `lockfile-refresh` there is nothing to commit**: skip `add`, `commit-msg` and `commit`,
+push the drift commit, and use the title
+`fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x`.
+Otherwise stage `pnpm-workspace.yaml` too when `override_file` names it:
 
 ```bash
 git -C <work>/fix add package.json <lockfile>
@@ -131,8 +139,8 @@ git -C <work>/fix commit -F <work>/commit-msg.txt
 git -C <work>/fix push -u origin <branch_name>
 ```
 
-**On a `lockfile-refresh` there is nothing to commit**: push the drift commit, and use the title
-`fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x`.
+A non-zero exit from `commit-msg` or `body` puts its `{"error": ...}` in the file. Then fail,
+with the error quoted: phase `push` for `commit-msg`, phase `pr` for `body`.
 
 **The repository's own commit and push hooks are the repository's, and they run.** Never bypass
 one (`--no-verify`, `HUSKY=0`, `LEFTHOOK=0`). Never edit code, tests or configuration to satisfy a
@@ -210,7 +218,7 @@ End your final message with exactly one fenced JSON block:
 ```
 
 - `action`, `resolved_version`, `bare_override` and `requires_major_bump` are `ready_for_pr`'s.
-  `risk` is the scorer's `band` and `score`, with `f4` and `f5` from its `factors[]`.
+  `risk` is `band`, `score`, `f4` and `f5` of the `risk` in `ready_for_pr`.
 - `observations` is the driver's array verbatim. When `bare_override` is `added`, append
   `{"type": "unscoped_override_added", "key", "range", "targets_this_package": true, "reason"}`,
   whose `reason` names the resolved copies and the scoped parents you tried.
