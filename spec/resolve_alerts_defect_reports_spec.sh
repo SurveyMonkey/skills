@@ -184,7 +184,7 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
     End
 
     It 'forbids re-deriving the rules in the audit skill'
-      When call phrase_in "$AUDIT_CMD" 'Never re-derive its rules here'
+      When call phrase_in "$AUDIT_CMD" 'Never re-derive its rules here. Its closing report is this step'"'"'s report'
       The status should be success
       The output should equal '1'
     End

@@ -17,7 +17,7 @@ Describe 'the why-file scratch path is package-qualified (#142)'
   # `grep -c` exits 1 on no match, which is the expected answer for a shape
   # that must be ABSENT, so this reports the count without failing on it.
   count_in() { grep -c -e "$2" -- "$1" || true; }
-  # A local `phrase_in`, distinct from spec/audit_pins_rules_spec.sh's (line 78),
+  # A local `phrase_in`, distinct from spec/audit_pins_rules_spec.sh's,
   # which flattens without squeezing whitespace and so is sensitive to the extra
   # leading spaces a bullet's indented continuation introduces after
   # `tr '\n' ' '`. This one squeezes runs of spaces first, matching
@@ -26,7 +26,7 @@ Describe 'the why-file scratch path is package-qualified (#142)'
   phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   # The scratch-inventory mention (phase 1's `<work>` container description),
-  # the write site (phase 5's merge-risk scoring), and the `--why-json` consume
+  # the write site (phase 8's merge-risk scoring), and the `--why-json` consume
   # site: three lines carry the literal.
   It 'names the package-qualified path three times: inventory, write, consume'
     When call rule_in "$AGENT" 'why-<package>\.json'

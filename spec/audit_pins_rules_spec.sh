@@ -221,8 +221,8 @@ Describe 'the rules that gate the removal PR'
 
     # 26 @esbuild/* packages moved as collateral and one was sampled with no
     # rule permitting it; the honest verdict is the whole point. The family
-    # rule itself is the driver's (`audit-pins judge`); the report owes the
-    # reader what the sample stood for.
+    # rule is the driver's (`audit-pins test-pin` picks the sample); the
+    # report owes the reader what the sample stood for.
     It 'requires the sampled verdict to say it sampled (#79b)'
       When call phrase_in "$AGENT" 'A .sampled-family. verdict names the member judged'
       The status should be success
