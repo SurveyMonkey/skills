@@ -1109,6 +1109,7 @@ describe('the relationship check (#335)', () => {
   it('keeps each alert that is not a root alert with a text relationship as it is', async () => {
     const odd = [
       'not an object',
+      null,
       { number: 1, manifest: 'package-lock.json' },
       dependabot(null),
       dependabot('transitive', 5),
@@ -1197,6 +1198,48 @@ describe('the relationship check (#335)', () => {
       })
     },
   )
+
+  it('makes an alert with the manifest unknown direct, as a root alert', async () => {
+    // `discover-alerts` writes `unknown` for an alert with no manifest path.
+    expect(
+      await realAlerts('npm-dev-direct', [
+        group('debug', '4', { alerts: [dependabot('transitive', 'unknown')] }),
+      ]),
+    ).toEqual({
+      alerts: [[{ ...dependabot('direct', 'unknown'), dependabot_relationship: 'transitive' }]],
+      errors: [],
+    })
+  })
+
+  it('asks declared_ranges nothing for a group with no root alert', async () => {
+    // The read for `duped` fails, so a read would name an error.
+    const { route, calls } = standIn()
+    const member = dependabot('transitive', 'packages/app/package.json')
+    const stdin = envelope([group('duped', '1', { alerts: [member] })])
+    const out = answerIn(
+      await classifyLines(context(['--repo-root', SOME_ROOT], stdin), run, route, '/'),
+    )
+    expect({
+      alerts: [...out.actionable, ...out.skipped].map((entry) => entry.alerts),
+      errors: out.classify_errors,
+      reads: calls.filter((call) => call.startsWith('declared_ranges --line null')),
+    }).toEqual({ alerts: [[member]], errors: [], reads: [] })
+  })
+
+  it('names a failed read once for the groups of one package', async () => {
+    const alerts = [dependabot('transitive')]
+    const out = await answer(
+      envelope([group('duped', '1', { alerts }), group('duped', '2', { alerts })]),
+    )
+    expect(out.classify_errors).toEqual([
+      {
+        adapter: 'node',
+        package: 'duped',
+        error:
+          'declared_ranges: package.json in the tree does not parse; relationship check skipped',
+      },
+    ])
+  })
 
   it('keeps the group actionable with its status when the read fails', async () => {
     const out = await answer(
