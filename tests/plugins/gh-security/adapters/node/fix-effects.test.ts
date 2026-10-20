@@ -467,6 +467,32 @@ describe('fixEffects, the dependents it compares', () => {
     ])
   })
 
+  // nx declares zed after the fix, and not before it. Before the fix, a path
+  // from nx finds the root copy 2.0.0, which nx did not get. nx gets its own
+  // copy 1.0.0 now, and the root copy does not move.
+  it('does not name a package that the dependent did not declare before the fix', async () => {
+    const before = beforeLock(addCopy('', 'dependencies', 'zed', 'node_modules/zed', '2.0.0'))
+    const dir = copyOf(
+      SPECIMEN,
+      editJson('package-lock.json', (lock) => {
+        addCopy('', 'dependencies', 'zed', 'node_modules/zed', '2.0.0')(lock)
+        addCopy(
+          'node_modules/nx',
+          'dependencies',
+          'zed',
+          'node_modules/nx/node_modules/zed',
+          '1.0.0',
+        )(lock)
+      }),
+    )
+    const found = await observationsOf(effects(dir, before))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'axios',
+      'brace-expansion',
+    ])
+  })
+
   // An alias key can resolve to another package after the fix.
   it('does not compare two copies of different packages', async () => {
     const dir = copyOf(

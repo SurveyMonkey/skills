@@ -35,18 +35,22 @@
 // edge first.
 //
 // So after the fix, the verb never names a key that it cannot decide. But
-// before the fix, such a key counts as reached, and so does a key that an
-// earlier key beat. Then the verb can name a key that npm did not apply
-// before the fix. A real npm 11.19.0 run showed one: a bare `"nx"` key
-// before `"nx@22.7.7"` won the edge into nx 22.7.7.
+// before the fix, such a key counts as reached. So does a key that an
+// earlier key beat, and a key that only the manifest after the fix has.
+// Then the verb can name a key that npm did not apply before the fix. A
+// real npm 11.19.0 run showed one: a bare `"nx"` key before `"nx@22.7.7"`
+// won the edge into nx 22.7.7.
 //
 // A downgrade. The verb reads each dependent at the same path before and
-// after the fix. Each package that it declares after the fix must resolve
-// to a copy on each side. When the copy after the fix has a lower version,
-// the verb names the package, the path of that copy, and the two versions.
-// Only two plain semver versions are compared. The target of the fix is
-// never named. A dependent at a new path is not compared. A package that
-// the dependent no longer declares is not compared.
+// after the fix. It compares each package that the dependent declares on
+// both sides, when that package resolves to a copy on each side. When the
+// copy after the fix has a lower version, the verb names the package, the
+// path of that copy, and the two versions. Only two plain semver versions
+// are compared.
+//
+// The verb never names the target of the fix. It does not compare a
+// dependent at a new path. It does not compare a package that the
+// dependent declares on one side only.
 //
 // The verb only reads. It fails for a file that it cannot read, a file that
 // is not JSON, and a lockfile with no packages. It is unsupported for pnpm
@@ -172,7 +176,8 @@ const downgrades = (before: NpmLock, after: NpmLock, pkg: string): FixObservatio
   const found = new Map<string, FixObservation>()
   for (const [from, entry] of after.entries) {
     if (!before.byKey.has(from)) continue
-    for (const key of unique(declaredKeys(entry))) {
+    const declaredBefore = declaredKeys(before.byKey.get(from))
+    for (const key of unique(declaredKeys(entry)).filter((each) => declaredBefore.includes(each))) {
       const was = resolveFrom(before, from, key)
       const now = resolveFrom(after, from, key)
       if (was === null || now === null) continue
