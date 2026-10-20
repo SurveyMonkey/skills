@@ -73,8 +73,7 @@ Describe 'the prose pin inventory (issue #197)'
   # phrase_in, count_in or rule_in, or it greps/awks one of the file's own
   # SKILL.md/agent/command path variables (declared as
   # `VAR="$SHELLSPEC_PROJECT_ROOT/....md"`) the way
-  # spec/reap_agent_artifacts_spec.sh's ad hoc `no_reap_script_mentions` and
-  # spec/audit_pins_rules_spec.sh's locally named `rule()` do. Counted once
+  # spec/audit_pins_rules_spec.sh's locally named `rule()` does. Counted once
   # per block regardless of how many times a match recurs inside it.
   pin_example_count() {
     f="$SPEC_DIR/$1"
