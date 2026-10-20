@@ -8,8 +8,9 @@
 // Input: the JSON that `discover-alerts` writes, `{actionable, skipped, ...}`.
 // Output: the same object. Each actionable group gets its route and two
 // notes, and the groups that no fix in the repository can reach move into
-// `skipped`. A top-level `classify_errors[]` names each adapter read that
-// failed. Each other top-level key passes through as it is.
+// `skipped`. The relationship check (below) can correct the `relationship`
+// of the alerts of a group. A top-level `classify_errors[]` names each
+// adapter read that failed. Each other top-level key passes through as it is.
 //
 // **The route.** Each actionable group gets `adapter`, the name of its
 // adapter, and `supported`, from the registry, by the group's own
@@ -75,6 +76,31 @@
 // A broken `detect` or `declared_ranges` read in this check keeps the group
 // `resolved` and actionable, and adds an entry to `classify_errors[]`.
 //
+// **The relationship check** (#335). `discover-alerts` copies the
+// `relationship` of each alert from Dependabot. Dependabot can call a package
+// `transitive` when the root manifest declares it. So each group with a
+// package and a root alert asks `declared_ranges` with no line, through the
+// adapter. A root alert is an object with a text `relationship`, and its
+// `manifest` is text with no `/`.
+//
+// A `root_range` that is not null means that the root declares the package.
+// Then each root alert gets `relationship: "direct"`, and
+// `dependabot_relationship` keeps the value of Dependabot. A `direct` alert
+// gets the field too. Each other alert stays as it is.
+//
+// An alert of a workspace member manifest, such as
+// `packages/app/package.json`, does not change. `root_range` reads the root
+// manifest only, so it cannot say what the member declares. The `manifest`
+// text `unknown`, which `discover-alerts` writes for an alert with no path,
+// has no directory part. So that alert is a root alert.
+//
+// The phase 4 plan of `resolve-alerts` reads `relationship`. The field
+// `dependabot_relationship` is the record for a person who reads the alert.
+// No command reads it. A failed or broken read, or a failed `detect`, keeps
+// the value of Dependabot. `classify_errors[]` names a failed or broken read.
+// The `resolved_versions` read already names a failed `detect`. These
+// failures do not change the status of the group.
+//
 // **Contract discipline** (ADR 001). A broken read is never an empty answer.
 // A read is broken when it fails, or when a promised field is not there or
 // is of the wrong type. `present: true` with no versions is also broken. A
@@ -92,8 +118,10 @@
 // **Each adapter verb runs in process, once for each key**, where the script
 // started one adapter process for each read: `detect` once for each adapter,
 // `resolved_versions` once for each adapter and package, and
-// `declared_ranges` once for each adapter, package and major. Only
-// `compare_versions` runs for each copy, as in the script.
+// `declared_ranges` once for each adapter, package and major. The
+// relationship check reads `declared_ranges` with no line, at most once for
+// each adapter and package. Only `compare_versions` runs for each copy, as in the
+// script.
 //
 // **`--base-ref origin/<branch>`** names the tree that the verbs read (#158).
 // Without it, they read the checkout at `--repo-root` as it is. With it, the
@@ -154,6 +182,8 @@
 //   - The own-range check is new (#168, a declared parity exception). The
 //     script gives `line_absent` to each group with a copy at or above its
 //     line, and has no such check.
+//   - The relationship check is new (#335, a declared parity exception). The
+//     script gives each alert as `discover-alerts` wrote it.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -235,6 +265,16 @@ const nameOf = (entry: string): string => {
   const at = entry.lastIndexOf('@')
   return at > 0 ? entry.slice(0, at) : entry
 }
+
+/**
+ * An alert that the relationship check can correct (#335). It is an object
+ * with a text `relationship`, and its `manifest` is text with no `/`.
+ */
+const atRoot = (alert: unknown): alert is JsonObject & { readonly relationship: string } =>
+  isRecord(alert) &&
+  typeof alert.relationship === 'string' &&
+  typeof alert.manifest === 'string' &&
+  !alert.manifest.includes('/')
 
 /** Why the input cannot be read, or the parts of it this command reads. */
 const readInput = (
@@ -626,6 +666,35 @@ const classify = (
     return row
   }
 
+  const declared = new Map<string, boolean>()
+  /**
+   * True when the root manifest declares the package, from one declared_ranges
+   * read with no line for each adapter and package (#335). A failed or broken
+   * read is false, and `classify_errors[]` names it. A failed detect is false
+   * too. The resolved_versions read already named it.
+   */
+  const rootDeclares = (name: string, adapter: Adapter<NodeDetection>, pkg: string): boolean => {
+    const cached = declared.get(key(name, pkg))
+    if (cached !== undefined) return cached
+    const detection = detected(name, adapter)
+    let found = false
+    if (detection.outcome === 'ok') {
+      const answer = adapter.declaredRanges(treeOf(detection.value), pkg, null)
+      const value: unknown = answer.outcome === 'ok' ? answer.value : undefined
+      const range = isRecord(value) ? value.root_range : undefined
+      if (typeof range === 'string' || range === null) found = range !== null
+      else {
+        const error =
+          answer.outcome === 'ok'
+            ? `declared_ranges broke its contract (ADR 001): ${JSON.stringify(answer.value).slice(0, 200)}`
+            : answer.error
+        note(name, pkg, `${error}; relationship check skipped`)
+      }
+    }
+    declared.set(key(name, pkg), found)
+    return found
+  }
+
   /** The verdict of the collision check: the parents to name, or null. */
   const collisionOf = (rows: readonly Row[], line: string, location: string): string[] | null => {
     const mine = rows.find((row) => row.line === line) as Row
@@ -705,8 +774,23 @@ const classify = (
         if (parents !== null) status = 'cross_line_collision'
       }
     }
+
+    // The relationship check (#335). A key that is already in the group keeps
+    // its place, so `alerts` stays where the input put it.
+    const alerts = group.alerts
+    const direct =
+      pkg !== '' && Array.isArray(alerts) && alerts.some(atRoot) && rootDeclares(name, adapter, pkg)
     return {
       ...group,
+      ...(direct
+        ? {
+            alerts: (alerts as JsonValue[]).map((alert) =>
+              atRoot(alert)
+                ? { ...alert, relationship: 'direct', dependabot_relationship: alert.relationship }
+                : alert,
+            ),
+          }
+        : {}),
       resolved_majors: [...majors],
       line_status: status,
       ...(parents === null ? {} : { collision_parents: parents }),

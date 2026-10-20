@@ -184,6 +184,21 @@ const DECLARED: Record<string, Envelope<unknown>> = {
   }),
 }
 
+/** A `declared_ranges` reply with no line, and this `root_range`. */
+const allLines = (root: unknown) =>
+  ok({ ...(ranges({}) as { value: object }).value, line: null, root_range: root })
+
+/**
+ * The `declared_ranges` replies with no line, for each package. A package
+ * not here answers `root_range: null`: the root does not declare it.
+ */
+const ROOTS: Record<string, Envelope<unknown>> = {
+  lodash: allLines('^4.17.21'),
+  duped: failed('declared_ranges: package.json in the tree does not parse'),
+  express: ok({ pm: 'npm', package: 'express', line: null }),
+  'path-to-regexp': allLines(5),
+}
+
 interface StandInSpec {
   /** The answer of `detect`. */
   readonly detect?: Envelope<unknown>
@@ -231,6 +246,13 @@ const standIn = (spec: StandInSpec = {}) => {
     },
     declaredRanges: (tree, pkg, line) => {
       calls.push(`declared_ranges --line ${line} ${pkg}`)
+      // The relationship check (#335) reads with no line (`line === null`). A tree with the file
+      // `root-declared` declares the package in its root manifest.
+      if (line === null && spec.fromTree === true) {
+        const declared = existsSync(join(tree.root, 'root-declared'))
+        return allLines(declared ? '^1.0.0' : null) as never
+      }
+      if (line === null) return (ROOTS[pkg] ?? allLines(null)) as never
       if (spec.fromTree === true) {
         const shared = existsSync(join(tree.root, 'dr-shared'))
         return ranges({ parents_read: [shared ? 'shared' : `solo-${line}`] }) as never
@@ -998,6 +1020,250 @@ describe('each verb runs once for each key, and not once for each group', () => 
   })
 })
 
+/** One alert as `discover-alerts` writes it, with `number` and the two fields that #335 reads. */
+const dependabot = (relationship: unknown, manifest: unknown = 'package-lock.json') => ({
+  number: 7,
+  relationship,
+  manifest,
+})
+
+/** The alerts of each group and the errors, from the real adapter registry on a lockfile specimen. */
+const realAlerts = async (fixture: string, groups: readonly Group[]) => {
+  const result = await classifyLines(
+    context(['--repo-root', join(FIXTURES_ROOT, fixture)], envelope(groups)),
+    run,
+    selectAdapter,
+    '/',
+  )
+  const out = answerIn(result)
+  return {
+    alerts: [...out.actionable, ...out.skipped].map((entry) => entry.alerts),
+    errors: out.classify_errors,
+  }
+}
+
+// #335. `npm-dev-direct` is a real `npm install --package-lock-only`
+// lockfile (npm 11.19.0). Its root declares `debug` in `devDependencies`, and
+// `ms` comes only through `debug`. Dependabot called such a package
+// transitive in the field case.
+describe('the relationship check (#335)', () => {
+  it('makes a transitive alert direct when the root manifest declares the package', async () => {
+    expect(
+      await realAlerts('npm-dev-direct', [
+        group('debug', '4', { alerts: [dependabot('transitive')] }),
+      ]),
+    ).toEqual({
+      alerts: [
+        [
+          {
+            number: 7,
+            relationship: 'direct',
+            manifest: 'package-lock.json',
+            dependabot_relationship: 'transitive',
+          },
+        ],
+      ],
+      errors: [],
+    })
+  })
+
+  it('keeps a transitive alert as it is when the root manifest does not declare the package', async () => {
+    expect(
+      await realAlerts('npm-dev-direct', [
+        group('ms', '2', { alerts: [dependabot('transitive')] }),
+      ]),
+    ).toEqual({ alerts: [[dependabot('transitive')]], errors: [] })
+  })
+
+  it('keeps a direct alert direct, and records the value of Dependabot', async () => {
+    expect(
+      await realAlerts('npm-dev-direct', [group('debug', '4', { alerts: [dependabot('direct')] })]),
+    ).toEqual({
+      alerts: [[{ ...dependabot('direct'), dependabot_relationship: 'direct' }]],
+      errors: [],
+    })
+  })
+
+  it('keeps an alert of a workspace member manifest as it is', async () => {
+    // The root declares the package, but the alert names a member manifest.
+    // `root_range` reads the root manifest only, so it cannot say what the member declares.
+    const member = dependabot('transitive', 'packages/app/package.json')
+    expect(
+      await realAlerts('npm-dev-direct', [
+        group('debug', '4', { alerts: [member, dependabot('transitive', 'package.json')] }),
+      ]),
+    ).toEqual({
+      alerts: [
+        [
+          member,
+          {
+            ...dependabot('direct', 'package.json'),
+            dependabot_relationship: 'transitive',
+          },
+        ],
+      ],
+      errors: [],
+    })
+  })
+
+  it('keeps each alert that is not a root alert with a text relationship as it is', async () => {
+    const odd = [
+      'not an object',
+      null,
+      { number: 1, manifest: 'package-lock.json' },
+      dependabot(null),
+      dependabot('transitive', 5),
+    ]
+    const out = await answer(
+      envelope([group('lodash', '4', { alerts: [...odd, dependabot('transitive')] })]),
+    )
+    expect(out.actionable[0]?.alerts).toEqual([
+      ...odd,
+      { ...dependabot('direct'), dependabot_relationship: 'transitive' },
+    ])
+  })
+
+  it.each([
+    ['alerts that are not a list', 'not a list'],
+    ['no alerts', undefined],
+  ])('asks the adapter nothing for a group with %s', async (_case, alerts) => {
+    const { route, calls } = standIn()
+    const stdin = envelope([group('lodash', '4', alerts === undefined ? {} : { alerts })])
+    const out = answerIn(
+      await classifyLines(context(['--repo-root', SOME_ROOT], stdin), run, route, '/'),
+    )
+    expect(out.actionable[0]?.alerts).toEqual(alerts)
+    expect(calls).toEqual(['detect', 'resolved_versions lodash'])
+  })
+
+  it('asks the adapter nothing for a group with no package', async () => {
+    const { route, calls } = standIn()
+    const stdin = envelope([
+      { ecosystem: 'npm', major_line: '4', alerts: [dependabot('transitive')] },
+    ])
+    const out = answerIn(
+      await classifyLines(context(['--repo-root', SOME_ROOT], stdin), run, route, '/'),
+    )
+    expect(out.actionable[0]?.alerts).toEqual([dependabot('transitive')])
+    expect(calls).toEqual([])
+  })
+
+  it('reads declared_ranges once for each package, with no line', async () => {
+    const { route, calls } = standIn()
+    const alerts = [dependabot('transitive')]
+    const stdin = envelope([group('lodash', '4', { alerts }), group('lodash', '4', { alerts })])
+    const out = answerIn(
+      await classifyLines(context(['--repo-root', SOME_ROOT], stdin), run, route, '/'),
+    )
+    expect(out.actionable.map((entry) => entry.alerts)).toEqual([
+      [{ ...dependabot('direct'), dependabot_relationship: 'transitive' }],
+      [{ ...dependabot('direct'), dependabot_relationship: 'transitive' }],
+    ])
+    expect(calls.filter((call) => call.startsWith('declared_ranges'))).toEqual([
+      'declared_ranges --line null lodash',
+    ])
+  })
+
+  it.each([
+    [
+      'a read that fails',
+      'duped',
+      '1',
+      'declared_ranges: package.json in the tree does not parse; relationship check skipped',
+    ],
+    [
+      'a reply with no root_range',
+      'express',
+      '5',
+      'declared_ranges broke its contract (ADR 001): {"pm":"npm","package":"express","line":null}; relationship check skipped',
+    ],
+    [
+      'a root_range that is not text or null',
+      'path-to-regexp',
+      '0',
+      `declared_ranges broke its contract (ADR 001): ${JSON.stringify(
+        (allLines(5) as { value: unknown }).value,
+      )}; relationship check skipped`,
+    ],
+  ])(
+    'keeps the value of Dependabot on %s, and names the error',
+    async (_case, pkg, line, error) => {
+      const out = await answer(envelope([group(pkg, line, { alerts: [dependabot('transitive')] })]))
+      expect({
+        alerts: out.actionable.map((entry) => entry.alerts),
+        errors: out.classify_errors,
+      }).toEqual({
+        alerts: [[dependabot('transitive')]],
+        errors: [{ adapter: 'node', package: pkg, error }],
+      })
+    },
+  )
+
+  it('makes an alert with the manifest unknown direct, as a root alert', async () => {
+    // `discover-alerts` writes `unknown` for an alert with no manifest path.
+    expect(
+      await realAlerts('npm-dev-direct', [
+        group('debug', '4', { alerts: [dependabot('transitive', 'unknown')] }),
+      ]),
+    ).toEqual({
+      alerts: [[{ ...dependabot('direct', 'unknown'), dependabot_relationship: 'transitive' }]],
+      errors: [],
+    })
+  })
+
+  it('asks declared_ranges nothing for a group with no root alert', async () => {
+    // The read for `duped` fails, so a read would name an error.
+    const { route, calls } = standIn()
+    const member = dependabot('transitive', 'packages/app/package.json')
+    const stdin = envelope([group('duped', '1', { alerts: [member] })])
+    const out = answerIn(
+      await classifyLines(context(['--repo-root', SOME_ROOT], stdin), run, route, '/'),
+    )
+    expect({
+      alerts: [...out.actionable, ...out.skipped].map((entry) => entry.alerts),
+      errors: out.classify_errors,
+      reads: calls.filter((call) => call.startsWith('declared_ranges --line null')),
+    }).toEqual({ alerts: [[member]], errors: [], reads: [] })
+  })
+
+  it('names a failed read once for the groups of one package', async () => {
+    const alerts = [dependabot('transitive')]
+    const out = await answer(
+      envelope([group('duped', '1', { alerts }), group('duped', '2', { alerts })]),
+    )
+    expect(out.classify_errors).toEqual([
+      {
+        adapter: 'node',
+        package: 'duped',
+        error:
+          'declared_ranges: package.json in the tree does not parse; relationship check skipped',
+      },
+    ])
+  })
+
+  it('keeps the group actionable with its status when the read fails', async () => {
+    const out = await answer(
+      envelope([group('duped', '1', { alerts: [dependabot('transitive')] })]),
+    )
+    expect(out.actionable.map((entry) => entry.line_status)).toEqual(['resolved'])
+  })
+
+  it('names a failed detect once, and keeps the value of Dependabot', async () => {
+    const out = await answer(
+      envelope([group('lodash', '4', { alerts: [dependabot('transitive')] })]),
+      ['--repo-root', SOME_ROOT],
+      { detect: failed('detect: no lockfile') },
+    )
+    expect({
+      alerts: out.actionable.map((entry) => entry.alerts),
+      errors: out.classify_errors,
+    }).toEqual({
+      alerts: [[dependabot('transitive')]],
+      errors: [{ adapter: 'node', package: 'lodash', error: 'detect: no lockfile' }],
+    })
+  })
+})
+
 describe('the route', () => {
   it('moves a group with no adapter into skipped, after the groups that were there', async () => {
     const { route, calls } = standIn()
@@ -1340,6 +1606,26 @@ describe('--base-ref', () => {
       { line_status: 'cross_line_collision', collision_parents: ['shared'] },
     ])
     expect(statusesOf(await at(repo, ['--repo-root', repo.work], { stdin }))).toEqual(['resolved'])
+  })
+
+  it('reads the root manifest of the detached tree for the relationship check (#335)', async () => {
+    // Only the tree on main declares the package.
+    const repo = repository()
+    writeFileSync(join(repo.work, 'root-declared'), 'yes\n')
+    repo.fixtures.git(repo.work, 'checkout', '-q', 'main')
+    repo.fixtures.git(repo.work, 'add', 'root-declared')
+    repo.fixtures.git(repo.work, 'commit', '-qm', 'declare')
+    repo.fixtures.git(repo.work, 'push', '-q', 'origin', 'main')
+    repo.fixtures.git(repo.work, 'checkout', '-q', 'feature')
+    const stdin = envelope([group('treeread', '1', { alerts: [dependabot('transitive')] })])
+    const alertsOf = (result: CommandResult) =>
+      [...answerIn(result).actionable, ...answerIn(result).skipped].map((entry) => entry.alerts)
+    const base = await at(repo, ['--repo-root', repo.work, '--base-ref', 'origin/main'], { stdin })
+    expect(alertsOf(base)).toEqual([
+      [{ ...dependabot('direct'), dependabot_relationship: 'transitive' }],
+    ])
+    const checkout = await at(repo, ['--repo-root', repo.work], { stdin })
+    expect(alertsOf(checkout)).toEqual([[dependabot('transitive')]])
   })
 
   it('fetches first, so a stale remote-tracking ref cannot answer', async () => {

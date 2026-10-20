@@ -1,0 +1,7 @@
+{
+  "name": "demo-npm-dev-direct",
+  "version": "1.0.0",
+  "devDependencies": {
+    "debug": "4.3.4"
+  }
+}

@@ -174,6 +174,8 @@ const alertOf = (alert: unknown): JsonObject => {
     vulnerable_range: pathOf(alert, 'security_vulnerability', 'vulnerable_version_range'),
     fixed_in: orElse(identifier, 'none'),
     epss_percentile: orElse(pathOf(alert, 'security_advisory', 'epss', 'percentile'), 0),
+    // Dependabot gives this value, or it is `unknown`. `classify-lines` can change it to
+    // `direct` from the root manifest (#335).
     relationship: orElse(pathOf(alert, 'dependency', 'relationship'), 'unknown'),
     manifest: orElse(pathOf(alert, 'dependency', 'manifest_path'), 'unknown'),
   }
