@@ -1,8 +1,9 @@
 #!/bin/sh
 # shellcheck shell=sh
 # The pin audit's `why-<package>.json` scratch path (issue #142). A scoped
-# package name substituted raw breaks the redirect: `$ADAPTER why @babel/traverse
-# > "$WORK/why-@babel/traverse.json"` targets a directory `$WORK` never creates,
+# package name substituted raw breaks the redirect: `<adapter_path> why
+# @babel/traverse > <work>/why-@babel/traverse.json` targets a directory
+# `<work>` never creates,
 # because the slash in the package name reads as a path separator. Sibling
 # spec/fix_dependency_scratch_spec.sh pins the same slug rule in
 # agents/fix-dependency.md, the definition this one was mirrored from.
@@ -24,7 +25,7 @@ Describe 'the why-file scratch path is package-qualified (#142)'
   # line-wrap boundary still matches regardless of how the document wraps.
   phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
-  # The scratch-inventory mention (phase 1's `$WORK` container description),
+  # The scratch-inventory mention (phase 1's `<work>` container description),
   # the write site (phase 5's merge-risk scoring), and the `--why-json` consume
   # site: three lines carry the literal.
   It 'names the package-qualified path three times: inventory, write, consume'
@@ -35,14 +36,14 @@ Describe 'the why-file scratch path is package-qualified (#142)'
 
   It 'writes the why capture to a package-qualified path'
     When call rule_in "$AGENT" \
-      '[$]ADAPTER why <package> > "[$]WORK/why-<package>[.]json"'
+      '<adapter_path> why <package> > <work>/why-<package>[.]json'
     The status should be success
     The output should not equal '0'
   End
 
-  It 'passes the same package-qualified path to score-merge-risk.sh'
+  It 'passes the same package-qualified path to score-merge-risk'
     When call rule_in "$AGENT" \
-      '--why-json "[$]WORK/why-<package>[.]json"'
+      '--why-json <work>/why-<package>[.]json'
     The status should be success
     The output should not equal '0'
   End
@@ -57,8 +58,8 @@ Describe 'the why-file scratch path is package-qualified (#142)'
   End
 
   # Finding: `<package>` substituted raw breaks the redirect for a scoped
-  # package, since `$WORK/why-@babel/` is never created
-  # (`$WORK/why-@babel/traverse.json`). The doc must say to slash-to-dash slug
+  # package, since `<work>/why-@babel/` is never created
+  # (`<work>/why-@babel/traverse.json`). The doc must say to slash-to-dash slug
   # the name before it goes into this one filename. Deleting the rule must fail
   # the suite (mutation-tested finding).
   It 'states the slash-to-dash slug rule for a scoped package name'
@@ -73,13 +74,13 @@ Describe 'the why-file scratch path is package-qualified (#142)'
     The output should not equal '0'
   End
 
-  # audit-pins scores many packages inside one $WORK, sequentially, unlike
+  # audit-pins scores many packages inside one <work>, sequentially, unlike
   # fix-dependency's one-package-per-agent shape; the slug rule's rationale
   # must say what qualification actually prevents here, not borrow
   # fix-dependency's sibling-agent framing verbatim.
-  It 'grounds the slug rule in scoring many packages in the same WORK'
+  It 'grounds the slug rule in scoring many packages in the same work directory'
     When call phrase_in "$AGENT" \
-      'This run scores many packages in the same .[$]WORK., one after another'
+      'This run scores many packages in the same .<work>., one after another'
     The status should be success
     The output should equal '1'
   End

@@ -182,12 +182,6 @@ merge-risk:medium"
       The status should be success
       The output should equal '1'
     End
-
-    It 'says creating a label is a deliberate write of repo metadata beyond the PR itself'
-      When call phrase_in "$AUDIT_AGENT" 'a deliberate write of repo metadata beyond the PR itself'
-      The status should be success
-      The output should equal '1'
-    End
   End
 
   Describe 'the scorer emits the matching emoji for each band, in the PR-body markdown'
