@@ -439,8 +439,11 @@ export const discoveryOf = (value: unknown): Discovery => {
 }
 
 /**
- * The answer of `preflight-repo` for one checkout that it excluded, with the
- * `nwo` of that checkout.
+ * The answer of `preflight-repo` for one checkout, with the `nwo` of that
+ * checkout. Each kind is a checkout that the preflight excluded, a call that
+ * failed, or an answer with `ok` true that still has an `exclude_error`.
+ * `excludeError` is the `exclude_error` of the answer: null for none, and
+ * for a call that failed, which has no answer.
  */
 export type Preflight =
   | {
@@ -450,13 +453,28 @@ export type Preflight =
       readonly cause: Cause
       readonly probe: string | null
       readonly stderr: string | null
+      readonly excludeError: string | null
     }
-  | { readonly checkout: string; readonly nwo: string; readonly error: string }
+  | {
+      readonly checkout: string
+      readonly nwo: string
+      readonly error: string
+      readonly excludeError: null
+    }
+  | {
+      readonly checkout: string
+      readonly nwo: string
+      readonly error: null
+      readonly cause: null
+      readonly excludeError: string
+    }
 
 /**
  * The preflight file: from the `checkout` of a kept checkout to the answer
- * of `preflight-repo` for it, or to its failure `{error}`. Only the
- * exclusions are kept, in the order of the file.
+ * of `preflight-repo` for it, or to its failure `{error}`. An entry is kept
+ * when the checkout was excluded, the call failed, or the answer has an
+ * `exclude_error`. An answer with `ok` true and no `exclude_error` is
+ * dropped. The order of the file stays.
  */
 export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonly Preflight[] => {
   const file = record(value, 'the file')
@@ -468,10 +486,22 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
       refuse(`${at} is not a kept checkout of the discovery`)
     const answer = record(element, at)
     if ('error' in answer) {
-      excluded.push({ checkout, nwo, error: text(answer.error, `${at}.error`) })
+      excluded.push({
+        checkout,
+        nwo,
+        error: text(answer.error, `${at}.error`),
+        excludeError: null,
+      })
       continue
     }
-    if (flag(answer.ok, `${at}.ok`)) continue
+    // Read before `ok`: an answer that worked can still have failed to write
+    // the worktree exclude.
+    const excludeError = textOrNull(answer.exclude_error, `${at}.exclude_error`)
+    if (flag(answer.ok, `${at}.ok`)) {
+      if (excludeError !== null)
+        excluded.push({ checkout, nwo, error: null, cause: null, excludeError })
+      continue
+    }
     excluded.push({
       checkout,
       nwo,
@@ -479,6 +509,7 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
       cause: oneOf(answer.cause, `${at}.cause`, CAUSES),
       probe: textOrNull(answer.probe_package, `${at}.probe_package`),
       stderr: answer.stderr === null ? null : words(answer.stderr, `${at}.stderr`),
+      excludeError,
     })
   }
   return excluded

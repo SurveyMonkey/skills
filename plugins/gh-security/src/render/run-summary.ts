@@ -261,16 +261,17 @@ const excluded = (summary: Summary): string[] => {
       `- ${code(entry.checkout)}: ${entry.reason}.` +
       (entry.stderr === '' ? '' : ` Output: ${entry.stderr}`),
   )
-  const preflightLines = summary.preflights.map((entry) => {
+  const preflightLines = summary.preflights.flatMap((entry) => {
+    if (entry.error === null && entry.cause === null) return []
     const cause =
       entry.error === null
         ? CAUSES[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
           (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${entry.stderr}`)
         : `preflight-repo failed: ${entry.error}.`
-    return (
+    return [
       `- \`${entry.nwo}\` (${code(entry.checkout)}): the registry preflight excluded each group of ` +
-      `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`
-    )
+        `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`,
+    ]
   })
   return [...checkoutLines, ...preflightLines]
 }
@@ -449,7 +450,17 @@ const observations = (summary: Summary): string[] => {
     ).length
     return `- ${code(type)} in \`${repo}\`: ${count} observation(s).`
   })
-  const lines = [...addedLines, ...notes, ...otherLines]
+  // A preflight that could not write the worktree exclude, ok or not. This is
+  // a note on a repository that the batch did touch, so it is not in section 6.
+  const excludeLines = summary.preflights.flatMap((entry) =>
+    entry.excludeError === null
+      ? []
+      : [
+          `- \`${entry.nwo}\` (${code(entry.checkout)}): the worktree exclude could not be written: ` +
+            `${entry.excludeError}. Worktree directories can show in \`git status\` there.`,
+        ],
+  )
+  const lines = [...addedLines, ...notes, ...otherLines, ...excludeLines]
   return lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
 }
 
