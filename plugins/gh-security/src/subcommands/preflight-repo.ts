@@ -61,13 +61,14 @@ import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, ok } from '../lib/envelope.ts'
 import { type Runner, run } from '../lib/process.ts'
+import type { Cause } from '../preflight-causes.ts'
 import { ensureWorktreeExclude, LOCK_TIMING } from './ensure-worktree-exclude.ts'
 
 const USAGE =
   'usage: gh-security preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'
 
 /** The cause of a probe that failed twice. */
-const causeOf = (attempt: RegistryProbeAnswer): 'auth' | 'not-found' | 'start' | 'network' => {
+const causeOf = (attempt: RegistryProbeAnswer): Exclude<Cause, 'detect'> => {
   if (attempt.http_status === 401 || attempt.http_status === 403) return 'auth'
   if (attempt.http_status === 404) return 'not-found'
   return attempt.started ? 'network' : 'start'
@@ -105,7 +106,7 @@ export const preflightRepo = async (
       pm: null,
       pm_exec: null,
       probe_package: null,
-      cause: 'detect',
+      cause: 'detect' satisfies Cause,
       stderr: detection.error,
       exclude_error: excludeError,
     })

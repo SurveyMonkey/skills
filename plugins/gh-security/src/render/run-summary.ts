@@ -10,10 +10,10 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import type { Cause } from '../preflight-causes.ts'
 import { cell, inline } from './markdown.ts'
 import type { Action } from './pr-inputs.ts'
 import {
-  type Cause,
   type Cleanup,
   type Discovery,
   type Group,

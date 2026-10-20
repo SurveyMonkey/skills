@@ -7,6 +7,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import type { ResultStatus } from '../post-agent.ts'
+import { CAUSES, type Cause } from '../preflight-causes.ts'
 import { ACTIONS, type Action } from './pr-inputs.ts'
 
 /** A bad input. The message names the path of the value. */
@@ -436,10 +437,6 @@ export const discoveryOf = (value: unknown): Discovery => {
   })
   return { checkouts, excluded, skipped }
 }
-
-export type Cause = 'auth' | 'not-found' | 'network' | 'start' | 'detect'
-
-const CAUSES: readonly Cause[] = ['auth', 'not-found', 'network', 'start', 'detect']
 
 /**
  * The answer of `preflight-repo` for one checkout that it excluded, with the
