@@ -603,8 +603,9 @@ End your final message with exactly one fenced JSON block:
 }
 ```
 
-- Each finding is the one `judge` returned, verbatim, plus `provenance` from phase 3, and each
-  `not_a_version_pin`, `inconclusive` or `not-tested` pin as a finding of its own. Every pin
+- Each finding is the one `judge` returned, verbatim, plus `provenance` from phase 3. `judge`
+  already holds the pins `baseline` refused. Add each `not_a_version_pin` entry of `list` and each
+  `untested[]` pin of `judge` as a finding of its own. Every pin
   `list` returned appears exactly once. `status` is `removable`, `removable-individually`,
   `still-required`, `inconclusive`, `not-a-version-pin` or `not-tested`.
 - `provenance.fixed_alerts` is an **array of alert numbers as bare integers** (`[93, 148]`), never
