@@ -1677,15 +1677,25 @@ describe('body', () => {
       'These version-qualified overrides matched a copy before this fix, and match no copy after it. So they have no effect now:\n\n'
     const FAILED =
       'The check for downgrades and stale overrides did not run, so this PR makes no claim about them: '
+    // The reviewed body of the scoped state, with `section` just before the
+    // verification. The section goes after the collateral section, and this
+    // state has none.
+    const bodyWith = (section: string): string => {
+      const body = textOf('expected-body-scoped.md')
+      expect(body.split('## Verification\n')).toHaveLength(2)
+      return body.replace('## Verification\n', `${section}## Verification\n`)
+    }
 
     it('lists the downgrades and the stale key of the field fix before the verification', async () => {
       const ran = await withObservations([OTHER, STALE, AXIOS, BRACE])
       expect(ran.result).toBeUndefined()
-      expect(ran.out).toContain(
-        `\`\`\`\n\n${HEAD}${TABLE}` +
-          '| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n' +
-          '| brace-expansion | node_modules/nx/node_modules/brace-expansion | 5.0.12 | 5.0.8 |\n\n' +
-          `${STALE_TEXT}- \`nx@22.7.7\`: installed now 22.7.10\n\n## Verification\n`,
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${TABLE}` +
+            '| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n' +
+            '| brace-expansion | node_modules/nx/node_modules/brace-expansion | 5.0.12 | 5.0.8 |\n\n' +
+            `${STALE_TEXT}- \`nx@22.7.7\`: installed now 22.7.10\n\n`,
+        ),
       )
     })
 
@@ -1708,8 +1718,8 @@ describe('body', () => {
 
     it('lists a downgrade with no stale key', async () => {
       const ran = await withObservations([AXIOS])
-      expect(ran.out).toContain(
-        `${HEAD}${TABLE}| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n\n## Verification\n`,
+      expect(ran.out).toBe(
+        bodyWith(`${HEAD}${TABLE}| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n\n`),
       )
     })
 
@@ -1718,8 +1728,10 @@ describe('body', () => {
         { ...STALE, installed: [] },
         { ...STALE, key: 'a@1', installed: ['2.0.0', '3.0.0'] },
       ])
-      expect(ran.out).toContain(
-        `${HEAD}${STALE_TEXT}- \`nx@22.7.7\`: installed now (none)\n- \`a@1\`: installed now 2.0.0, 3.0.0\n\n## Verification\n`,
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${STALE_TEXT}- \`nx@22.7.7\`: installed now (none)\n- \`a@1\`: installed now 2.0.0, 3.0.0\n\n`,
+        ),
       )
     })
 
@@ -1730,14 +1742,18 @@ describe('body', () => {
           error: 'fix_effects: the package-lock.json of the last commit holds no packages.\n',
         },
       ])
-      expect(ran.out).toContain(
-        `${HEAD}${FAILED}fix_effects: the package-lock.json of the last commit holds no packages.\n\n## Verification\n`,
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${FAILED}fix_effects: the package-lock.json of the last commit holds no packages.\n\n`,
+        ),
       )
     })
 
     it('escapes a pipe in a cell of the table', async () => {
       const ran = await withObservations([down('a|b', 'node_modules/a|b', '2.0.0', '1.0.0')])
-      expect(ran.out).toContain('| a\\|b | node_modules/a\\|b | 2.0.0 | 1.0.0 |\n')
+      expect(ran.out).toBe(
+        bodyWith(`${HEAD}${TABLE}| a\\|b | node_modules/a\\|b | 2.0.0 | 1.0.0 |\n\n`),
+      )
     })
 
     const BAD = (file: string, what: string) =>
@@ -1746,6 +1762,7 @@ describe('body', () => {
     const REFUSED: readonly (readonly [string, unknown, string])[] = [
       ['an object', {}, "an 'observations' that is not a list"],
       ['text', 'x', "an 'observations' that is not a list"],
+      ['false', false, "an 'observations' that is not a list"],
       [
         'a stale key with no key',
         [{ ...STALE, key: 5 }],
