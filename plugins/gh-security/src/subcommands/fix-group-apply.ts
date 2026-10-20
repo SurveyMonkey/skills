@@ -14,15 +14,17 @@
 //   step 3  the stale-lockfile stop.
 //   then    a judgment for the agent: `validate_failed_after_ladder`.
 //
-// After validate passes, and the fix changed the worktree, `fixEffects`
-// compares the tree with the last commit, which is the tree after the
-// control install (#334). It names each version-qualified key that the fix
-// made stale, and each package that the fix did not target that went down.
-// They go after the observations of `apply_constraint`, in the answer and in
-// `apply_result`, so `score` gives them to the PR body. They are a report
-// only, and change no label and no step (ruling 4). A check that fails is
-// one more observation, `fix_effects_failed`, with the error. A check that
-// the adapter does not support for the package manager adds nothing.
+// After validate passes on a changed worktree, `fixEffects` compares the
+// tree with the last commit (#334). That commit is the tree after the
+// control install. The verb names each version-qualified key that the fix
+// made stale. It also names each package that went down, and that the fix
+// did not target. These observations go after those of `apply_constraint`,
+// in the answer and in `apply_result`. So `score` gives them to the PR body.
+// They are a report only, and change no label and no step (ruling 4). A
+// check that fails is one more observation, `fix_effects_failed`, with the
+// error. A tree that `detect` refuses gives `fix_effects_failed` too. A
+// check that the adapter does not support for the package manager adds
+// nothing.
 //
 // The adapter verbs run in process. The package manager that `install`
 // starts and the git calls run under the prefix. `apply` runs two git

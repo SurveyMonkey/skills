@@ -26,10 +26,10 @@
 //     U+007F is not escaped.
 //   - A section `## Downgrades and stale overrides` follows the collateral
 //     section when the state names an effect of the fix (#334). It lists
-//     each package that the fix did not target that went down, each
-//     version-qualified override that no longer matches a copy, and each
-//     check that could not run. The script has no such section. The risk
-//     label does not change for it (ruling 4).
+//     the packages that went down, and that the fix did not target. It
+//     lists the version-qualified overrides that match no copy now. It also
+//     lists each check that could not run. The script has no such section.
+//     The risk label does not change for it (ruling 4).
 //
 // This file ships. It imports nothing outside the plugin.
 

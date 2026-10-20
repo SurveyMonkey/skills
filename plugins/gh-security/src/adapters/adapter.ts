@@ -359,12 +359,12 @@ export type CommitSource = (file: string) => Promise<Envelope<string>>
  * Each is for a person to review. None changes the risk score (ruling 4).
  *
  *   - `stale_qualified_override`: a version-qualified override key of the
- *     manifest, such as `"nx@22.7.7"`, that npm matched for a copy before
- *     the fix, and matches for no copy after it. `installed` has the
+ *     manifest, such as `"nx@22.7.7"`. npm matched it for a copy before the
+ *     fix, and matches it for no copy after it. `installed` has the
  *     versions of the parent after the fix.
- *   - `untargeted_downgrade`: a dependent at the same path, before and after
- *     the fix, now gets a lower version of a package that the fix did not
- *     target. `path` is the copy after the fix.
+ *   - `untargeted_downgrade`: a package that the fix did not target. A
+ *     dependent at the same path before and after the fix now gets a lower
+ *     version of it. `path` is the copy after the fix.
  */
 export type FixObservation =
   | {
@@ -392,7 +392,10 @@ export type FixEffectsFailed = { readonly type: 'fix_effects_failed'; readonly e
 /** The `fixEffects` answer. */
 export type FixEffectsAnswer = {
   readonly pm: string
-  /** The package that the fix targets. No effect names it. */
+  /**
+   * The package that the fix targets. No downgrade names it. A stale key can
+   * have it as its parent.
+   */
   readonly package: string
   /** The stale keys in the order of the block, then the downgrades by package and path. */
   readonly observations: readonly FixObservation[]

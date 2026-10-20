@@ -184,8 +184,8 @@ const renamedKey = (key: string) =>
 
 describe('fixEffects, the edge rule for each spec', () => {
   // npm matches a tag, a file or a directory edge by name, and a git edge by
-  // its range when it has one. The verb does not decide those, so it names
-  // no key.
+  // its range when it has one. An alias edge is the same here. The verb does
+  // not decide those, so it names no key.
   it.each(['latest', 'file:../nx', 'github:nrwl/nx', 'npm:nx@22.7.10'])(
     'names no stale key beside an edge of the spec %s',
     async (spec) => {

@@ -9,9 +9,10 @@
 // real node adapter, with `why`, `declared_ranges`, `resolved_versions`,
 // `apply_constraint` and `validate` replaced. `install` is real. `detect`
 // is real too, with a count of its calls and a failure that an example can
-// put at one call. `fixEffects` gives a written answer, or runs the real verb
-// where an example asks for it. The package manager is a stand-in on PATH, because an install
-// reaches the network. git is real: each example runs in a repository with a
+// put at one call. `fixEffects` gives a written answer, a failure,
+// `unsupported`, a read of one file of the last commit, or the real verb.
+// The package manager is a stand-in on PATH, because an install reaches the
+// network. git is real: each example runs in a repository with a
 // bare origin from `harness/git.ts`. The expected values are written by hand
 // from the contract in the header of `fix-group.ts`.
 import {
@@ -1847,8 +1848,9 @@ describe('the effects of the fix (#334)', () => {
   // writes the lockfile of the field fix, and `apply_constraint` its manifest.
   it('names the stale key and each downgrade of the field fix, on real npm runs', async () => {
     const after = join(FIXTURES_ROOT, 'npm-stale-qualified-key')
-    // The group stays the lodash group. nx moves up, so the target that the
-    // verb leaves out changes nothing here.
+    // The group stays the lodash group. In the field fix, nx was the
+    // target. nx moves up, so no downgrade names it, and the answer is the
+    // same for lodash.
     const w = world(group(), 'npm-stale-qualified-key-before')
     w.script.effects = 'real'
     w.script.on.apply = {

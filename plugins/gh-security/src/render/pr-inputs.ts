@@ -37,12 +37,13 @@
 //     list of texts.
 //   - A `requires_major_bump` or a `vulnerable_ranges` that is `false` is
 //     refused. The script read `false` as the empty list, with `// []`.
-//   - `body` reads `observations` for the three kinds that `fix-group apply`
-//     adds after the fix install (#334): `stale_qualified_override`,
+//   - `body` reads three kinds of `observations` (#334). `fix-group apply`
+//     adds them after the fix install: `stale_qualified_override`,
 //     `untargeted_downgrade` and `fix_effects_failed`. An absent or null
-//     `observations` is the empty list. A list is required, and an entry of
-//     one of the three kinds must have each of its fields. Each other entry
-//     is not read. The script read no observation.
+//     `observations` is the empty list. A list is required. An entry of one
+//     of the three kinds must have the fields that the body shows: `key`
+//     and `installed`, or `package`, `path`, `before` and `after`, or
+//     `error`. Each other entry is not read. The script read no observation.
 //
 // This file ships. It imports nothing outside the plugin.
 

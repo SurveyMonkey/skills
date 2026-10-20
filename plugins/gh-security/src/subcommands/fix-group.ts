@@ -80,10 +80,11 @@
 //             the drift commit decides (#146). Else the widest shape of
 //             `written[]` labels the fix. `fix-group-ladder.ts` has each
 //             decision as a pure function. Then `fixEffects` compares the
-//             tree with the last commit. Its observations, a stale
-//             version-qualified key and a package that went down, come
-//             after those of `apply_constraint`, and `score` carries them
-//             (#334). They change no label.
+//             tree with the last commit. It names a stale
+//             version-qualified key, or a package that went down. A check
+//             that did not run is `fix_effects_failed`. These observations
+//             come after those of `apply_constraint`, and `score` carries
+//             them (#334). They change no label.
 //
 //   score     refuses a run that has no action, and a run that `apply` ended
 //             as a no-op. It reads `resolved_versions`, `why` and

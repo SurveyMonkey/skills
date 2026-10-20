@@ -16,23 +16,29 @@
 //   - The peer range of @nx/devkit matched `"nx@22.7.7"` for a copy of nx
 //     22.7.10, so the key still moved its children.
 //
-// So the key reaches a copy through an edge when the copy is not placed
-// (`npm-placement.ts`), and the spec of the edge matches the selector:
+// So a key reaches a copy through an edge when two things are true. The
+// version of the copy is that of a copy that no rule places
+// (`npm-placement.ts`). The spec of the edge matches the selector:
 //
 //   - An exact spec: the selector admits that version.
 //   - A range, beside an exact selector: the range admits the selector.
-//   - Anything else: a range beside a range selector, a selector that the
-//     range rules cannot read, or a spec that is not a version or a range.
-//     The range rules have no `intersects`, and npm takes a tag, a file or
-//     a directory edge by name. So the key counts as reached.
+//   - Anything else counts as reached. That is a range beside a range
+//     selector, a selector that the range rules cannot read, or a spec that
+//     is not a version or a range. The range rules have no `intersects`.
+//     npm takes a tag, a file or a directory edge by name.
 //
-// A key is stale when it reached a copy before the fix, and reaches none
-// after it. A key that only the manifest after the fix has counts as one
-// that reached a copy before. Each read uses the manifest of its own side.
-// The verb reads only the top-level keys of the block. It does not check
-// that an earlier key of the block wins the edge first. A key that it
-// cannot decide is never named, so it names fewer keys than npm would,
-// never more.
+// A key of the manifest after the fix is stale when it reached a copy
+// before the fix, and reaches none after it. A key that only the manifest
+// after the fix has counts as one that reached a copy before. Each read
+// uses the manifest of its own side. The verb reads only the top-level keys
+// of the block. It does not check that an earlier key of the block wins the
+// edge first.
+//
+// So after the fix, the verb never names a key that it cannot decide. But
+// before the fix, such a key counts as reached, and so does a key that an
+// earlier key beat. Then the verb can name a key that npm did not apply
+// before the fix. A real npm 11.19.0 run showed one: a bare `"nx"` key
+// before `"nx@22.7.7"` won the edge into nx 22.7.7.
 //
 // A downgrade. The verb reads each dependent at the same path before and
 // after the fix. Each package that it declares after the fix must resolve
