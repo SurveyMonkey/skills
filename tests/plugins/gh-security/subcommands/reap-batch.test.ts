@@ -1018,7 +1018,8 @@ describe('the command', () => {
 })
 
 describe('the report', () => {
-  it('has the keys of post-agent.sh, in its order', async () => {
+  // The order is the one that the deleted `post-agent.sh` emitted.
+  it('has the keys of the bash report, in its order', async () => {
     const at = world()
     const report = await only(reapAll(at, [entry(at.repo, null)]))
     expect(Object.keys(report as Record<string, JsonValue>)).toEqual([

@@ -14,8 +14,8 @@ up to ~17 minutes total) and the remediation ladder needs a seam where judgment 
 agent. The subcommands, the exit-code contract and the option surface are stated in the header of
 `src/subcommands/fix-group.ts`; restating them here is how the two drift.
 
-The command is `gh-security fix-group <phase>`, one phase at a time (#232). The bash driver
-`fix-group.sh` was deleted in #236. The header of `src/subcommands/fix-group.ts` states the
+The command is `gh-security fix-group <phase>`, one phase at a time (#232). #236 deleted the
+bash driver `fix-group.sh`. The header of `src/subcommands/fix-group.ts` states the
 contract of each phase. Each phase has its own module, `fix-group-<phase>.ts`. The
 decisions of `apply` (the range, the ladder and its stops, the widest shape, the empty diff) are
 pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
@@ -51,7 +51,7 @@ What that header does not say, and what belongs here:
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
   `worktree_removed: true` with no field naming `$WORK` is the failure that `src/reap.ts`
   guards against on both sides of the same operation. **A populated `errors[]` exits non-zero**, as
-  the reap does for the same reason: the fields without that
+  the bash `reap-agent-artifacts.sh` did for the same reason: the fields without that
   exit still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup.
   **That exit 3 is a signal, not a verdict on the run**, and it is the one exit-3 the agent does
   not map straight onto a failure result: `cleanup` runs after the push and the PR, so the agent

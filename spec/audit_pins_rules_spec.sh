@@ -64,9 +64,9 @@ count_in() { grep -c -e "$2" -- "$1" || true; }
 # names one guard and fails if the sentence carrying it leaves the file.
 Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
-  # Phases 2, 4, 5 and 7 are executed by `gh-security audit-pins`, so a rule
-  # that is purely procedural lives in the command and is tested in
-  # tests/plugins/gh-security/subcommands/audit-pins*.test.ts. The rules that
+  # `gh-security audit-pins` runs phases 2, 4, 5 and 7, so a rule that is
+  # only procedure lives in the command, and
+  # tests/plugins/gh-security/subcommands/audit-pins*.test.ts tests it. The rules that
   # still govern the agent's own reading of a command answer stay in the
   # definition.
 

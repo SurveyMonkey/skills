@@ -10,7 +10,7 @@ provenance, phase 6's report, and phase 8's merge risk and pull request.
 
 The command is `gh-security audit-pins` (#235), with all five steps
 (`src/subcommands/audit-pins*.ts`). `judge` calls `check-advisories` in process. The agent calls
-the command for all five steps (#237). The bash driver `audit-pins-driver.sh` was deleted in #236.
+the command for all five steps (#237). #236 deleted the bash driver `audit-pins-driver.sh`.
 
 Stepped, with a state file at `$WORK/state.json`, for the reasons of `fix-group` and one of its own:
 this flow runs **one install per pin**, so a repository with a dozen pins cannot fit inside the

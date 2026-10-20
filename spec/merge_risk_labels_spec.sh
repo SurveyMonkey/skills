@@ -1,13 +1,13 @@
 #!/bin/sh
 # shellcheck shell=sh
-# Pins the closed set of three merge-risk labels of issue #109 in the places
-# that must agree: the `audit-pins` agent definition (which creates its own
-# risk label inline), the `fix-dependency` agent definition, and README.md.
-# A drifted hex or a fourth band in one of them fails this suite.
+# Pins the closed set of three merge-risk labels of issue #109. The
+# `audit-pins` agent definition creates its own risk label inline. This suite
+# pins its hexes and its three bands. It also pins the hexes in README.md.
 #
 # The `fix-dependency` agent carries no label vocabulary. It calls
-# `render-pr labels` and `render-pr create`. Those calls are tested in
-# tests/plugins/gh-security/subcommands/render-pr.test.ts, with a mocked `gh`.
+# `render-pr labels` and `render-pr create`, and this suite pins those calls.
+# tests/plugins/gh-security/subcommands/render-pr.test.ts tests the labels
+# that the calls make, with a mocked `gh`.
 
 Describe 'the closed set of merge-risk labels (#109)'
   FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"

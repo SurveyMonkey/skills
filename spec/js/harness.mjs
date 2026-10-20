@@ -132,12 +132,13 @@ export function noOpResult(over = {}) {
   }
 }
 
-// A `fix-group cleanup` report as the command emits it on exit 3, minus
-// the `status`/`step` the Result contract strips. Trimmed from the real
-// output rather than invented.
+// A cleanup report on exit 3, minus the `status`/`step` the Result contract
+// strips. Trimmed from the jq output of the deleted `fix-group.sh`, not
+// invented. The command also emits `phase`, `worktree_removed` and
+// `left_behind`.
 export function cleanupReport(over = {}) {
   return {
-    // Resolved paths, as the driver emits them: on macOS the same directory
+    // Resolved paths, as the driver emitted them: on macOS the same directory
     // the orchestrator dispatched as /w/... comes back as /private/w/...,
     // which is why nothing may correlate these by string equality.
     worktree: { path: '/private/w/app/.claude/worktrees/fix-dependabot-undici-6x', action: 'left' },

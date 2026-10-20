@@ -10,10 +10,11 @@ rather than a tidier version of them.
 Everything else is used for real:
 
 - **Not a collaborator you own**, a module the caller imports or a sibling script it resolves by
-  path. `src/post-agent.ts` imports the `pr-status` reader and the reap of `src/reap.ts`: run the
-  real ones. The `reap-batch` examples do exactly that, with real git and a mocked `gh`. A mocked
-  collaborator tests the caller against a shape nothing emits, which is how two units that each
-  pass their own suite disagree in the field.
+  path. `reap-batch` imports the `pr-status` reader and gives it to `src/post-agent.ts`,
+  which imports the reap of `src/reap.ts`: run the real ones. The `reap-batch` examples do
+  exactly that, with real git and a mocked `gh`. A mocked collaborator tests the caller against a
+  shape nothing emits, which is how two units that each pass their own suite disagree in the
+  field.
   Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh` and
   `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their own
   seam and never against a mock of the other.
@@ -40,9 +41,8 @@ answers from environment variables so one mock serves every `Parameters` row.
 around.** Where running the real one would run a package manager or reach the network, the
 command's own seam carries the substitution: the examples of `fix-group` and `audit-pins` in
 `tests/plugins/gh-security/subcommands/` pass an adapter through the registry parameter. This is
-not a hole in the rule above. The parameter is a documented part of the contract, the command
-falls back to the real collaborator when it is absent, and the example is still observing only the
-seam.
+not a hole in the rule above. The CLI binding of each command passes the real registry. A test
+passes a stand-in, and the example still sees only the seam.
 
 Two constraints hold for a substituted collaborator:
 

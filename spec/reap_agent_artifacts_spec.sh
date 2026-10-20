@@ -2,8 +2,8 @@
 # shellcheck shell=sh
 # The orchestrator-side reap (issue #131), as prose pins.
 #
-# The reap itself is `src/reap.ts`, tested in tests/plugins/gh-security/reap.test.ts
-# and in the examples of `reap-batch`. Nothing executable decides *when* it
+# The reap itself is `src/reap.ts`. tests/plugins/gh-security/reap.test.ts and
+# the examples of `reap-batch` test it. Nothing executable decides *when* it
 # runs or what happens to the artifacts it deliberately leaves: that is
 # orchestrator prose in SKILL.md and agent prose in fix-dependency.md, so the
 # sentences are the implementation and their absence is the whole regression

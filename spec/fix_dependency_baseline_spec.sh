@@ -3,9 +3,9 @@
 # The control-install baseline rules (issue #146), and where they live now.
 #
 # They were prose in agents/fix-dependency.md. The adapter's --baseline check
-# does not loosen for ambient drift (see node_validate_spec.sh), so the phase
-# order is the whole fix: classify on the never-installed tree, then a
-# no-change control install, its drift committed, THEN the snapshot. The
+# does not loosen for ambient drift (see node_validate_spec.sh). So the phase
+# order is the whole fix. First classify on the never-installed tree. Then do
+# a no-change control install and commit its drift. THEN take the snapshot. The
 # `gh-security fix-group` command runs that order, and
 # tests/plugins/gh-security/subcommands/fix-group.test.ts covers it.
 #
