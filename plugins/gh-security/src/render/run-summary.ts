@@ -454,7 +454,8 @@ const observations = (summary: Summary): string[] => {
   })
   // A preflight that could not write the worktree exclude, ok or not. Section
   // 6 is only for what the batch never touched, and an ok answer is not that.
-  // So each of these notes is here, also for an excluded repository.
+  // So all exclude notes are here, in one section, also for an excluded
+  // repository.
   const excludeLines = summary.preflights.flatMap((entry) =>
     entry.excludeError === null
       ? []

@@ -3,7 +3,7 @@
 // in its answer, and `summarize-run` reads one from that answer. The answer
 // type of `preflight-repo` uses the type. The text of each cause in
 // `run-summary` also uses it. `run-inputs` reads a cause with the list. So
-// `preflight-repo` cannot give a cause that `summarize-run` refuses, and
+// `preflight-repo` cannot give a cause that is not in the list, and
 // `run-summary` has a text for each cause. This file has no import of the
 // node adapter on purpose: a `summarize-run` that imported `preflight-repo`
 // would load that adapter.
