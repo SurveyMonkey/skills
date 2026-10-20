@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type JsonValue, ok } from '#gh-security/lib/envelope.ts'
-import { run } from '#gh-security/lib/process.ts'
+import { type RunResult, run } from '#gh-security/lib/process.ts'
 import {
   type BranchPolicy,
   type Contained,
@@ -628,6 +628,68 @@ describe('reap', () => {
       `git rev-parse refs/heads/${BRANCH} failed: git stub: refusing rev-parse --verify --quiet refs/heads/${BRANCH}`,
     ])
     expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
+  })
+
+  /** The real git, except for the read of one ref, which answers `answer`. */
+  const answering =
+    (w: World, ref: string, answer: Partial<RunResult>): Git =>
+    (dir, args) =>
+      args.includes('rev-parse') && args.includes(ref)
+        ? Promise.resolve({
+            status: 1,
+            signal: null,
+            stdout: '',
+            stderr: '',
+            combined: '',
+            timedOut: false,
+            elapsedMs: 0,
+            startFailure: null,
+            streamErrors: [],
+            ...answer,
+          })
+        : w.git(dir, args)
+
+  it.each([
+    ['a signal ends git', { status: null, signal: 'SIGKILL' as const }, 'killed by SIGKILL'],
+    ['git exits 128 with no text', { status: 128 }, 'exit 128'],
+    [
+      'git exits 1 and a stream is lost',
+      { streamErrors: [{ code: 'EIO', message: 'read EIO' }] },
+      'a pipe failed: EIO, read EIO',
+    ],
+  ])('keeps the branch, and names the read, when %s', async (_name, answer, words) => {
+    const w = world()
+    addWorktree(w)
+    commitIn(w, 'a.txt')
+    push(w)
+    const ref = `refs/remotes/origin/${BRANCH}`
+    const report = await reap(
+      await contained(w),
+      { pushed: true, defaultBranch: 'main' },
+      answering(w, ref, answer),
+    )
+    expect(report.branch_ref.action).toBe('left')
+    expect(report.branch_ref).toMatchObject({ reason: 'tip-read-failed', origin_tip: null })
+    expect(report.left_behind).toEqual([BRANCH])
+    expect(report.errors).toEqual([`git rev-parse ${ref} failed: ${words}`])
+    expect(w.fixtures.branches(w.repo)).toEqual([BRANCH, 'main'])
+  })
+
+  it('still reads exit 1 with no text and no stream error as an absent ref', async () => {
+    // Green when written: the old rule gave the same answer for this case.
+    const w = world()
+    addWorktree(w)
+    const report = await reap(
+      await contained(w),
+      { pushed: true, defaultBranch: 'main' },
+      answering(w, `refs/remotes/origin/${BRANCH}`, {}),
+    )
+    expect(report.errors).toEqual([])
+    expect(report.branch_ref).toMatchObject({
+      action: 'deleted',
+      reason: 'tip-on-default',
+      origin_tip: null,
+    })
   })
 
   it('reports a branch delete that git refuses', async () => {

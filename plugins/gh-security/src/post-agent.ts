@@ -82,7 +82,7 @@
 import { statSync } from 'node:fs'
 
 import type { JsonObject } from './lib/envelope.ts'
-import { contain, type Git, reap } from './reap.ts'
+import { contain, type Git, reap, refReadFailure } from './reap.ts'
 
 export type ResultStatus = 'success' | 'no-op' | 'failure' | 'unparsable' | 'missing'
 
@@ -211,20 +211,12 @@ const onDisk = async (
   const ref = `refs/heads/${branch}`
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
   if (read.status === 0) return { left: [...left, branch], errors }
-  // `--quiet` answers a missing ref with exit 1 and no text. Any text, any
-  // other exit, a signal, a lost stream, or a git that did not start, is a
-  // failed read.
-  const text = [
-    ...read.streamErrors.map((broke) => `a pipe failed: ${broke.code}, ${broke.message}`),
-    read.startFailure === null ? read.combined : read.startFailure.message,
-  ]
-    .join(' ')
-    .replace(/\s+$/, '')
-    .replace(/\n/g, ' ')
-  if (text === '' && read.status === 1) return { left, errors }
-  const why =
-    text !== '' ? text : read.status === null ? `killed by ${read.signal}` : `exit ${read.status}`
-  return { left: [...left, branch], errors: [...errors, `git rev-parse ${ref} failed: ${why}`] }
+  // `refReadFailure` has the rule: only exit 1 with no text and no stream
+  // error is an absent ref.
+  const failure = refReadFailure(read)
+  return failure === null
+    ? { left, errors }
+    : { left: [...left, branch], errors: [...errors, `git rev-parse ${ref} failed: ${failure}`] }
 }
 
 const REASONS: Readonly<Record<'no-op' | 'failure', string>> = {
