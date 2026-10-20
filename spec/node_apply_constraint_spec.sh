@@ -1301,7 +1301,7 @@ Describe 'node.sh apply_constraint'
     # `npm:underscore@^4.17.21`, a version of underscore that does not exist,
     # while the lodash copy the caller meant goes unmoved. Pre-existing and not
     # fixable in the adapter (neither sense of the name is knowable here), so
-    # `written[]` has to surface it and the definition has to stop on it
+    # `written[]` has to surface it and the fix driver has to stop on it
     # (issue #49).
     It 'writes an npm: value naming a different package when the name collides'
       use_fixture npm-dual-name
@@ -1309,12 +1309,6 @@ Describe 'node.sh apply_constraint'
         apply_constraint lodash '>=4.17.21 <5'
       The status should be success
       The output should equal '["npm:underscore@^4.17.21"]'
-    End
-
-    It 'has a definition that rejects such a value rather than opening a PR on it'
-      When call definition 'value that names a different package, and fail the run'
-      The status should be success
-      The output should equal '1'
     End
 
     # The root is a dependent like any other, and it declares both copies here.

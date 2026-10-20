@@ -7,8 +7,8 @@
 # `band` field is their only source. A drifted hex, a fourth band, or a
 # mismatched color in any one of the three fails this suite.
 #
-# `fix-dependency.md` itself carries no label vocabulary any more — it calls
-# `render-pr.sh labels` and `render-pr.sh create`, and the label behavior
+# `fix-dependency.md` itself carries no label vocabulary any more. It calls
+# `render-pr labels` and `render-pr create`, and the label behavior
 # those calls produce (colors, descriptions, race tolerance, the `--label
 # security --label dependencies --label merge-risk:<band>` argv) is exercised
 # end-to-end in spec/render_pr_spec.sh, with a mocked `gh`. This file only
@@ -117,15 +117,15 @@ merge-risk:medium"
     End
   End
 
-  Describe 'fix-dependency.md delegates label creation and PR opening to render-pr.sh'
-    It 'calls render-pr.sh labels with --repo and --band'
-      When call rule_in "$FIX_AGENT" 'render-pr\.sh labels --repo <nwo> --band <band>'
+  Describe 'fix-dependency.md delegates label creation and PR opening to render-pr'
+    It 'calls render-pr labels with --repo and --band'
+      When call rule_in "$FIX_AGENT" 'render-pr labels --repo <nwo> --band <band>'
       The status should be success
       The output should equal '1'
     End
 
-    It 'calls render-pr.sh create with --band'
-      When call rule_in "$FIX_AGENT" 'render-pr\.sh create --repo <nwo> --head <branch_name> --band <band>'
+    It 'calls render-pr create with --band'
+      When call rule_in "$FIX_AGENT" 'render-pr create --repo <nwo> --head <branch_name> --band <band>'
       The status should be success
       The output should equal '1'
     End

@@ -23,12 +23,13 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
 
   # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts
   # lines and suits a prescribed command or a sentence that fits on one,
-  # `phrase_in` flattens the file first and suits anything the 100-column
-  # wrap may split. Phrases are distinctive fragments, not whole sentences,
+  # `phrase_in` flattens the file first, and squeezes each run of spaces to
+  # one, so it suits anything the 100-column wrap may split, an indented
+  # continuation line included. Phrases are distinctive fragments, not whole sentences,
   # so a copyedit that reflows or rewords around them does not break the
   # spec — only removing the rule itself does.
   rule_in() { grep -c -e "$2" -- "$1"; }
-  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+  phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'driver steps are expected to terminate'
     It 'states the rule that a step is expected to terminate'

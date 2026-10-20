@@ -208,14 +208,13 @@ End your final message with exactly one fenced JSON block:
 - `observations` is the driver's array verbatim. When `bare_override` is `added`, append
   `{"type": "unscoped_override_added", "key", "range", "targets_this_package": true, "reason"}`,
   whose `reason` names the resolved copies and the scoped parents you tried.
-- `cleanup` is required on every result.
-  It is `null` only when Cleanup completed with an empty `errors[]`.
-  Otherwise it is the driver's cleanup report verbatim, without `status` and `step`.
+- `cleanup` is required on every result, and it is `null` only
+  when Cleanup completed with an empty `errors[]`. Otherwise it is the driver's cleanup report verbatim, without `status` and `step`.
   Never summarize it into `detail` and leave the field `null`.
 - Exactly one of `no_op` and `failure` is non-null, and both are `null` on success.
 - On failure, `pr_url` (except after a failed `create`), `action`, `resolved_version` and `risk`
   are `null`, and `failure` is
   `{"phase": "input | worktree | baseline | classify | apply | install | validate | push | pr", "detail": "..."}`.
-  `bare_override` and `observations` report what you wrote, and `cleanup` is never nulled by a
-  failure.
+  `bare_override` and `observations` report what you wrote. `cleanup` reports what is left: it
+  is never nulled by a failure.
 - On a no-op, `pr_url`, `action` and `risk` are `null`, and `no_op` is the driver's object.
