@@ -524,7 +524,7 @@ describe('classify-lines: the declared exception of #168', () => {
   })
 })
 
-// The declared exception of #335 (ruling 10). On the lockfile, the root
+// The declared exception of #335 (ruling 10). On `npm-dev-direct`, the root
 // declares `debug` in `devDependencies`, and `ms` comes only through `debug`.
 // The script gives each alert as discovery wrote it. The port makes the
 // `debug` alert direct, and keeps the value of Dependabot. For `ms`, the two

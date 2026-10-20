@@ -246,7 +246,7 @@ const standIn = (spec: StandInSpec = {}) => {
     },
     declaredRanges: (tree, pkg, line) => {
       calls.push(`declared_ranges --line ${line} ${pkg}`)
-      // The relationship check (#335) reads all lines. A tree with the file
+      // The relationship check (#335) reads with no line (`line === null`). A tree with the file
       // `root-declared` declares the package in its root manifest.
       if (line === null && spec.fromTree === true) {
         const declared = existsSync(join(tree.root, 'root-declared'))
@@ -1020,14 +1020,14 @@ describe('each verb runs once for each key, and not once for each group', () => 
   })
 })
 
-/** One alert as `discover-alerts` writes it, with only the fields that #335 reads. */
+/** One alert as `discover-alerts` writes it, with `number` and the two fields that #335 reads. */
 const dependabot = (relationship: unknown, manifest: unknown = 'package-lock.json') => ({
   number: 7,
   relationship,
   manifest,
 })
 
-/** The alerts of each group, with the real registry on a lockfile specimen. */
+/** The alerts of each group and the errors, from the real adapter registry on a lockfile specimen. */
 const realAlerts = async (fixture: string, groups: readonly Group[]) => {
   const result = await classifyLines(
     context(['--repo-root', join(FIXTURES_ROOT, fixture)], envelope(groups)),
@@ -1042,8 +1042,8 @@ const realAlerts = async (fixture: string, groups: readonly Group[]) => {
   }
 }
 
-// #335. On `npm-dev-direct`, a real `npm install --package-lock-only`
-// lockfile (npm 11.19.0), the root declares `debug` in `devDependencies`, and
+// #335. `npm-dev-direct` is a real `npm install --package-lock-only`
+// lockfile (npm 11.19.0). Its root declares `debug` in `devDependencies`, and
 // `ms` comes only through `debug`. Dependabot called such a package
 // transitive in the field case.
 describe('the relationship check (#335)', () => {
@@ -1086,7 +1086,7 @@ describe('the relationship check (#335)', () => {
 
   it('keeps an alert of a workspace member manifest as it is', async () => {
     // The root declares the package, but the alert names a member manifest.
-    // The adapter reads the root only, so it cannot say what the member declares.
+    // `root_range` reads the root manifest only, so it cannot say what the member declares.
     const member = dependabot('transitive', 'packages/app/package.json')
     expect(
       await realAlerts('npm-dev-direct', [

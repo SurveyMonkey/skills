@@ -77,11 +77,11 @@
 // `resolved` and actionable, and adds an entry to `classify_errors[]`.
 //
 // **The relationship check** (#335). `discover-alerts` copies the
-// `relationship` of each alert from Dependabot, and Dependabot can call a
-// package `transitive` when the root manifest declares it. So each group with
-// a root alert asks `declared_ranges` with no line, through the adapter. A
-// root alert is an object with a text `relationship`, and its `manifest` has
-// no directory part.
+// `relationship` of each alert from Dependabot. Dependabot can call a package
+// `transitive` when the root manifest declares it. So each group with a
+// package and a root alert asks `declared_ranges` with no line, through the
+// adapter. A root alert is an object with a text `relationship`, and its
+// `manifest` is text with no `/`.
 //
 // A `root_range` that is not null means that the root declares the package.
 // Then each root alert gets `relationship: "direct"`, and
@@ -98,7 +98,8 @@
 // `dependabot_relationship` is the record for a person who reads the alert.
 // No command reads it. A failed or broken read, or a failed `detect`, keeps
 // the value of Dependabot. `classify_errors[]` names a failed or broken read.
-// It does not change the group.
+// The `resolved_versions` read already names a failed `detect`. These
+// failures do not change the status of the group.
 //
 // **Contract discipline** (ADR 001). A broken read is never an empty answer.
 // A read is broken when it fails, or when a promised field is not there or
@@ -118,8 +119,8 @@
 // started one adapter process for each read: `detect` once for each adapter,
 // `resolved_versions` once for each adapter and package, and
 // `declared_ranges` once for each adapter, package and major. The
-// relationship check reads `declared_ranges` with no line, once for each
-// adapter and package. Only `compare_versions` runs for each copy, as in the
+// relationship check reads `declared_ranges` with no line, at most once for
+// each adapter and package. Only `compare_versions` runs for each copy, as in the
 // script.
 //
 // **`--base-ref origin/<branch>`** names the tree that the verbs read (#158).
@@ -266,8 +267,8 @@ const nameOf = (entry: string): string => {
 }
 
 /**
- * An alert that the relationship check can correct (#335): an object with a
- * text `relationship`, whose `manifest` is a path with no directory part.
+ * An alert that the relationship check can correct (#335). It is an object
+ * with a text `relationship`, and its `manifest` is text with no `/`.
  */
 const atRoot = (alert: unknown): alert is JsonObject & { readonly relationship: string } =>
   isRecord(alert) &&
