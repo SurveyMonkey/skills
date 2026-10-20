@@ -38,9 +38,11 @@ differ by whether this run opens a pull request against a real repository, and y
 which one was meant.
 
 Each command is `node <cli> <command> ...` on one line, with the literal `cli` path and literal
-arguments: no variable, quote, pipe or `;`. The plugin's allow hook then passes it. A call with
-`--env-prefix`, a `--path` array, a `--key` that holds `>`, or a leading `cd` cannot pass the
-hook; write it as shown all the same.
+arguments: no variable, pipe or `;`. The plugin's allow hook passes a call when each argument
+holds only letters, digits and `. _ : / @ = + , -`. Put an argument that holds any other
+character in single quotes, so the shell does not read it: `'eslint>minimatch'`, `'^3.1.0'`. The
+hook then prompts, and so it does for `--env-prefix` and a leading `cd`. Write the call as shown
+all the same.
 
 `<work>` is `<repo_root>/.claude/worktrees/audit-pins`, and **the literal path goes in every
 command**.
@@ -69,9 +71,11 @@ command**.
   is an opaque, optional seam").
 - **Every Bash call starts fresh**, so git always takes `git -C <literal path>`, and never shares
   a command with `cd`. `gh` calls carry `--repo <nwo>`.
-- **Never modify machine-global state** (`corepack enable`, global installs). If an install
-  failed on a missing bare `yarn` or `pnpm`, run `cd <work>/audit && <adapter_path> shim <work>/bin`
-  once and put its `path_prefix` in front of PATH for that command.
+- **Never modify machine-global state** (`corepack enable`, global installs). If a `why` or
+  `declared_ranges` call of phase 8 failed on a missing bare `yarn` or `pnpm`, run
+  `cd <work>/audit && <adapter_path> shim <work>/bin` once and put its `path_prefix` in front of
+  PATH for that command. An install inside an `audit-pins` step gets no shim: its failure is the
+  answer of that step.
 - **Scratch files live under `<work>`, never `/tmp`.** Cleanup removes `<work>`. The session
   scratchpad is shared with agents running beside you.
 - **Never run the repository's checks**: not its tests, build or linters. The merge-risk score is
@@ -92,7 +96,13 @@ JSON on stdout; read it, not stderr.
   result verbatim, run Cleanup, and stop.
 - **Exit 1, `{"error": ...}`**: a bug in the call you just made, never a finding. Fail with the
   error quoted, at the phase of the step: `list` for `list`, `install` for `baseline` and
-  `test-pin`, `advisories` for `judge`, `compose` for `together`.
+  `test-pin`, `advisories` for `judge`, `compose` for `together`. Two refusals are not bugs:
+  - `test-pin` refuses a `--key` that names more than one pin. Run it again with `--path`.
+  - `judge` refuses when no pin was tested to the end: each `test-pin` call was declined, or
+    each one's install failed. Then no pin is removable. Report the pins that `baseline` refused
+    and the finding of each `test-pin` answer as they came back, and each other pin
+    `not-tested`. Skip phases 7 and 8. In `pr` mode, `pr_skipped_reason` is
+    `no removable pins found`.
 
 The steps run in order, and each refuses to run early with exit 1. **`judge` is not a one-way
 latch**: a `test-pin` run after it makes its answer stale, so run `judge` again before
@@ -200,21 +210,22 @@ node <cli> audit-pins test-pin --work <work> --key <key>
 node <cli> audit-pins test-pin --work <work> --path '<path as JSON>'
 ```
 
-Run `baseline` once, then `test-pin` once per pin, in `test_order`. **A manifest key is not
-unique**: when `test-pin` refuses a `--key` that names more than one pin, pass that pin's own
-`path` with `--path`. Never resolve the ambiguity by picking the first.
+Run `baseline` once. Then run `test-pin` once per pin, in the `test_order` of the `baseline`
+answer, not the one from `list`. **A manifest key is not unique**: when `test-pin` refuses a
+`--key` that names more than one pin, pass that pin's own `path` with `--path`. Never resolve the
+ambiguity by picking the first.
 
-`baseline` answers `ok` with `inconclusive[]`, the pins it refused because their package read
-`present: false` in a tree just installed from a manifest that pins it. Report them
-`inconclusive`, quoting the baseline. A `whole_tree_view` of `false` is not a stop: each verdict
-then covers the named package only. Exit 3 phase `install` is a failed baseline install, or a
-`resolution_map` or `resolved_versions` that errors: fail. Never test pins against a tree that
-could not be built.
+`baseline` answers `ok` with `inconclusive[]`: one entry for each package that read
+`present: false` in a tree just installed from a manifest that pins it. Its pins are not in that
+`test_order`. `judge` carries them as `inconclusive` findings, so do not add them yourself. A
+`whole_tree_view` of `false` is not a stop: each verdict then covers the named package only. Exit
+3 phase `install` is a failed baseline install, or a `resolution_map` or `resolved_versions` that
+errors: fail. Never test pins against a tree that could not be built.
 
 `test-pin` answers `ok` with one `finding`. A `tested` finding goes to phase 5. An `inconclusive`
 finding names its reason in `detail`: **a per-pin install failure stops that pin, not the run.**
-Exit 3 phase `install` is an edit that did not land. **Exit 3 phase `restore` ends the run**: the
-next pin would be tested against a tree that still carries this removal. Fail; do not retry.
+Each exit 3 ends the run, as above. **Do not retry after exit 3 phase `restore`**: the next pin
+would be tested against a tree that still carries this removal.
 
 A finding with a `disagreement` object is one where the two parsers disagree. Quote both answers,
 do not pick a winner, and report by its `shape`:
@@ -298,9 +309,9 @@ node <cli> audit-pins together --work <work>
   set `pr` to `null`, copy `pr_skipped_reason` and `pr_skipped_detail`, and go to Cleanup. Add a
   `combined_failed` answer's `attempt` to `pr_skipped_detail`: it has no field of its own when
   `pr` is `null`.
-- **Exit 3 phase `compose`** is a failure result (phase `compose`) quoting the install error. It
-  never falls through to attempt 2: an install that did not finish is a fact about the
-  environment, not the pins.
+- **Exit 3 phase `compose`** is a failure result (phase `compose`) quoting the install error, or
+  the edit that did not land. It never falls through to attempt 2: an install that did not
+  finish is a fact about the environment, not the pins.
 - **Exit 3 phase `advisories`** is a failure result quoting the error, not a failed attempt.
 - **Exit 3 phase `restore`** ends the run, as in phase 4.
 
@@ -316,16 +327,16 @@ Score **one rating per removed package whose version actually moved**. Two kinds
 a package that **left the tree** (no after-version), and one whose **delta was empty**. List them
 in the PR body under "not scored: no longer resolved / no version moved", saying which.
 
+```bash
+cd <work>/audit && <adapter_path> why <package> > <work>/why-<package>.json
+cd <work>/audit && <adapter_path> declared_ranges <package>
+cd <work>/audit && node <cli> score-merge-risk --package <package> --before <before> --after <after> --why-json <work>/why-<package>.json --override-scope none --declared-range '<range>'
+```
+
 Slug `<package>` before it goes into that filename: replace every `/` with `-`, so
 `@babel/traverse` becomes `why-@babel-traverse.json`. This run scores many packages in the same
 `<work>`, one after another, so the qualified name also keeps one package's capture from
 overwriting the next.
-
-```bash
-cd <work>/audit && <adapter_path> why <package> > <work>/why-<package>.json
-cd <work>/audit && <adapter_path> declared_ranges <package>
-cd <work>/audit && node <cli> score-merge-risk --package <package> --before <before> --after <after> --why-json <work>/why-<package>.json --override-scope none --declared-range <range>
-```
 
 The scorer reads the tree from its directory, so it keeps its `cd`.
 

@@ -45,7 +45,7 @@ run.
 ```mermaid
 flowchart TD
     CMD1["/gh-security:audit-pins: resolve env_prefix from what session<br/>context states for this tree, if anything, then<br/>node &lt;entry&gt; detect-scope [--env-prefix P] CWD"] --> CMD1E{"detect-scope exit status"}
-    CMD1E -->|"non-zero: the GitHub read failed"| CSTOPE(["Stop: report the error"])
+    CMD1E -->|"non-zero: a usage error,<br/>or the GitHub read failed"| CSTOPE(["Stop: report the error"])
     CMD1E -->|zero| CMD1Q{"inside a git repository?"}
     CMD1Q -->|"no: scope null"| CMD1A["Ask which repo, or ask the user to run it from<br/>that repo's checkout, then re-run detect-scope<br/>against that checkout and read the second output"] --> CMD1N
     CMD1Q -->|"yes: repo scope"| CMD1N{"nwo resolved from origin?"}
@@ -101,7 +101,8 @@ flowchart TD
     A4Q -->|"empty delta: a sibling pin<br/>holds the tree"| AREM
     A4Q -->|"delta produced"| A5["Phase 5: node &lt;entry&gt; audit-pins judge --work WORK:<br/>check-advisories, in process, on every version in the delta"]
     A5 --> A5Q{"verdict"}
-    A5Q -->|"non-zero exit, or unknown with<br/>a non-empty adapter_errors[]"| AFA["failure: phase advisories"]
+    A5Q -->|"exit 3, any other exit 1, or unknown<br/>with a non-empty adapter_errors[]"| AFA["failure: phase advisories"]
+    A5Q -->|"exit 1: no pin tested to the end,<br/>so no candidate"| A6
     A5Q -->|"every version safe"| A5C
     A5Q -->|"any vulnerable"| AREQ["finding: still-required,<br/>naming the ranges"]
     A5Q -->|"any unknown or no-advisories"| AINC
@@ -161,7 +162,9 @@ flowchart TD
     ACL["Cleanup: worktree remove --force, rm -rf WORK;<br/>a cleanup failure is reported, not hidden"] --> ARES["One fenced JSON result:<br/>success | failure"]
     ARES --> CMD7{"skill steps 6 and 7:<br/>a pr-mode PR opened?"}
     CMD7 -->|"no"| CDONE(["Report the findings, the pr_skipped_reason,<br/>or the failure; stop"])
-    CMD7 -->|yes| CMD7S["node &lt;entry&gt; pr-status [--env-prefix P] PR_URL"] --> CDONE2(["Report the PR and its state as information;<br/>nothing acts on it (ADR 008)"])
+    CMD7 -->|yes| CMD7S["node &lt;entry&gt; pr-status [--env-prefix P] PR_URL"] --> CMD7Q{"pr-status exit status"}
+    CMD7Q -->|non-zero| CSTOP7(["Stop: report the error and the URL"])
+    CMD7Q -->|zero| CDONE2(["Report the PR and its state as information;<br/>nothing acts on it (ADR 008)"])
 
     subgraph APBOX["node &lt;entry&gt; audit-pins: phases 2, 4 and 5"]
         A2

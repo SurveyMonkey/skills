@@ -15,8 +15,9 @@ The user explicitly invoked `/gh-security:audit-pins`. Run the pin audit on the 
 repository, directly: this entry point does not discover or fix alerts.
 
 **Each step is one command; run it, read its JSON, and decide.** Write every call on one line, as
-shown, with literal paths and no variable, quote, pipe or redirection, so the plugin's allow hook
-passes it. A call with `--env-prefix "<env_prefix>"` cannot pass the hook, and prompts.
+shown, with literal paths and no variable, pipe or redirection. The plugin's allow hook then
+passes each `node` call. A call with `--env-prefix "<env_prefix>"` cannot pass the hook, and
+prompts.
 
 ## 1. Resolve `env_prefix`, then detect scope
 
@@ -40,7 +41,7 @@ The audit is **repo-scoped**, and stays so even when `resolve-alerts` runs acros
 checkouts: one `audit-pins` agent tests one repository's pins. If `scope` is null, say that this
 skill audits a single repository and ask which one, or ask the user to run it from that repo's
 checkout. **Re-run `detect-scope` against that checkout and read `nwo`, `default_branch` and
-`repo_root` from the second output**, never from the first: the first ran outside every
+`path` from the second output**, never from the first: the first ran outside every
 repository, so every one of its fields is null. Never fan out across every repo in an org by
 hand: each pin tested costs an install.
 
@@ -48,6 +49,7 @@ If `nwo` is null, this checkout has no usable `origin`; report that and stop, si
 own PR is opened against that repository. If `default_branch` is null, report that and stop.
 
 `repo_root` is `git -C <path> rev-parse --show-toplevel`, where `<path>` is the answer's `path`.
+Put `<env_prefix>` in front when there is one.
 
 ## 2. Check there is something to audit
 
