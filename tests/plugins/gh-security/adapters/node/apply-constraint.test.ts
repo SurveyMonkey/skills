@@ -1224,6 +1224,62 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
       `apply_constraint: cannot scope 'smol-toml' on this line: a pre-existing version-qualified override key for its parent is the first key that npm matches for copies on this line and for copies whose 'smol-toml' is on other major lines: [{"parent":"nx","key":"nx@>=22.6.0 <23","other_line_versions":["22.6.0"]}]. A constraint inside that key would move those lines across their major boundary, and a new key after it has no effect on the copies it matches (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
     )
   })
+
+  it.each([
+    [
+      'no entry into the key of another package',
+      { 'other@>=22 <23': { axios: AXIOS } },
+      undefined,
+      { 'other@>=22 <23': { axios: AXIOS }, nx: { 'smol-toml': SMOL } },
+    ],
+    [
+      'inside the key of the copy on the line, beside a key for a copy on another line',
+      { 'nx@22.7.7': { axios: AXIOS }, 'nx@22.6.0': { axios: AXIOS } },
+      secondNx('22.6.0', '0.9.0'),
+      { 'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL }, 'nx@22.6.0': { axios: AXIOS } },
+    ],
+    [
+      'inside the key of each copy, and keeps a bare pair on another line',
+      {
+        'nx@22.7.7': { axios: AXIOS },
+        'nx@~22.6.0': { axios: AXIOS },
+        nx: { 'smol-toml': '^0.5.0' },
+      },
+      secondNx('22.6.0', '1.4.0'),
+      {
+        'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL },
+        'nx@~22.6.0': { axios: AXIOS, 'smol-toml': SMOL },
+        nx: { 'smol-toml': '^0.5.0' },
+      },
+    ],
+    [
+      'inside the key, and keeps a bare pair with no floor major',
+      { 'nx@22.7.7': { axios: AXIOS }, nx: { 'smol-toml': { '.': '^1.7.0' } } },
+      undefined,
+      { 'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL }, nx: { 'smol-toml': { '.': '^1.7.0' } } },
+    ],
+  ])('writes %s', (_title, overrides, setup, expected) => {
+    const setups = setup === undefined ? rule(overrides) : both(rule(overrides), setup)
+    expect(manifestAfter(QUALIFIED, smolToml, setups).overrides).toEqual(expected)
+  })
+
+  it('reports the entries in the order of the keys in the block', () => {
+    const setup = both(
+      rule({ 'nx@~22.6.0': { axios: AXIOS }, 'nx@22.7.7': { axios: AXIOS } }),
+      secondNx('22.6.0', '1.4.0'),
+    )
+    expect(answer(QUALIFIED, smolToml, setup).written.map(({ path }) => path)).toEqual([
+      ['overrides', 'nx@~22.6.0', 'smol-toml'],
+      ['overrides', 'nx@22.7.7', 'smol-toml'],
+    ])
+  })
+
+  it('refuses a pin with no floor major inside the key, and names the key', () => {
+    const pinned = rule({ 'nx@22.7.7': { axios: AXIOS, 'smol-toml': { '.': '1.6.1' } } })
+    expect(refusalOf(QUALIFIED, smolToml, pinned)).toBe(
+      `apply_constraint: a pre-existing pin for 'smol-toml' INSIDE the version-qualified override key of its parent pins a DIFFERENT major line: [{"parent":"nx","key":"nx@22.7.7","value":{".":"1.6.1"}}]. npm matches that key first, so a new key after it has no effect, and overwriting the pin would strip that line's protection (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
+    )
+  })
 })
 
 describe('npm placement detection is grounded in the lockfile', () => {
