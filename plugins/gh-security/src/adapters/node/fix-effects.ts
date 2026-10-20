@@ -34,12 +34,13 @@
 // cannot decide is never named, so it names fewer keys than npm would,
 // never more.
 //
-// A downgrade. For each dependent at the same path before and after the
-// fix, each package that it declares resolves to a copy on each side. When
-// the copy after the fix has a lower version, the verb names the package,
-// the path of that copy, and the two versions. Only two plain semver
-// versions are compared. The target of the fix is never named. A dependent
-// at a new path is not compared.
+// A downgrade. The verb reads each dependent at the same path before and
+// after the fix. Each package that it declares after the fix must resolve
+// to a copy on each side. When the copy after the fix has a lower version,
+// the verb names the package, the path of that copy, and the two versions.
+// Only two plain semver versions are compared. The target of the fix is
+// never named. A dependent at a new path is not compared. A package that
+// the dependent no longer declares is not compared.
 //
 // The verb only reads. It fails for a file that it cannot read, a file that
 // is not JSON, and a lockfile with no packages. It is unsupported for pnpm
@@ -165,7 +166,7 @@ const downgrades = (before: NpmLock, after: NpmLock, pkg: string): FixObservatio
   const found = new Map<string, FixObservation>()
   for (const [from, entry] of after.entries) {
     if (!before.byKey.has(from)) continue
-    for (const key of unique([...declaredKeys(entry), ...declaredKeys(before.byKey.get(from))])) {
+    for (const key of unique(declaredKeys(entry))) {
       const was = resolveFrom(before, from, key)
       const now = resolveFrom(after, from, key)
       if (was === null || now === null) continue

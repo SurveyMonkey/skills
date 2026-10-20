@@ -351,6 +351,23 @@ describe('fixEffects, the dependents it compares', () => {
     ])
   })
 
+  // nx declares axios before the fix, and not after it. The root copy of
+  // axios still went down, but nx does not get it now.
+  it('does not name a package that the dependent no longer declares', async () => {
+    const dir = copyOf(
+      SPECIMEN,
+      editJson('package-lock.json', (lock) => {
+        const nx = (lock.packages as Record<string, Json>)['node_modules/nx'] as Json
+        delete (nx.dependencies as Json).axios
+      }),
+    )
+    const found = await observationsOf(effects(dir, BEFORE))
+    expect(found.map((each) => ('package' in each ? each.package : each.type))).toEqual([
+      'stale_qualified_override',
+      'brace-expansion',
+    ])
+  })
+
   // An alias key can resolve to another package after the fix.
   it('does not compare two copies of different packages', async () => {
     const dir = copyOf(
