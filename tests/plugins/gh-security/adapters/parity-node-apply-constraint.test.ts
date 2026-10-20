@@ -52,6 +52,11 @@
 // the refusals of the port: a copy with no manifest version under a parent
 // that must be qualified, and a key that reaches a copy on another major line.
 //
+// Declared exception (#333, #295), a case of its own below: an npm parent with
+// a version-qualified key in the manifest, `"nx@22.7.7": {...}`. npm uses the
+// first key that matches a copy. bash writes a new bare `"nx"` key after it,
+// which has no effect on the copy. The port writes inside `"nx@22.7.7"`.
+//
 // Declared divergence in the exit status, as in parity-node.test.ts: where
 // jq itself stops, bash exits 5. The TypeScript side answers `failed`. There
 // the check is the refusal alone.
@@ -1285,6 +1290,15 @@ const OUTSIDE_PARENTS: readonly Case[] = [
   ),
 )
 
+/** The npm parent with a version-qualified key in the manifest (#333). */
+const QUALIFIED_PARENT = call(
+  'an npm parent with a version-qualified key',
+  'npm-qualified-parent-key',
+  'smol-toml',
+  '>=1.9.0 <2',
+  'nx',
+)
+
 /** The cases whose bash side runs before the examples, at the same time. */
 const ALL_CASES: readonly Case[] = [
   ...SPEC_CASES,
@@ -1292,6 +1306,7 @@ const ALL_CASES: readonly Case[] = [
   ...odd,
   GIT_PARENT_AGREES,
   ...OUTSIDE_PARENTS,
+  QUALIFIED_PARENT,
 ]
 
 /** The time limit of the bash side of all cases together. */
@@ -1342,6 +1357,33 @@ describe('apply_constraint parity on a parent from outside the registry (#50, #3
         bash: bash.includes('debug@4.3.4>ms'),
         typescript: typescript.includes('debug@4.3.4>ms'),
       }).toEqual({ wrote: true, file: true, bash: false, typescript: true })
+    },
+    CASE_TIMEOUT_MS,
+  )
+})
+
+describe('apply_constraint parity on an npm parent with a version-qualified key (#333)', () => {
+  // The declared exception of #333. Only the port writes inside the key.
+  it(
+    'differs: bash writes a bare key after the qualified key, and the port writes inside it',
+    () => {
+      const outcome = outcomeOf(QUALIFIED_PARENT)
+      const [bash = '', typescript = ''] = (outcome.tree ?? '')
+        .replace(/^package\.json differs: bash /, '')
+        .split(', TypeScript ')
+      const overridesOf = (shown: string): unknown =>
+        (JSON.parse(JSON.parse(shown) as string) as { overrides: unknown }).overrides
+      expect({
+        answer: outcome.answer,
+        wrote: outcome.wrote,
+        bash: overridesOf(bash),
+        typescript: overridesOf(typescript),
+      }).toEqual({
+        answer: 'they differ at $.written[0].path[1]: bash "nx", TypeScript "nx@22.7.7"',
+        wrote: true,
+        bash: { 'nx@22.7.7': { axios: '>=1.16.0 <2' }, nx: { 'smol-toml': '>=1.9.0 <2' } },
+        typescript: { 'nx@22.7.7': { axios: '>=1.16.0 <2', 'smol-toml': '>=1.9.0 <2' } },
+      })
     },
     CASE_TIMEOUT_MS,
   )
