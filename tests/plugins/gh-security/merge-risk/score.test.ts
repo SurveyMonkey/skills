@@ -300,6 +300,25 @@ describe('F1 and F7: the version delta and the declared ranges', () => {
       'crosses the pinned range ~6.14.0; dependents declare ~6.14.0',
     ],
     ['11.0.0', '11.1.1', ['>=1'], 0, 'no major line crossed; dependents declare >=1'],
+    // The field-test verdicts. `spec/node_semver_spec.sh` scored these with
+    // the deleted bash scorer, and the expected values are its answers. The
+    // ranges of the other major lines give F7 2. The ranges of `--line` give 0.
+    ['5.0.6', '5.0.9', ['^5.0.5'], 0, 'no major line crossed; dependents declare ^5.0.5'],
+    [
+      '5.0.6',
+      '5.0.9',
+      ['^1.1.7', '^5.0.5'],
+      2,
+      '4 major lines crossed; dependents declare ^1.1.7, ^5.0.5',
+    ],
+    [
+      '7.28.0',
+      '7.29.0',
+      ['5.28.4', '5.29.0', '^6.22.0', '^6.23.0', '^7.27.1'],
+      2,
+      '2 major lines crossed; dependents declare 5.28.4, 5.29.0, ^6.22.0, ^6.23.0, ^7.27.1; crosses the pinned range 5.28.4',
+    ],
+    ['7.28.0', '7.29.0', ['^7.27.1'], 0, 'no major line crossed; dependents declare ^7.27.1'],
   ])('scores %s -> %s against %j as F7 %i', (before, after, ranges, score, evidence) => {
     const report = scored(quiet(), { before, after, declaredRanges: ranges })
     expect(report.factors[6]).toMatchObject({ score, evidence })
