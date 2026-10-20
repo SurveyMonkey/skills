@@ -37,6 +37,12 @@
 //     list of texts.
 //   - A `requires_major_bump` or a `vulnerable_ranges` that is `false` is
 //     refused. The script read `false` as the empty list, with `// []`.
+//   - `body` reads `observations` for the three kinds that `fix-group apply`
+//     adds after the fix install (#334): `stale_qualified_override`,
+//     `untargeted_downgrade` and `fix_effects_failed`. An absent or null
+//     `observations` is the empty list. A list is required, and an entry of
+//     one of the three kinds must have each of its fields. Each other entry
+//     is not read. The script read no observation.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -346,6 +352,29 @@ export interface GlobalOverride {
   readonly note: string
 }
 
+/** A version-qualified override key that the fix made stale (#334). */
+export interface StaleKey {
+  readonly key: string
+  /** The versions of the parent after the fix. */
+  readonly installed: readonly string[]
+}
+
+/** A package that the fix did not target, whose version went down (#334). */
+export interface Downgrade {
+  readonly package: string
+  readonly path: string
+  readonly before: string
+  readonly after: string
+}
+
+/** What the fix did beside its target, from `observations` (#334). */
+export interface Effects {
+  readonly stale: readonly StaleKey[]
+  readonly downgrades: readonly Downgrade[]
+  /** The error of each check that could not run. */
+  readonly failures: readonly string[]
+}
+
 export interface BodyInputs extends PackageFacts {
   readonly alerts: readonly BodyAlert[]
   readonly action: Action
@@ -364,6 +393,7 @@ export interface BodyInputs extends PackageFacts {
   readonly moves: Moves
   /** The note that a fatal move needs, when the caller gave it. */
   readonly collateralNote: string | undefined
+  readonly effects: Effects
 }
 
 /** A list that may be absent or null, as `// []` read it, and whose entries are all text. */
@@ -396,6 +426,40 @@ const readMoves = (state: Rec, message: string): Envelope<Moves> => {
     moves.push({ major: String(major), before, after })
   }
   return ok({ kind: fatal ? 'fatal' : 'benign', moves })
+}
+
+/** The three kinds of `observations` that the body reads, each with its fields (#334). */
+const readEffects = (state: Rec, stateFile: string): Envelope<Effects> => {
+  const raw = state.observations ?? []
+  const bad = (what: string): Envelope<never> =>
+    failed(
+      `body: ${stateFile} has ${what}. A downgrade or a stale override that cannot be read is never left out of the PR.`,
+    )
+  if (!Array.isArray(raw)) return bad("an 'observations' that is not a list")
+  const stale: StaleKey[] = []
+  const downgrades: Downgrade[] = []
+  const failures: string[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    if (entry.type === 'stale_qualified_override') {
+      if (!isText(entry.key) || !isTextArray(entry.installed)) {
+        return bad(
+          "a stale_qualified_override with no 'key' as text or 'installed' as a list of texts",
+        )
+      }
+      stale.push({ key: entry.key, installed: entry.installed })
+    } else if (entry.type === 'untargeted_downgrade') {
+      const { package: name, path, before, after } = entry
+      if (!isText(name) || !isText(path) || !isText(before) || !isText(after)) {
+        return bad("an untargeted_downgrade with no 'package', 'path', 'before' or 'after' as text")
+      }
+      downgrades.push({ package: name, path, before, after })
+    } else if (entry.type === 'fix_effects_failed') {
+      if (!isText(entry.error)) return bad("a fix_effects_failed with no 'error' as text")
+      failures.push(entry.error)
+    }
+  }
+  return ok({ stale, downgrades, failures })
 }
 
 /** The major of a version, as `major_of` read it: no `v` or `=` prefix, and the leading digits. */
@@ -507,6 +571,8 @@ export const readBodyInputs = (
     `body: ${stateFile}'s other_line_moves does not parse as an array of {class: fatal|benign_dedup, major, before: [], after: []} entries.`,
   )
   if (moves.outcome !== 'ok') return moves
+  const effects = readEffects(state, stateFile)
+  if (effects.outcome !== 'ok') return effects
 
   // Every required note is checked before anything is made.
   if (bare.value !== 'none' && notes.override === undefined) {
@@ -602,5 +668,6 @@ export const readBodyInputs = (
     bumps: bumps.value,
     moves: moves.value,
     collateralNote: notes.collateral,
+    effects: effects.value,
   })
 }
