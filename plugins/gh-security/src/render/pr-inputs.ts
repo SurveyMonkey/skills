@@ -46,6 +46,7 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import type { FixEffectsFailed, FixObservation } from '../adapters/adapter.ts'
 import { type Envelope, failed, ok } from '../lib/envelope.ts'
 import { DASH, shown } from './markdown.ts'
 
@@ -352,20 +353,19 @@ export interface GlobalOverride {
   readonly note: string
 }
 
+/** The observation of `fixEffects` of the kind `K`. */
+type EffectOf<K extends FixObservation['type']> = Extract<FixObservation, { readonly type: K }>
+
 /** A version-qualified override key that the fix made stale (#334). */
-export interface StaleKey {
-  readonly key: string
-  /** The versions of the parent after the fix. */
-  readonly installed: readonly string[]
-}
+export type StaleKey = Pick<EffectOf<'stale_qualified_override'>, 'key' | 'installed'>
 
 /** A package that the fix did not target, whose version went down (#334). */
-export interface Downgrade {
-  readonly package: string
-  readonly path: string
-  readonly before: string
-  readonly after: string
-}
+export type Downgrade = Omit<EffectOf<'untargeted_downgrade'>, 'type'>
+
+/** The kinds that the body reads. A kind renamed in `adapter.ts` fails the type check here. */
+const STALE_KIND = 'stale_qualified_override' satisfies FixObservation['type']
+const DOWNGRADE_KIND = 'untargeted_downgrade' satisfies FixObservation['type']
+const FAILED_KIND = 'fix_effects_failed' satisfies FixEffectsFailed['type']
 
 /** What the fix did beside its target, from `observations` (#334). */
 export interface Effects {
@@ -441,20 +441,20 @@ const readEffects = (state: Rec, stateFile: string): Envelope<Effects> => {
   const failures: string[] = []
   for (const entry of raw) {
     if (!isRecord(entry)) continue
-    if (entry.type === 'stale_qualified_override') {
+    if (entry.type === STALE_KIND) {
       if (!isText(entry.key) || !isTextArray(entry.installed)) {
         return bad(
           "a stale_qualified_override with no 'key' as text or 'installed' as a list of texts",
         )
       }
       stale.push({ key: entry.key, installed: entry.installed })
-    } else if (entry.type === 'untargeted_downgrade') {
+    } else if (entry.type === DOWNGRADE_KIND) {
       const { package: name, path, before, after } = entry
       if (!isText(name) || !isText(path) || !isText(before) || !isText(after)) {
         return bad("an untargeted_downgrade with no 'package', 'path', 'before' or 'after' as text")
       }
       downgrades.push({ package: name, path, before, after })
-    } else if (entry.type === 'fix_effects_failed') {
+    } else if (entry.type === FAILED_KIND) {
       if (!isText(entry.error)) return bad("a fix_effects_failed with no 'error' as text")
       failures.push(entry.error)
     }

@@ -31,7 +31,7 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
-import type { CommitSource } from '../adapters/adapter.ts'
+import type { CommitSource, FixEffectsFailed } from '../adapters/adapter.ts'
 import { type CommandResult, type FailedReport, failedReport } from '../cli/command.ts'
 import { fieldOf, orElse, tostring, uniqueJq } from '../jq.ts'
 import { type Failure, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
@@ -597,6 +597,12 @@ const unchanged = (run: Run, drift: boolean): Stop | CommandResult | null => {
   return verdict === 'no_op' ? noOp(run, drift) : null
 }
 
+/** The observation of a check that did not run, with its error. */
+const failedCheck = (error: string): JsonObject => {
+  const failure: FixEffectsFailed = { type: 'fix_effects_failed', error }
+  return failure
+}
+
 /**
  * What the fix did beside its target, as observations (#334). A check that
  * fails is an observation that names the error, never a stop.
@@ -612,11 +618,11 @@ const effectsOf = async (run: Run): Promise<JsonValue[]> => {
   // Only the verb may answer `unsupported` for no effect. A tree that
   // `detect` refuses here is a check that did not run.
   const tree = run.loaded.tree()
-  if (tree.outcome !== 'ok') return [{ type: 'fix_effects_failed', error: tree.error }]
+  if (tree.outcome !== 'ok') return [failedCheck(tree.error)]
   const answer = await adapter.fixEffects(tree.value, driver.package, before)
   if (answer.outcome === 'ok') return answer.value.observations as unknown as JsonValue[]
   if (answer.outcome === 'unsupported') return []
-  return [{ type: 'fix_effects_failed', error: answer.error }]
+  return [failedCheck(answer.error)]
 }
 
 /** After validate passed: the labels of the fix, the state, and the answer. */

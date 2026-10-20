@@ -382,6 +382,13 @@ export type FixObservation =
       readonly after: string
     }
 
+/**
+ * The observation that `fix-group apply` adds when it cannot run
+ * `fixEffects` (#334). No adapter verb gives it: a verb fails in its
+ * envelope.
+ */
+export type FixEffectsFailed = { readonly type: 'fix_effects_failed'; readonly error: string }
+
 /** The `fixEffects` answer. */
 export type FixEffectsAnswer = {
   readonly pm: string
