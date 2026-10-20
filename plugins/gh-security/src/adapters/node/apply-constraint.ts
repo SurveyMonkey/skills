@@ -83,7 +83,6 @@ import { type QualifiedKeys, qualifiedKeysOf } from './npm-qualified-keys.ts'
 import { writePass } from './override-pass.ts'
 import {
   bareConflict,
-  type Edge,
   npmEdges,
   outsideRegistryRefusal,
   plainKeyRefusal,
@@ -217,11 +216,10 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
     if (tighten) tightened = orStop(tightenedRules(placements.get(pkg), overrides, pkg, range))
   }
   let qualifiers: Qualifiers = new Map()
-  let edges: readonly Edge[] = []
   if (location !== 'resolutions' && parents.length > 0) {
     const pnpmLock =
       location === 'pnpm.overrides' ? readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8') : null
-    edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
+    const edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
     qualifiers = orStop(
       qualifiersOf(
         { location, edges, parents, target: targetOf(range), manifest },
@@ -244,16 +242,19 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
   // Find the qualified npm parent keys that npm matches first for a copy (#333).
   let qualifiedKeys: ReadonlyMap<string, QualifiedKeys> = new Map()
   if (location === 'overrides' && parents.length > 0) {
+    const overrides = dieOn(CANNOT_READ_MANIFEST, () => or(get(manifest, 'overrides'), {}))
     const found = orStop(
-      qualifiedKeysOf({
-        overrides: dieOn(CANNOT_READ_MANIFEST, () => or(get(manifest, 'overrides'), {})),
-        edges,
-        parents,
-        qualifiers,
-        placements,
-        pkg,
-        range,
-      }),
+      dieOn(CANNOT_READ_LOCKFILE, () =>
+        qualifiedKeysOf({
+          overrides,
+          lock: npmLock(),
+          parents,
+          qualifiers,
+          placements,
+          pkg,
+          range,
+        }),
+      ),
     )
     qualifiedKeys = found.keys
     qualifiers = found.qualifiers

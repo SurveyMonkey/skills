@@ -65,7 +65,7 @@ import type { Placement } from './npm-placement.ts'
 import { satisfiesAll } from './validate.ts'
 
 /** One edge to the package: the parent, the version of its copy, and the version of the child. */
-export type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: unknown }
+type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: unknown }
 
 /** The missing value of an edge, as the rows of node.sh write it. */
 export const MISSING = '-'

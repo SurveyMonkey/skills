@@ -1081,16 +1081,37 @@ const SMOL = '>=1.9.0 <2'
 
 const AXIOS = '>=1.16.0 <2'
 
-/** A second copy of nx, at `version`, under `foo`, with its own copy of smol-toml at `smol`. */
+/**
+ * A second copy of nx, at `version`, under `foo`, with its own copy of
+ * smol-toml at `smol`. foo declares that exact version, so each edge into a
+ * copy of nx is exact.
+ */
 const secondNx = (version: string, smol: string): Setup =>
   lockEdit((packages) => {
-    packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: `^${version}` } }
+    packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: version } }
     packages['node_modules/foo/node_modules/nx'] = {
       version,
       dependencies: { 'smol-toml': smol },
     }
     packages['node_modules/foo/node_modules/smol-toml'] = { version: smol }
   })
+
+/** The root declares nx as `spec`, in package.json and in the root entry of the lockfile. */
+const rootSpec = (spec: string): Setup =>
+  both(
+    manifestEdit((manifest) => {
+      manifest.devDependencies = { nx: spec }
+    }),
+    lockEdit((packages) => {
+      packages[''] = { ...(packages[''] as Json), devDependencies: { nx: spec } }
+    }),
+  )
+
+const UNSURE = (detail: string): string =>
+  `apply_constraint: cannot scope 'smol-toml': npm can match a pre-existing version-qualified override key for its parent through the range of an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
+
+const OTHER = (detail: string): string =>
+  `apply_constraint: cannot scope 'smol-toml': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
 describe('npm constraint goes inside a qualified key that matches the parent', () => {
   it('writes inside the qualified key of the field case, and no bare key', () => {
@@ -1281,23 +1302,138 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     )
   })
 
-  // Real npm 11.19.0 runs (round 1 of the review of #345). With
-  // `"nx@22.7.6": {".": "22.7.7"}` and an nx edge of `^22.7.0`, npm used that
-  // key and moved nx to 22.7.7. A bare key after it had no effect. With an
-  // exact edge of `22.7.7`, npm did not use the key. The lockfile has no
-  // edge range to the parent, so the pass cannot know which one applies.
+  // Real npm 11.19.0 runs (review of #345). With `"nx@22.7.6": {".":
+  // "22.7.7"}` and an exact nx edge of `22.7.7`, npm did not use the key, and
+  // a bare key after it moved smol-toml (vA). With an nx edge of `^22.7.0`,
+  // npm used that key and moved nx to 22.7.7, and the bare key had no effect
+  // (vC). The pass reads the spec of the edge from the lockfile.
   it.each([
     ['an object with a "." value', { 'nx@22.7.6': { '.': '22.7.7', axios: AXIOS } }],
     ['a text value', { 'nx@22.7.6': '22.7.7' }],
-    ['a text value before a bare key', { 'nx@22.7.6': '22.7.7', nx: { minimist: '^1.2.8' } }],
   ])(
-    'refuses a key whose selector does not admit the copy but whose value does: %s',
+    'writes the bare key beside a key that an exact edge does not match: %s',
     (_title, overrides) => {
-      expect(refusalOf(QUALIFIED, smolToml, rule(overrides))).toBe(
-        `apply_constraint: cannot scope 'smol-toml': a pre-existing version-qualified override key for its parent has a selector that does not admit a copy on this line, and a value that does: [{"parent":"nx","key":"nx@22.7.6","versions":["22.7.7"]}]. npm can match that key through the range of the edge to the copy, and move the copy to that value, so neither a constraint inside that key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
-      )
+      expect(manifestAfter(QUALIFIED, smolToml, rule(overrides)).overrides).toEqual({
+        ...overrides,
+        nx: { 'smol-toml': SMOL },
+      })
     },
   )
+
+  it.each([
+    ['an object with a "." value', { 'nx@22.7.6': { '.': '22.7.7', axios: AXIOS } }],
+    ['a text value before a bare key', { 'nx@22.7.6': '22.7.7', nx: { minimist: '^1.2.8' } }],
+    // A real npm lockfile kept nx 22.7.12 beside this key, for an edge of
+    // `^22.7.0`. A fresh install then used the key, and a bare key after it
+    // had no effect.
+    ['an object with no "." value', { 'nx@22.7.9': { axios: AXIOS } }],
+    ['a range selector before the key of the copy', { 'nx@~22.6.0': {}, 'nx@22.7.7': {} }],
+  ])('refuses a key that a range edge can match: %s', (_title, overrides) => {
+    const key = Object.keys(overrides)[0] as string
+    expect(refusalOf(QUALIFIED, smolToml, both(rootSpec('^22.6.0'), rule(overrides)))).toBe(
+      UNSURE(`[{"parent":"nx","key":"${key}","versions":["22.7.7"]}]`),
+    )
+  })
+
+  it('writes inside the key of the copy for a range edge, past an exact key outside the range', () => {
+    const setup = both(rootSpec('^22.6.0'), rule({ 'nx@21.0.0': {}, 'nx@22.7.7': {} }))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@21.0.0': {},
+      'nx@22.7.7': { 'smol-toml': SMOL },
+    })
+  })
+
+  it('refuses a copy whose two edges match different keys', () => {
+    const setup = both(
+      rule({ 'nx@22.7.6': { '.': '22.7.7' }, 'nx@22.7.7': {} }),
+      rootSpec('22.7.6'),
+      lockEdit((packages) => {
+        packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: '22.7.7' } }
+      }),
+    )
+    expect(refusalOf(QUALIFIED, smolToml, setup)).toBe(
+      UNSURE(
+        '[{"parent":"nx","key":"nx@22.7.6","versions":["22.7.7"]},{"parent":"nx","key":"nx@22.7.7","versions":["22.7.7"]}]',
+      ),
+    )
+  })
+
+  // Real npm 11.19.0 runs (review of #345): for a git copy of nx at 22.7.7,
+  // a constraint inside `"nx@22.7.7"` had no effect, and a bare key moved
+  // smol-toml. npm gives a tag or a directory the first key by name.
+  it.each([
+    ['a git URL', 'git+https://github.com/nrwl/nx.git'],
+    ['a tag', 'latest'],
+    ['a directory', 'file:vendor/nx'],
+  ])('refuses a key beside a copy of the parent from %s', (_title, spec) => {
+    expect(refusalOf(QUALIFIED, smolToml, both(rootSpec(spec), rule({ 'nx@22.7.7': {} })))).toBe(
+      OTHER('[{"parent":"nx","keys":["nx@22.7.7"],"versions":["22.7.7"]}]'),
+    )
+  })
+
+  it('refuses a key beside a copy with a tag edge and an exact edge', () => {
+    const tag = lockEdit((packages) => {
+      packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: 'latest' } }
+    })
+    expect(refusalOf(QUALIFIED, smolToml, both(tag, rule({ 'nx@22.7.7': {} })))).toBe(
+      OTHER('[{"parent":"nx","keys":["nx@22.7.7"],"versions":["22.7.7"]}]'),
+    )
+  })
+
+  it('refuses a key beside a copy with no edge into it', () => {
+    const lone = lockEdit((packages) => {
+      packages['node_modules/foo/node_modules/nx'] = {
+        version: '22.7.7',
+        dependencies: { 'smol-toml': '1.6.1' },
+      }
+    })
+    expect(refusalOf(QUALIFIED, smolToml, both(lone, rule({ 'nx@22.7.7': {} })))).toBe(
+      OTHER('[{"parent":"nx","keys":["nx@22.7.7"],"versions":["22.7.7"]}]'),
+    )
+  })
+
+  it('writes inside the key of a normal copy, and nests for the copy that a rule places', () => {
+    const normal = lockEdit((packages) => {
+      packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: '22.7.5' } }
+      packages['node_modules/foo/node_modules/nx'] = {
+        version: '22.7.5',
+        dependencies: { 'brace-expansion': '^5.0.4' },
+      }
+    })
+    const keys = rule({ lerna: { nx: '>=22.7.7 <23', chalk: '^6.0.0' }, 'nx@22.7.5': {} })
+    expect(manifestAfter(PLACED, nx, both(normal, keys)).overrides).toEqual({
+      lerna: { nx: NESTED, chalk: '^6.0.0' },
+      'nx@22.7.5': { 'brace-expansion': '>=5.0.9 <6' },
+    })
+  })
+
+  it('writes the field case with no regard to a copy of another parent', () => {
+    const bar = lockEdit((packages) => {
+      packages['node_modules/bar'] = { version: '1.0.0', dependencies: { 'smol-toml': 'latest' } }
+    })
+    expect(
+      manifestAfter(QUALIFIED, smolToml, both(bar, rule({ 'nx@22.7.7': {} }))).overrides,
+    ).toEqual({ 'nx@22.7.7': { 'smol-toml': SMOL } })
+  })
+
+  it.each([
+    [
+      'only into the key of the copy on the line',
+      { 'nx@22.7.7': { axios: AXIOS } },
+      secondNx('22.6.0', '0.9.0'),
+      { 'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL } },
+    ],
+    [
+      'inside the key of one copy, and a qualified key for the copy it does not match',
+      { 'nx@22.7.7': { axios: AXIOS } },
+      secondNx('22.6.0', '1.4.0'),
+      { 'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL }, 'nx@22.6.0': { 'smol-toml': SMOL } },
+    ],
+  ])('writes %s', (_title, overrides, setup, expected) => {
+    expect(manifestAfter(QUALIFIED, smolToml, both(rule(overrides), setup)).overrides).toEqual(
+      expected,
+    )
+  })
 
   it('writes the bare key beside a key whose value does not admit the copy either', () => {
     expect(manifestAfter(QUALIFIED, smolToml, rule({ 'nx@22.7.6': '22.7.6' })).overrides).toEqual({
@@ -1321,43 +1457,21 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
   })
 
-  /** The root declares nx as `latest`, so the parent has no qualifier: the bare verdict. */
-  const latest = manifestEdit((manifest) => {
-    manifest.devDependencies = { nx: 'latest' }
-  })
-
-  it('writes only into the key of the copy on the line, when the parent has no qualifier', () => {
-    const setup = both(
-      latest,
-      rule({ 'nx@20.1.0': { axios: AXIOS }, 'nx@22.7.7': { axios: AXIOS } }),
-      secondNx('20.1.0', '0.9.0'),
-    )
-    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
-      'nx@20.1.0': { axios: AXIOS },
-      'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL },
-    })
-  })
-
   it('refuses a key that also matches a copy on another line, when the parent has no qualifier', () => {
-    const setup = both(
-      latest,
-      rule({ 'nx@>=20.0.0 <23': { axios: AXIOS } }),
-      secondNx('20.1.0', '0.9.0'),
-    )
+    // Two copies at one version: the parent has no qualifier.
+    const setup = both(rule({ 'nx@22.7.7': { axios: AXIOS } }), secondNx('22.7.7', '0.9.0'))
     expect(refusalOf(QUALIFIED, smolToml, setup)).toBe(
-      `apply_constraint: cannot scope 'smol-toml' on this line: a pre-existing version-qualified override key for its parent is the first key that npm matches for copies on this line and for copies whose 'smol-toml' is on other major lines: [{"parent":"nx","key":"nx@>=20.0.0 <23","other_line_versions":["20.1.0"]}]. A constraint inside that key would move those lines across their major boundary, and a new key after it has no effect on the copies it matches (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
+      `apply_constraint: cannot scope 'smol-toml' on this line: a pre-existing version-qualified override key for its parent is the first key that npm matches for copies on this line and for copies whose 'smol-toml' is on other major lines: [{"parent":"nx","key":"nx@22.7.7","other_line_versions":["22.7.7"]}]. A constraint inside that key would move those lines across their major boundary, and a new key after it has no effect on the copies it matches (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
     )
   })
 
-  // npm gives an edge of a tag, a directory or a file the first key of the
-  // parent by name, whatever its selector (`getEdgeRule`).
-  it('refuses a copy of the parent with no version beside a key that serves a copy', () => {
+  it('refuses a key beside a copy with no version and a range edge', () => {
     const versionless = lockEdit((packages) => {
       packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: '*' } }
       packages['node_modules/foo/node_modules/nx'] = { dependencies: { 'smol-toml': '1.6.1' } }
     })
     expect(refusalOf(QUALIFIED, smolToml, versionless)).toBe(
-      `apply_constraint: cannot scope 'smol-toml': its parent has a copy with no version in the lockfile, beside pre-existing version-qualified override keys that npm matches first for other copies: [{"parent":"nx","keys":["nx@22.7.7"]}]. npm can match such a key for the copy with no version, so neither a constraint inside it nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
+      UNSURE('[{"parent":"nx","key":"nx@22.7.7","versions":["-"]}]'),
     )
   })
 })

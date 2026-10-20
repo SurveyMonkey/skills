@@ -3,18 +3,22 @@
 // in the header of `apply-constraint.ts`.
 //
 // npm uses the first key of the override block that matches a copy of a
-// parent (`getEdgeRule` and `getNodeRule` in `@npmcli/arborist`,
-// `lib/override-set.js`). The other keys for that parent have no effect on
-// the copy. Real npm 11.19.0 installs showed this. With `"nx@22.7.7": {...}`
-// in the block, a new bare `"nx": {...}` key after it kept the child of nx
-// 22.7.7. The child moved when the constraint was inside `"nx@22.7.7"`.
+// parent (`getEdgeRule` in `@npmcli/arborist`, `lib/override-set.js`). The
+// other keys for that parent have no effect on the copy. Real npm 11.19.0
+// installs showed this. With `"nx@22.7.7": {...}` in the block, a new bare
+// `"nx": {...}` key after it kept the child of nx 22.7.7. The child moved
+// when the constraint was inside `"nx@22.7.7"`.
 //
-// When npm builds the tree, it matches a key by the range of the edge to
-// the copy. The lockfile does not give that range, so this pass reads the
-// version of the copy, as the placement pass does. The two agree when the
-// selector admits the copy. A key whose selector does not admit the copy,
-// but whose text or `"."` value does, can match the copy through its edge.
-// Real runs showed both results.
+// npm matches a key by the spec of each edge into the copy, not by the
+// version of the copy. The lockfile gives that spec: the entry that depends
+// on the parent declares it. This pass reads it:
+//
+//   - An exact version: the first key whose selector admits that version.
+//   - A range that the copy satisfies: a selector that admits the copy
+//     matches. An exact selector outside the range does not. npm can match
+//     any other selector through the range, so that key is unsure.
+//   - Any other spec, such as a tag, a git URL or a directory: npm takes the
+//     first key by name, or skips each qualified key for a git URL.
 //
 // For each normal copy of a parent on the line, the pass finds the first key
 // that matches it. When that key has a selector, the constraint goes inside
@@ -22,20 +26,19 @@
 // that reaches no other copy. That key would have no effect. A copy whose
 // first key has no selector, or that no key matches, takes the normal write.
 //
-// When the qualified keys serve each normal copy on the line, a bare pair for
-// the package after them has no effect. The pass supersedes a pair on the
-// line, and reports it. A pair on another line stays as it is.
+// When the qualified keys serve each normal copy on the line, a bare pair
+// after them has no effect. The pass supersedes a pair on the line, and
+// reports it. A pair on another line stays as it is.
 //
-// Four refusals, each before any write:
+// Four refusals, each before any write, for a parent with a qualified key:
 //
-//   - A key whose selector does not admit a copy on the line, but whose value
-//     does, comes before the first key that the selector admits.
+//   - A copy of the parent has an edge of any other spec, or no edge.
+//   - A copy has an unsure key before its first match, or two edges that
+//     match different keys.
 //   - A key that serves a copy is also the first key of a copy whose child is
 //     on another major line. A constraint inside that key would move that line.
-//   - A key that serves a copy has a pin for the package that is not on the
-//     major line of the range, or that has no floor major.
-//   - A key serves a copy, and the parent has a copy with no version. npm
-//     gives an edge of a tag, a directory or a file the first key by name.
+//   - A key that serves a copy has a pin for the package. The pin is on
+//     another major line, or the pin or the range has no floor major.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -44,8 +47,9 @@ import { rangeFloorMajor } from '../../semver/ranges.ts'
 import { entriesOf, equal, get, or, render, toText, unique } from './jq-json.ts'
 import { stripSelector } from './list-pins.ts'
 import { isRecord } from './manifest.ts'
+import { candidatesOf, declarationsOf, lastSegment, type NpmLock, resolveFrom } from './npm-lock.ts'
 import type { Placement } from './npm-placement.ts'
-import { type Edge, MISSING, type Qualifiers } from './parent-qualifiers.ts'
+import { MISSING, type Qualifiers } from './parent-qualifiers.ts'
 import { satisfiesAll } from './validate.ts'
 
 /** The qualified keys of the manifest that serve the copies of one parent. */
@@ -62,7 +66,7 @@ export type QualifiedKeys = {
 export type QualifiedKeyQuery = {
   /** `.overrides // {}` of package.json. */
   readonly overrides: unknown
-  readonly edges: readonly Edge[]
+  readonly lock: NpmLock
   readonly parents: readonly string[]
   readonly qualifiers: Qualifiers
   readonly placements: ReadonlyMap<string, Placement>
@@ -104,14 +108,24 @@ const childOffLine = (cver: unknown, target: number | null): boolean => {
   return floor !== null && target !== null && floor !== target
 }
 
-/**
- * The text value of a key, or its `"."` value, or null. npm moves a copy
- * that the key matches to it.
- */
-const movedTo = (value: unknown): string | null => {
-  const text = isRecord(value) ? value['.'] : value
-  return typeof text === 'string' ? text : null
-}
+// An exact version, as npm reads a spec or a selector of one version.
+const EXACT = /^[v=]*([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$/
+
+// A spec that the range rules can read, as `looks_range` reads it.
+const LOOKS_RANGE = /^[v=^~><*0-9]/
+
+/** The version of an exact spec or selector, or null. */
+const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?.[1] ?? null
+
+const EDGE_BLOCKS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
+
+/** The specs of the edges into the copy at `path`, from each entry that depends on it. */
+const specsInto = (lock: NpmLock, path: string): readonly unknown[] =>
+  lock.entries.flatMap(([from, entry]) =>
+    EDGE_BLOCKS.flatMap((block) => entriesOf(or(get(entry, block), {})))
+      .filter(([key]) => resolveFrom(lock, from, key) === path)
+      .map(([, spec]) => spec),
+  )
 
 /** One normal copy of a parent, and where the write for it goes. */
 type Copy = {
@@ -123,17 +137,19 @@ type Copy = {
   readonly intended: string | undefined
   /** The first key that matches the copy. Null when no key matches, or the first is bare. */
   readonly first: string | null
-  /** The keys before the first match whose value admits the copy, but whose selector does not. */
+  /** The keys that npm can match for the copy, other than `first`. */
   readonly unsure: readonly string[]
+  /** An edge into the copy has a spec that is not a version or a range, or no edge comes in. */
+  readonly other: boolean
 }
 
 /**
  * The qualified keys of the manifest for each parent of the call. It also
  * gives the qualifiers, less those that would write a key with no effect.
- * It gives a failure for each refusal.
+ * It gives a failure for each refusal. It throws where jq stops.
  */
 export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | Failure => {
-  const { overrides, pkg, placements } = query
+  const { overrides, lock, pkg, placements } = query
   const target = rangeFloorMajor(query.range)
   const block = entriesOf(overrides)
   const keys = new Map<string, QualifiedKeys>()
@@ -142,41 +158,79 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
     const placement = placements.get(parent)
     // The normal write does not run for this parent (#147).
     if (placement !== undefined && !placement.has_normal_online) continue
-    const own = qualifiers.get(parent) ?? []
+    /** The keys of the block for the parent, in order, with their selectors. */
+    const own = block.flatMap(([key]) => {
+      const { name, selector } = stripSelector(key)
+      return name === parent ? [{ key, selector }] : []
+    })
+    if (own.every(({ selector }) => selector === null)) continue
+    const quals = qualifiers.get(parent) ?? []
     /** The qualifier of the normal write for a copy on the line. */
     const intendedOf = (version: string): string | undefined =>
-      own.length === 0 ? '' : own.find((each) => admits(version, each))
-    /** The first key of the parent that matches the version, and the unsure keys before it. */
-    const scan = (pver: string): Pick<Copy, 'first' | 'unsure'> => {
+      quals.length === 0 ? '' : quals.find((each) => admits(version, each))
+    /** The first key that one edge spec matches, and the unsure keys before it. */
+    const scan = (pver: string, spec: string): Pick<Copy, 'first' | 'unsure'> => {
+      const exact = exactOf(spec)
+      const sure = exact !== null || admits(pver, spec)
       const unsure: string[] = []
-      for (const [key, value] of block) {
-        const { name, selector } = stripSelector(key)
-        if (name !== parent) continue
+      for (const { key, selector } of own) {
         if (selector === null) return { first: null, unsure }
-        if (admits(pver, selector)) return { first: key, unsure }
-        const moved = movedTo(value)
-        if (moved !== null && admits(pver, moved)) unsure.push(key)
+        if (exact !== null) {
+          if (admits(exact, selector)) return { first: key, unsure }
+          continue
+        }
+        if (sure && admits(pver, selector)) return { first: key, unsure }
+        const one = exactOf(selector)
+        if (!(sure && one !== null && !admits(one, spec))) unsure.push(key)
       }
       return { first: null, unsure }
     }
-    // A copy with no version matches no selector here. The last refusal stops on it.
-    const copies: Copy[] = query.edges
-      .filter(({ parent: name }) => name === parent)
+    // Each copy of the parent that declares the package, as `npm_copy_rows` reads it.
+    const copies: Copy[] = lock.entries
+      .filter(([path]) => path !== '' && lastSegment(path) === parent)
+      .flatMap(([path, entry]) =>
+        declarationsOf(entry).flatMap(([key, specifier]) =>
+          typeof specifier === 'string' && (key === pkg || specifier.startsWith(`npm:${pkg}@`))
+            ? [{ path, pver: or(get(entry, 'version'), MISSING), key }]
+            : [],
+        ),
+      )
       .filter(
         ({ pver }) =>
           placement === undefined || placement.normal_pvers.some((each) => equal(each, pver)),
       )
-      .map(({ pver, cver }) => {
+      .map(({ path, pver, key }) => {
         const version = toText(pver)
+        // The version of the first candidate that has one, as `npm_copy_rows` reads it.
+        const cver = [
+          ...candidatesOf(path, key).map((each) =>
+            or(get(lock.byKey.get(each) ?? null, 'version'), null),
+          ),
+          MISSING,
+        ].find((each) => each !== null)
+        const specs = specsInto(lock, path).map(toText)
+        const readable = specs.filter((spec) => LOOKS_RANGE.test(spec.trim()))
+        const found = readable.map((spec) => scan(version, spec))
+        const firsts = unique(found.map(({ first }) => first))
         return {
           pver: version,
           intended: childOffLine(cver, target) ? undefined : intendedOf(version),
-          ...scan(version),
+          first: firsts.length === 1 ? (firsts[0] as string | null) : null,
+          unsure: unique([
+            ...found.flatMap(({ unsure }) => unsure),
+            ...(firsts.length > 1 ? firsts.filter((each) => each !== null) : []),
+          ]),
+          other: readable.length === 0 || readable.length < specs.length,
         }
       })
-    const unsure = copies.filter(
-      ({ intended, unsure: each }) => intended !== undefined && each.length > 0,
-    )
+    const qualified = own.flatMap(({ key, selector }) => (selector === null ? [] : [key]))
+    const others = unique(copies.filter(({ other }) => other).map(({ pver }) => pver))
+    if (others.length > 0) {
+      return failed(
+        `apply_constraint: cannot scope '${pkg}': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${render([{ parent, keys: qualified, versions: others }], null)}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
+      )
+    }
+    const unsure = copies.filter(({ unsure: each }) => each.length > 0)
     if (unsure.length > 0) {
       const detail = unique(unsure.flatMap(({ unsure: each }) => each)).map((key) => ({
         parent,
@@ -186,7 +240,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
         ),
       }))
       return failed(
-        `apply_constraint: cannot scope '${pkg}': a pre-existing version-qualified override key for its parent has a selector that does not admit a copy on this line, and a value that does: ${render(detail, null)}. npm can match that key through the range of the edge to the copy, and move the copy to that value, so neither a constraint inside that key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
+        `apply_constraint: cannot scope '${pkg}': npm can match a pre-existing version-qualified override key for its parent through the range of an edge into a copy, and the lockfile cannot show which key it matches: ${render(detail, null)}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
       )
     }
     const served = unique(
@@ -220,25 +274,19 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
         `apply_constraint: a pre-existing pin for '${pkg}' INSIDE the version-qualified override key of its parent pins a DIFFERENT major line: ${render(pins, null)}. npm matches that key first, so a new key after it has no effect, and overwriting the pin would strip that line's protection (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
       )
     }
-    const ordered = block.map(([key]) => key).filter((key) => served.includes(key))
-    if (copies.some(({ pver }) => pver === MISSING)) {
-      return failed(
-        `apply_constraint: cannot scope '${pkg}': its parent has a copy with no version in the lockfile, beside pre-existing version-qualified override keys that npm matches first for other copies: ${render([{ parent, keys: ordered }], null)}. npm can match such a key for the copy with no version, so neither a constraint inside it nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`,
-      )
-    }
     const unserved = copies.filter(
       ({ intended, first }) => intended !== undefined && first === null,
     )
     const rest = unserved.length > 0
     const bare = or(get(overrides, parent), null)
     keys.set(parent, {
-      keys: ordered,
+      keys: qualified.filter((key) => served.includes(key)),
       rest,
       supersedeBare:
         !rest && isRecord(bare) && Object.hasOwn(bare, pkg) && !otherLine(bare[pkg], target),
     })
     // A qualifier that reaches no unserved copy would write a key with no effect.
-    const kept = own.filter((each) => unserved.some(({ intended }) => intended === each))
+    const kept = quals.filter((each) => unserved.some(({ intended }) => intended === each))
     if (kept.length === 0) qualifiers.delete(parent)
     else qualifiers.set(parent, kept)
   }
