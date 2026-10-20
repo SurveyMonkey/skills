@@ -41,7 +41,7 @@ prompt. Every obligation ADR 001 states survives the move unchanged.
 
 Everything ecosystem-specific stays behind the verbs, **including version comparison and range
 semantics**. Milestone 7's Python adapter implements PEP 440; node implements semver. Do not lift
-`compare_versions` or `range_facts` into shared code. `score-merge-risk` is the pattern to copy:
+`compare_versions` or `range_facts` into shared code. The merge-risk scorer is the pattern to copy:
 it needs to know how far past `^9` a fix landed, and it asks the adapter rather than reaching for
 a leading digit itself.
 
@@ -55,7 +55,7 @@ answer, since a range with no floor has no `majors_ahead`, and absence never is,
 rule that makes `range_facts` emit every key. An adapter missing `major_distance` once made the
 whole multi-major escalation vanish while the run still reported success. Two further routes
 reach that same silent zero and are checked the same way: a present-but-untyped value, and a verb
-that reports success while answering with nothing at all. So `score-merge-risk` asserts the reply
+that reports success while answering with nothing at all. So the scorer asserts the reply
 is an object before reading any field of it, and checks the numeric ones are integers before
 comparing them.
 

@@ -6,7 +6,7 @@
 //
 // The adapter verbs run in process, and so does the scorer
 // (`src/merge-risk/score.ts`, #233, ruling 9). It scores the worktree, and
-// asks the adapter of the state for each comparison. The bash ran
+// asks the adapter of the state for each comparison. The old bash ran
 // `score-merge-risk.sh` as a child.
 //
 // The order of the steps and of the state writes is the order of the bash:

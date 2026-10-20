@@ -1,7 +1,7 @@
 // The merge-risk rating of a dependency fix, in process: the port of
-// `scripts/common/score-merge-risk.sh` (#233). `score` of `fix-group` calls
-// it, and so does the `score-merge-risk` command. The rules, and the reason
-// for each, are in the header of that script and in ADR 006.
+// `scripts/common/score-merge-risk.sh` (#233), which #236 deleted. `score` of
+// `fix-group` calls it, and so does the `score-merge-risk` command. The
+// rules, and the reason for each, are in ADR 006.
 //
 // Seven factors score 0 to 2 each, so the maximum is 14. The bands are Low
 // for 0 to 3, Medium for 4 to 6, and High for 7 or more. Three rules

@@ -4,8 +4,7 @@
 // that breaks the contract (`mocking.md`, "The injected collaborator").
 //
 // The expected values are written by hand from ADR 006 and the header of
-// `score-merge-risk.sh`. `parity-score-merge-risk.test.ts` compares the port
-// with the script on the shellspec tables.
+// `score-merge-risk.sh` (deleted in #236).
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
