@@ -439,7 +439,10 @@ type WrittenEntry = {
   readonly preserved?: true
 }
 
-/** One entry that `applyConstraint` removed, because a new key replaces it. */
+/**
+ * One entry that `applyConstraint` removed or changed. A new value replaces
+ * it, or an earlier key of the block makes it have no effect (#147, #333).
+ */
 type SupersededKey = {
   readonly parent: string
   readonly path: readonly string[]

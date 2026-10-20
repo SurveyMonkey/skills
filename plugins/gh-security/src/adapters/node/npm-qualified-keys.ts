@@ -15,11 +15,12 @@
 // version that the selector admits. So this pass reads the version of the
 // copy, as the placement pass does.
 //
-// For each normal copy of a parent, the pass finds the first key that matches
-// it. When that key has a selector, the constraint goes inside that key, with
-// `putRuleNested`. The keys of the normal write that reach no other copy are
-// dropped, because each of them would have no effect. A copy that the first
-// key does not match takes the normal write.
+// For each normal copy of a parent on the line, the pass finds the first key
+// that matches it. When that key has a selector, the constraint goes inside
+// that key, with `putRuleNested`. The keys of the normal write that reach no
+// other copy are dropped, because each of them would have no effect. A copy
+// whose first key has no selector, or that no key matches, takes the normal
+// write.
 //
 // When the qualified keys serve each normal copy, a bare pair for the package
 // after them has no effect. A pair on the line is superseded, and reported. A
@@ -27,8 +28,8 @@
 //
 // Two refusals, each before any write:
 //
-//   - A key that serves a copy also matches a copy whose child is on another
-//     major line. A constraint inside that key would move that line.
+//   - A key that serves a copy is also the first key of a copy whose child is
+//     on another major line. A constraint inside that key would move that line.
 //   - A key that serves a copy has a pin for the package on another major
 //     line.
 //
@@ -43,7 +44,7 @@ import type { Placement } from './npm-placement.ts'
 import { type Edge, MISSING, type Qualifiers } from './parent-qualifiers.ts'
 import { satisfiesAll } from './validate.ts'
 
-/** The existing qualified keys that serve the copies of one parent. */
+/** The qualified keys of the manifest that serve the copies of one parent. */
 export type QualifiedKeys = {
   /** The keys that get the constraint, in the order of the block. */
   readonly keys: readonly string[]
@@ -100,7 +101,7 @@ type Copy = {
 }
 
 /**
- * The existing qualified keys of each parent of the call, and the qualifiers
+ * The qualified keys of the manifest for each parent of the call, and the qualifiers
  * with the keys that would have no effect dropped. It gives a failure for
  * each refusal.
  */
