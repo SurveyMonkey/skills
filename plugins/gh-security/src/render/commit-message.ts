@@ -1,5 +1,5 @@
 // The commit message of one fix group (#233): the port of `commit-msg` of
-// `render-pr.sh`. It is a template over the inputs that `pr-inputs.ts` read.
+// `render-pr.sh` (deleted in #236). It is a template over the inputs that `pr-inputs.ts` read.
 // It makes no decision, and fails for no input: every check is already done.
 //
 // Declared difference from the script, with #233: a line break in an alert

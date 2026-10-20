@@ -251,35 +251,13 @@ Describe 'the rules that gate the removal PR'
   # green (#87). (The audit no longer rides along in a resolve-alerts batch at
   # all; since ADR 009 it dispatches only through /gh-security:audit-pins.)
   #
-  # Since issue #172, fix-dependency.md no longer builds `gh pr create` itself
-  # — it calls `common/render-pr.sh create`, which is the actual `gh pr
-  # create` invocation now. The two assertions below moved with it; the agent
-  # doc keeps only the structural pointer (checked separately, and end-to-end
-  # with a mocked `gh` in spec/render_pr_spec.sh).
+  # Since issue #172, fix-dependency.md no longer builds `gh pr create`
+  # itself. It calls `render-pr create`, which opens the pull request. The
+  # ADR 008 rule that it passes no `--draft` is tested with a mocked `gh` in
+  # tests/plugins/gh-security/subcommands/render-pr.test.ts. The agent doc
+  # keeps only the structural pointer, checked below.
   Describe 'the PR-state rules in fix-dependency (#87)'
     FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-    RENDER_PR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/render-pr.sh"
-
-    # Paired deliberately with the presence assertion below. An absent-string
-    # assertion alone passes when the line it guards is gone entirely, so on its
-    # own it cannot tell "no --draft" from "no gh pr create". The presence
-    # assertion's literal is intentionally pinned a second time, in
-    # merge_risk_labels_spec.sh (#109): that suite needs it as evidence
-    # `merge-risk:<band>` lands on the same `gh pr create` call as `security`,
-    # not appended later in a separate `gh pr edit --add-label`. Each suite
-    # asserts the shared literal for its own reason, not because one copied
-    # the other.
-    It 'passes no --draft, anywhere in render-pr.sh'
-      When call count_in "$RENDER_PR" '\-\-draft'
-      The status should be success
-      The output should equal '0'
-    End
-
-    It 'still builds the gh pr create call, so the absence above is about the flag'
-      When call phrase_in "$RENDER_PR" 'gh pr create --repo "[$]repo" --head "[$]head" .*--label security --label dependencies --label "merge-risk:[$]band_lower")'
-      The status should be success
-      The output should equal '1'
-    End
 
     It 'fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself'
       When call rule_in "$FIX_AGENT" 'render-pr create --repo <nwo> --head <branch_name> --band <band>'

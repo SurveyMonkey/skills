@@ -232,8 +232,8 @@ const SEARCH_FIELDS = 'url'
 
 /**
  * The phrase of `gh label create` for a label that exists. `createLabel` (#233)
- * is not in the target stack, and is a known divergence from it. It is the
- * call that `render-pr.sh` made. Sibling agents that fix other packages of
+ * is not in the target stack, and is a known divergence from it. It was the
+ * call that `render-pr.sh` made (deleted in #236). Sibling agents that fix other packages of
  * one batch race to make the same band label. The failure of the loser
  * means that the label is there, which is what it wanted. So the answer
  * says `created: false`, and does not throw.
@@ -243,7 +243,7 @@ const LABEL_EXISTS = 'already exists'
 /**
  * The URL that `gh pr create` prints. `createPullRequest` (#233) is not in
  * the target stack either, and is a known divergence from it. The pattern
- * is the one of `render-pr.sh`: the host is `github.com`, and the URL runs
+ * was the one of `render-pr.sh`: the host is `github.com`, and the URL runs
  * to the next white space. A pull request of another host is no URL here,
  * the same as it was there.
  */

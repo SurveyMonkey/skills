@@ -1,4 +1,4 @@
-// The PR body of one fix group (#233): the port of `body` of `render-pr.sh`.
+// The PR body of one fix group (#233): the port of `body` of `render-pr.sh` (deleted in #236).
 // It is a template over the inputs that `pr-inputs.ts` read. Each section is
 // one function, and the body is the sections in order. It makes no decision
 // that the inputs did not already settle, and it fails for no input.

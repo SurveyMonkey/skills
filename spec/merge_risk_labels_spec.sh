@@ -1,28 +1,15 @@
 #!/bin/sh
 # shellcheck shell=sh
-# Pins issue #109's closed set of three merge-risk labels across every place
-# it has to agree: `common/render-pr.sh` (which now renders and creates every
-# label the fix flow uses, issue #172), the `audit-pins` agent definition
-# (which still creates its own risk label inline), and the scorer whose
-# `band` field is their only source. A drifted hex, a fourth band, or a
-# mismatched color in any one of the three fails this suite.
+# Pins the closed set of three merge-risk labels of issue #109 in the places
+# that must agree: the `audit-pins` agent definition (which creates its own
+# risk label inline), the `fix-dependency` agent definition, and README.md.
+# A drifted hex or a fourth band in one of them fails this suite.
 #
-# `fix-dependency.md` itself carries no label vocabulary any more. It calls
-# `render-pr labels` and `render-pr create`, and the label behavior
-# those calls produce (colors, descriptions, race tolerance, the `--label
-# security --label dependencies --label merge-risk:<band>` argv) is exercised
-# in tests/plugins/gh-security/subcommands/render-pr.test.ts, with a mocked
-# `gh`. spec/render_pr_spec.sh does the same for the bash script. This file only
-# pins the rendering script's own source against drift, the same way it
-# always pinned the agent prose.
-#
-# This lives in its own file rather than spec/audit_pins_rules_spec.sh or
-# spec/common_scripts_spec.sh because the thing being pinned spans an agent,
-# a script, and the scorer; folding it into either existing file would bury a
-# cross-cutting contract inside a suite named for one component.
+# The `fix-dependency` agent carries no label vocabulary. It calls
+# `render-pr labels` and `render-pr create`. Those calls are tested in
+# tests/plugins/gh-security/subcommands/render-pr.test.ts, with a mocked `gh`.
 
 Describe 'the closed set of merge-risk labels (#109)'
-  RENDER_PR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/render-pr.sh"
   FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
   AUDIT_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
   README="$SHELLSPEC_PROJECT_ROOT/README.md"
@@ -30,20 +17,6 @@ Describe 'the closed set of merge-risk labels (#109)'
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
   sorted_band_names() { grep -o -e 'merge-risk:[a-z][a-z]*' -- "$1" | sort -u; }
-
-  Describe 'render-pr.sh: label names and colors, one case arm per band'
-    Parameters
-      low    "low)    color=2da44e; desc=\"Low merge risk\" ;;"
-      medium "medium) color=d4a72c; desc=\"Medium merge risk\" ;;"
-      high   "high)   color=cf222e; desc=\"High merge risk\" ;;"
-    End
-
-    It "creates merge-risk:$1 with the pinned color and description"
-      When call rule_in "$RENDER_PR" "$2"
-      The status should be success
-      The output should equal '1'
-    End
-  End
 
   Describe 'audit-pins.md: label names and colors, pinned in the agent definition'
     Parameters
@@ -84,19 +57,6 @@ Describe 'the closed set of merge-risk labels (#109)'
   End
 
   Describe 'no fourth band is inventable: exactly three merge-risk label names'
-    sorted_band_case_arms() {
-      grep -oE '^ *(low|medium|high|[a-z]+)\)( +color=| ;;)' -- "$1" \
-        | sed -E 's/^ *//; s/\).*/\)/' | sort -u
-    }
-
-    It 'names exactly low, medium, and high in render-pr.sh'"'"'s labels case, never a fourth'
-      When call sorted_band_case_arms "$RENDER_PR"
-      The status should be success
-      The output should equal "high)
-low)
-medium)"
-    End
-
     It 'names exactly low, medium, and high in audit-pins.md, never a fourth'
       When call sorted_band_names "$AUDIT_AGENT"
       The status should be success
@@ -132,22 +92,6 @@ merge-risk:medium"
     End
   End
 
-  Describe 'render-pr.sh create: the full label set, security + dependencies + the band'
-    It 'builds --label security --label dependencies --label "merge-risk:..." in its gh pr create argv'
-      When call rule_in "$RENDER_PR" '\-\-label security \-\-label dependencies \-\-label "merge-risk:'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'render-pr.sh create never passes --draft: PRs open ready for review (ADR 008)'
-    It 'builds no --draft flag anywhere in its gh pr create argv'
-      When call rule_in "$RENDER_PR" '\-\-draft'
-      The status should equal 1
-      The output should equal '0'
-    End
-  End
-
   Describe 'the audit guards its risk label on a non-null band'
     It 'adds the label only when pr.risk.band is non-null'
       When call phrase_in "$AUDIT_AGENT" 'Add .merge-risk:<band>. only when .pr\.risk\.band. is non-null'
@@ -162,51 +106,11 @@ merge-risk:medium"
     End
   End
 
-  Describe 'render-pr.sh: the race-tolerance rule for label creation'
-    It 'treats "already exists" in gh label create output as success, not an error'
-      When call rule_in "$RENDER_PR" '\*"already exists"\*) return 0 ;;'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says creating a label is a deliberate write of repo metadata beyond the PR itself'
-      When call phrase_in "$RENDER_PR" 'a deliberate write of repo metadata beyond the PR itself'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
   Describe 'audit-pins.md: the race-tolerance rule, in the agent definition'
     It 'treats a gh label create failing because the label now exists as success, not an error'
       When call phrase_in "$AUDIT_AGENT" 'gh label create. that fails because *the label now exists is success, *not an error'
       The status should be success
       The output should equal '1'
-    End
-  End
-
-  Describe 'the scorer emits the matching emoji for each band, in the PR-body markdown'
-    After 'cleanup_fixture'
-
-    Parameters
-      # fixture           rel     dev    before  after   expected band  expected emoji
-      tooling-only        direct  true   1.0.0   1.0.1   Low            🟢
-      coverage-partial    direct  false  1.0.0   1.1.0   Medium         🟡
-      coverage-none       direct  false  1.0.0   2.0.0   High           🔴
-    End
-
-    score_band_line() {
-      use_fixture "$1"
-      jq -n --arg rel "$2" --argjson dev "$3" \
-        '{relationship: $rel, dev_only: $dev, parents: [], package: "lodash"}' > why.json
-      "$COMMON/score-merge-risk.sh" --package lodash --before "$4" --after "$5" \
-        --adapter "$ADAPTER" --why-json why.json --override-scope none --declared-range none \
-        | jq -r '.markdown' | head -1
-    }
-
-    It "puts $7 on the Merge risk line for a $6 band"
-      When call score_band_line "$1" "$2" "$3" "$4" "$5"
-      The status should be success
-      The output should include "## Merge risk: $7 $6 ("
     End
   End
 End

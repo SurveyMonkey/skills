@@ -1,6 +1,6 @@
 // `gh-security render-pr <verb> [options]`: the commit message, the PR body,
 // the labels and the `gh pr create` call of one dependency-fix group. This is
-// the port of `scripts/common/render-pr.sh` (#233). The text is a template
+// the port of `render-pr.sh` (#233, deleted in #236). The text is a template
 // over typed inputs (`src/render/`), and not a join of jq strings.
 //
 //   render-pr commit-msg --state <file> --group-json <file> --repo <nwo>

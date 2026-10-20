@@ -44,7 +44,7 @@ the exports into module-private state still is.
   one literal, beats a pile of "should include" lines: the projection names what the example is
   about, and exact equality is what a stray extra key has to survive.
 - **Rendered text is the same seam**, asserted byte-for-byte against a reviewed fixture
-  (`spec/render_pr_spec.sh`), never by substring.
+  (`tests/plugins/gh-security/subcommands/render-pr.test.ts`), never by substring.
 - **Prose is a seam only where prose is the implementation.** See "Prose pins" below.
 - **Use a table for table-driven cases** (version ordering, ecosystem routing, band thresholds)
   rather than near-identical repeated examples: `it.each` under vitest, `Parameters` under
