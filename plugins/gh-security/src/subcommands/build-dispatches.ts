@@ -23,13 +23,15 @@
 //                   `branch_name` alone repeats across repositories.
 //
 // Output: `{cap, dispatches}`. Each dispatch is
-// `{group, adapter_path, nwo, default_branch, repo_root, scripts_dir}`, and
+// `{group, adapter_path, nwo, default_branch, repo_root, cli}`, and
 // `env_prefix` only for a checkout with a prefix. The key is then omitted,
 // never null (SKILL.md phase 6). `group` is the group of the envelope, with
 // each field that it has. `nwo` is the `repo` of the group. `default_branch`
 // and `repo_root` come from the checkout whose `nwo` is that `repo`.
 // `adapter_path` comes from the ecosystem of the group, through the adapter
-// registry. `scripts_dir` is `scripts/common` of this plugin. The order is
+// registry. `cli` is the entry point of this plugin, as the allow hook
+// resolves it (`ENTRY`). The fix agent writes it as the second word of each
+// call, so the hook allows the call. The order is
 // the order of `actionable`, which is the rank of phase 3, and not the order
 // of the ids.
 //
@@ -58,12 +60,10 @@ import type { CommandContext, CommandHandler, CommandResult } from '../cli/comma
 import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix } from '../lib/env-prefix.ts'
 import { type Envelope, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
+import { ENTRY } from './allow-own-commands.ts'
 
 const USAGE =
   'usage: gh-security build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...'
-
-/** The directory of the bash scripts that the fix agent runs. */
-export const SCRIPTS_DIR = fileURLToPath(new URL('../../scripts/common', import.meta.url))
 
 /** The directory of the bash adapters. */
 const ECOSYSTEMS_DIR = fileURLToPath(new URL('../../scripts/ecosystems', import.meta.url))
@@ -189,7 +189,7 @@ const dispatchOf = (
     nwo: group.repo as string,
     default_branch: owner.default_branch,
     repo_root: owner.checkout,
-    scripts_dir: SCRIPTS_DIR,
+    cli: ENTRY,
     ...(prefix === undefined ? {} : { env_prefix: prefix }),
   })
 }
