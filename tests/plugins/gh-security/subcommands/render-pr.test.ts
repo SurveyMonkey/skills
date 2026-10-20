@@ -1716,6 +1716,27 @@ describe('body', () => {
       expect(ran.out).toBe(textOf('expected-body-scoped.md'))
     })
 
+    // The reviewed body of a state with a collateral section. The section of
+    // the effects goes after it.
+    it('puts the section after the collateral section', async () => {
+      const ran = await render(
+        'body',
+        edit(jsonOf('state-collateral-benign.json'), (s) => {
+          s.observations = [AXIOS]
+        }),
+        GROUP,
+      )
+      const reviewed = textOf('expected-body-collateral-benign.md')
+      expect(reviewed.split('## Collateral\n')).toHaveLength(2)
+      expect(reviewed.split('## Verification\n')).toHaveLength(2)
+      expect(ran.out).toBe(
+        reviewed.replace(
+          '## Verification\n',
+          `${HEAD}${TABLE}| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n\n## Verification\n`,
+        ),
+      )
+    })
+
     it('lists a downgrade with no stale key', async () => {
       const ran = await withObservations([AXIOS])
       expect(ran.out).toBe(

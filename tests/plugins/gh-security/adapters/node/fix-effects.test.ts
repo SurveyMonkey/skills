@@ -395,20 +395,51 @@ describe('fixEffects, the versions it compares', () => {
 })
 
 describe('fixEffects, the dependents it compares', () => {
-  // The root declares zed only as a dev dependency.
-  it('names a downgrade through a devDependencies edge', async () => {
-    const edit = addCopy('', 'devDependencies', 'zed', 'node_modules/zed', '1.0.0')
+  // The root declares zed in this block only. Each downgrade of the
+  // specimens goes through `dependencies`.
+  it.each(['devDependencies', 'optionalDependencies', 'peerDependencies'])(
+    'names a downgrade through an edge of %s',
+    async (block) => {
+      const edit = addCopy('', block, 'zed', 'node_modules/zed', '1.0.0')
+      const dir = copyOf(
+        SPECIMEN,
+        editJson('package-lock.json', addCopy('', block, 'zed', 'node_modules/zed', '0.9.0')),
+      )
+      const found = await observationsOf(effects(dir, beforeLock(edit)))
+      expect(found.filter(({ type }) => type === 'untargeted_downgrade')).toEqual([
+        AXIOS,
+        down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
+        down('zed', 'node_modules/zed', '1.0.0', '0.9.0'),
+      ])
+    },
+  )
+
+  // a and b each declare x. Before the fix, each has its own copy. After
+  // it, both get the one root copy 1.0.0. By package and path alone, the
+  // row of a, 3.0.0, would come first.
+  it('lists two downgrades of one copy by the version before the fix', async () => {
+    const both = (lock: Json): void => {
+      addCopy('', 'dependencies', 'a', 'node_modules/a', '1.0.0')(lock)
+      addCopy('', 'dependencies', 'b', 'node_modules/b', '1.0.0')(lock)
+      addCopy('node_modules/a', 'dependencies', 'x', 'node_modules/a/node_modules/x', '3.0.0')(lock)
+      addCopy('node_modules/b', 'dependencies', 'x', 'node_modules/b/node_modules/x', '2.0.0')(lock)
+    }
     const dir = copyOf(
       SPECIMEN,
       editJson('package-lock.json', (lock) => {
-        addCopy('', 'devDependencies', 'zed', 'node_modules/zed', '0.9.0')(lock)
+        both(lock)
+        const packages = lock.packages as Record<string, Json>
+        delete packages['node_modules/a/node_modules/x']
+        delete packages['node_modules/b/node_modules/x']
+        packages['node_modules/x'] = { version: '1.0.0' }
       }),
     )
-    const found = await observationsOf(effects(dir, beforeLock(edit)))
+    const found = await observationsOf(effects(dir, beforeLock(both)))
     expect(found.filter(({ type }) => type === 'untargeted_downgrade')).toEqual([
       AXIOS,
       down('brace-expansion', 'node_modules/nx/node_modules/brace-expansion', '5.0.12', '5.0.8'),
-      down('zed', 'node_modules/zed', '1.0.0', '0.9.0'),
+      down('x', 'node_modules/x', '2.0.0', '1.0.0'),
+      down('x', 'node_modules/x', '3.0.0', '1.0.0'),
     ])
   })
 
