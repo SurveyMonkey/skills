@@ -1438,6 +1438,31 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
   })
 
+  it('reads no placed copy for a key whose selector admits the edge into it', () => {
+    const normal = lockEdit((packages) => {
+      packages['node_modules/foo'] = { version: '1.0.0', dependencies: { nx: '22.7.5' } }
+      packages['node_modules/foo/node_modules/nx'] = {
+        version: '22.7.5',
+        dependencies: { 'brace-expansion': '^5.0.4' },
+      }
+    })
+    const keys = rule({
+      lerna: { nx: '>=22.7.7 <23', chalk: '^6.0.0' },
+      'nx@>=22.7.5 <22.8.0': {},
+    })
+    expect(manifestAfter(PLACED, nx, both(normal, keys)).overrides).toEqual({
+      lerna: { nx: NESTED, chalk: '^6.0.0' },
+      'nx@>=22.7.5 <22.8.0': { 'brace-expansion': '>=5.0.9 <6' },
+    })
+  })
+
+  it('writes inside a key that serves a copy whose child has no major', () => {
+    const setup = both(rule({ 'nx@>=22.6.0 <23': {} }), secondNx('22.6.0', '-1'))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@>=22.6.0 <23': { 'smol-toml': SMOL },
+    })
+  })
+
   it('writes the field case with no regard to a copy of another parent', () => {
     const bar = lockEdit((packages) => {
       packages['node_modules/bar'] = { version: '1.0.0', dependencies: { 'smol-toml': 'latest' } }

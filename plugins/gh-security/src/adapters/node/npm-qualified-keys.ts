@@ -96,7 +96,7 @@ const admits = (version: string, selector: string): boolean => {
 /** A floor major that differs from `target`, or one of the two that has none. */
 const otherLine = (value: unknown, target: number | null): boolean => {
   const floor = rangeFloorMajor(toText(value))
-  return floor === null || target === null || floor !== target
+  return floor === null || floor !== target
 }
 
 /**
