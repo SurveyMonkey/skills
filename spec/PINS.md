@@ -48,7 +48,7 @@ carries the marker. A new mechanical pin needs a new successor script, and a cha
 
 ## Totals
 
-256 pins across 15 files: 256 `judgment`, 0 `mechanical`.
+237 pins across 15 files: 237 `judgment`, 0 `mechanical`.
 
 Each mechanical pin was retired in the same change that landed its successor, a command in the
 TypeScript port of gh-security. No mechanical pin remains.
@@ -113,108 +113,102 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 71 | gives the slug rule the concrete scoped-package example | judgment | - |
 | 81 | grounds the slug rule in scoring many packages in the same work directory | judgment | - |
 
-### `spec/resolve_alerts_dispatch_spec.sh`: 37 pins (37 judgment, 0 mechanical)
+### `spec/resolve_alerts_dispatch_spec.sh`: 36 pins (36 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 61 | embeds no javascript fence in the skill any more | judgment | - |
-| 76 | copies the workflow byte-for-byte from the plugin root before launch | judgment | - |
-| 82 | checksums the staged copy against the source before launching | judgment | - |
-| 88 | launches the workflow by scriptPath, from the staged checksum-verified copy | judgment | - |
-| 98 | rules out the session scratchpad as a staging location | judgment | - |
-| 106 | requires the staged copy to survive until the run, and any resume, is done | judgment | - |
-| 115 | forbids inlining a copy or hand-editing a variant | judgment | - |
-| 121 | explains that the staged, checksum-verified copy is not the forbidden kind | judgment | - |
-| 127 | points at the tests as the reason the file is authoritative | judgment | - |
-| 133 | keeps the reap and the summary outside the script | judgment | - |
-| 142 | keeps the sonnet pin in the agent frontmatter ADR 004 names | judgment | - |
-| 153 | says phase 4 approval covers the workflow launch and every agent in it | judgment | - |
-| 159 | states plainly that nothing inside the workflow prompts | judgment | - |
-| 165 | grants the Workflow tool in the frontmatter | judgment | - |
-| 174 | no longer grants the Task tool | judgment | - |
-| 197 | no longer carries the $1 | judgment | - |
-| 211 | refuses to read an absent or short return as nothing having run | judgment | - |
-| 224 | names the $1 mode | judgment | - |
-| 231 | names the journal as the record of what actually returned | judgment | - |
-| 237 | resumes from the runId rather than re-dispatching the batch | judgment | - |
-| 243 | says a plain relaunch duplicates the branches and PRs that already succeeded | judgment | - |
-| 252 | asks before resuming a run the user deliberately interrupted | judgment | - |
-| 258 | reaps the whole dispatch list anyway when resume is impossible or declined | judgment | - |
-| 264 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
-| 272 | says no bounded pool can make the dispatch order repeat | judgment | - |
-| 284 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
-| 292 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
-| 298 | keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too | judgment | - |
-| 304 | records the widened pull-request read window in ADR 003 | judgment | - |
-| 313 | no longer describes the fix agent as running from a rolling pool | judgment | - |
-| 320 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
-| 326 | keeps the headline bullet on the same mechanism | judgment | - |
-| 338 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
-| 344 | rests the decision on the harness already being node | judgment | - |
-| 350 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
-| 358 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
-| 364 | forbids the shipped code from importing the workflow file | judgment | - |
+| 60 | embeds no javascript fence in the skill any more | judgment | - |
+| 75 | copies the workflow byte-for-byte from the plugin root before launch | judgment | - |
+| 81 | checksums the staged copy against the source before launching | judgment | - |
+| 87 | launches the workflow by scriptPath, from the staged checksum-verified copy | judgment | - |
+| 97 | rules out the session scratchpad as a staging location | judgment | - |
+| 105 | requires the staged copy to survive until the run, and any resume, is done | judgment | - |
+| 114 | forbids inlining a copy or hand-editing a variant | judgment | - |
+| 120 | explains that the staged, checksum-verified copy is not the forbidden kind | judgment | - |
+| 126 | points at the tests as the reason the file is authoritative | judgment | - |
+| 132 | keeps the reap and the summary outside the script | judgment | - |
+| 141 | keeps the sonnet pin in the agent frontmatter ADR 004 names | judgment | - |
+| 152 | says phase 4 approval covers the workflow launch and every agent in it | judgment | - |
+| 158 | states plainly that nothing inside the workflow prompts | judgment | - |
+| 164 | grants the Workflow tool in the frontmatter | judgment | - |
+| 173 | no longer grants the Task tool | judgment | - |
+| 196 | no longer carries the $1 | judgment | - |
+| 210 | refuses to read an absent or short return as nothing having run | judgment | - |
+| 223 | names the $1 mode | judgment | - |
+| 230 | names the journal as the record of what actually returned | judgment | - |
+| 236 | resumes from the runId rather than re-dispatching the batch | judgment | - |
+| 242 | says a plain relaunch duplicates the branches and PRs that already succeeded | judgment | - |
+| 251 | asks before resuming a run the user deliberately interrupted | judgment | - |
+| 257 | reaps the whole dispatch list anyway when resume is impossible or declined | judgment | - |
+| 263 | is reachable from phase 7, which otherwise keys on one entry per group | judgment | - |
+| 271 | says no bounded pool can make the dispatch order repeat | judgment | - |
+| 283 | still keeps repo-global git state with the orchestrator while agents are in flight | judgment | - |
+| 291 | keeps the never-prune rule in the plugin guide on the entitlement, not the timing | judgment | - |
+| 297 | records the widened pull-request read window in ADR 003 | judgment | - |
+| 306 | no longer describes the fix agent as running from a rolling pool | judgment | - |
+| 313 | describes the dispatch as a capacity-bounded workflow instead | judgment | - |
+| 319 | keeps the headline bullet on the same mechanism | judgment | - |
+| 331 | says the plugin scripts keep their bash, jq and gh constraint | judgment | - |
+| 337 | rests the decision on the harness already being node | judgment | - |
+| 343 | names the toolchain as a dev and CI dependency, not a user-facing one | judgment | - |
+| 351 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
+| 357 | forbids the shipped code from importing the workflow file | judgment | - |
 
-### `spec/audit_pins_rules_spec.sh`: 49 pins (49 judgment, 0 mechanical)
+### `spec/audit_pins_rules_spec.sh`: 44 pins (44 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 80 | requires the combined test before any PR | judgment | - |
-| 90 | restores the tree between the two attempts | judgment | - |
-| 99 | verifies the edits landed before the combined install | judgment | - |
-| 109 | routes a failed combined install to the compose phase | judgment | - |
-| 118 | routes a broken advisory lookup to the advisories phase, not a failed attempt | judgment | - |
-| 129 | forbids the agent from merging its own PR or arming auto-merge | judgment | - |
-| 135 | creates the PR on the plugin-owned head | judgment | - |
-| 145 | passes no --draft, anywhere | judgment | - |
-| 154 | refuses to default the mode | judgment | - |
-| 162 | stops report mode before the PR phases | judgment | - |
-| 173 | leases the push against the verified sha, not the tracking ref | judgment | - |
-| 182 | verifies a remnant against a closed PR head before touching it | judgment | - |
-| 191 | does not silence the branch delete | judgment | - |
-| 202 | forbids bypassing a repository hook on commit or push (#78) | judgment | - |
-| 208 | makes a hook failure a failure result rather than something to edit around (#78) | judgment | - |
-| 216 | defines --after when a removal admits several versions (#79a) | judgment | - |
-| 226 | requires the sampled verdict to say it sampled (#79b) | judgment | - |
-| 236 | validates the manifest after the edit, before list_pins (#79c) | judgment | - |
-| 242 | templates a direct-commit provenance ref (#79d) | judgment | - |
-| 250 | keeps still-required findings out of left_behind, in the schema (#81) | judgment | - |
-| 256 | says the same in the PR body template (#81) | judgment | - |
-| 262 | states the element type of fixed_alerts (#81) | judgment | - |
-| 270 | says no worktree is created at the workspace root (#79) | judgment | - |
-| 303 | passes no --draft, anywhere in render-pr.sh | judgment | - |
-| 309 | still builds the gh pr create call, so the absence above is about the flag | judgment | - |
-| 315 | fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself | judgment | - |
-| 324 | forbids merging its own PR or arming auto-merge | judgment | - |
-| 339 | stops before phase 4 on a peer_only package | judgment | - |
-| 345 | names the classification peer_only_dependency in the failure detail | judgment | - |
-| 351 | reports the failure at phase classify | judgment | - |
-| 357 | quotes peer_parents in the failure detail | judgment | - |
-| 367 | steers the remedy at required peer parents, not optional ones | judgment | - |
-| 385 | $1 | judgment | - |
-| 395 | records the hook distinction in ADR 006 (#78) | judgment | - |
-| 413 | offers it first in $1 | judgment | - |
-| 430 | checks for open security-labeled PRs before asking the mode question | judgment | - |
-| 436 | stops rather than proceeding when open security PRs exist | judgment | - |
-| 449 | offers no proceed-anyway option | judgment | - |
-| 462 | no longer builds an audit-pins Task dispatch in resolve-alerts | judgment | - |
-| 478 | mentions audit-pins exactly twice: the phase 7 lead and the phase 8 pointer | judgment | - |
-| 484 | points the phase 7 unscoped-override lead at /gh-security:audit-pins | judgment | - |
-| 490 | carries the phase 8 pointer sentence to /gh-security:audit-pins | judgment | - |
-| 519 | states the one env_prefix rule in $1 | judgment | - |
-| 529 | runs bare when env_prefix is absent, per $1 | judgment | - |
-| 539 | declares env_prefix OPTIONAL in the input contract of $1 | judgment | - |
-| 559 | takes the prefix from session context in $1 | judgment | - |
-| 569 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
-| 584 | is stated in the audit agent | judgment | - |
-| 590 | is stated in the fix agent | judgment | - |
+| 78 | requires the combined test before any PR | judgment | - |
+| 88 | routes a failed combined install to the compose phase | judgment | - |
+| 97 | routes a broken advisory lookup to the advisories phase, not a failed attempt | judgment | - |
+| 108 | forbids the agent from merging its own PR or arming auto-merge | judgment | - |
+| 114 | creates the PR on the plugin-owned head | judgment | - |
+| 124 | passes no --draft, anywhere | judgment | - |
+| 133 | refuses to default the mode | judgment | - |
+| 141 | stops report mode before the PR phases | judgment | - |
+| 152 | leases the push against the verified sha, not the tracking ref | judgment | - |
+| 161 | verifies a remnant against a closed PR head before touching it | judgment | - |
+| 170 | does not silence the branch delete | judgment | - |
+| 181 | forbids bypassing a repository hook on commit or push (#78) | judgment | - |
+| 187 | makes a hook failure a failure result rather than something to edit around (#78) | judgment | - |
+| 195 | defines --after when a removal admits several versions (#79a) | judgment | - |
+| 205 | requires the sampled verdict to say it sampled (#79b) | judgment | - |
+| 211 | templates a direct-commit provenance ref (#79d) | judgment | - |
+| 219 | keeps still-required findings out of left_behind, in the schema (#81) | judgment | - |
+| 225 | says the same in the PR body template (#81) | judgment | - |
+| 231 | states the element type of fixed_alerts (#81) | judgment | - |
+| 239 | says no worktree is created at the workspace root (#79) | judgment | - |
+| 262 | fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself | judgment | - |
+| 271 | forbids merging its own PR or arming auto-merge | judgment | - |
+| 286 | stops before phase 4 on a peer_only package | judgment | - |
+| 292 | names the classification peer_only_dependency in the failure detail | judgment | - |
+| 298 | reports the failure at phase classify | judgment | - |
+| 304 | quotes peer_parents in the failure detail | judgment | - |
+| 314 | steers the remedy at required peer parents, not optional ones | judgment | - |
+| 332 | $1 | judgment | - |
+| 342 | records the hook distinction in ADR 006 (#78) | judgment | - |
+| 360 | offers it first in $1 | judgment | - |
+| 377 | checks for open security-labeled PRs before asking the mode question | judgment | - |
+| 383 | stops rather than proceeding when open security PRs exist | judgment | - |
+| 396 | offers no proceed-anyway option | judgment | - |
+| 409 | no longer builds an audit-pins Task dispatch in resolve-alerts | judgment | - |
+| 425 | mentions audit-pins exactly twice: the phase 7 lead and the phase 8 pointer | judgment | - |
+| 431 | points the phase 7 unscoped-override lead at /gh-security:audit-pins | judgment | - |
+| 437 | carries the phase 8 pointer sentence to /gh-security:audit-pins | judgment | - |
+| 466 | states the one env_prefix rule in $1 | judgment | - |
+| 476 | runs bare when env_prefix is absent, per $1 | judgment | - |
+| 486 | declares env_prefix OPTIONAL in the input contract of $1 | judgment | - |
+| 506 | takes the prefix from session context in $1 | judgment | - |
+| 516 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
+| 531 | is stated in the audit agent | judgment | - |
+| 537 | is stated in the fix agent | judgment | - |
 
 ### `spec/reap_agent_artifacts_spec.sh`: 2 pins (2 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 543 | never interpolates the raw package name into a worktree path in either document | judgment | - |
-| 556 | keeps the guard from clearing it anyway | judgment | - |
+| 26 | never interpolates the raw package name into a worktree path in either document | judgment | - |
+| 39 | keeps the guard from clearing it anyway | judgment | - |
 
 ### `spec/resolve_alerts_defect_reports_spec.sh`: 25 pins (25 judgment, 0 mechanical)
 
@@ -246,26 +240,21 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 180 | gives a readable path to resolve-alerts/defect-report.md | judgment | - |
 | 186 | forbids re-deriving the rules in the audit skill | judgment | - |
 
-### `spec/merge_risk_labels_spec.sh`: 16 pins (16 judgment, 0 mechanical)
+### `spec/merge_risk_labels_spec.sh`: 11 pins (11 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 41 | creates merge-risk:$1 with the pinned color and description | judgment | - |
-| 56 | creates $2 with color $3 | judgment | - |
-| 71 | documents $1 as $2 (#$3) | judgment | - |
-| 79 | documents \`dependencies\` as \`#0366d6\` | judgment | - |
-| 100 | names exactly low, medium, and high in audit-pins.md, never a fourth | judgment | - |
-| 108 | never uses a bare risk: prefix in fix-dependency.md, which would read as alert severity | judgment | - |
-| 114 | never uses a bare risk: prefix in audit-pins.md, which would read as alert severity | judgment | - |
-| 122 | calls render-pr labels with --repo and --band | judgment | - |
-| 128 | calls render-pr create with --band | judgment | - |
-| 136 | builds --label security --label dependencies --label "merge-risk:..." in its gh pr create argv | judgment | - |
-| 144 | builds no --draft flag anywhere in its gh pr create argv | judgment | - |
-| 152 | adds the label only when pr.risk.band is non-null | judgment | - |
-| 158 | says a null band gets no risk label, never a fake one | judgment | - |
-| 166 | treats "already exists" in gh label create output as success, not an error | judgment | - |
-| 172 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
-| 180 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
+| 29 | creates $2 with color $3 | judgment | - |
+| 44 | documents $1 as $2 (#$3) | judgment | - |
+| 52 | documents \`dependencies\` as \`#0366d6\` | judgment | - |
+| 60 | names exactly low, medium, and high in audit-pins.md, never a fourth | judgment | - |
+| 68 | never uses a bare risk: prefix in fix-dependency.md, which would read as alert severity | judgment | - |
+| 74 | never uses a bare risk: prefix in audit-pins.md, which would read as alert severity | judgment | - |
+| 82 | calls render-pr labels with --repo and --band | judgment | - |
+| 88 | calls render-pr create with --band | judgment | - |
+| 96 | adds the label only when pr.risk.band is non-null | judgment | - |
+| 102 | says a null band gets no risk label, never a fake one | judgment | - |
+| 110 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
 
 ### `spec/fix_dependency_result_spec.sh`: 29 pins (29 judgment, 0 mechanical)
 
@@ -301,38 +290,30 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 218 | lists the failure phase enum without a commit member | judgment | - |
 | 224 | routes a phase-6 hook commit failure to push, matching audit-pins | judgment | - |
 
-### `spec/fix_dependency_baseline_spec.sh`: 10 pins (10 judgment, 0 mechanical)
+### `spec/fix_dependency_baseline_spec.sh`: 3 pins (3 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 33 | spells the drift-commit subject exactly once, as one constant | judgment | - |
-| 39 | grounds the post-control ordering in the attribution it protects | judgment | - |
-| 45 | keeps the never-stage-package.json rule beside the staging code | judgment | - |
-| 51 | preserves residual porcelain as evidence rather than absorbing it | judgment | - |
-| 57 | reports a control-install failure as phase baseline, never phase install | judgment | - |
-| 67 | sanctions one retry per install invocation, on a registry-timeout shape only | judgment | - |
-| 73 | keeps the drift-cleared subcase a real fix, not a no-op | judgment | - |
-| 81 | names the baseline failure as ambient rather than group-specific | judgment | - |
-| 87 | keeps the hook rules governing the drift commit too | judgment | - |
-| 93 | carries lockfile-refresh in the result action enum | judgment | - |
+| 27 | names the baseline failure as ambient rather than group-specific | judgment | - |
+| 33 | keeps the hook rules governing the drift commit too | judgment | - |
+| 39 | carries lockfile-refresh in the result action enum | judgment | - |
 
-### `spec/fix_dependency_branch_spec.sh`: 13 pins (13 judgment, 0 mechanical)
+### `spec/fix_dependency_branch_spec.sh`: 12 pins (12 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 35 | calls the driver for setup rather than prescribing the guard | judgment | - |
-| 41 | calls the driver for cleanup rather than prescribing the delete | judgment | - |
-| 49 | gates the delete on it being provably safe | judgment | - |
-| 55 | says an unrecreatable commit is what the leave-behind protects | judgment | - |
-| 63 | still forbids repository-wide git commands | judgment | - |
-| 71 | names the driver as the single home of phases 1 to 5 | judgment | - |
-| 89 | grounds $1 | judgment | - |
-| 99 | no longer says the branch simply remains | judgment | - |
-| 105 | no longer stops on the mere existence of a local branch | judgment | - |
-| 120 | no longer prescribes $1 | judgment | - |
-| 132 | amends the guard decision | judgment | - |
-| 138 | retires the base worktree | judgment | - |
-| 144 | says one tree is installed, not two | judgment | - |
+| 30 | calls the driver for setup rather than prescribing the guard | judgment | - |
+| 36 | calls the driver for cleanup rather than prescribing the delete | judgment | - |
+| 44 | gates the delete on it being provably safe | judgment | - |
+| 50 | says an unrecreatable commit is what the leave-behind protects | judgment | - |
+| 58 | still forbids repository-wide git commands | judgment | - |
+| 66 | names the driver as the single home of phases 1 to 5 | judgment | - |
+| 76 | no longer says the branch simply remains | judgment | - |
+| 82 | no longer stops on the mere existence of a local branch | judgment | - |
+| 97 | no longer prescribes $1 | judgment | - |
+| 109 | amends the guard decision | judgment | - |
+| 115 | retires the base worktree | judgment | - |
+| 121 | says one tree is installed, not two | judgment | - |
 
 ### `spec/fix_dependency_scratch_spec.sh`: 7 pins (7 judgment, 0 mechanical)
 
@@ -343,8 +324,8 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 46 | names the predictable-filename hazard, not just cleanup deletion | judgment | - |
 | 55 | keeps the sibling-collision warning in the corepack-shim bullet | judgment | - |
 | 61 | keeps the collision rationale naming the shared parallel directory | judgment | - |
-| 76 | has no remaining unqualified why.json literal | judgment | - |
-| 82 | no longer prescribes a why-capture redirect of its own | judgment | - |
+| 74 | has no remaining unqualified why.json literal | judgment | - |
+| 80 | no longer prescribes a why-capture redirect of its own | judgment | - |
 
 ### `spec/env_prefix_seam_spec.sh`: 18 pins (18 judgment, 0 mechanical)
 
