@@ -1036,6 +1036,32 @@ describe('the checkouts and repositories that the batch never touched', () => {
     )
   })
 
+  it('names an exclude error after the observations of the results', () => {
+    const run: Run = {
+      entries: [
+        entry(PKG, success(PKG, { observations: [{ type: 'unscoped_override', key: 'x' }] })),
+      ],
+      reports: [reaped(PKG)],
+      preflight: {
+        [ROOT]: {
+          ok: true,
+          pm: 'npm',
+          pm_exec: 'npm',
+          probe_package: 'a',
+          cause: null,
+          stderr: null,
+          exclude_error: 'lock held',
+        },
+      },
+    }
+    expect(sectionOf(run, 'Observations')).toBe(
+      [
+        '- Note: `octo/app` contains 1 unscoped global override(s): `x`. These may be removable or convertible to scoped pins. `/gh-security:audit-pins` tests removability.',
+        EXCLUDE_LINE,
+      ].join('\n'),
+    )
+  })
+
   it('names no exclude error when a failed preflight has none', () => {
     const run: Run = {
       ...CLEAN,
