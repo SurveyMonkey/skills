@@ -1,5 +1,5 @@
 // `audit-pins list`: phase 2, the port of `cmd_list` in
-// `scripts/common/audit-pins-driver.sh`. It reads the pins of the worktree
+// `audit-pins-driver.sh` (deleted in #236). It reads the pins of the worktree
 // through `list_pins`, routes each by its kind, orders the testable pins bare
 // first, and writes the state file. The contract is in the header of
 // `audit-pins.ts`.

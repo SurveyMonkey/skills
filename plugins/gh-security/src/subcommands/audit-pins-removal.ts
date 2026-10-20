@@ -1,7 +1,7 @@
 // The removal of one pin from the override file: the one place where the pin
 // audit edits a user's manifest. These are the ports of
 // `manifest_remove_paths` and `workspace_remove_key` in
-// `scripts/common/audit-pins-driver.sh`.
+// `audit-pins-driver.sh` (deleted in #236).
 //
 // The removal is an edit in the driver, not a verb of the adapter. The
 // writer of the adapter refuses to delete an entry that is already there

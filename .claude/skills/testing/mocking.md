@@ -37,20 +37,20 @@ answers from environment variables so one mock serves every `Parameters` row.
 
 ## The injected collaborator
 
-**A collaborator a driver accepts as a parameter is substituted through that parameter, not mocked
-around.** Where running the real one would run a package manager or reach the network, the driver's
-own seam carries the substitution: `spec/fix_group_spec.sh` and `spec/fix_group_apply_spec.sh` pass
-`--adapter` and `--scorer`, and `spec/audit_driver_spec.sh` and `spec/audit_driver_judge_spec.sh`
-pass `--adapter` and `--advisories`. This is not a hole in the rule above. The flag is a documented
-part of the contract, the driver falls back to the real collaborator when it is absent, and the
-example is still observing only the seam.
+**A collaborator a command accepts as a parameter is substituted through that parameter, not mocked
+around.** Where running the real one would run a package manager or reach the network, the
+command's own seam carries the substitution: the examples of `fix-group` and `audit-pins` in
+`tests/plugins/gh-security/subcommands/` pass an adapter through the registry parameter. This is
+not a hole in the rule above. The parameter is a documented part of the contract, the command
+falls back to the real collaborator when it is absent, and the example is still observing only the
+seam.
 
 Two constraints hold for a substituted collaborator:
 
 - **It reproduces the real shape, and it does not recompute the answer the driver does.**
-  `spec/audit_driver_spec.sh`'s `list_pins` stub deliberately re-reads the pin list from the
-  manifest on disk instead of serving a canned count, so the driver's own removal is what the
-  count-minus-one check is measured against. A spec that canned both sides asserts the driver
+  The `list_pins` stub of the `audit-pins` examples deliberately re-reads the pin list from the
+  manifest on disk instead of serving a canned count, so the removal of the command is what the
+  count-minus-one check is measured against. A test that canned both sides asserts the command
   against itself.
 - **It is named at the point of use as what it stands in for.** Anything substituted that is
   neither `gh`, the machine trio, the Workflow runtime, nor a collaborator behind a documented

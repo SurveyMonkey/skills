@@ -1,6 +1,6 @@
 // `gh-security audit-pins <phase>`: the driver for the pin audit of one
 // repository. This is the port of `scripts/common/audit-pins-driver.sh`
-// (#235). It has the five phases:
+// (#235), which #236 deleted. It has the five phases:
 //
 //   audit-pins list     --work <dir> --worktree <dir> [--ecosystem <eco>]
 //                       [--env-prefix "<string>"]
@@ -9,8 +9,7 @@
 //   audit-pins judge    --work <dir>
 //   audit-pins together --work <dir>
 //
-// The agent calls `audit-pins-driver.sh` for all five steps until #237
-// moves it here.
+// The agent calls this command for all five steps (#237).
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `list` writes it, and each later phase reads it first.
@@ -73,13 +72,13 @@
 // directory: git gets `-C <dir>` after the prefix, and a verb gives its
 // child a `cwd`.
 //
-// Differences from `audit-pins-driver.sh`:
+// Differences from the deleted `audit-pins-driver.sh`:
 //   - There is no `--adapter`, `--scripts-dir` or `--advisories`. The route
 //     is `--ecosystem` (default `npm`), through `src/adapters/registry.ts`,
 //     as in `check-advisories`. The state records the name of the adapter
 //     in `adapter` and the route in `ecosystem`, and has no `advisories` or
-//     `scripts_dir`. A state that this command writes is not for the bash,
-//     and the reverse: do not mix the two in one run.
+//     `scripts_dir`. A state that this command writes is not for the old
+//     bash driver, and the reverse.
 //   - The adapter verbs run in process. So the prefix wraps the package
 //     manager that `install` starts, and not an adapter process. `detect`
 //     runs again before each verb, as each `node.sh` call did, and its
