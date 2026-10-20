@@ -18,6 +18,8 @@
 // readers inside `node.sh`. `probeRegistry` is not a verb of `node.sh`
 // either. It is new in #228, from phase 5 of `resolve-alerts` SKILL.md
 // (round 6 ruling 8). It only reads, so it has no worktree guard.
+// `fixEffects` is new in #334, and only reads too. It compares the tree
+// with the files of the last commit, after a fix install.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -346,6 +348,49 @@ export type InstallSource = { readonly run: Runner; readonly env: Environment }
  */
 export type ProbeSource = { readonly run: Runner; readonly env: Environment }
 
+/**
+ * How `fixEffects` reads a file of the tree as the last commit has it. The
+ * name is relative to the root of the tree. The caller runs git.
+ */
+export type CommitSource = (file: string) => Promise<Envelope<string>>
+
+/**
+ * One effect of a fix beside its target, that `fixEffects` reports (#334).
+ * Each is for a person to review. None changes the risk score (ruling 4).
+ *
+ *   - `stale_qualified_override`: a version-qualified override key of the
+ *     manifest, such as `"nx@22.7.7"`, that npm matched for a copy before
+ *     the fix, and matches for no copy after it. `installed` has the
+ *     versions of the parent after the fix.
+ *   - `untargeted_downgrade`: a dependent at the same path, before and after
+ *     the fix, now gets a lower version of a package that the fix did not
+ *     target. `path` is the copy after the fix.
+ */
+export type FixObservation =
+  | {
+      readonly type: 'stale_qualified_override'
+      readonly key: string
+      readonly parent: string
+      readonly selector: string
+      readonly installed: readonly string[]
+    }
+  | {
+      readonly type: 'untargeted_downgrade'
+      readonly package: string
+      readonly path: string
+      readonly before: string
+      readonly after: string
+    }
+
+/** The `fixEffects` answer. */
+export type FixEffectsAnswer = {
+  readonly pm: string
+  /** The package that the fix targets. No effect names it. */
+  readonly package: string
+  /** The stale keys in the order of the block, then the downgrades by package and path. */
+  readonly observations: readonly FixObservation[]
+}
+
 /** The `probeRegistry` answer: one attempt of the probe. */
 export type RegistryProbeAnswer = {
   /** The package that the probe asked for. */
@@ -580,4 +625,14 @@ export interface Adapter<Detection extends { readonly pm: string }> {
     fallback: string | null,
     source: ProbeSource,
   ) => Promise<Envelope<RegistryProbeAnswer>>
+  /**
+   * What a fix did beside its target `pkg`: the override keys that it made
+   * stale, and the packages that it moved down. It compares the tree with
+   * the files that `before` reads from the last commit. It only reads.
+   */
+  readonly fixEffects: (
+    tree: Tree<Detection>,
+    pkg: string,
+    before: CommitSource,
+  ) => Promise<Envelope<FixEffectsAnswer>>
 }
