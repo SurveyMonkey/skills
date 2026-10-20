@@ -51,8 +51,9 @@
 // or the branch stays in `left_behind`, and `errors` names the read. Only
 // `ENOENT` and `ENOTDIR` make a path absent. A stat that fails for another
 // reason, such as `EACCES`, is a failed read. Only exit 1 with no text and no
-// stream error is an absent branch. A signal, another exit, or a lost stream
-// is a failed read, which `src/reap.ts` reads as absent.
+// stream error is an absent branch. On exit 0 the branch is there, so it
+// stays with no error, also when a stream is lost. On another exit,
+// `refReadFailure` in `src/reap.ts` holds the rule for both files.
 //
 // Differences from the script, each with #229:
 //   - The input is one entry of the workflow result, not a file. The script
@@ -82,7 +83,7 @@
 import { statSync } from 'node:fs'
 
 import type { JsonObject } from './lib/envelope.ts'
-import { contain, type Git, reap } from './reap.ts'
+import { contain, type Git, reap, refReadFailure } from './reap.ts'
 
 export type ResultStatus = 'success' | 'no-op' | 'failure' | 'unparsable' | 'missing'
 
@@ -211,20 +212,12 @@ const onDisk = async (
   const ref = `refs/heads/${branch}`
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
   if (read.status === 0) return { left: [...left, branch], errors }
-  // `--quiet` answers a missing ref with exit 1 and no text. Any text, any
-  // other exit, a signal, a lost stream, or a git that did not start, is a
-  // failed read.
-  const text = [
-    ...read.streamErrors.map((broke) => `a pipe failed: ${broke.code}, ${broke.message}`),
-    read.startFailure === null ? read.combined : read.startFailure.message,
-  ]
-    .join(' ')
-    .replace(/\s+$/, '')
-    .replace(/\n/g, ' ')
-  if (text === '' && read.status === 1) return { left, errors }
-  const why =
-    text !== '' ? text : read.status === null ? `killed by ${read.signal}` : `exit ${read.status}`
-  return { left: [...left, branch], errors: [...errors, `git rev-parse ${ref} failed: ${why}`] }
+  // `refReadFailure` has the rule: only exit 1 with no text and no stream
+  // error is an absent ref.
+  const failure = refReadFailure(read)
+  return failure === null
+    ? { left, errors }
+    : { left: [...left, branch], errors: [...errors, `git rev-parse ${ref} failed: ${failure}`] }
 }
 
 const REASONS: Readonly<Record<'no-op' | 'failure', string>> = {

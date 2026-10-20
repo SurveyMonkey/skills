@@ -16,8 +16,10 @@
 //                `stderr`) and `skipped`. Its `actionable` is not read.
 //   --preflight  optional. One JSON object, from the `checkout` of a kept
 //                checkout to the answer of `preflight-repo` for it, or to
-//                `{error}` for a call that failed. Without it, no repository
-//                was excluded by the registry preflight.
+//                `{error}` for a call that failed. Each answer has an
+//                `exclude_error`, text or null. Without the file, the
+//                registry preflight excluded no repository, and no answer
+//                has an `exclude_error`.
 //   --args       optional. The Workflow `args`, `{cap, dispatches}`. Give it
 //                for a run that was interrupted. Each entry then names a
 //                dispatch by its `repo` and `branch_name`, and a dispatch with
@@ -83,6 +85,8 @@
 //       `unscoped_override_added` is one line with its PR. Each repository
 //       with an `unscoped_override` is one line with its keys. Each other
 //       type is one count for each repository.
+//       Last, each preflight answer with an `exclude_error`, `ok` or not, is
+//       one line with the repository and the error.
 //
 // The command fails, with exit 1, before it writes anything, in these cases:
 //   - a bad command line: an option it does not know, a required flag that

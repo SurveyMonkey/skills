@@ -61,13 +61,25 @@ import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, ok } from '../lib/envelope.ts'
 import { type Runner, run } from '../lib/process.ts'
+import type { Cause } from '../preflight-causes.ts'
 import { ensureWorktreeExclude, LOCK_TIMING } from './ensure-worktree-exclude.ts'
 
 const USAGE =
   'usage: gh-security preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'
 
+/** The answer on exit 0. The header has each field. */
+type Answer = {
+  readonly ok: boolean
+  readonly pm: string | null
+  readonly pm_exec: string | null
+  readonly probe_package: string | null
+  readonly cause: Cause | null
+  readonly stderr: string | null
+  readonly exclude_error: string | null
+}
+
 /** The cause of a probe that failed twice. */
-const causeOf = (attempt: RegistryProbeAnswer): 'auth' | 'not-found' | 'start' | 'network' => {
+const causeOf = (attempt: RegistryProbeAnswer): Exclude<Cause, 'detect'> => {
   if (attempt.http_status === 401 || attempt.http_status === 403) return 'auth'
   if (attempt.http_status === 404) return 'not-found'
   return attempt.started ? 'network' : 'start'
@@ -100,7 +112,7 @@ export const preflightRepo = async (
   // 2. detect, in the root.
   const detection = adapter.detect(root, context.env)
   if (detection.outcome !== 'ok') {
-    return ok({
+    return ok<Answer>({
       ok: false,
       pm: null,
       pm_exec: null,
@@ -130,7 +142,7 @@ export const preflightRepo = async (
   const answer = attempt.value
 
   // 4. The cause.
-  return ok({
+  return ok<Answer>({
     ok: answer.ok,
     pm: detection.value.pm,
     pm_exec: detection.value.pm_exec,

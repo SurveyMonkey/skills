@@ -10,10 +10,10 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import type { Cause } from '../preflight-causes.ts'
 import { cell, inline } from './markdown.ts'
 import type { Action } from './pr-inputs.ts'
 import {
-  type Cause,
   type Cleanup,
   type Discovery,
   type Group,
@@ -242,7 +242,7 @@ const unknown = (summary: Summary): string[] => {
 
 // Section 6: the checkouts and repositories that the batch never touched.
 
-const CAUSES: Readonly<Record<Cause, (probe: string) => string>> = {
+const CAUSE_TEXT: Readonly<Record<Cause, (probe: string) => string>> = {
   auth: (probe) =>
     `The probe of ${probe} got an auth failure (HTTP 401 or 403): the registry credentials ` +
     'are dead. Run the login flow of that registry.',
@@ -261,16 +261,19 @@ const excluded = (summary: Summary): string[] => {
       `- ${code(entry.checkout)}: ${entry.reason}.` +
       (entry.stderr === '' ? '' : ` Output: ${entry.stderr}`),
   )
-  const preflightLines = summary.preflights.map((entry) => {
+  const preflightLines = summary.preflights.flatMap((entry) => {
+    // An ok answer with only an `exclude_error` excluded nothing. Section 11
+    // names it.
+    if (entry.error === null && entry.cause === null) return []
     const cause =
       entry.error === null
-        ? CAUSES[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
+        ? CAUSE_TEXT[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
           (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${entry.stderr}`)
         : `preflight-repo failed: ${entry.error}.`
-    return (
+    return [
       `- \`${entry.nwo}\` (${code(entry.checkout)}): the registry preflight excluded each group of ` +
-      `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`
-    )
+        `this repository. ${cause} The failure can be transient. A new run of the skill probes again.`,
+    ]
   })
   return [...checkoutLines, ...preflightLines]
 }
@@ -449,7 +452,19 @@ const observations = (summary: Summary): string[] => {
     ).length
     return `- ${code(type)} in \`${repo}\`: ${count} observation(s).`
   })
-  const lines = [...addedLines, ...notes, ...otherLines]
+  // A preflight that could not write the worktree exclude, ok or not. Section
+  // 6 is only for what the batch never touched, and an ok answer is not that.
+  // So all exclude notes are here, in one section, also for an excluded
+  // repository.
+  const excludeLines = summary.preflights.flatMap((entry) =>
+    entry.excludeError === null
+      ? []
+      : [
+          `- \`${entry.nwo}\` (${code(entry.checkout)}): the worktree exclude could not be written: ` +
+            `${entry.excludeError}. Worktree directories can show in \`git status\` there.`,
+        ],
+  )
+  const lines = [...addedLines, ...notes, ...otherLines, ...excludeLines]
   return lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
 }
 

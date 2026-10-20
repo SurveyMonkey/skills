@@ -321,6 +321,25 @@ const removeWork = (work: string, blocked: boolean): Step<WorkDirAction> => {
     : { action: 'absent', error: null }
 }
 
+/**
+ * The failure of a `git rev-parse --verify --quiet` read of a ref, or `null`
+ * when the ref is absent. `--quiet` answers a missing ref with exit 1 and no
+ * text. Any text, any other exit, a signal, a lost stream, or a git that did
+ * not start, is a failed read. Each caller decides what exit 0 means before
+ * it calls this.
+ */
+export const refReadFailure = (read: RunResult): string | null => {
+  const text = oneLine(
+    [
+      ...read.streamErrors.map((broke) => `a pipe failed: ${broke.code}, ${broke.message}`),
+      read.startFailure === null ? read.combined : read.startFailure.message,
+    ].join(' '),
+  )
+  if (text === '' && read.status === 1) return null
+  if (text !== '') return text
+  return read.status === null ? `killed by ${read.signal}` : `exit ${read.status}`
+}
+
 /** A ref: its commit, null when it is not there, or the failure of the read. */
 const readRef = async (
   git: Git,
@@ -328,13 +347,16 @@ const readRef = async (
   ref: string,
 ): Promise<{ readonly tip: string | null; readonly error: string | null }> => {
   const read = await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref])
-  if (read.status === 0) return { tip: read.stdout.trim(), error: null }
-  // `--quiet` answers a missing ref with exit 1 and no stderr. Any text on
-  // stderr, or a git that did not start, is a failed read.
-  const text = outputOf(read)
-  return text === ''
+  // A lost stream on exit 0 can lose the tip. An exit 0 with no tip gives no
+  // answer. In both cases the read failed.
+  const tip = read.stdout.trim()
+  if (read.status === 0 && read.streamErrors.length === 0 && tip !== '') {
+    return { tip, error: null }
+  }
+  const failure = refReadFailure(read)
+  return failure === null
     ? { tip: null, error: null }
-    : { tip: null, error: `git rev-parse ${ref} failed: ${text}` }
+    : { tip: null, error: `git rev-parse ${ref} failed: ${failure}` }
 }
 
 /** Step 3: the branch. */

@@ -430,7 +430,15 @@ describe('the order of the sections', () => {
             { package: 'g-pkg', major_line: 'none', repo: 'octo/app', reason: 'no fix available' },
           ],
         }),
-        preflight: { [ROOT]: { ok: false, probe_package: 'q', cause: 'auth', stderr: null } },
+        preflight: {
+          [ROOT]: {
+            ok: false,
+            probe_package: 'q',
+            cause: 'auth',
+            stderr: null,
+            exclude_error: null,
+          },
+        },
       }),
     )
     expect(headings(text)).toEqual([
@@ -949,6 +957,7 @@ describe('the checkouts and repositories that the batch never touched', () => {
     expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
       `${HEAD} preflight-repo failed: a manifest that cannot be read. ${TAIL}`,
     )
+    expect(sectionOf(run, 'Observations')).toBeNull()
   })
 
   it('names the repository of the checkout that the preflight excluded', () => {
@@ -982,6 +991,93 @@ describe('the checkouts and repositories that the batch never touched', () => {
       },
     }
     expect(sectionOf(run, 'Excluded checkouts and repositories')).toBeNull()
+  })
+
+  const EXCLUDE_LINE =
+    '- `octo/app` (`/Users/example/src/octo/app`): the worktree exclude could not be written: lock held. Worktree directories can show in `git status` there.'
+
+  it('names an exclude error of a preflight that answered ok, and excludes nothing', () => {
+    const run: Run = {
+      ...CLEAN,
+      preflight: {
+        [ROOT]: {
+          ok: true,
+          pm: 'npm',
+          pm_exec: 'npm',
+          probe_package: 'a',
+          cause: null,
+          stderr: null,
+          exclude_error: 'lock held',
+        },
+      },
+    }
+    expect(sectionOf(run, 'Observations')).toBe(EXCLUDE_LINE)
+    expect(sectionOf(run, 'Excluded checkouts and repositories')).toBeNull()
+  })
+
+  it('names an exclude error of a preflight that excluded the repository, in both sections', () => {
+    const run: Run = {
+      ...CLEAN,
+      preflight: {
+        [ROOT]: {
+          ok: false,
+          pm: 'npm',
+          pm_exec: 'npm',
+          probe_package: 'a',
+          cause: 'network',
+          stderr: null,
+          exclude_error: 'lock held',
+        },
+      },
+    }
+    expect(sectionOf(run, 'Observations')).toBe(EXCLUDE_LINE)
+    expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
+      `${HEAD} The probe of \`a\` failed with a network problem, such as a time limit, DNS or a reset. ${TAIL}`,
+    )
+  })
+
+  it('names an exclude error after the observations of the results', () => {
+    const run: Run = {
+      entries: [
+        entry(PKG, success(PKG, { observations: [{ type: 'unscoped_override', key: 'x' }] })),
+      ],
+      reports: [reaped(PKG)],
+      preflight: {
+        [ROOT]: {
+          ok: true,
+          pm: 'npm',
+          pm_exec: 'npm',
+          probe_package: 'a',
+          cause: null,
+          stderr: null,
+          exclude_error: 'lock held',
+        },
+      },
+    }
+    expect(sectionOf(run, 'Observations')).toBe(
+      [
+        '- Note: `octo/app` contains 1 unscoped global override(s): `x`. These may be removable or convertible to scoped pins. `/gh-security:audit-pins` tests removability.',
+        EXCLUDE_LINE,
+      ].join('\n'),
+    )
+  })
+
+  it('names no exclude error when a failed preflight has none', () => {
+    const run: Run = {
+      ...CLEAN,
+      preflight: {
+        [ROOT]: {
+          ok: false,
+          pm: 'npm',
+          pm_exec: 'npm',
+          probe_package: 'a',
+          cause: 'network',
+          stderr: null,
+          exclude_error: null,
+        },
+      },
+    }
+    expect(sectionOf(run, 'Observations')).toBeNull()
   })
 
   it('names each repository whose batch ran under the flat branch scheme', () => {
@@ -1596,7 +1692,9 @@ describe('an input that is refused', () => {
         { package: 'd', major_line: '1', repo: 'octo/app', reason: 'PR check failed', error: 'e' },
       ],
     }),
-    'preflight.json': { [ROOT]: { ok: false, probe_package: 'a', cause: 'auth', stderr: null } },
+    'preflight.json': {
+      [ROOT]: { ok: false, probe_package: 'a', cause: 'auth', stderr: null, exclude_error: null },
+    },
     'args.json': {
       cap: 1,
       dispatches: [PKG, NOP, BAD].map((group) => ({ group: { ...group }, repo_root: ROOT })),
@@ -1957,6 +2055,23 @@ describe('an input that is refused', () => {
     ],
     ['preflight.json', [ROOT, 'probe_package'], GONE, `"${ROOT}".probe_package is not text`],
     ['preflight.json', [ROOT, 'stderr'], GONE, `"${ROOT}".stderr is not text`],
+    ['preflight.json', [ROOT, 'exclude_error'], GONE, `"${ROOT}".exclude_error is not text`],
+    ['preflight.json', [ROOT, 'exclude_error'], 5, `"${ROOT}".exclude_error is not text`],
+    ['preflight.json', [ROOT, 'exclude_error'], '', `"${ROOT}".exclude_error is not text`],
+    [
+      'preflight.json',
+      [ROOT],
+      {
+        ok: true,
+        pm: 'npm',
+        pm_exec: 'npm',
+        probe_package: 'a',
+        cause: null,
+        stderr: null,
+        exclude_error: 5,
+      },
+      `"${ROOT}".exclude_error is not text`,
+    ],
     ['preflight.json', [ROOT], { error: '' }, `"${ROOT}".error is not text`],
     [
       'preflight.json',
