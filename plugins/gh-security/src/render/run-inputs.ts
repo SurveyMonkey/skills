@@ -440,8 +440,8 @@ export const discoveryOf = (value: unknown): Discovery => {
 
 /**
  * The answer of `preflight-repo` for one checkout, with the `nwo` of that
- * checkout. There are three kinds: an excluded checkout, a call that failed,
- * and an answer with `ok` true that has an `exclude_error`.
+ * checkout. It is an excluded checkout, a call that failed, or an `ok`
+ * answer with an `exclude_error`.
  * `excludeError` is the `exclude_error` of the answer: null for none, and
  * for a call that failed, which has no answer.
  */
