@@ -662,6 +662,7 @@ describe('reap', () => {
       { status: 0, streamErrors: [{ code: 'EIO', message: 'read EIO' }] },
       'a pipe failed: EIO, read EIO',
     ],
+    ['git exits 0 with no tip', { status: 0 }, 'exit 0'],
     [
       'git does not start',
       { status: null, startFailure: { code: 'ENOENT', message: 'spawn git ENOENT' } },
