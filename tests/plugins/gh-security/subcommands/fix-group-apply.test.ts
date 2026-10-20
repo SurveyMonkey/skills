@@ -1,9 +1,9 @@
 // `gh-security fix-group apply`. The seam is the exported handler, with the
 // runner and the registry as parameters. These are the examples of
-// `spec/fix_group_apply_spec.sh` that cover `apply`, and the branches that
-// only the port has. The examples of `score` in that file are for layer B3.
+// `spec/fix_group_apply_spec.sh` (deleted with `fix-group.sh`) that covered
+// `apply`, and the branches that only the port has.
 //
-// As in the bash spec, the adapter is a stand-in that gives a written
+// As in that spec, the adapter is a stand-in that gives a written
 // answer for each call, and records each call. It comes through the
 // registry parameter (`mocking.md`, "The injected collaborator"). It is the
 // real node adapter, with `why`, `declared_ranges`, `resolved_versions`,
@@ -13,8 +13,6 @@
 // reaches the network. git is real: each example runs in a repository with a
 // bare origin from `harness/git.ts`. The expected values are written by hand
 // from the contract in the header of `fix-group.ts`.
-// `parity-fix-group-apply.test.ts` compares the port with `fix-group.sh` on
-// the real adapter.
 import {
   chmodSync,
   existsSync,

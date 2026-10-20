@@ -2,25 +2,19 @@
 # shellcheck shell=sh
 # The control-install baseline rules (issue #146), and where they live now.
 #
-# They used to be prose in agents/fix-dependency.md, because the adapter's
-# --baseline check deliberately does not loosen for ambient drift (see
-# node_validate_spec.sh) and the phase ordering was therefore the whole fix:
-# classify on the never-installed tree, then a no-change control install, its
-# drift committed, THEN the snapshot. `common/fix-group.sh` executes that
-# ordering now, and spec/fix_group_spec.sh asserts it by running the steps and
-# reading the adapter's call order back.
+# They were prose in agents/fix-dependency.md. The adapter's --baseline check
+# does not loosen for ambient drift (see node_validate_spec.sh), so the phase
+# order is the whole fix: classify on the never-installed tree, then a
+# no-change control install, its drift committed, THEN the snapshot. The
+# `gh-security fix-group` command runs that order, and
+# tests/plugins/gh-security/subcommands/fix-group.test.ts covers it.
 #
-# What stays here is the driver's own grounding for the ordering, and the agent
-# prose. The orchestrator half is code since #229: `summarize-run` labels a
-# baseline failure and a lockfile-refresh action
-# (tests/plugins/gh-security/subcommands/summarize-run.test.ts). The
-# drift-cleared subcase (the control install itself resolving the vulnerable
-# copy) stays pinned, because losing it silently reverts a real fix into a
-# false "already fixed" no-op.
+# What stays here is the agent prose. The orchestrator half is code since #229:
+# `summarize-run` labels a baseline failure and a lockfile-refresh action
+# (tests/plugins/gh-security/subcommands/summarize-run.test.ts).
 
 Describe 'the control-install baseline rules (#146, #171)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/fix-group.sh"
 
   # Same two readers as spec/fix_dependency_result_spec.sh: `rule_in` counts
   # lines and suits a prescribed command or a sentence that fits on one,
@@ -28,54 +22,6 @@ Describe 'the control-install baseline rules (#146, #171)'
   # wrap may split.
   rule_in() { grep -c -e "$2" -- "$1"; }
   phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
-
-  Describe 'the driver holds the ordering and its reasons'
-    It 'spells the drift-commit subject exactly once, as one constant'
-      When call rule_in "$DRIVER" "^DRIFT_SUBJECT='chore(deps): refresh lockfile (control install, no manifest change)'$"
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'grounds the post-control ordering in the attribution it protects'
-      When call rule_in "$DRIVER" 'measures only movement the fix itself causes'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps the never-stage-package.json rule beside the staging code'
-      When call rule_in "$DRIVER" 'Never .package.json.: the control install had no manifest edit'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'preserves residual porcelain as evidence rather than absorbing it'
-      When call rule_in "$DRIVER" 'evidence, never noise to absorb'
-      The status should be success
-      The output should not equal '0'
-    End
-
-    It 'reports a control-install failure as phase baseline, never phase install'
-      When call rule_in "$DRIVER" 'A failure here is phase .baseline., never .install.'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # A grep over a comment, and deliberately not the only guard: which shapes
-    # count as a registry timeout, and how many times the install then runs, is
-    # asserted behaviorally in spec/fix_group_spec.sh ("the one sanctioned
-    # install retry"). This example only keeps the reason beside the code.
-    It 'sanctions one retry per install invocation, on a registry-timeout shape only'
-      When call rule_in "$DRIVER" 'One sanctioned retry per install invocation'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps the drift-cleared subcase a real fix, not a no-op'
-      When call rule_in "$DRIVER" 'real fix whose content is the drift commit, not a no-op'
-      The status should be success
-      The output should equal '1'
-    End
-  End
 
   Describe 'the agent definition reports what the driver decided'
     It 'names the baseline failure as ambient rather than group-specific'

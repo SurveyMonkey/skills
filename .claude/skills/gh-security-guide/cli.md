@@ -66,8 +66,8 @@ the message goes to stderr, and the exit code is 1. `pr-status` does this, so a 
 same JSON on stdout when a URL failed. `render-pr create` does this when `gh pr create` opened a
 pull request and then failed: the report is `{"error": ..., "pr_url": ...}` (ruling 18 of #233).
 A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
-that goes back to the agent (`needs_judgment`), which `apply` gives. These two codes are the codes
-of `fix-group.sh`. They are not `not-implemented` and `unsupported` of ADR 001.
+that goes back to the agent (`needs_judgment`), which `apply` gives. These two codes were the codes
+of the bash `fix-group.sh`, which #236 deleted. They are not `not-implemented` and `unsupported` of ADR 001.
 A handler that throws is a defect. So is a command that cannot load. `run.ts` renders both as
 the `failed` envelope, `{"error": "<command>: <message>"}` on stdout, with the same line on
 stderr and exit 1.

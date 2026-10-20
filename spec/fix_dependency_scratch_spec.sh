@@ -66,12 +66,10 @@ Describe 'scratch-file isolation in fix-dependency (#133)'
     End
   End
 
-  # The why capture itself moved into common/fix-group.sh with #171, which
-  # writes it as `$WORK/why-<package_path>.json` and hands that path to
-  # score-merge-risk.sh. Both halves are asserted against the driver's own argv
-  # in spec/fix_group_apply_spec.sh; what stays here is that the agent
-  # definition no longer prescribes a path of its own, and carries no
-  # unqualified `why.json` literal anywhere.
+  # The `gh-security fix-group` command writes the why capture as
+  # `$WORK/why-<package_path>.json` and hands it to the scorer. What stays
+  # here is that the agent definition no longer prescribes a path of its own,
+  # and carries no unqualified `why.json` literal anywhere.
   Describe 'the why capture is the driver.s, and no unqualified literal survives'
     It 'has no remaining unqualified why.json literal'
       When call count_in "$AGENT" 'why\.json'

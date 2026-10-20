@@ -4,8 +4,8 @@
 # #122). Nothing in a script enforces any of this: the agent decides, on its
 # own, whether a stalled driver step is a failure or something to wait on, so
 # the definition's sentences are the whole implementation and their absence is
-# the whole regression. The verbs moved into common/fix-group.sh with #171, so
-# the rules now govern the six driver steps the agent invokes; the hazard and
+# the whole regression. The verbs moved into `gh-security fix-group` with #171, so
+# the rules now govern the six steps the agent invokes; the hazard and
 # every sentence guarding it are unchanged.
 #
 # The failure mode: a field run hit a hung adapter verb, backgrounded it, and

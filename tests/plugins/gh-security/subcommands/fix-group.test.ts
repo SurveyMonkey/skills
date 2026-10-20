@@ -1,7 +1,8 @@
 // `gh-security fix-group setup|classify|baseline`. The seam is the exported
 // handler, with the runner and the registry as parameters. These are the
 // examples of `spec/fix_group_setup_spec.sh` and `spec/fix_group_spec.sh`
-// that cover these three phases, and the branches that only the port has.
+// (deleted with `fix-group.sh`) that covered these three phases, and the
+// branches that only the port has.
 //
 // git is real: each example runs in a repository with a bare origin from
 // `harness/git.ts`. A git failure comes from the git shim of that harness on
@@ -12,7 +13,6 @@
 // registry parameter: the real node adapter with one verb replaced
 // (`mocking.md`, "The injected collaborator"). The expected values are
 // written by hand from the contract in the header of `fix-group.ts`.
-// `parity-fix-group.test.ts` compares the port with `fix-group.sh`.
 import {
   chmodSync,
   existsSync,

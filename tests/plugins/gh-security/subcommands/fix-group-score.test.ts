@@ -1,7 +1,8 @@
 // `gh-security fix-group score`. The seam is the exported handler, with the
 // runner and the registry as parameters. These are the examples of
-// `spec/fix_group_apply_spec.sh` that cover `score`, the examples of its
-// `env_prefix` block, and the branches that only the port has.
+// `spec/fix_group_apply_spec.sh` (deleted with `fix-group.sh`) that covered
+// `score`, the examples of its `env_prefix` block, and the branches that only
+// the port has.
 //
 // `score` reads the state that `apply` wrote and runs no git command. So each
 // example writes that state by hand, in a directory that has the lockfile of
@@ -13,7 +14,6 @@
 // manager is a stand-in on PATH. The expected values come from the contract
 // in the header of `fix-group.ts`, from jq probes of the bash lines, and, for
 // the risk report, from `score-merge-risk.sh` on the same inputs.
-// `parity-fix-group-score.test.ts` compares the port with `fix-group.sh`.
 import {
   chmodSync,
   cpSync,

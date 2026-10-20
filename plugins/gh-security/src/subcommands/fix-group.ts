@@ -1,6 +1,6 @@
 // `gh-security fix-group <phase>`: the driver for one dependency-fix group.
 // This is the port of `scripts/common/fix-group.sh` (#232), one phase at a
-// time. All six phases are ported:
+// time. #236 deleted that script. All six phases are ported:
 //
 //   fix-group setup    --group-json <file> --repo-root <path>
 //                      --default-branch <name>
@@ -11,7 +11,7 @@
 //   fix-group score    --work <dir>
 //   fix-group cleanup  --work <dir> [--pushed]
 //
-// The agent calls `fix-group.sh` for all six steps until #237 moves it here.
+// The agent calls this command for all six steps (#237).
 //
 // The steps share one state file at `<work>/state.json`, through
 // `src/state.ts`. `setup` writes it, and each later phase reads it first.
@@ -116,13 +116,13 @@
 // directory: git gets `-C <dir>` after the prefix, and a verb gives its
 // child a `cwd`.
 //
-// Differences from `fix-group.sh`:
+// Differences from the deleted `fix-group.sh`:
 //   - There is no `--adapter <path>`. The route is the `ecosystem` of the
 //     group, through `src/adapters/registry.ts`, as in `classify-lines`. So
 //     a group must carry `ecosystem`, and an ecosystem with no adapter is
 //     exit 1. The state records the name of the adapter in `adapter`, and
 //     the route in `ecosystem`. A state that this command writes is not for
-//     `fix-group.sh`, and the reverse: do not mix the two in one run.
+//     the old `fix-group.sh`, and the reverse.
 //   - The adapter verbs run in process. So the prefix wraps the package
 //     manager that a verb starts (`why`, `install`), and not an adapter
 //     process. `detect` runs again before each verb, as each `node.sh` call

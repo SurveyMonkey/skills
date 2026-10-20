@@ -2,23 +2,18 @@
 # shellcheck shell=sh
 # The fix branch lifecycle (issue #84), and where it lives now.
 #
-# It used to be prose in agents/fix-dependency.md: phase 1 created the branch
-# and Cleanup disposed of it, both by instruction, so the definition's
-# sentences were the whole implementation and their absence was the whole
-# regression. `common/fix-group.sh` is that implementation now, and the
-# behavioural assertions moved with it — the three recognized tips and the
-# unpushed-work refusal are in spec/fix_group_setup_spec.sh, asserted against
-# real git repositories rather than against a paragraph.
+# It was prose in agents/fix-dependency.md: phase 1 created the branch and
+# Cleanup disposed of it, so the sentences of the definition were the whole
+# implementation. The `gh-security fix-group` command is that implementation
+# now, and tests/plugins/gh-security/subcommands/fix-group.test.ts asserts it
+# against real git repositories.
 #
-# What stays here is what a script cannot hold: that the agent definition
-# delegates rather than re-deriving (a prose re-derivation of a driver-owned
-# procedure is the bug this issue's fix creates the room for), that the safety
-# rule survives in both places, and that the sentences the defect shipped as
-# have not come back.
+# What stays here is what a command cannot hold: that the agent definition
+# delegates and does not re-derive, that the safety rule survives in both
+# places, and that the sentences the defect shipped as have not come back.
 
 Describe 'the fix branch lifecycle in fix-dependency (#84, #171)'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/fix-group.sh"
   CONV="$SHELLSPEC_PROJECT_ROOT/.claude/skills/gh-security-guide/fix-driver.md"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
 
@@ -70,24 +65,6 @@ Describe 'the fix branch lifecycle in fix-dependency (#84, #171)'
     # next reader re-derives nothing.
     It 'names the driver as the single home of phases 1 to 5'
       When call phrase_in "$CONV" 'single home of that procedure'
-      The status should be success
-      The output should equal '1'
-    End
-  End
-
-  Describe 'the driver still carries all three safe cases'
-    # Each is asserted behaviourally in spec/fix_group_setup_spec.sh; these
-    # pin that the reasoning stayed with the code, since a comment naming the
-    # case is what stops the next reader from collapsing three branches into
-    # one "delete it, it is ours".
-    Parameters
-      'the pushed tip'   'the remote carries the same commits'
-      'the untouched tip' 'there is nothing on the branch to lose'
-      'the drift commit'  'regenerates equivalently from the same manifests'
-    End
-
-    It "grounds $1"
-      When call rule_in "$DRIVER" "$2"
       The status should be success
       The output should equal '1'
     End

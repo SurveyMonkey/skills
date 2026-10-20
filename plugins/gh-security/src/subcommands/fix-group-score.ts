@@ -1,5 +1,5 @@
 // `fix-group score`: phase 5, the port of `cmd_score` in
-// `scripts/common/fix-group.sh`. It reads the lockfile after the fix, hands
+// `fix-group.sh` (deleted in #236). It reads the lockfile after the fix, hands
 // the facts to the risk scorer, and answers `ready_for_pr` with the whole
 // report for the pull request. The contract is in the header of
 // `fix-group.ts`.
