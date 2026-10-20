@@ -8,6 +8,7 @@
 //   alias-keys.ts               the declared keys of the root and the parents
 //   npm-placement.ts            the npm parents that a rule places
 //   parent-qualifiers.ts        the version qualifiers of pnpm and npm
+//   npm-qualified-keys.ts       the qualified npm parent keys that are there
 //   override-pass.ts            the write of the manifest
 //   workspace-write.ts          the write of pnpm-workspace.yaml
 //   lockfile-invalidation.ts    the stale npm lockfile entries
@@ -27,6 +28,14 @@
 // another major line. node.sh writes keys in each case. Beside one registry
 // copy at the same version, the port writes the plain key. For a URL with no
 // `@`, node.sh writes a qualified key for each copy there.
+//
+// Declared parity exception (#333, #295). npm uses the first key of the
+// block that matches a copy of a parent. Where the manifest has a
+// version-qualified key for an npm parent, such as `"nx@22.7.7": {...}`, and
+// that key comes first for a copy, the port writes the constraint inside it.
+// node.sh writes a new key after it, which has no effect on that copy. The
+// port also refuses where such a key matches a copy on another major line,
+// or has a pin for the package on another line.
 //
 // Each refusal of the read passes comes before the first write. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
@@ -69,9 +78,11 @@ import { invalidationOf } from './lockfile-invalidation.ts'
 import { isRecord, NO_DOCUMENT, readManifest } from './manifest.ts'
 import { type NpmLock, readNpmLock } from './npm-lock.ts'
 import { type Placement, placementRefusal, placementsOf, tightenedRules } from './npm-placement.ts'
+import { type QualifiedKeys, qualifiedKeysOf } from './npm-qualified-keys.ts'
 import { writePass } from './override-pass.ts'
 import {
   bareConflict,
+  type Edge,
   npmEdges,
   outsideRegistryRefusal,
   plainKeyRefusal,
@@ -205,10 +216,11 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
     if (tighten) tightened = orStop(tightenedRules(placements.get(pkg), overrides, pkg, range))
   }
   let qualifiers: Qualifiers = new Map()
+  let edges: readonly Edge[] = []
   if (location !== 'resolutions' && parents.length > 0) {
     const pnpmLock =
       location === 'pnpm.overrides' ? readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8') : null
-    const edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
+    edges = pnpmLock === null ? npmEdges(npmLock(), pkg) : pnpmEdges(pnpmLock, pkg)
     qualifiers = orStop(
       qualifiersOf(
         { location, edges, parents, target: targetOf(range), manifest },
@@ -228,6 +240,23 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       if (refusal !== null) throw new Error(refusal.error)
     }
   }
+  // The qualified npm parent keys that are there come first for a copy (#333).
+  let qualifiedKeys: ReadonlyMap<string, QualifiedKeys> = new Map()
+  if (location === 'overrides' && parents.length > 0) {
+    const found = orStop(
+      qualifiedKeysOf({
+        overrides: dieOn(CANNOT_READ_MANIFEST, () => or(get(manifest, 'overrides'), {})),
+        edges,
+        parents,
+        qualifiers,
+        placements,
+        pkg,
+        range,
+      }),
+    )
+    qualifiedKeys = found.keys
+    qualifiers = found.qualifiers
+  }
   if (location === 'overrides' && qualifiers.size > 0) {
     const conflict = bareConflict(qualifiers, placements, manifest, pkg, range)
     if (conflict !== null) throw new Error(conflict.error)
@@ -244,6 +273,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       keysByParent: lookup.keysByParent,
       qualifiers,
       placements,
+      qualifiedKeys,
       tightened,
     }),
   )

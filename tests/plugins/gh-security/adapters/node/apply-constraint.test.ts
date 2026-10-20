@@ -1078,7 +1078,7 @@ const QUALIFIED = 'npm-qualified-parent-key'
 const smolToml = ['smol-toml', '>=1.9.0 <2', 'nx']
 
 describe('npm constraint goes inside a qualified key that matches the parent', () => {
-  it.fails('writes inside the qualified key of the field case, and no bare key', () => {
+  it('writes inside the qualified key of the field case, and no bare key', () => {
     expect(manifestAfter(QUALIFIED, smolToml).overrides).toEqual({
       'nx@22.7.7': { axios: '>=1.16.0 <2', 'smol-toml': '>=1.9.0 <2' },
     })

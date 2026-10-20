@@ -17,6 +17,8 @@
 //     npm. A pnpm or npm parent with qualifiers gets one key for each
 //     qualifier, from `parent-qualifiers.ts`. An npm parent that a rule
 //     places takes the nested write inside each rule that places it (#147).
+//     A version-qualified npm parent key that npm matches first for a copy
+//     takes the write for that copy, as a rule does (#333).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
@@ -48,6 +50,7 @@ import {
 import { stripSelector, yarnKey } from './list-pins.ts'
 import { isRecord } from './manifest.ts'
 import type { Placement } from './npm-placement.ts'
+import type { QualifiedKeys } from './npm-qualified-keys.ts'
 import type { Qualifiers } from './parent-qualifiers.ts'
 
 type Written = ApplyConstraintAnswer['written'][number]
@@ -67,6 +70,8 @@ export type PassQuery = {
   readonly keysByParent: ReadonlyMap<string, readonly string[]>
   readonly qualifiers: Qualifiers
   readonly placements: ReadonlyMap<string, Placement>
+  /** The qualified npm parent keys that npm matches first for a copy (#333). */
+  readonly qualifiedKeys: ReadonlyMap<string, QualifiedKeys>
   /** The rule paths that a tighten moves. */
   readonly tightened: readonly (readonly string[])[]
 }
@@ -245,6 +250,13 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
       if (!placement.has_normal) supersedePair(parent, key)
       for (const rule of placement.rulepaths) putRuleNested(parent, rule, key, value)
       if (!placement.has_normal_online) return
+    }
+    const existing = query.qualifiedKeys.get(parent)
+    if (existing !== undefined) {
+      // A bare pair after the keys has no effect when they serve each copy.
+      if (existing.supersedeBare) supersedePair(parent, key)
+      for (const outer of existing.keys) putRuleNested(parent, [outer], key, value)
+      if (!existing.rest) return
     }
     if (qualified.length === 0) {
       putNested(parent, parent, key, value)

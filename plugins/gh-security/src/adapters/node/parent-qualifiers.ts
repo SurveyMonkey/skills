@@ -65,10 +65,10 @@ import type { Placement } from './npm-placement.ts'
 import { satisfiesAll } from './validate.ts'
 
 /** One edge to the package: the parent, the version of its copy, and the version of the child. */
-type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: unknown }
+export type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: unknown }
 
 /** The missing value of an edge, as the rows of node.sh write it. */
-const MISSING = '-'
+export const MISSING = '-'
 
 /**
  * A parent version from outside the registry (#50). A registry version starts
