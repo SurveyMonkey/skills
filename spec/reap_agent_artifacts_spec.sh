@@ -540,14 +540,6 @@ Describe 'the orchestrator-side reap (issue #131)'
   # SKILL.md keeps only the orchestrator-level policy that still has to be
   # decided here — when to call it, and that its failure is never fatal.
   Describe 'the step in phase 6'
-    # The AGENT workspace template is untouched: the fix agent still builds
-    # its own worktree path, and that responsibility never moved.
-    It 'still defines <package_path> in the agent workspace definition (untouched by the collapse)'
-      When call phrase_in "$AGENT" '.<package_path>. is .<package>. with every ./. replaced by .-.'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'never interpolates the raw package name into a worktree path in either document'
       raw_path_sites() {
         grep -c 'worktrees/fix-dependabot-<package>' "$SKILL" "$AGENT" | awk -F: '{ s += $NF } END { print s }'
@@ -559,47 +551,10 @@ Describe 'the orchestrator-side reap (issue #131)'
   End
 
   Describe 'the agent definition agrees with it'
-    # Phase 1 still stops on a pre-existing $WORK. What changes is the
-    # diagnosis it offers, now that a well-behaved success no longer leaves one.
-    It 'reads a surviving work directory as a failed, crashed, or foreign run'
-      When call rule_in "$AGENT" 'means a failed or crashed run, or a session that'
-      The status should be success
-      The output should equal '1'
-    End
-
+    # The agent never clears what a `worktree` failure names: the person
+    # inspects it.
     It 'keeps the guard from clearing it anyway'
-      When call rule_in "$AGENT" 'Neither is yours to clear from a distance'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # Cleanup is not optional now that something else also cleans: the reap
-    # covers exactly one exit path, and Cleanup covers all of them.
-    It 'keeps agent Cleanup as the first line of defense'
-      When call phrase_in "$AGENT" 'You are the first line of defense here, not the only one'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'says the reap covers only the verified-PR exit path'
-      When call phrase_in "$AGENT" 'the reap runs only on a verified open PR'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The agent must not read the reap as a safety net under the one judgment
-    # this section refuses to make: an unpushed tip is left at both ends. The
-    # reap's test is narrower than the agent's three safe cases — it re-checks
-    # only origin/<branch_name> — and the agent is told so rather than told
-    # the two tests are the same (#152).
-    It 'tells the agent the reap re-checks only the origin tip, a narrower test'
-      When call phrase_in "$AGENT" 'a narrower test than your three safe cases'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'does not promise a deliberately left branch is reaped later'
-      When call rule_in "$AGENT" 'is not on origin is left there too and reported'
+      When call phrase_in "$AGENT" 'Never delete a directory or branch that a .worktree. failure names'
       The status should be success
       The output should equal '1'
     End

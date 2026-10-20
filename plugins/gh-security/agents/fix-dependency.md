@@ -20,8 +20,9 @@ control back, and write the PR narrative. **Re-deriving any of its procedure her
 ## Input contract
 
 Your dispatch prompt gives `group` (one package major line from discovery), `cli` (the gh-security
-entry point), `adapter_path` (for the shim only), `nwo`, `default_branch`, `repo_root`, and an
-OPTIONAL `env_prefix`. If any but `env_prefix` is missing, return a failure (phase `input`).
+entry point), `adapter_path` (for the shim only), `nwo`, `default_branch`, `repo_root`, and
+`env_prefix`: OPTIONAL. A literal, opaque command prefix that this repo's environment requires.
+If any but `env_prefix` is missing, return a failure (phase `input`).
 
 Each command is `node <cli> <command> ...` on one line, with the literal `cli` path and literal
 arguments: no variable, quote, pipe or `;`. The plugin's allow hook then passes it. A call with
@@ -52,9 +53,10 @@ arguments: no variable, quote, pipe or `;`. The plugin's allow hook then passes 
   you write**, after its `cd`: the prefix wraps a command, not a shell builtin. Give it to
   `fix-group setup`, `render-pr labels` and `render-pr create` as `--env-prefix "<env_prefix>"`.
   **It is opaque to you**: your dispatcher resolved it once for this repo, so prepend it verbatim,
-  do not re-derive it, and never reason about what it contains. **When it is absent, run every one
-  of those commands bare, with no wrapping of your own** (`env-prefix.md`, "`env_prefix` is an
-  opaque, optional seam").
+  do not re-derive it, and never reason about what it contains.
+  **When `env_prefix` is absent, run every one of those commands bare, with no wrapping of your
+  own.** This is the one rule for carrying a repo's environment (`env-prefix.md`, "`env_prefix`
+  is an opaque, optional seam").
 - **Run each step in the foreground with an explicit Bash timeout.** Pass
   `timeout: 600000` (10 minutes) on `baseline` and `apply`, which install. Pass
   `timeout: 120000` (2 minutes) on `setup`, `classify`, `score` and `cleanup`.
@@ -95,7 +97,10 @@ file. Each step answers JSON on stdout:
 - **Exit 2, `needs_judgment`**: see below.
 - **Exit 3, `failure`**: copy `phase` and `detail` to your result verbatim, run Cleanup, and
   stop. A `baseline` failure is ambient, not group-specific. The hook rules in phase 6 apply here
-  unchanged. Never delete a directory or branch that a `worktree` failure names.
+  unchanged. Never delete a directory or branch that a `worktree` failure names. A `classify`
+  failure that names `peer_only_dependency` is a dead end: Stop here, clean up, and report it at
+  `failure.phase: "classify"`, with the driver's detail quoting `peer_parents` verbatim. In your
+  prose, point the human at a required peer parent, never an optional one.
   - **`cleanup` is the one exception, and the only one.** It runs after the push and the PR, so
     its exit 3 says something leaked. Map it by what actually shipped:
     **if you hold a `pr_url`**, your result is `"status": "success"`, with the report in `cleanup`.
@@ -129,9 +134,10 @@ git -C <work>/fix push -u origin <branch_name>
 **On a `lockfile-refresh` there is nothing to commit**: push the drift commit, and use the title
 `fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x`.
 
-**The repository's own hooks run on your commit and push.** Never bypass one (`--no-verify`,
-`HUSKY=0`, `LEFTHOOK=0`), and never edit code to satisfy one. A hook that fails is a failure
-(phase `push`, which covers both the commit and the push here), quoting its output.
+**The repository's own commit and push hooks are the repository's, and they run.** Never bypass
+one (`--no-verify`, `HUSKY=0`, `LEFTHOOK=0`). Never edit code, tests or configuration to satisfy a
+hook. A hook that fails is a failure (phase `push`, which covers both the commit and the push
+here), quoting its output.
 
 A push rejected with `(directory file conflict)` means the remote blocks `<branch_name>`
 ([#123](https://github.com/SurveyMonkey/skills/issues/123)). Do not retry, and never rename the
@@ -164,7 +170,7 @@ also in `parents_malformed`; `superseded_keys`; and the observations `pnpm_major
 known limit, not a warning ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
 
 A failed `create` that carries `pr_url` opened that PR. Do not retry: fail (phase `pr`) with that
-`pr_url`. Never merge the PR or enable auto-merge, and do not offer to.
+`pr_url`. Never merge the PR, never enable auto-merge on it, and do not offer to either.
 
 ## Cleanup
 
