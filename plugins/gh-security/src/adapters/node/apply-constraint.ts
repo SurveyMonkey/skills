@@ -13,6 +13,12 @@
 //   workspace-write.ts          the write of pnpm-workspace.yaml
 //   lockfile-invalidation.ts    the stale npm lockfile entries
 //
+// The observations of this verb are the entries that it saw before any
+// install (`constraint-observations.ts`). A version-qualified key that a
+// parent bump makes stale, and a package that the install moves down, show
+// only after the install. `fixEffects` (`fix-effects.ts`) names them, as
+// `stale_qualified_override` and `untargeted_downgrade` (#334).
+//
 // It is a write verb, so it refuses outside a linked worktree (ADR 001,
 // "Invocation"). As in node.sh, the guard is its first statement. node.sh
 // then runs `detect`. This verb does not: the caller gives it a `Tree`.
