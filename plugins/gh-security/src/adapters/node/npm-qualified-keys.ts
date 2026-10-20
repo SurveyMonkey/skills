@@ -33,8 +33,8 @@
 // Four refusals, each before any write, for a parent with a qualified key:
 //
 //   - A copy of the parent has an edge of any other spec, or no edge.
-//   - A copy has an unsure key before its first match, or two edges that
-//     match different keys.
+//   - A copy, on any line, has an unsure key before its first match, or two
+//     edges that match different keys.
 //   - A key that serves a copy is also the first key of a copy whose child is
 //     on another major line. A constraint inside that key would move that line.
 //   - A key that serves a copy has a pin for the package. The pin is on

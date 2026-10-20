@@ -441,7 +441,7 @@ type WrittenEntry = {
 
 /**
  * One entry that `applyConstraint` removed or changed. A new value replaces
- * it, or it has no effect. No normal copy is left for it (#147), or an
+ * it, or it has no effect: no normal copy is left for it (#147), or an
  * earlier key of the block matches the copy first (#333).
  */
 type SupersededKey = {

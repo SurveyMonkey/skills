@@ -32,8 +32,9 @@
 // Declared parity exception (#333, #295). npm uses the first key of the
 // block that matches a copy of a parent. The manifest can have a
 // version-qualified key for an npm parent, such as `"nx@22.7.7": {...}`.
-// When that key comes first for a copy, the port writes the constraint
-// inside it. node.sh writes a new key after it, which has no effect on that
+// The port finds that key from the spec of each edge into the copy. When
+// that key comes first for a copy, the port writes the constraint inside
+// it. node.sh writes a new key after it, which has no effect on that
 // copy. The port refuses four shapes that `npm-qualified-keys.ts` names.
 // One is such a key that also comes first for a copy whose child is on
 // another major line. Another is a pin in that key on another line.
