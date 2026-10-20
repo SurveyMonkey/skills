@@ -187,7 +187,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
     }
     // Each copy of the parent that declares the package, as `npm_copy_rows` reads it.
     const copies: Copy[] = lock.entries
-      .filter(([path]) => path !== '' && lastSegment(path) === parent)
+      .filter(([path]) => lastSegment(path) === parent)
       .flatMap(([path, entry]) =>
         declarationsOf(entry).flatMap(([key, specifier]) =>
           typeof specifier === 'string' && (key === pkg || specifier.startsWith(`npm:${pkg}@`))
@@ -215,7 +215,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
         return {
           pver: version,
           intended: childOffLine(cver, target) ? undefined : intendedOf(version),
-          first: firsts.length === 1 ? (firsts[0] as string | null) : null,
+          first: firsts[0] ?? null,
           unsure: unique([
             ...found.flatMap(({ unsure }) => unsure),
             ...(firsts.length > 1 ? firsts.filter((each) => each !== null) : []),

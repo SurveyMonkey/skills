@@ -1343,6 +1343,37 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
   })
 
+  it('refuses each key for a copy outside the range of its edge', () => {
+    const setup = both(rootSpec('^21.0.0'), rule({ 'nx@22.7.7': {} }))
+    expect(refusalOf(QUALIFIED, smolToml, setup)).toBe(
+      UNSURE('[{"parent":"nx","key":"nx@22.7.7","versions":["22.7.7"]}]'),
+    )
+  })
+
+  it.each([
+    [
+      'a declaration that is not a text',
+      lockEdit((packages) => {
+        ;((packages['node_modules/nx'] as Json).dependencies as Json).other = 5
+      }),
+      { 'nx@22.7.7': { 'smol-toml': SMOL } },
+    ],
+    [
+      'a declaration of the package through an npm: alias',
+      lockEdit((packages) => {
+        const entry = packages['node_modules/nx'] as Json
+        entry.dependencies = { toml: 'npm:smol-toml@1.6.1' }
+        packages['node_modules/toml'] = { name: 'smol-toml', version: '1.6.1' }
+      }),
+      // The alias lookup gives the key and the value of the alias.
+      { 'nx@22.7.7': { toml: `npm:smol-toml@${SMOL}` } },
+    ],
+  ])('writes the field case beside %s', (_title, setup, expected) => {
+    expect(
+      manifestAfter(QUALIFIED, smolToml, both(setup, rule({ 'nx@22.7.7': {} }))).overrides,
+    ).toEqual(expected)
+  })
+
   it('refuses a copy whose two edges match different keys', () => {
     const setup = both(
       rule({ 'nx@22.7.6': { '.': '22.7.7' }, 'nx@22.7.7': {} }),
