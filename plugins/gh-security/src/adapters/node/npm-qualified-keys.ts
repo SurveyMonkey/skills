@@ -9,11 +9,12 @@
 // in the block, a new bare `"nx": {...}` key after it kept the child of nx
 // 22.7.7. The child moved when the constraint was inside `"nx@22.7.7"`.
 //
-// npm matches a key by the range of the edge to the copy. The lockfile does
-// not give that range, so this pass reads the version of the copy, as the
-// placement pass does. The two agree when the selector admits the copy. A
-// key whose selector does not admit the copy, but whose text or `"."` value
-// does, can match the copy through its edge. Real runs showed both results.
+// When npm builds the tree, it matches a key by the range of the edge to
+// the copy. The lockfile does not give that range, so this pass reads the
+// version of the copy, as the placement pass does. The two agree when the
+// selector admits the copy. A key whose selector does not admit the copy,
+// but whose text or `"."` value does, can match the copy through its edge.
+// Real runs showed both results.
 //
 // For each normal copy of a parent on the line, the pass finds the first key
 // that matches it. When that key has a selector, the constraint goes inside
@@ -94,13 +95,19 @@ const otherLine = (value: unknown, target: number | null): boolean => {
   return floor === null || target === null || floor !== target
 }
 
-/** The child version has a floor major, and it is not `target`. A child with no major is on the line. */
+/**
+ * The child version has a floor major, and it is not `target`. A child with
+ * no major is on the line.
+ */
 const childOffLine = (cver: unknown, target: number | null): boolean => {
   const floor = rangeFloorMajor(toText(cver))
   return floor !== null && target !== null && floor !== target
 }
 
-/** The text value of a key, or its `"."` value, or null. npm moves a copy that the key matches to it. */
+/**
+ * The text value of a key, or its `"."` value, or null. npm moves a copy
+ * that the key matches to it.
+ */
 const movedTo = (value: unknown): string | null => {
   const text = isRecord(value) ? value['.'] : value
   return typeof text === 'string' ? text : null
@@ -109,9 +116,12 @@ const movedTo = (value: unknown): string | null => {
 /** One normal copy of a parent, and where the write for it goes. */
 type Copy = {
   readonly pver: string
-  /** The qualifier of the normal write that reaches the copy: '' for the bare key, undefined for none. */
+  /**
+   * The qualifier of the normal write that reaches the copy: '' for the
+   * bare key, undefined for none.
+   */
   readonly intended: string | undefined
-  /** The first key that matches the copy, or null when no key matches or the first match is bare. */
+  /** The first key that matches the copy. Null when no key matches, or the first is bare. */
   readonly first: string | null
   /** The keys before the first match whose value admits the copy, but whose selector does not. */
   readonly unsure: readonly string[]
@@ -136,7 +146,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
     /** The qualifier of the normal write for a copy on the line. */
     const intendedOf = (version: string): string | undefined =>
       own.length === 0 ? '' : own.find((each) => admits(version, each))
-    /** The first key of the block for the parent that matches the version, and the unsure keys before it. */
+    /** The first key of the parent that matches the version, and the unsure keys before it. */
     const scan = (pver: string): Pick<Copy, 'first' | 'unsure'> => {
       const unsure: string[] = []
       for (const [key, value] of block) {
