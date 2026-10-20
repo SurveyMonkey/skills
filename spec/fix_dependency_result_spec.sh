@@ -208,7 +208,7 @@ Describe 'the hang-hardening rules in fix-dependency (#122)'
     End
 
     It 'says a cleanup failure with nothing shipped is a worktree failure'
-      When call phrase_in "$AGENT" 'when .*nothing.* shipped, a cleanup failure is all there is to report'
+      When call phrase_in "$AGENT" 'When nothing shipped, a cleanup failure is all there is to report'
       The status should be success
       The output should equal '1'
     End

@@ -11,7 +11,8 @@
 # `render-pr labels` and `render-pr create`, and the label behavior
 # those calls produce (colors, descriptions, race tolerance, the `--label
 # security --label dependencies --label merge-risk:<band>` argv) is exercised
-# end-to-end in spec/render_pr_spec.sh, with a mocked `gh`. This file only
+# in tests/plugins/gh-security/subcommands/render-pr.test.ts, with a mocked
+# `gh`. spec/render_pr_spec.sh does the same for the bash script. This file only
 # pins the rendering script's own source against drift, the same way it
 # always pinned the agent prose.
 #
