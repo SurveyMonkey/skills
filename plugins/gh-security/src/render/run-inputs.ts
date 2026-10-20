@@ -440,8 +440,8 @@ export const discoveryOf = (value: unknown): Discovery => {
 
 /**
  * The answer of `preflight-repo` for one checkout, with the `nwo` of that
- * checkout. Each kind is a checkout that the preflight excluded, a call that
- * failed, or an answer with `ok` true that still has an `exclude_error`.
+ * checkout. There are three kinds: an excluded checkout, a call that failed,
+ * and an answer with `ok` true that has an `exclude_error`.
  * `excludeError` is the `exclude_error` of the answer: null for none, and
  * for a call that failed, which has no answer.
  */
@@ -478,7 +478,7 @@ export type Preflight =
  */
 export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonly Preflight[] => {
   const file = record(value, 'the file')
-  const excluded: Preflight[] = []
+  const entries: Preflight[] = []
   for (const [checkout, element] of Object.entries(file)) {
     const at = JSON.stringify(checkout)
     const { nwo } =
@@ -486,7 +486,7 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
       refuse(`${at} is not a kept checkout of the discovery`)
     const answer = record(element, at)
     if ('error' in answer) {
-      excluded.push({
+      entries.push({
         checkout,
         nwo,
         error: text(answer.error, `${at}.error`),
@@ -499,10 +499,10 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
     const excludeError = textOrNull(answer.exclude_error, `${at}.exclude_error`)
     if (flag(answer.ok, `${at}.ok`)) {
       if (excludeError !== null)
-        excluded.push({ checkout, nwo, error: null, cause: null, excludeError })
+        entries.push({ checkout, nwo, error: null, cause: null, excludeError })
       continue
     }
-    excluded.push({
+    entries.push({
       checkout,
       nwo,
       error: null,
@@ -512,5 +512,5 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
       excludeError,
     })
   }
-  return excluded
+  return entries
 }

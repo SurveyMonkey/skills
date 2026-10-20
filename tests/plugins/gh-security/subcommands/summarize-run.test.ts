@@ -957,6 +957,7 @@ describe('the checkouts and repositories that the batch never touched', () => {
     expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
       `${HEAD} preflight-repo failed: a manifest that cannot be read. ${TAIL}`,
     )
+    expect(sectionOf(run, 'Observations')).toBeNull()
   })
 
   it('names the repository of the checkout that the preflight excluded', () => {
@@ -1030,8 +1031,8 @@ describe('the checkouts and repositories that the batch never touched', () => {
       },
     }
     expect(sectionOf(run, 'Observations')).toBe(EXCLUDE_LINE)
-    expect(sectionOf(run, 'Excluded checkouts and repositories')).toContain(
-      'failed with a network problem',
+    expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
+      `${HEAD} The probe of \`a\` failed with a network problem, such as a time limit, DNS or a reset. ${TAIL}`,
     )
   })
 
@@ -2031,6 +2032,20 @@ describe('an input that is refused', () => {
     ['preflight.json', [ROOT, 'exclude_error'], GONE, `"${ROOT}".exclude_error is not text`],
     ['preflight.json', [ROOT, 'exclude_error'], 5, `"${ROOT}".exclude_error is not text`],
     ['preflight.json', [ROOT, 'exclude_error'], '', `"${ROOT}".exclude_error is not text`],
+    [
+      'preflight.json',
+      [ROOT],
+      {
+        ok: true,
+        pm: 'npm',
+        pm_exec: 'npm',
+        probe_package: 'a',
+        cause: null,
+        stderr: null,
+        exclude_error: 5,
+      },
+      `"${ROOT}".exclude_error is not text`,
+    ],
     ['preflight.json', [ROOT], { error: '' }, `"${ROOT}".error is not text`],
     [
       'preflight.json',

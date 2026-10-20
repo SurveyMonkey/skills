@@ -1,8 +1,12 @@
-// The causes of a registry preflight that failed twice. `preflight-repo`
-// gives one in its answer, and `summarize-run` reads one from that answer.
-// Both import this list and its type, so a cause cannot be in one and not
-// in the other. This file has no import of the node adapter on purpose: a
-// `summarize-run` that imported `preflight-repo` would load that adapter.
+// The causes of a registry preflight that excluded a repository: a probe
+// that failed twice, or a `detect` that failed. `preflight-repo` gives one
+// in its answer, and `summarize-run` reads one from that answer. The answer
+// type of `preflight-repo` and the text of each cause in `run-summary` use
+// the type, and `run-inputs` reads a cause with the list. So
+// `preflight-repo` cannot give a cause that `summarize-run` refuses, and
+// `run-summary` has a text for each cause. This file has no import of the
+// node adapter on purpose: a `summarize-run` that imported `preflight-repo`
+// would load that adapter.
 //
 //   auth        HTTP 401 or 403. The registry token is dead.
 //   not-found   HTTP 404. The registry has no such package.

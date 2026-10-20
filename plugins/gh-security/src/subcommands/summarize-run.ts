@@ -17,8 +17,9 @@
 //   --preflight  optional. One JSON object, from the `checkout` of a kept
 //                checkout to the answer of `preflight-repo` for it, or to
 //                `{error}` for a call that failed. Each answer has an
-//                `exclude_error`, text or null. Without the file, no repository
-//                was excluded by the registry preflight.
+//                `exclude_error`, text or null. Without the file, the
+//                registry preflight excluded no repository, and no answer
+//                has an `exclude_error`.
 //   --args       optional. The Workflow `args`, `{cap, dispatches}`. Give it
 //                for a run that was interrupted. Each entry then names a
 //                dispatch by its `repo` and `branch_name`, and a dispatch with

@@ -242,7 +242,7 @@ const unknown = (summary: Summary): string[] => {
 
 // Section 6: the checkouts and repositories that the batch never touched.
 
-const CAUSES: Readonly<Record<Cause, (probe: string) => string>> = {
+const CAUSE_TEXT: Readonly<Record<Cause, (probe: string) => string>> = {
   auth: (probe) =>
     `The probe of ${probe} got an auth failure (HTTP 401 or 403): the registry credentials ` +
     'are dead. Run the login flow of that registry.',
@@ -262,10 +262,12 @@ const excluded = (summary: Summary): string[] => {
       (entry.stderr === '' ? '' : ` Output: ${entry.stderr}`),
   )
   const preflightLines = summary.preflights.flatMap((entry) => {
+    // An ok answer with only an `exclude_error` excluded nothing. Section 11
+    // names it.
     if (entry.error === null && entry.cause === null) return []
     const cause =
       entry.error === null
-        ? CAUSES[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
+        ? CAUSE_TEXT[entry.cause](entry.probe === null ? 'the package' : code(entry.probe)) +
           (entry.stderr === null || entry.stderr === '' ? '' : ` Output: ${entry.stderr}`)
         : `preflight-repo failed: ${entry.error}.`
     return [
@@ -450,8 +452,9 @@ const observations = (summary: Summary): string[] => {
     ).length
     return `- ${code(type)} in \`${repo}\`: ${count} observation(s).`
   })
-  // A preflight that could not write the worktree exclude, ok or not. This is
-  // a note on a repository that the batch did touch, so it is not in section 6.
+  // A preflight that could not write the worktree exclude, ok or not. Section
+  // 6 is only for what the batch never touched, and an ok answer is not that.
+  // So each of these notes is here, also for an excluded repository.
   const excludeLines = summary.preflights.flatMap((entry) =>
     entry.excludeError === null
       ? []
