@@ -1631,6 +1631,188 @@ describe('body', () => {
     })
   })
 
+  // The observations of the field fix: `fixEffects` on the real npm runs of
+  // `spec/fixtures/npm-stale-qualified-key*` gave these (#334).
+  describe('the effects of the fix (#334)', () => {
+    const STALE = {
+      type: 'stale_qualified_override',
+      key: 'nx@22.7.7',
+      parent: 'nx',
+      selector: '22.7.7',
+      installed: ['22.7.10'],
+    }
+    const down = (pkg: string, path: string, before: string, after: string) => ({
+      type: 'untargeted_downgrade',
+      package: pkg,
+      path,
+      before,
+      after,
+    })
+    const AXIOS = down('axios', 'node_modules/axios', '1.20.0', '1.18.1')
+    const BRACE = down(
+      'brace-expansion',
+      'node_modules/nx/node_modules/brace-expansion',
+      '5.0.12',
+      '5.0.8',
+    )
+    const OTHER = {
+      type: 'unscoped_override',
+      key: 'lodash',
+      range: '^4',
+      targets_this_package: true,
+    }
+    const withObservations = (observations: unknown) =>
+      render(
+        'body',
+        edit(STATE, (s) => {
+          s.observations = observations
+        }),
+        GROUP,
+      )
+    const HEAD = '## Downgrades and stale overrides\n\n'
+    const TABLE =
+      'This fix moves these packages, which it does not target, to a lower version. Check each one before you merge. The merge risk above does not count them.\n\n' +
+      '| Package | Path | Before | After |\n|---|---|---|---|\n'
+    const STALE_TEXT =
+      'These version-qualified overrides match no copy after this fix. So they have no effect now:\n\n'
+    const FAILED =
+      'The check for downgrades and stale overrides did not run, so this PR makes no claim about them: '
+    // The reviewed body of the scoped state, with `section` just before the
+    // verification. The section goes after the collateral section, and this
+    // state has none.
+    const bodyWith = (section: string): string => {
+      const body = textOf('expected-body-scoped.md')
+      expect(body.split('## Verification\n')).toHaveLength(2)
+      return body.replace('## Verification\n', `${section}## Verification\n`)
+    }
+
+    it('lists the downgrades and the stale key of the field fix before the verification', async () => {
+      const ran = await withObservations([OTHER, STALE, AXIOS, BRACE])
+      expect(ran.result).toBeUndefined()
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${TABLE}` +
+            '| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n' +
+            '| brace-expansion | node_modules/nx/node_modules/brace-expansion | 5.0.12 | 5.0.8 |\n\n' +
+            `${STALE_TEXT}- \`nx@22.7.7\`: installed now 22.7.10\n\n`,
+        ),
+      )
+    })
+
+    it.each([
+      ['no observation', []],
+      ['an absent list', undefined],
+      ['a null list', null],
+      ['only other kinds, and an entry that is not an object', [OTHER, 5, null, 'x']],
+    ])('renders the same body for %s', async (_name, observations) => {
+      const ran = await render(
+        'body',
+        edit(STATE, (s) => {
+          if (observations === undefined) delete s.observations
+          else s.observations = observations
+        }),
+        GROUP,
+      )
+      expect(ran.out).toBe(textOf('expected-body-scoped.md'))
+    })
+
+    // The reviewed body of a state with a collateral section. The section of
+    // the effects goes after it.
+    it('puts the section after the collateral section', async () => {
+      const ran = await render(
+        'body',
+        edit(jsonOf('state-collateral-benign.json'), (s) => {
+          s.observations = [AXIOS]
+        }),
+        GROUP,
+      )
+      const reviewed = textOf('expected-body-collateral-benign.md')
+      expect(reviewed.split('## Collateral\n')).toHaveLength(2)
+      expect(reviewed.split('## Verification\n')).toHaveLength(2)
+      expect(ran.out).toBe(
+        reviewed.replace(
+          '## Verification\n',
+          `${HEAD}${TABLE}| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n\n## Verification\n`,
+        ),
+      )
+    })
+
+    it('lists a downgrade with no stale key', async () => {
+      const ran = await withObservations([AXIOS])
+      expect(ran.out).toBe(
+        bodyWith(`${HEAD}${TABLE}| axios | node_modules/axios | 1.20.0 | 1.18.1 |\n\n`),
+      )
+    })
+
+    it('lists a stale key with no copy left, and no downgrade', async () => {
+      const ran = await withObservations([
+        { ...STALE, installed: [] },
+        { ...STALE, key: 'a@1', installed: ['2.0.0', '3.0.0'] },
+      ])
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${STALE_TEXT}- \`nx@22.7.7\`: installed now (none)\n- \`a@1\`: installed now 2.0.0, 3.0.0\n\n`,
+        ),
+      )
+    })
+
+    it('says that the check did not run, with its error', async () => {
+      const ran = await withObservations([
+        {
+          type: 'fix_effects_failed',
+          error: 'fix_effects: the package-lock.json of the last commit holds no packages.\n',
+        },
+      ])
+      expect(ran.out).toBe(
+        bodyWith(
+          `${HEAD}${FAILED}fix_effects: the package-lock.json of the last commit holds no packages.\n\n`,
+        ),
+      )
+    })
+
+    it('escapes a pipe in a cell of the table', async () => {
+      const ran = await withObservations([down('a|b', 'node_modules/a|b', '2.0.0', '1.0.0')])
+      expect(ran.out).toBe(
+        bodyWith(`${HEAD}${TABLE}| a\\|b | node_modules/a\\|b | 2.0.0 | 1.0.0 |\n\n`),
+      )
+    })
+
+    const BAD = (file: string, what: string) =>
+      `body: --state ${file} has ${what}. A downgrade or a stale override that cannot be read is never left out of the PR.`
+
+    const REFUSED: readonly (readonly [string, unknown, string])[] = [
+      ['an object', {}, "an 'observations' that is not a list"],
+      ['text', 'x', "an 'observations' that is not a list"],
+      ['false', false, "an 'observations' that is not a list"],
+      [
+        'a stale key with no key',
+        [{ ...STALE, key: 5 }],
+        "a stale_qualified_override with no 'key' as text or 'installed' as a list of texts",
+      ],
+      [
+        'a stale key with a number among the versions',
+        [{ ...STALE, installed: [1] }],
+        "a stale_qualified_override with no 'key' as text or 'installed' as a list of texts",
+      ],
+      ...(['package', 'path', 'before', 'after'] as const).map(
+        (field): readonly [string, unknown, string] => [
+          `a downgrade with no ${field}`,
+          [{ ...AXIOS, [field]: null }],
+          "an untargeted_downgrade with no 'package', 'path', 'before' or 'after' as text",
+        ],
+      ),
+      [
+        'a failed check with no error',
+        [{ type: 'fix_effects_failed' }],
+        "a fix_effects_failed with no 'error' as text",
+      ],
+    ]
+    it.each(REFUSED)('refuses observations that hold %s', async (_name, observations, what) => {
+      const ran = await withObservations(observations)
+      refused(ran, BAD(ran.files['state.json'] as string, what))
+    })
+  })
+
   describe('text from input', () => {
     it('escapes a pipe, a backslash and a line break in a cell, and keeps non-ASCII text', async () => {
       const ran = await render(

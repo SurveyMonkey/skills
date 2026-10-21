@@ -85,7 +85,7 @@ export type QualifiedKeyResult = {
  * read admits no version here. npm refuses some of them as a key, such as
  * `nx@>=`.
  */
-const admits = (version: string, selector: string): boolean => {
+export const admits = (version: string, selector: string): boolean => {
   try {
     return satisfiesAll(version, selector)
   } catch {
@@ -112,15 +112,15 @@ const childOffLine = (cver: unknown, target: number | null): boolean => {
 const EXACT = /^[v=]*([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$/
 
 // A spec that the range rules can read, as `looks_range` reads it.
-const LOOKS_RANGE = /^[v=^~><*0-9]/
+export const LOOKS_RANGE = /^[v=^~><*0-9]/
 
 /** The version of an exact spec or selector, or null. */
-const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?.[1] ?? null
+export const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?.[1] ?? null
 
 const EDGE_BLOCKS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
 
 /** The specs of the edges into the copy at `path`, from each entry that depends on it. */
-const specsInto = (lock: NpmLock, path: string): readonly unknown[] =>
+export const specsInto = (lock: NpmLock, path: string): readonly unknown[] =>
   lock.entries.flatMap(([from, entry]) =>
     EDGE_BLOCKS.flatMap((block) => entriesOf(or(get(entry, block), {})))
       .filter(([key]) => resolveFrom(lock, from, key) === path)

@@ -24,11 +24,26 @@
 //     number goes first. A number is in its shortest form, so `1.0` is `1`
 //     and `1E+2` is `100`. An integer above 2^53 loses its last digits.
 //     U+007F is not escaped.
+//   - A section `## Downgrades and stale overrides` follows the collateral
+//     section when the state names an effect of the fix (#334). It lists
+//     the packages that went down, and that the fix did not target. It
+//     lists the version-qualified overrides that match no copy now. It also
+//     lists each check that could not run. The script has no such section.
+//     The risk label does not change for it (ruling 4).
 //
 // This file ships. It imports nothing outside the plugin.
 
 import { cell, DASH, fence, percent, shown } from './markdown.ts'
-import type { Action, BodyAlert, BodyInputs, Bump, GlobalOverride, Move } from './pr-inputs.ts'
+import type {
+  Action,
+  BodyAlert,
+  BodyInputs,
+  Bump,
+  Downgrade,
+  GlobalOverride,
+  Move,
+  StaleKey,
+} from './pr-inputs.ts'
 
 const VERBS: Readonly<Record<Action, string>> = {
   'direct-update': 'updating the direct dependency',
@@ -185,6 +200,44 @@ const collateral = (inputs: BodyInputs): string[] => {
     : [...head, ...table, `${inputs.collateralNote}\n`]
 }
 
+const downgradeRow = (row: Downgrade): string =>
+  `| ${cell(row.package)} | ${cell(row.path)} | ${cell(row.before)} | ${cell(row.after)} |`
+
+const staleLine = (row: StaleKey): string =>
+  `- \`${shown(row.key)}\`: installed now ${row.installed.length === 0 ? '(none)' : shown(row.installed.join(', '))}`
+
+/** What the fix did beside its target (#334). A PR with a downgrade says so here. */
+const effects = (inputs: BodyInputs): string[] => {
+  const { stale, downgrades, failures } = inputs.effects
+  if (stale.length + downgrades.length + failures.length === 0) return []
+  return [
+    '## Downgrades and stale overrides',
+    '',
+    ...(downgrades.length === 0
+      ? []
+      : [
+          'This fix moves these packages, which it does not target, to a lower version. Check each one before you merge. The merge risk above does not count them.',
+          '',
+          '| Package | Path | Before | After |',
+          '|---|---|---|---|',
+          ...downgrades.map(downgradeRow),
+          '',
+        ]),
+    ...(stale.length === 0
+      ? []
+      : [
+          'These version-qualified overrides match no copy after this fix. So they have no effect now:',
+          '',
+          ...stale.map(staleLine),
+          '',
+        ]),
+    ...failures.flatMap((failure) => [
+      `The check for downgrades and stale overrides did not run, so this PR makes no claim about them: ${shown(failure)}`,
+      '',
+    ]),
+  ]
+}
+
 const verification = (inputs: BodyInputs): string[] => [
   '## Verification',
   '',
@@ -221,6 +274,7 @@ export const prBody = (inputs: BodyInputs, repo: string): string =>
     ...(inputs.globalOverride === null ? [] : globalOverride(inputs, inputs.globalOverride)),
     ...notFixed(inputs),
     ...collateral(inputs),
+    ...effects(inputs),
     ...verification(inputs),
     ...references(inputs, repo),
     '',

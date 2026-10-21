@@ -14,12 +14,26 @@
 //   step 3  the stale-lockfile stop.
 //   then    a judgment for the agent: `validate_failed_after_ladder`.
 //
+// After validate passes on a changed worktree, `fixEffects` compares the
+// tree with the last commit (#334). That commit is the tree after the
+// control install. The verb names each version-qualified key that the fix
+// made stale. It also names each package that went down, and that the fix
+// did not target.
+//
+// These observations go after those of `apply_constraint`, in the answer
+// and in `apply_result`. So `score` gives them to the PR body. They are a
+// report only, and change no label and no step (ruling 4). A check that
+// fails, or a tree that `detect` refuses, gives `fix_effects_failed` with
+// the error. A check that the adapter does not support adds nothing.
+//
 // The adapter verbs run in process. The package manager that `install`
-// starts and the git call run under the prefix. `apply` runs one git
-// command, `status --porcelain`. It never prunes a worktree (git.md).
+// starts and the git calls run under the prefix. `apply` runs two git
+// commands: `status --porcelain`, and `show HEAD:./<file>` for each file
+// that `fixEffects` reads. It never prunes a worktree (git.md).
 //
 // This file ships. It imports nothing outside the plugin.
 
+import type { CommitSource, FixEffectsFailed } from '../adapters/adapter.ts'
 import { type CommandResult, type FailedReport, failedReport } from '../cli/command.ts'
 import { fieldOf, orElse, tostring, uniqueJq } from '../jq.ts'
 import { type Failure, failed, type JsonObject, type JsonValue, ok } from '../lib/envelope.ts'
@@ -585,6 +599,34 @@ const unchanged = (run: Run, drift: boolean): Stop | CommandResult | null => {
   return verdict === 'no_op' ? noOp(run, drift) : null
 }
 
+/** The observation of a check that failed or did not run, with its error. */
+const failedCheck = (error: string): JsonObject => {
+  const failure: FixEffectsFailed = { type: 'fix_effects_failed', error }
+  return failure
+}
+
+/**
+ * What the fix did beside its target, as observations (#334). A check that
+ * fails is an observation that names the error, never a stop.
+ */
+const effectsOf = async (run: Run): Promise<JsonValue[]> => {
+  const { adapter, driver, git } = run.loaded
+  const before: CommitSource = async (file) => {
+    const shown = await git(driver.worktree, ['show', `HEAD:./${file}`])
+    return shown.status === 0
+      ? ok(shown.stdout)
+      : failed(`git show HEAD:./${file} failed: ${outputOf(shown)}`)
+  }
+  // Only the verb may answer `unsupported` for no effect. A tree that
+  // `detect` refuses here is a check that did not run.
+  const tree = run.loaded.tree()
+  if (tree.outcome !== 'ok') return [failedCheck(tree.error)]
+  const answer = await adapter.fixEffects(tree.value, driver.package, before)
+  if (answer.outcome === 'ok') return answer.value.observations as unknown as JsonValue[]
+  if (answer.outcome === 'unsupported') return []
+  return [failedCheck(answer.error)]
+}
+
 /** After validate passed: the labels of the fix, the state, and the answer. */
 const finish = async (run: Run, observationsFirst: JsonValue[]): Promise<CommandResult> => {
   const { driver } = run.loaded
@@ -624,6 +666,13 @@ const finish = async (run: Run, observationsFirst: JsonValue[]): Promise<Command
     if (end !== null) return end
     labels = LOCKFILE_REFRESH
   }
+  // The answer of the last `apply_constraint`, with the effects of the fix
+  // after its own observations. An empty diff has no effect to compare.
+  const effects = porcelain === '' ? [] : await effectsOf(run)
+  const answer: JsonObject = {
+    ...run.answer,
+    observations: [...(run.answer.observations as JsonValue[]), ...effects],
+  }
 
   // The install signals are the union that the last install wrote. Each
   // key goes in the order of the bash.
@@ -632,7 +681,7 @@ const finish = async (run: Run, observationsFirst: JsonValue[]): Promise<Command
     ['action', labels.action],
     ['override_scope', labels.override_scope],
     ['bare_override', labels.bare_override],
-    ['apply_result', run.answer],
+    ['apply_result', answer],
     ['validate', validate],
     ['applied_parents', run.applied],
     ['tighten_bare', run.tightenBare],
@@ -640,7 +689,6 @@ const finish = async (run: Run, observationsFirst: JsonValue[]): Promise<Command
     const saved = save(run, key, value)
     if (saved !== null) return saved
   }
-  const answer = run.answer
   return ok({
     status: 'ok',
     step: 'apply',

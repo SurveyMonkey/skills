@@ -1,0 +1,18 @@
+{
+  "name": "npm-stale-qualified-key",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@nx/workspace": "22.7.7",
+    "nx": "22.7.10"
+  },
+  "overrides": {
+    "nx@22.7.7": {
+      "axios": ">=1.16.1 <2",
+      "brace-expansion": ">=5.0.9 <6"
+    },
+    "@nx/workspace": {
+      "nx": ">=22.7.10 <23"
+    }
+  }
+}
