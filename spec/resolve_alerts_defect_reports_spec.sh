@@ -2,7 +2,8 @@
 # shellcheck shell=sh
 # Orchestrator guidance to file skill-defect reports from field-run evidence
 # (issue #148). Nothing in a script enforces this: the guidance is prose in
-# resolve-alerts/SKILL.md's Phase 7, referenced (not duplicated) from
+# resolve-alerts/defect-report.md, which SKILL.md's phase 7 links (#237),
+# referenced (not duplicated) from
 # audit-pins.md, so the sentences are the whole implementation and their
 # absence is the whole regression. reference_scrub_spec.sh already gates the
 # real internal slugs this guidance must never spell; this file asserts the
@@ -11,6 +12,7 @@
 
 Describe 'the defect-report guidance in resolve-alerts (#148)'
   SKILL="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/SKILL.md"
+  DEFECT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/resolve-alerts/defect-report.md"
   AUDIT_CMD="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/skills/audit-pins/SKILL.md"
 
   # Two readers, as in spec/audit_pins_rules_spec.sh: `rule_in` counts lines
@@ -24,43 +26,43 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
 
   Describe 'Phase 7 gains the defect-report sub-block'
     It 'states the check-first-then-file-or-comment practice'
-      When call phrase_in "$SKILL" 'Check this repository for an existing issue before drafting a new one'
+      When call phrase_in "$DEFECT" 'Check this repository for an existing issue before drafting a new one'
       The status should be success
       The output should equal '1'
     End
 
     It 'runs the search against this repository, not the target'
-      When call rule_in "$SKILL" 'gh issue list --repo SurveyMonkey/skills --search'
+      When call rule_in "$DEFECT" 'gh issue list --repo SurveyMonkey/skills --search'
       The status should be success
       The output should equal '1'
     End
 
     It 'searches closed issues too, since a fixed-and-closed defect is still a hit'
-      When call rule_in "$SKILL" 'gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>" --state all'
+      When call rule_in "$DEFECT" 'gh issue list --repo SurveyMonkey/skills --search "<distinguishing terms>" --state all'
       The status should be success
       The output should equal '1'
     End
 
     It 'names the search itself as the reachability probe for the identity question'
-      When call phrase_in "$SKILL" 'This search is also the reachability probe for the identity question below'
+      When call phrase_in "$DEFECT" 'This search is also the reachability probe for the identity question below'
       The status should be success
       The output should equal '1'
     End
 
     It 'treats a second sighting as confirmation, not noise'
-      When call phrase_in "$SKILL" 'a second independent field sighting is confirmation, not noise'
+      When call phrase_in "$DEFECT" 'a second independent field sighting is confirmation, not noise'
       The status should be success
       The output should equal '1'
     End
 
     It 'requires the run'"'"'s own concrete evidence in the report'
-      When call phrase_in "$SKILL" "The report carries the run's own concrete evidence"
+      When call phrase_in "$DEFECT" "The report carries the run's own concrete evidence"
       The status should be success
       The output should equal '1'
     End
 
     It 'excludes target-repo defects from this path'
-      When call phrase_in "$SKILL" 'a target repo.s own defect .* is never filed here'
+      When call phrase_in "$DEFECT" 'a target repo.s own defect .* is never filed here'
       The status should be success
       The output should equal '1'
     End
@@ -68,7 +70,7 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
 
   Describe 'the scrub-rule sentence'
     It 'forbids naming the target repository, owner, org, or topology'
-      When call phrase_in "$SKILL" 'Never name the target repository, its owner or org, or its internal directory topology'
+      When call phrase_in "$DEFECT" 'Never name the target repository, its owner or org, or its internal directory topology'
       The status should be success
       The output should equal '1'
     End
@@ -76,13 +78,13 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
 
   Describe 'the consent sentence'
     It 'gates filing on the user'"'"'s go-ahead, or a prior in-session authorization'
-      When call phrase_in "$SKILL" 'Propose the drafted title and body and file only on the user.s go-ahead'
+      When call phrase_in "$DEFECT" 'Propose the drafted title and body and file only on the user.s go-ahead'
       The status should be success
       The output should equal '1'
     End
 
     It 'requires the closing report to say what was filed or proposed'
-      When call phrase_in "$SKILL" 'the closing report in phase 8 states what was filed'
+      When call phrase_in "$DEFECT" 'the closing report in phase 8 states what was filed'
       The status should be success
       The output should equal '1'
     End
@@ -90,31 +92,31 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
 
   Describe 'the identity sentence'
     It 'resolves the reporting identity separately from the batch identity'
-      When call phrase_in "$SKILL" 'The identity that files the report is resolved separately from the identity that ran the batch'
+      When call phrase_in "$DEFECT" 'The identity that files the report is resolved separately from the identity that ran the batch'
       The status should be success
       The output should equal '1'
     End
 
     It 'names the EMU case as barred from contributing here'
-      When call phrase_in "$SKILL" 'an account barred from contributing to outside'
+      When call phrase_in "$DEFECT" 'an account barred from contributing to outside'
       The status should be success
       The output should equal '1'
     End
 
     It 'allows switching to a discoverable capable account under the same consent'
-      When call phrase_in "$SKILL" 'use it for the report,.*under the same consent that covers the report itself'
+      When call phrase_in "$DEFECT" 'use it for the report,.*under the same consent that covers the report itself'
       The status should be success
       The output should equal '1'
     End
 
     It 'never invents a switched identity silently'
-      When call phrase_in "$SKILL" 'Switching identities is never invented \+silently'
+      When call phrase_in "$DEFECT" 'Switching identities is never invented \+silently'
       The status should be success
       The output should equal '1'
     End
 
     It 'hands the drafted report to the user when no capable account resolves'
-      When call phrase_in "$SKILL" 'the report does not vanish: hand the drafted title and body to'
+      When call phrase_in "$DEFECT" 'the report does not vanish: hand the drafted title and body to'
       The status should be success
       The output should equal '1'
     End

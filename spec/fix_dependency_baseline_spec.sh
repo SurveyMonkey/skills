@@ -27,7 +27,7 @@ Describe 'the control-install baseline rules (#146, #171)'
   # `phrase_in` flattens the file first and suits anything the 100-column
   # wrap may split.
   rule_in() { grep -c -e "$2" -- "$1"; }
-  phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
+  phrase_in() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'the driver holds the ordering and its reasons'
     It 'spells the drift-commit subject exactly once, as one constant'

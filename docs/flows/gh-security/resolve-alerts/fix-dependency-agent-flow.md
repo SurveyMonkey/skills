@@ -13,7 +13,7 @@ stale_after: 2027-02-24
 | [`plugins/gh-security/agents/fix-dependency.md`](../../../../plugins/gh-security/agents/fix-dependency.md) | One group's fix. |
 
 **A boxed region is executed, not instructed.** Everything inside one runs as a tested script or
-workflow (`common/fix-group.sh`), with
+command (`node <cli> fix-group <step>`, `src/subcommands/fix-group.ts`), with
 its branches decided in code and covered by the suite. Everything outside is prose a model reads
 and follows, which is why the unboxed nodes are the ones that write PR narrative or apply
 judgment the driver deliberately hands back. The distinction is the point of
@@ -32,23 +32,23 @@ rather than exits.
 
 ```mermaid
 flowchart TD
-    D0["Dispatch payload: group, adapter_path, nwo,<br/>default_branch, repo_root, scripts_dir,<br/>env_prefix (optional)"] --> D0Q{"any required field missing?"}
+    D0["Dispatch payload: group, cli, adapter_path, nwo,<br/>default_branch, repo_root,<br/>env_prefix (optional)"] --> D0Q{"any required field missing?"}
     D0Q -->|yes| FIN["failure: phase input"]
     D0Q -->|no| D1
 
-    D1["Phase 1: $WORK container at<br/>.claude/worktrees/fix-dependabot-PKG-LINEx;<br/>the checkout is $WORK/fix"] --> D1A{"$WORK already exists?"}
+    D1["Phase 1: node &lt;cli&gt; fix-group setup --group-json FILE<br/>--repo-root ROOT --default-branch BRANCH [--env-prefix P];<br/>its answer names work, .claude/worktrees/fix-dependabot-PKG-LINEx;<br/>the checkout is WORK/fix"] --> D1A{"WORK already exists?"}
     D1A -->|"yes: previous run crashed"| FWT["failure: phase worktree<br/>(never reuse, never delete)"]
     D1A -->|no| D1B{"local branch of this name?"}
     D1B -->|none| D1C
     D1B -->|"tip = origin/default_branch<br/>or origin/branch_name"| D1DEL["This flow's own leftover: branch -D, recreate"] --> D1C
     D1B -->|"tip is neither"| FWT2["failure: phase worktree,<br/>quoting the three shas (unpushed work)"]
-    D1C["worktree add $WORK/fix -b branch_name origin/default_branch"] --> D2
+    D1C["worktree add WORK/fix -b branch_name origin/default_branch"] --> D2
 
-    D2["Phase 2: ADAPTER why (no install needed)"] --> D2Q{"relationship"}
+    D2["Phase 2: node &lt;cli&gt; fix-group classify --work WORK:<br/>why (no install needed)"] --> D2Q{"relationship"}
     D2Q -->|direct| D3
     D2Q -->|transitive| D2E["declared_ranges --line, to narrow parents:<br/>eligible = parents_read + parents_unreadable +<br/>parents_without_range, minus parents_other_lines"] --> D3
 
-    D3["Phase 3: pre-drift snapshot (resolved_versions<br/>on the never-installed tree), then control install"] --> D3I{"control install"}
+    D3["Phase 3: node &lt;cli&gt; fix-group baseline --work WORK:<br/>pre-drift snapshot (resolved_versions<br/>on the never-installed tree), then control install"] --> D3I{"control install"}
     D3I -->|fails| FBASE0["failure: phase baseline<br/>(ambient: fails before any fix exists)"]
     D3I -->|installed| D3P{"status --porcelain"}
     D3P -->|empty| D3S
@@ -57,16 +57,19 @@ flowchart TD
     D3DQ -->|"hook fails the commit"| FBASE1["failure: phase baseline,<br/>quoting the hook"]
     D3DQ -->|"porcelain still non-empty"| FBASE2["failure: phase baseline<br/>(residual non-lockfile changes:<br/>evidence, never cleaned up)"]
     D3DQ -->|clean| D3S
-    D3S["baseline snapshot: ADAPTER resolved_versions<br/>(post-control-install)"] --> D3SQ{"result"}
+    D3S["baseline snapshot: resolved_versions<br/>(post-control-install)"] --> D3SQ{"result"}
     D3SQ -->|"the adapter errors on<br/>an unreadable lockfile"| FBASE["failure: phase baseline<br/>(a failed parse is never an empty result)"]
     D3SQ -->|"present: false"| D3N["No baseline to record; the output is still<br/>passed to validate --baseline"] --> D4
     D3SQ -->|present| D4
 
-    D4["Phase 4: apply_constraint with a major-bounded range"] --> D4A{"written[] npm: value<br/>names another package?"}
+    D4["Phase 4: node &lt;cli&gt; fix-group apply --work WORK:<br/>apply_constraint with a major-bounded range"] --> D4A{"written[] npm: value<br/>names another package?"}
     D4A -->|yes| FALIAS["failure: alias collision,<br/>no install, no PR (#49)"]
-    D4A -->|no| D4I["ADAPTER install"]
+    D4A -->|no| D4I["fix install (four per run at most)"]
     D4I --> D4IQ{"install result"}
-    D4IQ -->|"peer conflict, missing version,<br/>timeout past one retry"| FINST["failure: phase install"]
+    D4IQ -->|"peer conflict, missing version,<br/>timeout past one retry: exit 2 install_failure"| D4J{"agent: has the state changed<br/>so apply can run again?"}
+    D4IQ -->|"budget spent: exit 2<br/>install_budget_exhausted"| FINST
+    D4J -->|"yes, once"| D4
+    D4J -->|no| FINST["failure: phase install"]
     D4IQ -->|installed| D4VAL["validate --line --vulnerable...<br/>--baseline --sibling-alerts"]
     D4VAL --> D4C{"other_line_moves"}
     D4C -->|"any fatal"| FCOLL["failure: phase validate, fail-closed;<br/>quote the array (#83)"]
@@ -82,14 +85,16 @@ flowchart TD
     D4L -->|"1. uncovered parents"| D4I
     D4L -->|"2. bare override"| D4B["apply_constraint --tighten-bare;<br/>bare_override = tightened or added"] --> D4I
     D4L -->|"3. stale lockfile"| FVAL["failure: phase validate<br/>(regeneration needs a human)"]
+    D4L -->|"ladder exhausted: exit 2<br/>validate_failed_after_ladder"| FVAL3["failure: phase validate, naming the copies<br/>and parents (the agent never narrows a key)"]
     D4L -->|"4. line_present false"| FVAL2["failure: phase validate, naming<br/>requires_major_bump; the override does nothing"]
 
-    D5["Phase 5: declared_ranges --line, then score-merge-risk.sh<br/>(F1-F7 as the scorer defines them today;<br/>F6 from --override-scope; no repo scripts run)"] --> D6
-    D6["Phase 6: commit and push from the worktree"] --> D6Q{"repo hooks"}
+    D5["Phase 5: node &lt;cli&gt; fix-group score --work WORK:<br/>declared_ranges --line, then the scorer in process<br/>(F1-F7 as the scorer defines them today;<br/>no repo scripts run); answers ready_for_pr"] --> D6
+    D6["Phase 6: git -C WORK/fix add, node &lt;cli&gt; render-pr commit-msg<br/>--state FILE --group-json FILE --repo NWO,<br/>git -C WORK/fix commit -F, git -C WORK/fix push"] --> D6Q{"repo hooks"}
     D6Q -->|"pre-commit or pre-push fails"| FPUSH["failure: phase push,<br/>quoting the hook (never --no-verify)"]
-    D6Q -->|pass| D6PR["gh label list / create, then gh pr create --label security<br/>--label dependencies --label merge-risk:&lt;band&gt; (ready for review;<br/>the agent never merges it or arms auto-merge)"]
+    D6Q -->|"push rejected: directory file conflict"| FPUSH
+    D6Q -->|pass| D6PR["node &lt;cli&gt; render-pr labels --repo NWO --band BAND,<br/>render-pr body --state FILE --group-json FILE --repo NWO,<br/>render-pr create --repo NWO --head BRANCH --band BAND<br/>--title TITLE --body-file FILE (ready for review;<br/>the agent never merges it or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
-    D6PRQ -->|no| FPR["failure: phase pr"]
+    D6PRQ -->|"no, or gh opened it and then failed:<br/>the failure carries pr_url"| FPR["failure: phase pr<br/>(pr_url kept when gh opened one; no retry)"]
     D6PRQ -->|yes| SUCC(["success: pr_url, action, risk band,<br/>requires_major_bump[], observations[]"])
 
     FIN --> CL
@@ -104,13 +109,14 @@ flowchart TD
     FCOLL --> CL
     FVAL --> CL
     FVAL2 --> CL
+    FVAL3 --> CL
     FPUSH --> CL
     FPR --> CL
     NOOP --> CL
     SUCC --> CL
-    CL["Cleanup on every path: worktree remove --force, rm -rf $WORK,<br/>then branch -D only when pushed, nothing was committed,<br/>or the only commit is the drift commit;<br/>a cleanup error goes in detail, never silenced<br/>(no git worktree prune, ever)"] --> RES(["One fenced JSON result:<br/>success | no-op | failure"])
+    CL["Cleanup on every path: node &lt;cli&gt; fix-group cleanup --work WORK [--pushed]:<br/>worktree remove, remove WORK,<br/>then branch -D only when its tip is safe to lose;<br/>a cleanup error is exit 3 and the result's cleanup field,<br/>never silenced (no git worktree prune, ever)"] --> RES(["One fenced JSON result:<br/>success | no-op | failure"])
 
-    subgraph FGBOX["common/fix-group.sh — phases 1 to 5, one stepped driver"]
+    subgraph FGBOX["fix-group: phases 1 to 5, one stepped driver"]
         D1
         D1A
         D1B
@@ -142,7 +148,7 @@ flowchart TD
         D5
     end
 
-    subgraph FGCLEAN["common/fix-group.sh — cleanup step"]
+    subgraph FGCLEAN["fix-group cleanup"]
         CL
     end
 ```

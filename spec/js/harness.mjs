@@ -170,7 +170,7 @@ export function dispatch(over = {}) {
     nwo: group.repo,
     default_branch: 'main',
     repo_root: '/w/app',
-    scripts_dir: '/p/scripts/common',
+    cli: '/p/scripts/gh-security.ts',
   }
   for (const [k, v] of Object.entries(over)) {
     if (k !== 'group') out[k] = v

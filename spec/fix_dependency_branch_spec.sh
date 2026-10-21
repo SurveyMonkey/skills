@@ -33,13 +33,13 @@ Describe 'the fix branch lifecycle in fix-dependency (#84, #171)'
 
   Describe 'the definition delegates the branch lifecycle to the driver'
     It 'calls the driver for setup rather than prescribing the guard'
-      When call rule_in "$AGENT" 'fix-group.sh setup --group-json'
+      When call rule_in "$AGENT" 'fix-group setup --group-json'
       The status should be success
       The output should not equal '0'
     End
 
     It 'calls the driver for cleanup rather than prescribing the delete'
-      When call rule_in "$AGENT" 'fix-group.sh cleanup --work'
+      When call rule_in "$AGENT" 'fix-group cleanup --work'
       The status should be success
       The output should not equal '0'
     End

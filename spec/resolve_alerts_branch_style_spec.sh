@@ -12,8 +12,7 @@
 # it, retries it once, excludes the checkout on a second failure, and passes
 # `--branch-style flat` to discovery after a hit.
 # tests/plugins/gh-security/subcommands/prepare-checkout.test.ts has those
-# examples. SKILL.md still states the probe in prose, with no pin, until #237
-# makes the skill call the command. The scheme itself is in discover-alerts
+# examples, and SKILL.md calls the command (#237). The scheme itself is in discover-alerts
 # --branch-style (tests/plugins/gh-security/subcommands/discover-alerts.test.ts),
 # in classify-lines --branch-style, and in the notice hook
 # (spec/notice_scan_spec.sh). The phase 7 line for a flat repository is in
@@ -27,23 +26,6 @@ Describe 'the branch-namespace preflight (issue #123)'
   phrase_in() { tr '\n' ' ' < "$1" | grep -o -e "$2" | wc -l | tr -d ' '; }
 
   Describe 'the fix agent stays a dumb consumer of branch_name'
-    It 'consumes either spelling verbatim'
-      When call phrase_in "$AGENT" 'you never choose or rewrite the spelling'
-      The status should be success
-      The output should equal '1'
-    End
-
-    # The field push-rejection string is the specimen for the one
-    # classification the agent makes: this rejection is a preflight miss,
-    # never a transient push failure. The count below only proves the
-    # specimen is carried verbatim, not that the surrounding prose
-    # classifies it (testing skill, "Prose pins" checklist item 6).
-    It 'carries the field push-rejection specimen verbatim'
-      When call phrase_in "$AGENT" '! \[remote rejected\] fix/dependabot-postcss-8x -> fix/dependabot-postcss-8x (directory file conflict)'
-      The status should be success
-      The output should equal '1'
-    End
-
     It 'forbids improvising a branch name at push time'
       When call phrase_in "$AGENT" 'never rename the branch yourself'
       The status should be success

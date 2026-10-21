@@ -365,8 +365,8 @@ Describe 'the rules that gate the removal PR'
       The output should equal '1'
     End
 
-    It 'fix-dependency.md calls render-pr.sh create, rather than re-deriving gh pr create itself'
-      When call rule_in "$FIX_AGENT" 'render-pr\.sh create --repo <nwo> --head <branch_name> --band <band>'
+    It 'fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself'
+      When call rule_in "$FIX_AGENT" 'render-pr create --repo <nwo> --head <branch_name> --band <band>'
       The status should be success
       The output should equal '1'
     End

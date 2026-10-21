@@ -242,14 +242,7 @@ describe('the dispatch payload', () => {
     const d = dispatch()
     const payload = JSON.parse(dispatchPrompt(d).split('Dispatch payload:\n')[1])
     expect(payload).toEqual(d)
-    for (const k of [
-      'group',
-      'adapter_path',
-      'nwo',
-      'default_branch',
-      'repo_root',
-      'scripts_dir',
-    ]) {
+    for (const k of ['group', 'adapter_path', 'nwo', 'default_branch', 'repo_root', 'cli']) {
       expect(payload).toHaveProperty(k)
     }
   })

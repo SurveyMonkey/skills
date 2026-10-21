@@ -29,7 +29,6 @@ import { createSandbox } from '#harness/sandbox.ts'
 const ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 const MERGE_FIXTURES = join(FIXTURES_ROOT, 'merge-envelopes')
 const ADAPTER_PATH = pluginFile('gh-security', 'scripts', 'ecosystems', 'node.sh')
-const SCRIPTS_DIR = pluginFile('gh-security', 'scripts', 'common')
 
 const context = (args: readonly string[]): CommandContext => ({
   args,
@@ -97,7 +96,7 @@ describe('build-dispatches: the Workflow args', () => {
           nwo: 'octo/api',
           default_branch: 'trunk',
           repo_root: '/work/api',
-          scripts_dir: SCRIPTS_DIR,
+          cli: ENTRY,
         },
         {
           group: group('api.json', 'fix/dependabot-lodash-4x'),
@@ -105,7 +104,7 @@ describe('build-dispatches: the Workflow args', () => {
           nwo: 'octo/api',
           default_branch: 'trunk',
           repo_root: '/work/api',
-          scripts_dir: SCRIPTS_DIR,
+          cli: ENTRY,
         },
         {
           group: group('app.json', 'fix/dependabot-lodash-4x'),
@@ -113,7 +112,7 @@ describe('build-dispatches: the Workflow args', () => {
           nwo: 'octo/app',
           default_branch: 'main',
           repo_root: '/work/app',
-          scripts_dir: SCRIPTS_DIR,
+          cli: ENTRY,
           env_prefix: 'env-run --profile work',
         },
       ],
@@ -137,7 +136,7 @@ describe('build-dispatches: the payload (pin: still carries $1)', () => {
     ['adapter_path', ADAPTER_PATH],
     ['default_branch', 'main'],
     ['repo_root', '/work/web'],
-    ['scripts_dir', SCRIPTS_DIR],
+    ['cli', ENTRY],
   ])('carries %s', (key, expected) => {
     const dir = filesOf({ 'merged.json': merged('web.json') })
     const [dispatch] = dispatchesOf(build(dir, 'octo/web:fix/dependabot-tar-6x'))
@@ -153,6 +152,15 @@ describe('build-dispatches: the payload (pin: still carries $1)', () => {
     const [dispatch] = dispatchesOf(build(scene(), 'octo/app:fix/dependabot-minimist-1x'))
     expect(readFileSync(dispatch?.adapter_path as string, 'utf8')).toMatch(/^#!/)
   })
+
+  it('gives the fix agent an entry point that the allow hook accepts', () => {
+    const [dispatch] = dispatchesOf(build(scene(), 'octo/app:fix/dependabot-minimist-1x'))
+    const command = `node ${dispatch?.cli as string} fix-group classify --work /work/app/.claude/worktrees/fix-dependabot-minimist-1x`
+    const input = { tool_name: 'Bash', tool_input: { command } }
+    expect(allowOwnCommands(input, ENTRY, commandNames)?.hookSpecificOutput).toMatchObject({
+      permissionDecision: 'allow',
+    })
+  })
 })
 
 describe('build-dispatches: env_prefix (pin: still omits env_prefix rather than sending null)', () => {
@@ -160,11 +168,11 @@ describe('build-dispatches: env_prefix (pin: still omits env_prefix rather than 
     const [dispatch] = dispatchesOf(build(scene(), 'octo/app:fix/dependabot-minimist-1x'))
     expect(Object.keys(dispatch ?? {}).sort()).toEqual([
       'adapter_path',
+      'cli',
       'default_branch',
       'group',
       'nwo',
       'repo_root',
-      'scripts_dir',
     ])
   })
 
@@ -458,7 +466,7 @@ describe('the process (pin: tells the caller to pass args as JSON, never as a JS
             nwo: 'octo/api',
             default_branch: 'trunk',
             repo_root: '/work/api',
-            scripts_dir: SCRIPTS_DIR,
+            cli: ENTRY,
           },
         ],
       },

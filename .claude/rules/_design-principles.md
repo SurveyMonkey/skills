@@ -26,8 +26,5 @@ before work starts:
 Challenge also when the user asks for the divergent design. Do not silently build a
 simpler design than the one approved.
 
-A known divergence has an issue: the `resolve-alerts` `SKILL.md` of gh-security is over 500
-lines (#237). Do not migrate it as a side effect of other work.
-
 Before you design or change a skill, agent, hook, script, command or plugin, invoke the
 `plugin-design` skill.
