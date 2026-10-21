@@ -1,6 +1,6 @@
 // `audit-pins together`: phase 7, the port of `cmd_together`,
 // `remove_candidates` and `run_attempt` in
-// `scripts/common/audit-pins-driver.sh`. The contract is in the header of
+// `audit-pins-driver.sh` (deleted in #236). The contract is in the header of
 // `audit-pins.ts`.
 //
 // Phases 4 and 5 tested one pin for each install, so no set of pins has been

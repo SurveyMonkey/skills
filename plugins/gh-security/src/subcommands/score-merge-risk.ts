@@ -3,7 +3,7 @@
 // --declared-range <range|none> [--declared-range <range>]...
 // [--before <version>]`: the merge-risk rating of one fix. This is the CLI
 // of `src/merge-risk/score.ts`, and the port of the command line of
-// `scripts/common/score-merge-risk.sh` (#233).
+// `score-merge-risk.sh` (#233, deleted in #236).
 //
 // It runs from the root of the tree being scored. `--why-json -` reads the
 // why payload from stdin. `--declared-range` is required: one for each

@@ -2,7 +2,8 @@
 // (`audit-pins-collateral.ts`): the disagreement of the two verbs, and the
 // collateral list with the platform-binary family rule. These are the
 // examples of `spec/audit_driver_spec.sh` ("the two verbs must agree" and
-// "the platform-binary family sample"), on the exported functions. The
+// "the platform-binary family sample", deleted in #236), on the exported
+// functions. The
 // expected values are written by hand from `audit-driver.md`.
 import { describe, expect, it } from 'vitest'
 

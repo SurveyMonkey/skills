@@ -215,7 +215,7 @@ export type InstallSite = Pick<Loaded, 'adapter' | 'tree' | 'pm' | 'env'>
 /**
  * One install, with no retry. A failure of the verb itself is a failed
  * install with its message. The pin audit runs it as it is, because
- * `audit-pins-driver.sh` has no retry.
+ * the old `audit-pins-driver.sh` had no retry.
  */
 export const installOnce = async (
   loaded: InstallSite,

@@ -1,7 +1,7 @@
 // `gh-security audit-pins together`. The seam is the exported handler, with
 // the runner, the registry and the `gh` client factory as parameters. These
-// are the `together` examples of `spec/audit_driver_judge_spec.sh`, and the
-// branches that only the port has.
+// are the `together` examples of `spec/audit_driver_judge_spec.sh` (deleted in
+// #236), and the branches that only the port has.
 //
 // git is real: each example runs in a linked worktree of a repository from
 // `harness/git.ts`, over a lockfile specimen of `spec/fixtures/`. `list` and
@@ -12,8 +12,7 @@
 // `createGhMock`. Where an example needs an adapter answer that the real
 // adapter never gives, the adapter is the real one with one verb replaced,
 // through the registry parameter. The expected values are written by hand
-// from the contract in the header of `audit-pins.ts`. The parity runs are in
-// `parity-audit-pins.test.ts`.
+// from the contract in the header of `audit-pins.ts`.
 import {
   chmodSync,
   existsSync,

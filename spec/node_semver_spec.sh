@@ -349,33 +349,6 @@ Describe 'node.sh declared_ranges --line'
       The status should be success
       The output should equal '{"ranges":["^4.17.20","^4.17.21"],"parents_read":["express"],"parents_other_lines":["test-exclude@6.0.0"]}'
     End
-
-    # The verdict: the range that reaches the PR body is what the scorer turns
-    # into a merge-risk number, and collecting the 1.x parent's declaration for
-    # a 5.x fix scores a patch bump as four major lines crossed.
-    Describe 'the score those ranges produce'
-      score_brace() {
-        "$ADAPTER" why brace-expansion > why.json 2>/dev/null || true
-        set -- --package brace-expansion --before 5.0.6 --after 5.0.9 \
-               --adapter "$ADAPTER" --why-json why.json --override-scope scoped "$@"
-        "$COMMON/score-merge-risk.sh" "$@" \
-          | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
-      }
-
-      It 'scores the fix on the ranges --line 5 returns'
-        use_fixture yarn-cross-line
-        When call score_brace --declared-range '^5.0.5'
-        The status should be success
-        The output should equal '{"f7":0,"evidence":"no major line crossed; dependents declare ^5.0.5"}'
-      End
-
-      It 'reproduces the score the unfiltered collection would have produced'
-        use_fixture yarn-cross-line
-        When call score_brace --declared-range '^1.1.7' --declared-range '^5.0.5'
-        The status should be success
-        The output should equal '{"f7":2,"evidence":"4 major lines crossed; dependents declare ^1.1.7, ^5.0.5"}'
-      End
-    End
   End
 
   # A scoped package occupies two path segments, so `NPM_COPY_ROWS_JQ`'s
@@ -527,35 +500,6 @@ Describe 'node.sh declared_ranges --line'
       When call prefixes_of 'node_modules/foo/'
       The status should be success
       The output should equal '["node_modules/foo/"]'
-    End
-  End
-
-  # The verdict, not the parse: what mattered on the field-test fix PR is the number that
-  # reached the PR body, so both halves are scored through score-merge-risk.sh.
-  Describe 'the score those ranges produce'
-    score_undici() {
-      "$ADAPTER" why undici > why.json 2>/dev/null || true
-      _scope=$1
-      shift
-      set -- --package undici --before 7.28.0 --after 7.29.0 \
-             --adapter "$ADAPTER" --why-json why.json --override-scope "$_scope" "$@"
-      "$COMMON/score-merge-risk.sh" "$@" \
-        | jq -c '{f7: .factors[6].score, evidence: .factors[6].evidence}'
-    }
-
-    It 'reproduces the F7 of 2 the unscoped collection produced on the field-test fix PR'
-      use_fixture yarn-line-scoped
-      When call score_undici scoped --declared-range 5.28.4 --declared-range 5.29.0 \
-        --declared-range '^6.22.0' --declared-range '^6.23.0' --declared-range '^7.27.1'
-      The status should be success
-      The output should equal '{"f7":2,"evidence":"2 major lines crossed; dependents declare 5.28.4, 5.29.0, ^6.22.0, ^6.23.0, ^7.27.1; crosses the pinned range 5.28.4"}'
-    End
-
-    It 'scores the same fix 0 on the ranges --line 7 returns'
-      use_fixture yarn-line-scoped
-      When call score_undici scoped --declared-range '^7.27.1'
-      The status should be success
-      The output should equal '{"f7":0,"evidence":"no major line crossed; dependents declare ^7.27.1"}'
     End
   End
 End

@@ -1,6 +1,6 @@
 // The text rules of the PR renderer (#233). Each expected value is written by
-// hand from the rule, and the EPSS values are the answers of `awk` in the
-// capture of `render-pr.sh` (`spec/fixtures/render-pr/capture.json`).
+// hand from the rule, and the EPSS values are the answers that `awk` gave in
+// the deleted `render-pr.sh`. #236 deleted that capture with the script.
 import { describe, expect, it } from 'vitest'
 
 import {

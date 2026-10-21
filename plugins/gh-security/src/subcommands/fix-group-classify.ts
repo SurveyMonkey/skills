@@ -1,5 +1,5 @@
 // `fix-group classify`: phase 2, the port of `cmd_classify` in
-// `scripts/common/fix-group.sh`. It runs on the tree before any install:
+// `fix-group.sh` (deleted in #236). It runs on the tree before any install:
 // `why` and `declared_ranges` read the lockfile, so a dead end that this
 // phase can name costs no install (#103). The contract is in the header of
 // `fix-group.ts`.

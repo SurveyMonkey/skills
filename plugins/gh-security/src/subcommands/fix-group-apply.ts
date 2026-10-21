@@ -1,5 +1,5 @@
 // `fix-group apply`: phase 4, the port of `cmd_apply` in
-// `scripts/common/fix-group.sh`. It writes the constraint, runs the fix
+// `fix-group.sh` (deleted in #236). It writes the constraint, runs the fix
 // install, and asks `validate` whether the alerts are clear. When they are
 // not, it goes up the remediation ladder. This file holds the order of the
 // steps and the state that they share. Each decision is a pure function in

@@ -1,7 +1,7 @@
 // What `test-pin` reads from the two whole-tree maps: whether the two verbs
 // agree about the tested package, and which other packages moved. These are
 // ports of the jq programs in `cmd_test_pin` of
-// `scripts/common/audit-pins-driver.sh`, as pure functions.
+// `audit-pins-driver.sh` (deleted in #236), as pure functions.
 //
 // A large collateral fan-out is checked, not sampled, unless it is a
 // platform-binary family (audit-driver.md). Each condition of the family is

@@ -1,7 +1,7 @@
 // `gh-security audit-pins judge`. The seam is the exported handler, with the
 // runner, the registry and the `gh` client factory as parameters. These are
-// the `judge` examples of `spec/audit_driver_judge_spec.sh`, and the branches
-// that only the port has.
+// the `judge` examples of `spec/audit_driver_judge_spec.sh` (deleted in
+// #236), and the branches that only the port has.
 //
 // `judge` runs no git and no install, so each example writes the state file
 // that the earlier steps would leave, with the findings it is about. `gh` is
@@ -10,8 +10,7 @@
 // `range_facts` that the real adapter never gives, the adapter is the real
 // one with that verb replaced, through the registry parameter (`mocking.md`,
 // "The injected collaborator"). The expected values are written by hand from
-// the contract in the header of `audit-pins.ts`. The parity runs over real
-// repositories are in `parity-audit-pins.test.ts`.
+// the contract in the header of `audit-pins.ts`.
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

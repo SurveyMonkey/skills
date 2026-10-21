@@ -40,7 +40,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   GUIDE_DIR="$SHELLSPEC_PROJECT_ROOT/.claude/skills/gh-security-guide"
   GIT_DOC="$GUIDE_DIR/git.md"
   CORE_DOC="$GUIDE_DIR/core.md"
-  REAP="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/reap-agent-artifacts.sh"
   ADR="$SHELLSPEC_PROJECT_ROOT/docs/adr/003-worktree-isolation-and-concurrency-cap.md"
   ADR010="$SHELLSPEC_PROJECT_ROOT/docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md"
   WORKFLOW="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/workflows/fix-groups.mjs"
@@ -291,12 +290,6 @@ Describe 'phase 6 dispatches one workflow (issue #175)'
   Describe 'the reap timing this layer changed'
     It 'keeps the never-prune rule in the plugin guide on the entitlement, not the timing'
       When call phrase_in "$GIT_DOC" 'the local-scope[ ]*rule is what makes it safe, not the timing'
-      The status should be success
-      The output should equal '1'
-    End
-
-    It 'keeps the never-prune rule in reap-agent-artifacts.sh on the entitlement too'
-      When call phrase_in "$REAP" 'a property of what.*this script is entitled to touch, not of when it happens to be called'
       The status should be success
       The output should equal '1'
     End

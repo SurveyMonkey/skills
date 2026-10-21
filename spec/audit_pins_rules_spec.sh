@@ -6,8 +6,7 @@
 # The adapter can only carry the fact; the verdict is the definition's. A spec
 # that stops at the adapter's JSON passes while the hazard survives, so each
 # example below pairs the number the adapter emits with the sentence in the
-# definition that acts on it. Its sibling spec/audit_restore_spec.sh does the
-# same for phase 4 step 7's two git commands.
+# definition that acts on it.
 
 Describe 'the audit rules that read a partially-parsed map'
   After 'cleanup_fixture'
@@ -65,12 +64,11 @@ count_in() { grep -c -e "$2" -- "$1" || true; }
 # names one guard and fails if the sentence carrying it leaves the file.
 Describe 'the rules that gate the removal PR'
   AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/audit-pins.md"
-  # Phases 2, 4, 5 and 7 are executed by common/audit-pins-driver.sh, so a rule
-  # that is purely procedural now lives in the driver and is asserted there
-  # (.claude/skills/gh-security-guide/audit-driver.md, "The pin-audit driver owns phases 2, 4, 5 and 7"). The
-  # rules that still govern the agent's own reading of a driver answer stay in
-  # the definition, and each example below says which file it is checking.
-  DRIVER="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/audit-pins-driver.sh"
+  # `gh-security audit-pins` runs phases 2, 4, 5 and 7, so a rule that is
+  # only procedure lives in the command, and
+  # tests/plugins/gh-security/subcommands/audit-pins*.test.ts tests it. The rules that
+  # still govern the agent's own reading of a command answer stay in the
+  # definition.
 
   # Phases 4 and 5 test one pin per install, on purpose, which is exactly why
   # no set has ever been installed together, and a PR removes a set. Without
@@ -79,25 +77,6 @@ Describe 'the rules that gate the removal PR'
   # commit.
   It 'requires the combined test before any PR'
     When call rule_in "$AGENT" 'never removes a set that was not installed and judged as a set'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # Attempt 2 measured against a tree still carrying attempt 1's removals is a
-  # result about neither set, and nothing downstream can see that: the
-  # manifest is still valid, the install still succeeds, and both parsers read
-  # a lockfile they have no way to know is wrong.
-  It 'restores the tree between the two attempts'
-    When call rule_in "$DRIVER" 'Restore the tree before attempt 2'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # A removal that silently matched nothing installs the manifest you started
-  # with, and every downstream step then reports the set as removed. The
-  # adapter is the only thing that can say what the manifest now declares.
-  It 'verifies the edits landed before the combined install'
-    When call rule_in "$DRIVER" 'Verify the edits landed before installing'
     The status should be success
     The output should equal '1'
   End
@@ -221,22 +200,12 @@ Describe 'the rules that gate the removal PR'
 
     # 26 @esbuild/* packages moved as collateral and one was sampled with no
     # rule permitting it; the honest verdict is the whole point. The family
-    # rule is the driver's (`audit-pins test-pin` picks the sample); the
+    # rule is the command's (`audit-pins test-pin` picks the sample); the
     # report owes the reader what the sample stood for.
     It 'requires the sampled verdict to say it sampled (#79b)'
       When call phrase_in "$AGENT" 'A .sampled-family. verdict names the member judged'
       The status should be success
       The output should equal '1'
-    End
-
-    # A trailing comma left by removing the last entry in an override block
-    # produced an invalid manifest that only `jq` would have caught cleanly.
-    # The check moved into the driver with the edit it guards, and it runs at
-    # both edit sites: the per-pin removal and the combined set.
-    It 'validates the manifest after the edit, before list_pins (#79c)'
-      When call rule_in "$DRIVER" 'jq \. package\.json'
-      The status should be success
-      The output should equal '2'
     End
 
     It 'templates a direct-commit provenance ref (#79d)'
@@ -282,35 +251,13 @@ Describe 'the rules that gate the removal PR'
   # green (#87). (The audit no longer rides along in a resolve-alerts batch at
   # all; since ADR 009 it dispatches only through /gh-security:audit-pins.)
   #
-  # Since issue #172, fix-dependency.md no longer builds `gh pr create` itself
-  # — it calls `common/render-pr.sh create`, which is the actual `gh pr
-  # create` invocation now. The two assertions below moved with it; the agent
-  # doc keeps only the structural pointer (checked separately, and end-to-end
-  # with a mocked `gh` in spec/render_pr_spec.sh).
+  # Since issue #172, fix-dependency.md no longer builds `gh pr create`
+  # itself. It calls `render-pr create`, which opens the pull request. The
+  # ADR 008 rule that it passes no `--draft` is tested with a mocked `gh` in
+  # tests/plugins/gh-security/subcommands/render-pr.test.ts. The agent doc
+  # keeps only the structural pointer, checked below.
   Describe 'the PR-state rules in fix-dependency (#87)'
     FIX_AGENT="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/agents/fix-dependency.md"
-    RENDER_PR="$SHELLSPEC_PROJECT_ROOT/plugins/gh-security/scripts/common/render-pr.sh"
-
-    # Paired deliberately with the presence assertion below. An absent-string
-    # assertion alone passes when the line it guards is gone entirely, so on its
-    # own it cannot tell "no --draft" from "no gh pr create". The presence
-    # assertion's literal is intentionally pinned a second time, in
-    # merge_risk_labels_spec.sh (#109): that suite needs it as evidence
-    # `merge-risk:<band>` lands on the same `gh pr create` call as `security`,
-    # not appended later in a separate `gh pr edit --add-label`. Each suite
-    # asserts the shared literal for its own reason, not because one copied
-    # the other.
-    It 'passes no --draft, anywhere in render-pr.sh'
-      When call count_in "$RENDER_PR" '\-\-draft'
-      The status should be success
-      The output should equal '0'
-    End
-
-    It 'still builds the gh pr create call, so the absence above is about the flag'
-      When call phrase_in "$RENDER_PR" 'gh pr create --repo "[$]repo" --head "[$]head" .*--label security --label dependencies --label "merge-risk:[$]band_lower")'
-      The status should be success
-      The output should equal '1'
-    End
 
     It 'fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself'
       When call rule_in "$FIX_AGENT" 'render-pr create --repo <nwo> --head <branch_name> --band <band>'

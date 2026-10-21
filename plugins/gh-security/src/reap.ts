@@ -2,9 +2,8 @@
 // delete its local branch when the delete is safe. This is the one
 // implementation of three bash ones (#234): `fix-group.sh cleanup`,
 // `reap-agent-artifacts.sh`, and the reap step of `post-agent.sh`, which
-// calls the second. `fix-group cleanup` uses it now. The `reap-batch` command
-// of #229 is its second caller. The two scripts stay bash until #231 and #236
-// remove them.
+// called the second. #236 deleted all three. `fix-group cleanup` uses this
+// module. The `reap-batch` command of #229 is its second caller.
 //
 // The module is here, beside `state.ts` and `worktree.ts`, because it is not
 // a command. A command is a file under `subcommands/`, and two commands use
@@ -24,7 +23,7 @@
 //   - When the caller gives the work path that `setup` recorded, the two are
 //     the same path. Only `fix-group cleanup` has one.
 //   - The resolved worktree is `<work>/fix`, as `reap-agent-artifacts.sh`
-//     makes it. So a worktree of another group cannot pass with this work
+//     made it. So a worktree of another group cannot pass with this work
 //     directory, and a link at `fix` cannot carry it to one.
 // These checks do not prove that a state file is not forged. They refuse a
 // path outside the worktree root, a path through `..` or a link, and a work
@@ -66,7 +65,7 @@
 // registration stays until `git gc` expires it (`gc.worktreePruneExpire`).
 // `src/signals.ts` covers SIGINT and SIGTERM for both commands.
 //
-// **The report** has the shape of `reap-agent-artifacts.sh`: the paths, the
+// **The report** has the shape that `reap-agent-artifacts.sh` had: the paths, the
 // action of each artifact, the branch and its reason, `left_behind` and
 // `errors`. A list of errors that is not empty is the failure outcome.
 // `fix-group cleanup` exits non-zero on it. `reap-batch` puts it in the

@@ -3,7 +3,7 @@
 // contract of #229, and the port of the loop that phase 6 ran by hand: one
 // `post-agent.sh` call for each entry, with an empty result file for a `null`
 // or `mispaired` entry. The step for one entry is `src/post-agent.ts`, which
-// has the report shape and each difference from the script.
+// has the report shape and each difference from the deleted script.
 //
 // Input: `results.json`, the value that `workflows/fix-groups.mjs` returns.
 // It is a list, in dispatch order, of `{dispatch, result, mispaired}`:

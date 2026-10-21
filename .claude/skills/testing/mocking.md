@@ -10,11 +10,11 @@ rather than a tidier version of them.
 Everything else is used for real:
 
 - **Not a collaborator you own**, a module the caller imports or a sibling script it resolves by
-  path. `post-agent.sh` resolves `pr-status.sh` and `reap-agent-artifacts.sh` as siblings of
-  its own path: run the real one. `spec/post_agent_spec.sh` does exactly that, copying both
-  collaborators verbatim next to a scratch copy of the script under test. A mocked collaborator
-  tests the caller against a shape nothing emits, which is how two scripts that each pass their
-  own suite disagree in the field.
+  path. `reap-batch` imports the `pr-status` reader and gives it to `src/post-agent.ts`,
+  which imports the reap of `src/reap.ts`: run the real ones. The `reap-batch` examples do
+  exactly that, with real git and a mocked `gh`. A mocked collaborator tests the caller against a
+  shape nothing emits, which is how two units that each pass their own suite disagree in the
+  field.
   Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh` and
   `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their own
   seam and never against a mock of the other.
@@ -37,20 +37,19 @@ answers from environment variables so one mock serves every `Parameters` row.
 
 ## The injected collaborator
 
-**A collaborator a driver accepts as a parameter is substituted through that parameter, not mocked
-around.** Where running the real one would run a package manager or reach the network, the driver's
-own seam carries the substitution: `spec/fix_group_spec.sh` and `spec/fix_group_apply_spec.sh` pass
-`--adapter` and `--scorer`, and `spec/audit_driver_spec.sh` and `spec/audit_driver_judge_spec.sh`
-pass `--adapter` and `--advisories`. This is not a hole in the rule above. The flag is a documented
-part of the contract, the driver falls back to the real collaborator when it is absent, and the
-example is still observing only the seam.
+**A collaborator a command accepts as a parameter is substituted through that parameter, not mocked
+around.** Where the real one would run a package manager or reach the network, the
+command's own seam carries the substitution: the examples of `fix-group` and `audit-pins` in
+`tests/plugins/gh-security/subcommands/` pass an adapter through the registry parameter. This is
+not a hole in the rule above. The CLI binding of each command passes the real registry. A test
+passes a stand-in, and the example still sees only the seam.
 
 Two constraints hold for a substituted collaborator:
 
 - **It reproduces the real shape, and it does not recompute the answer the driver does.**
-  `spec/audit_driver_spec.sh`'s `list_pins` stub deliberately re-reads the pin list from the
-  manifest on disk instead of serving a canned count, so the driver's own removal is what the
-  count-minus-one check is measured against. A spec that canned both sides asserts the driver
+  The `list_pins` stub of the `audit-pins` examples deliberately re-reads the pin list from the
+  manifest on disk instead of serving a canned count, so the removal of the command is what the
+  count-minus-one check is measured against. A test that canned both sides asserts the command
   against itself.
 - **It is named at the point of use as what it stands in for.** Anything substituted that is
   neither `gh`, the machine trio, the Workflow runtime, nor a collaborator behind a documented

@@ -2,22 +2,22 @@
 
 ## The pin-audit driver owns phases 2, 4, 5 and 7
 
-`common/audit-pins-driver.sh` executes `agents/audit-pins.md` phases 2, 4, 5 and, in `pr` mode,
+`gh-security audit-pins` executes `agents/audit-pins.md` phases 2, 4, 5 and, in `pr` mode,
 phase 7. Same rule as the fix driver ([fix-driver.md](fix-driver.md)): **the audit procedure lives here and nowhere else**, and a
 prose re-derivation of any of it in the agent definition is a bug. What stays with the agent is what
 reads history or writes prose — phase 1's worktree and its two `pr`-mode guards, phase 3's
 provenance, phase 6's report, and phase 8's merge risk and pull request.
 
-The TypeScript port is `gh-security audit-pins` (#235), with all five steps
-(`src/subcommands/audit-pins*.ts`). `judge` calls `check-advisories` in process. The agent calls the
-bash for all five steps until #237.
+The command is `gh-security audit-pins` (#235), with all five steps
+(`src/subcommands/audit-pins*.ts`). `judge` calls `check-advisories` in process. The agent calls
+the command for all five steps (#237). #236 deleted the bash driver `audit-pins-driver.sh`.
 
-Stepped, with a state file at `$WORK/state.json`, for `fix-group.sh`'s reasons and one of its own:
+Stepped, with a state file at `$WORK/state.json`, for the reasons of `fix-group` and one of its own:
 this flow runs **one install per pin**, so a repository with a dozen pins cannot fit inside the
 Bash tool's 10-minute ceiling however the work is arranged. `test-pin` is therefore one pin per
 call, and the state file is what makes the with-all-pins baseline outlive the call that took it.
-The subcommands, the exit-code contract and the option surface are stated once, in the script's
-own header; restating them here is how the two drift.
+The subcommands, the exit-code contract and the option surface are stated once, in the header of
+`src/subcommands/audit-pins.ts`; restating them here is how the two drift.
 
 What that header does not say, and what belongs here:
 
@@ -53,7 +53,7 @@ What that header does not say, and what belongs here:
   empty list becomes both the baseline and the after-removal list, so the delta is empty, and an
   empty delta is this flow's documented cue for `removable`. A parser that found nothing would
   recommend a deletion with no advisory query run, which is the repo's headline rule inverted in
-  the one driver whose output deletes things. `fix-group.sh` hard-errors on the identical payload
+  the one driver whose output deletes things. `fix-group` hard-errors on the identical payload
   for the identical reason.
 - **The advisory cache is a payload like any other, and it outlives the process.**
   `$WORK/advisories/` is read by a later invocation than the one that wrote it, so it is written

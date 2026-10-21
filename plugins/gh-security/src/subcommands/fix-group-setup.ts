@@ -1,5 +1,5 @@
 // `fix-group setup`: phase 1, the port of `cmd_setup` in
-// `scripts/common/fix-group.sh`. It checks the group, makes the work
+// `fix-group.sh` (deleted in #236). It checks the group, makes the work
 // directory and its worktree on a new branch, and writes the state file. The
 // contract and each declared difference are in the header of `fix-group.ts`.
 //

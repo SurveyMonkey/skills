@@ -1,5 +1,5 @@
 // `audit-pins test-pin`: phase 4, one pin for each install, the port of
-// `cmd_test_pin` in `scripts/common/audit-pins-driver.sh`. It removes one
+// `cmd_test_pin` in `audit-pins-driver.sh` (deleted in #236). It removes one
 // entry, checks that the edit landed, installs, reads what resolves now and
 // the whole-tree map, records the finding, and returns the tree to HEAD. The
 // contract is in the header of `audit-pins.ts`.

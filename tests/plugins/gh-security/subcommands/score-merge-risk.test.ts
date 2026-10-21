@@ -1,8 +1,7 @@
 // `gh-security score-merge-risk`, at its seam: the exported handler with the
 // registry and the tree as parameters. The command line, the why payload and
 // the refusals of the script are here. The factors are in
-// `merge-risk/score.test.ts`, and `parity-score-merge-risk.test.ts` compares
-// the command with the script.
+// `merge-risk/score.test.ts`.
 import { chmodSync, cpSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

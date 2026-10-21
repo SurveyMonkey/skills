@@ -1,5 +1,5 @@
 // `audit-pins baseline`: the head of phase 4, the port of `cmd_baseline` in
-// `scripts/common/audit-pins-driver.sh`. It runs one install for the whole
+// `audit-pins-driver.sh` (deleted in #236). It runs one install for the whole
 // audit, and reads the two baselines that each pin is measured against: the
 // whole-tree map, and `resolved_versions` of each package that a testable
 // pin names. The contract is in the header of `audit-pins.ts`.

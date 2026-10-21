@@ -1,8 +1,9 @@
 // `fix-group cleanup`: the Cleanup of `agents/fix-dependency.md`, the port of
-// `cmd_cleanup` in `scripts/common/fix-group.sh` (#234). The reap itself is
+// `cmd_cleanup` in `fix-group.sh` (#234, deleted in #236). The reap itself is
 // `src/reap.ts`. This file reads the state, gives the reap its paths and the
-// branch rule of the driver, and writes the report of the bash. The contract
-// and each declared difference are in the header of `fix-group.ts`.
+// branch rule of the driver, and writes a report in the shape that the bash
+// had. The contract and each declared difference are in the header of
+// `fix-group.ts`.
 //
 // This file ships. It imports nothing outside the plugin.
 

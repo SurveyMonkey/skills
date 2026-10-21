@@ -1,5 +1,5 @@
 // `audit-pins judge`: phase 5, the port of `cmd_judge` and `advisory_for` in
-// `scripts/common/audit-pins-driver.sh`. It asks the advisory database about
+// `audit-pins-driver.sh` (deleted in #236). It asks the advisory database about
 // each version that a removal let in, and about each version of another
 // package that moved with it. Then it gives each tested pin its verdict, and
 // applies the sibling rule. The contract is in the header of `audit-pins.ts`.

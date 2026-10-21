@@ -767,10 +767,9 @@ Describe 'node.sh why'
   # output: `why` collapses duplicate parents through sort -u and
   # `declared_ranges` reads no manifests on Berry (no node_modules), so both
   # pass unchanged even when the Meta block leaks junk rows (seventh review
-  # pass proved this by patching the pattern). Extract the reader the way
-  # audit_restore_spec.sh extracts the restore commands and assert its rows
-  # exactly. An empty extraction produces zero lines, which the count catches,
-  # so this cannot pass vacuously.
+  # pass proved this by patching the pattern). Extract the reader from the
+  # adapter, and assert its rows exactly. An empty extraction gives zero
+  # lines, which the count catches, so this cannot pass vacuously.
   yarn_reader_rows() {
     _prog=$(sed -n '/^YARN_DECLARATION_AWK=/,/^)$/p' "$ADAPTER")
     [ -n "$_prog" ] || return 1

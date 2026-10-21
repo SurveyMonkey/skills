@@ -1,10 +1,10 @@
 // The post-agent step for one entry of the workflow result: read the agent
 // result, verify its pull request, reap the local artifacts only when the
 // pull request reads `OPEN`, and report. This is the port of
-// `scripts/common/post-agent.sh` (#229). `reap-batch` calls it once for each
-// entry. The script stays bash until #231 removes it.
+// `scripts/common/post-agent.sh` (#229), which #236 deleted. `reap-batch`
+// calls it once for each entry.
 //
-// The report has the shape of the script (`post-agent.sh:31-43`):
+// The report has the shape that `post-agent.sh` had:
 //
 //   { package, major_line, branch, worktree_path,
 //     result_status: "success" | "no-op" | "failure" | "unparsable" | "missing",
@@ -38,9 +38,9 @@
 // **The pull request** is read only for a success, with `entryForUrl` of
 // `pr-status`, under the `env_prefix` of the entry. **The reap** runs only on
 // `OPEN`: `contain`, then `reap` of `src/reap.ts`, with no prefix, because it
-// touches one local path and one local ref (`post-agent.sh`, "Why env_prefix
-// stops at the PR read"). The open pull request confirms the push, so a
-// branch whose tip is on origin goes. `defaultBranch` is null, as in
+// touches one local path and one local ref (the old `post-agent.sh` gave the
+// same reason). The open pull request confirms the push, so a
+// branch whose tip is on origin goes. `defaultBranch` is null, as it was in
 // `reap-agent-artifacts.sh`.
 //
 // **What stays when no reap ran** (round 7 ruling 12 on #229). `left_behind`

@@ -1,5 +1,5 @@
 // `fix-group baseline`: phase 3, the port of `cmd_baseline` in
-// `scripts/common/fix-group.sh`. It reads the lockfile as the default branch
+// `fix-group.sh` (deleted in #236). It reads the lockfile as the default branch
 // has it, runs the control install with no change to the manifest, commits
 // the drift that the install makes, and then reads the lockfile again. The
 // contract is in the header of `fix-group.ts`.

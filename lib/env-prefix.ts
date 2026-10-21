@@ -1,6 +1,6 @@
 // `env_prefix`, in one place. The four per-script `set_env_prefix`/`run_env`
 // pairs (`fix-group.sh`, `audit-pins-driver.sh`, `post-agent.sh`,
-// `render-pr.sh`) become this module. The commands that take `--env-prefix`
+// `render-pr.sh`, all deleted in #236) became this module. The commands that take `--env-prefix`
 // import it. The `gh` client and the git helpers take no prefix. A caller that
 // needs one wraps the runner with {@link withEnvPrefix}.
 //

@@ -6,8 +6,7 @@
 // `gh` comes from the mock client.
 //
 // The expected text is the reviewed fixtures of `spec/fixtures/render-pr/`
-// and strings written by hand. Parity against the script is in
-// `parity-render-pr.test.ts`.
+// and strings written by hand.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

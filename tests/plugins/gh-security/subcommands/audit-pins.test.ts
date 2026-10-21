@@ -1,7 +1,7 @@
 // `gh-security audit-pins list|baseline|test-pin`. The seam is the exported
 // handler, with the runner and the registry as parameters. These are the
 // examples of `spec/audit_driver_spec.sh` and `spec/audit_restore_spec.sh`
-// for these three phases, and the branches that only the port has.
+// (both deleted in #236) for these three phases, and the branches that only the port has.
 //
 // git is real: each example runs in a linked worktree of a repository from
 // `harness/git.ts`, over a lockfile specimen of `spec/fixtures/`. The package
@@ -10,10 +10,9 @@
 // adapter never gives, the adapter is a stand-in given through the registry
 // parameter: the real node adapter with one verb replaced (`mocking.md`,
 // "The injected collaborator"). The `list_pins` stand-ins read the manifest
-// on disk through the real verb, so the driver's own removal is what the
+// on disk through the real verb, so the removal of the command is what the
 // count check measures. The expected values are written by hand from the
-// contract in the header of `audit-pins.ts`. `parity-audit-pins.test.ts`
-// compares the port with `audit-pins-driver.sh`.
+// contract in the header of `audit-pins.ts`.
 import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'

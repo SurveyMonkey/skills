@@ -2,8 +2,7 @@
 // the one place where the pin audit edits a user's manifest. The seam is the
 // two exported functions, over real files in a scratch directory. The
 // expected files are written by hand from the rules in the header of that
-// file and in `audit-driver.md`. `parity-audit-pins.test.ts` runs both
-// deleters against `audit-pins-driver.sh` through `test-pin`.
+// file and in `audit-driver.md`.
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

@@ -1,7 +1,7 @@
 // The decisions of `fix-group apply`, as pure functions, with no git
 // repository (#232). Each expected value is written by hand from the jq
-// filter or the shell test in `scripts/common/fix-group.sh` that the
-// function ports, and the rows that read a path or a version list were
+// filter or the shell test in `fix-group.sh` (deleted in #236) that the
+// function ported, and the rows that read a path or a version list were
 // checked against that jq. `fix-group-apply.test.ts` runs the same rules
 // through the command.
 import { describe, expect, it } from 'vitest'

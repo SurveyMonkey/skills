@@ -1,8 +1,8 @@
 // What the merge-risk scorer reads from the tree: F3 (usage surface), F4
 // (test coverage of that surface) and F5 (CI presence). This is the port of
-// the grep, find, awk and sed reads in `scripts/common/score-merge-risk.sh`.
-// The rules and the reasons for each are in the header of that script and in
-// ADR 006. `score.ts` holds the factors and the bands.
+// the grep, find, awk and sed reads in `score-merge-risk.sh` (#236 deleted
+// it). The rules and the reasons for each are in ADR 006. `score.ts` holds
+// the factors and the bands.
 //
 // Each read is a line test, as grep does it. A file is read as UTF-8: grep
 // passes the bytes through, and jq writes them in the report as UTF-8. A

@@ -2,7 +2,7 @@
 
 ## The fix driver owns phases 1 to 5
 
-`common/fix-group.sh` executes `agents/fix-dependency.md` phases 1 to 5 and Cleanup. **It is the
+`gh-security fix-group` executes `agents/fix-dependency.md` phases 1 to 5 and Cleanup. **It is the
 single home of that procedure**: a prose re-derivation of any of it in an agent definition is a
 bug, not a fallback. Every branch it takes was an enumerated branch of that document first, each
 one added to fix a field defect, and a fully enumerated decision tree is a script that has not
@@ -11,19 +11,18 @@ been written yet ([#171](https://github.com/SurveyMonkey/skills/issues/171)).
 **Stepped, with a state file at `$WORK/state.json`, not one run**, because the Bash tool's
 10-minute ceiling cannot wrap a control install plus a fix install (field runs: ~4 minutes each,
 up to ~17 minutes total) and the remediation ladder needs a seam where judgment can escape to the
-agent. The subcommands, the exit-code contract and the option surface are stated in the
-script's own header (`common/fix-group.sh:1-76`), and for the port in the header of
+agent. The subcommands, the exit-code contract and the option surface are stated in the header of
 `src/subcommands/fix-group.ts`; restating them here is how the two drift.
 
-The TypeScript port is `gh-security fix-group <phase>`, one phase at a time (#232). The header of
-`src/subcommands/fix-group.ts` states the contract of each ported phase, and each
-difference from the script. Each phase has its own module, `fix-group-<phase>.ts`. The
+The command is `gh-security fix-group <phase>`, one phase at a time (#232). #236 deleted the
+bash driver `fix-group.sh`. The header of `src/subcommands/fix-group.ts` states the
+contract of each phase. Each phase has its own module, `fix-group-<phase>.ts`. The
 decisions of `apply` (the range, the ladder and its stops, the widest shape, the empty diff) are
 pure functions in `fix-group-ladder.ts`, so a test reads them with no git repository. The phases
 read and write the state through `src/state.ts`, and `loadDriverState` reads the keys that
-`setup` writes. All six phases are ported, and the agent still calls the script for each step
-until #237. `cleanup` runs on the reap module `src/reap.ts` (#234). `score` calls the scorer in process
-(`src/merge-risk/score.ts`, #233). A state file that one of the two writes is not for the other.
+`setup` writes. The agent calls the command for each step (#237). `cleanup` runs on the reap
+module `src/reap.ts` (#234). `score` calls the scorer in process (`src/merge-risk/score.ts`,
+#233).
 
 What that header does not say, and what belongs here:
 
@@ -42,7 +41,7 @@ What that header does not say, and what belongs here:
   and one checked accessor does the dying at the call site, because a reader that answers with a
   value cannot end the run from inside it. An "every source is asserted" comment above a
   hand-maintained list is not the guarantee; a reader that cannot be called unchecked is.
-- **`cleanup` holds its path to `reap-agent-artifacts.sh`'s containment discipline**, because the
+- **`cleanup` holds its path to the containment discipline of the reap**, because the
   two run the same `rm -rf` on the same directory from opposite sides. Both sides resolved
   physically, no `..` segment, contained under `<repo_root>/.claude/worktrees/`, plus one
   condition available only here: `--work` must name the workspace `setup` recorded. In the port,
@@ -50,9 +49,9 @@ What that header does not say, and what belongs here:
   `reap-batch` (#229) use. It checks the `..` segment on the path as given, and refuses a
   resolved worktree that is not `<work>/fix`. The removal's
   status is then checked and reported as `work_dir: {path, action}` beside `errors[]` — reporting
-  `worktree_removed: true` with no field naming `$WORK` is the failure `reap-agent-artifacts.sh`
-  guards against on its side of the same operation. **A populated `errors[]` exits non-zero**, as it does there
-  (`reap-agent-artifacts.sh` ends the same way for the same reason): the fields without that
+  `worktree_removed: true` with no field naming `$WORK` is the failure that `src/reap.ts`
+  guards against on both sides of the same operation. **A populated `errors[]` exits non-zero**, as
+  the bash `reap-agent-artifacts.sh` did for the same reason: the fields without that
   exit still let an orchestrator keying on `status` read a leaked worktree as a clean cleanup.
   **That exit 3 is a signal, not a verdict on the run**, and it is the one exit-3 the agent does
   not map straight onto a failure result: `cleanup` runs after the push and the PR, so the agent

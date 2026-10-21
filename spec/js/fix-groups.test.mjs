@@ -342,11 +342,11 @@ describe('RESULT_SCHEMA, executed', () => {
     expect(accepts(failureResult())).toBe(true)
   })
 
-  // `fix-group.sh cleanup` runs after the PR is created and exits 3 when it
+  // `fix-group cleanup` runs after the PR is created and exits 3 when it
   // leaves a worktree behind, so a cleanup error can follow completed work.
   // Forcing it into the `failure` branch would make the agent choose between
   // hiding the leak and hiding a real open PR — and hiding the PR also
-  // suppresses post-agent.sh's reap, which only reaps a verified-open PR
+  // suppresses the reap of `reap-batch`, which only reaps a verified-open PR
   // from a success. Every branch must therefore permit a report.
   describe('the cleanup field', () => {
     it('requires the field to be present, even when it is null', () => {
@@ -400,7 +400,7 @@ describe('RESULT_SCHEMA, executed', () => {
     // Layer 1 confirms worktree and work_dir are each {path, action}, and the
     // path is the RESOLVED one the driver acted on. Phase 7 correlates on it,
     // so a report that omits either field would leave the orchestrator
-    // comparing undefined against post-agent.sh's derived path.
+    // comparing undefined against the derived path of the post-agent step.
     for (const container of ['worktree', 'work_dir']) {
       for (const field of ['path', 'action']) {
         it(`rejects a cleanup report whose ${container} has no ${field}`, () => {
@@ -895,7 +895,7 @@ describe('the workflow body, run with stubbed collaborators', () => {
 
   // #200: the schema can no longer reject this shape (it moved out of the
   // schema entirely), so the workflow must warn rather than lose the group.
-  // `post-agent.sh` and phase 7 still read `pr_url`/`action`/`bare_override`
+  // The post-agent step and phase 7 still read `pr_url`/`action`/`bare_override`
   // straight off the result, so the entry is kept exactly as the agent
   // reported it — only logged, never dropped or nulled.
   it('warns on a cross-field inconsistency instead of dropping or nulling the result', async () => {

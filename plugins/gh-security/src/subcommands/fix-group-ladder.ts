@@ -8,7 +8,7 @@
 //
 // Each function is the port of a jq filter or a shell test in
 // `cmd_apply`, `apply_call`, `validate_call`, `fix_install_step`,
-// `uncovered_parents` and `line_versions` of `scripts/common/fix-group.sh`.
+// `uncovered_parents` and `line_versions` of `fix-group.sh` (deleted in #236).
 //
 // This file ships. It imports nothing outside the plugin.
 
