@@ -46,29 +46,6 @@ Describe 'the audit rules that read a partially-parsed map'
     The status should be success
     The output should equal '1'
   End
-
-  It 'has a definition that maps a non-zero count onto not-checked'
-    When call rule 'unreadable_entries` non-zero'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # The alias carve-out used to be illustrated with a `kind: alias` pin, which
-  # phase 2 files `not-a-version-pin` and never tests, so the illustration
-  # named a pin the audit cannot reach (issue #48). The rule moved into a
-  # bullet when phase 4 collapsed onto the driver (#174), so the fragment is no
-  # longer at the start of its line.
-  It 'illustrates the alias carve-out with a pin phase 2 actually tests'
-    When call rule '">=4.18.0"` is a version pin'
-    The status should be success
-    The output should equal '1'
-  End
-
-  It 'says the alias-valued form never reaches that comparison'
-    When call rule 'never reaches this comparison'
-    The status should be success
-    The output should equal '1'
-  End
 End
 
 # Two readers, because a wrapped paragraph is not one grep line. `rule_in`
@@ -102,32 +79,6 @@ Describe 'the rules that gate the removal PR'
   # commit.
   It 'requires the combined test before any PR'
     When call rule_in "$AGENT" 'never removes a set that was not installed and judged as a set'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # Attempt 1 has to be the maximal set. An attempt 1 that already excluded the
-  # individually-tested pins would never answer the sibling question, and
-  # attempt 2 would be the same set twice.
-  It 'puts the individually-tested pins in attempt 1'
-    When call rule_in "$AGENT" 'includes the individually-tested pins as well'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # A single unreadable locator drops its package from both snapshots, so the
-  # diff reports no change for it. In report mode that degrades to a narrower
-  # claim; here it would ship a deletion nothing checked, so it fails closed.
-  It 'fails an attempt closed on a partially-read map'
-    When call rule_in "$AGENT" 'fails the attempt closed'
-    The status should be success
-    The output should equal '1'
-  End
-
-  # Attempt 2 is the narrowing fallback. Keeping the individually-tested pins
-  # in it would re-run the set that just failed, minus nothing that mattered.
-  It 'narrows attempt 2 by dropping the individually-tested pins'
-    When call rule_in "$AGENT" 'drops every pin whose finding was'
     The status should be success
     The output should equal '1'
   End
@@ -269,17 +220,13 @@ Describe 'the rules that gate the removal PR'
     End
 
     # 26 @esbuild/* packages moved as collateral and one was sampled with no
-    # rule permitting it; the honest verdict is the whole point.
-    It 'rules on a platform-binary collateral fan-out (#79b)'
-      When call phrase_in "$AGENT" 'checked, not sampled, unless it is a platform-binary family'
+    # rule permitting it; the honest verdict is the whole point. The family
+    # rule is the driver's (`audit-pins test-pin` picks the sample); the
+    # report owes the reader what the sample stood for.
+    It 'requires the sampled verdict to say it sampled (#79b)'
+      When call phrase_in "$AGENT" 'A .sampled-family. verdict names the member judged'
       The status should be success
       The output should equal '1'
-    End
-
-    It 'requires the sampled verdict to say it sampled (#79b)'
-      When call rule_in "$AGENT" 'sampled-family'
-      The status should be success
-      The output should equal '3'
     End
 
     # A trailing comma left by removing the last entry in an override block

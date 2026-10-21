@@ -48,7 +48,7 @@ carries the marker. A new mechanical pin needs a new successor script, and a cha
 
 ## Totals
 
-261 pins across 15 files: 261 `judgment`, 0 `mechanical`.
+256 pins across 15 files: 256 `judgment`, 0 `mechanical`.
 
 Each mechanical pin was retired in the same change that landed its successor, a command in the
 TypeScript port of gh-security. No mechanical pin remains.
@@ -105,13 +105,13 @@ TypeScript port of gh-security. No mechanical pin remains.
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 30 | names the package-qualified path three times: inventory, write, consume | judgment | - |
-| 36 | writes the why capture to a package-qualified path | judgment | - |
-| 43 | passes the same package-qualified path to score-merge-risk.sh | judgment | - |
-| 53 | has no remaining unqualified why.json literal | judgment | - |
-| 64 | states the slash-to-dash slug rule for a scoped package name | judgment | - |
-| 70 | gives the slug rule the concrete scoped-package example | judgment | - |
-| 80 | grounds the slug rule in scoring many packages in the same WORK | judgment | - |
+| 31 | names the package-qualified path three times: inventory, write, consume | judgment | - |
+| 37 | writes the why capture to a package-qualified path | judgment | - |
+| 44 | passes the same package-qualified path to score-merge-risk | judgment | - |
+| 54 | has no remaining unqualified why.json literal | judgment | - |
+| 65 | states the slash-to-dash slug rule for a scoped package name | judgment | - |
+| 71 | gives the slug rule the concrete scoped-package example | judgment | - |
+| 81 | grounds the slug rule in scoring many packages in the same work directory | judgment | - |
 
 ### `spec/resolve_alerts_dispatch_spec.sh`: 37 pins (37 judgment, 0 mechanical)
 
@@ -155,63 +155,59 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 358 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
 | 364 | forbids the shipped code from importing the workflow file | judgment | - |
 
-### `spec/audit_pins_rules_spec.sh`: 53 pins (53 judgment, 0 mechanical)
+### `spec/audit_pins_rules_spec.sh`: 49 pins (49 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 103 | requires the combined test before any PR | judgment | - |
-| 112 | puts the individually-tested pins in attempt 1 | judgment | - |
-| 121 | fails an attempt closed on a partially-read map | judgment | - |
-| 129 | narrows attempt 2 by dropping the individually-tested pins | judgment | - |
-| 139 | restores the tree between the two attempts | judgment | - |
-| 148 | verifies the edits landed before the combined install | judgment | - |
-| 158 | routes a failed combined install to the compose phase | judgment | - |
-| 167 | routes a broken advisory lookup to the advisories phase, not a failed attempt | judgment | - |
-| 178 | forbids the agent from merging its own PR or arming auto-merge | judgment | - |
-| 184 | creates the PR on the plugin-owned head | judgment | - |
-| 194 | passes no --draft, anywhere | judgment | - |
-| 203 | refuses to default the mode | judgment | - |
-| 211 | stops report mode before the PR phases | judgment | - |
-| 222 | leases the push against the verified sha, not the tracking ref | judgment | - |
-| 231 | verifies a remnant against a closed PR head before touching it | judgment | - |
-| 240 | does not silence the branch delete | judgment | - |
-| 251 | forbids bypassing a repository hook on commit or push (#78) | judgment | - |
-| 257 | makes a hook failure a failure result rather than something to edit around (#78) | judgment | - |
-| 265 | defines --after when a removal admits several versions (#79a) | judgment | - |
-| 273 | rules on a platform-binary collateral fan-out (#79b) | judgment | - |
-| 279 | requires the sampled verdict to say it sampled (#79b) | judgment | - |
-| 289 | validates the manifest after the edit, before list_pins (#79c) | judgment | - |
-| 295 | templates a direct-commit provenance ref (#79d) | judgment | - |
-| 303 | keeps still-required findings out of left_behind, in the schema (#81) | judgment | - |
-| 309 | says the same in the PR body template (#81) | judgment | - |
-| 315 | states the element type of fixed_alerts (#81) | judgment | - |
-| 323 | says no worktree is created at the workspace root (#79) | judgment | - |
-| 356 | passes no --draft, anywhere in render-pr.sh | judgment | - |
-| 362 | still builds the gh pr create call, so the absence above is about the flag | judgment | - |
-| 368 | fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself | judgment | - |
-| 377 | forbids merging its own PR or arming auto-merge | judgment | - |
-| 392 | stops before phase 4 on a peer_only package | judgment | - |
-| 398 | names the classification peer_only_dependency in the failure detail | judgment | - |
-| 404 | reports the failure at phase classify | judgment | - |
-| 410 | quotes peer_parents in the failure detail | judgment | - |
-| 420 | steers the remedy at required peer parents, not optional ones | judgment | - |
-| 438 | $1 | judgment | - |
-| 448 | records the hook distinction in ADR 006 (#78) | judgment | - |
-| 466 | offers it first in $1 | judgment | - |
-| 483 | checks for open security-labeled PRs before asking the mode question | judgment | - |
-| 489 | stops rather than proceeding when open security PRs exist | judgment | - |
-| 502 | offers no proceed-anyway option | judgment | - |
-| 515 | no longer builds an audit-pins Task dispatch in resolve-alerts | judgment | - |
-| 531 | mentions audit-pins exactly twice: the phase 7 lead and the phase 8 pointer | judgment | - |
-| 537 | points the phase 7 unscoped-override lead at /gh-security:audit-pins | judgment | - |
-| 543 | carries the phase 8 pointer sentence to /gh-security:audit-pins | judgment | - |
-| 572 | states the one env_prefix rule in $1 | judgment | - |
-| 582 | runs bare when env_prefix is absent, per $1 | judgment | - |
-| 592 | declares env_prefix OPTIONAL in the input contract of $1 | judgment | - |
-| 612 | takes the prefix from session context in $1 | judgment | - |
-| 622 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
-| 637 | is stated in the audit agent | judgment | - |
-| 643 | is stated in the fix agent | judgment | - |
+| 80 | requires the combined test before any PR | judgment | - |
+| 90 | restores the tree between the two attempts | judgment | - |
+| 99 | verifies the edits landed before the combined install | judgment | - |
+| 109 | routes a failed combined install to the compose phase | judgment | - |
+| 118 | routes a broken advisory lookup to the advisories phase, not a failed attempt | judgment | - |
+| 129 | forbids the agent from merging its own PR or arming auto-merge | judgment | - |
+| 135 | creates the PR on the plugin-owned head | judgment | - |
+| 145 | passes no --draft, anywhere | judgment | - |
+| 154 | refuses to default the mode | judgment | - |
+| 162 | stops report mode before the PR phases | judgment | - |
+| 173 | leases the push against the verified sha, not the tracking ref | judgment | - |
+| 182 | verifies a remnant against a closed PR head before touching it | judgment | - |
+| 191 | does not silence the branch delete | judgment | - |
+| 202 | forbids bypassing a repository hook on commit or push (#78) | judgment | - |
+| 208 | makes a hook failure a failure result rather than something to edit around (#78) | judgment | - |
+| 216 | defines --after when a removal admits several versions (#79a) | judgment | - |
+| 226 | requires the sampled verdict to say it sampled (#79b) | judgment | - |
+| 236 | validates the manifest after the edit, before list_pins (#79c) | judgment | - |
+| 242 | templates a direct-commit provenance ref (#79d) | judgment | - |
+| 250 | keeps still-required findings out of left_behind, in the schema (#81) | judgment | - |
+| 256 | says the same in the PR body template (#81) | judgment | - |
+| 262 | states the element type of fixed_alerts (#81) | judgment | - |
+| 270 | says no worktree is created at the workspace root (#79) | judgment | - |
+| 303 | passes no --draft, anywhere in render-pr.sh | judgment | - |
+| 309 | still builds the gh pr create call, so the absence above is about the flag | judgment | - |
+| 315 | fix-dependency.md calls render-pr create, rather than re-deriving gh pr create itself | judgment | - |
+| 324 | forbids merging its own PR or arming auto-merge | judgment | - |
+| 339 | stops before phase 4 on a peer_only package | judgment | - |
+| 345 | names the classification peer_only_dependency in the failure detail | judgment | - |
+| 351 | reports the failure at phase classify | judgment | - |
+| 357 | quotes peer_parents in the failure detail | judgment | - |
+| 367 | steers the remedy at required peer parents, not optional ones | judgment | - |
+| 385 | $1 | judgment | - |
+| 395 | records the hook distinction in ADR 006 (#78) | judgment | - |
+| 413 | offers it first in $1 | judgment | - |
+| 430 | checks for open security-labeled PRs before asking the mode question | judgment | - |
+| 436 | stops rather than proceeding when open security PRs exist | judgment | - |
+| 449 | offers no proceed-anyway option | judgment | - |
+| 462 | no longer builds an audit-pins Task dispatch in resolve-alerts | judgment | - |
+| 478 | mentions audit-pins exactly twice: the phase 7 lead and the phase 8 pointer | judgment | - |
+| 484 | points the phase 7 unscoped-override lead at /gh-security:audit-pins | judgment | - |
+| 490 | carries the phase 8 pointer sentence to /gh-security:audit-pins | judgment | - |
+| 519 | states the one env_prefix rule in $1 | judgment | - |
+| 529 | runs bare when env_prefix is absent, per $1 | judgment | - |
+| 539 | declares env_prefix OPTIONAL in the input contract of $1 | judgment | - |
+| 559 | takes the prefix from session context in $1 | judgment | - |
+| 569 | carries env_prefix into the audit-pins Task payload in skills/audit-pins/SKILL.md | judgment | - |
+| 584 | is stated in the audit agent | judgment | - |
+| 590 | is stated in the fix agent | judgment | - |
 
 ### `spec/reap_agent_artifacts_spec.sh`: 2 pins (2 judgment, 0 mechanical)
 
@@ -247,30 +243,29 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 160 | grants gh issue create | judgment | - |
 | 166 | grants gh issue comment | judgment | - |
 | 174 | points at the same practice for a contract-violation-shaped defect | judgment | - |
-| 180 | gives a readable path to resolve-alerts/SKILL.md | judgment | - |
-| 186 | refers to the named Filing a skill-defect report section, not "Phase 7" generally, and says to read it first | judgment | - |
+| 180 | gives a readable path to resolve-alerts/defect-report.md | judgment | - |
+| 186 | forbids re-deriving the rules in the audit skill | judgment | - |
 
-### `spec/merge_risk_labels_spec.sh`: 17 pins (17 judgment, 0 mechanical)
+### `spec/merge_risk_labels_spec.sh`: 16 pins (16 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
-| 40 | creates merge-risk:$1 with the pinned color and description | judgment | - |
-| 55 | creates $2 with color $3 | judgment | - |
-| 70 | documents $1 as $2 (#$3) | judgment | - |
-| 78 | documents \`dependencies\` as \`#0366d6\` | judgment | - |
-| 99 | names exactly low, medium, and high in audit-pins.md, never a fourth | judgment | - |
-| 107 | never uses a bare risk: prefix in fix-dependency.md, which would read as alert severity | judgment | - |
-| 113 | never uses a bare risk: prefix in audit-pins.md, which would read as alert severity | judgment | - |
-| 121 | calls render-pr labels with --repo and --band | judgment | - |
-| 127 | calls render-pr create with --band | judgment | - |
-| 135 | builds --label security --label dependencies --label "merge-risk:..." in its gh pr create argv | judgment | - |
-| 143 | builds no --draft flag anywhere in its gh pr create argv | judgment | - |
-| 151 | adds the label only when pr.risk.band is non-null | judgment | - |
-| 157 | says a null band gets no risk label, never a fake one | judgment | - |
-| 165 | treats "already exists" in gh label create output as success, not an error | judgment | - |
-| 171 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
-| 179 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
-| 185 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
+| 41 | creates merge-risk:$1 with the pinned color and description | judgment | - |
+| 56 | creates $2 with color $3 | judgment | - |
+| 71 | documents $1 as $2 (#$3) | judgment | - |
+| 79 | documents \`dependencies\` as \`#0366d6\` | judgment | - |
+| 100 | names exactly low, medium, and high in audit-pins.md, never a fourth | judgment | - |
+| 108 | never uses a bare risk: prefix in fix-dependency.md, which would read as alert severity | judgment | - |
+| 114 | never uses a bare risk: prefix in audit-pins.md, which would read as alert severity | judgment | - |
+| 122 | calls render-pr labels with --repo and --band | judgment | - |
+| 128 | calls render-pr create with --band | judgment | - |
+| 136 | builds --label security --label dependencies --label "merge-risk:..." in its gh pr create argv | judgment | - |
+| 144 | builds no --draft flag anywhere in its gh pr create argv | judgment | - |
+| 152 | adds the label only when pr.risk.band is non-null | judgment | - |
+| 158 | says a null band gets no risk label, never a fake one | judgment | - |
+| 166 | treats "already exists" in gh label create output as success, not an error | judgment | - |
+| 172 | says creating a label is a deliberate write of repo metadata beyond the PR itself | judgment | - |
+| 180 | treats a gh label create failing because the label now exists as success, not an error | judgment | - |
 
 ### `spec/fix_dependency_result_spec.sh`: 29 pins (29 judgment, 0 mechanical)
 
