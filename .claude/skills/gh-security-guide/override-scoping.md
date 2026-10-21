@@ -79,6 +79,24 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   when that key pins a DIFFERENT line, since deleting it strips that line's protection and
   keeping it smothers this fix.
 
+  npm uses the first key of the block that matches a copy of a parent. The other keys for that
+  parent have no effect on it (npm 11.19.0, issues #333 and #295). So a version-qualified key
+  that the manifest has, such as `"nx@22.7.7": {...}`, wins over a new bare key after it. When
+  such a key comes first for a copy on the line, `apply_constraint` writes the constraint inside
+  it. A text value moves to the `"."` entry, as for a rule that places a parent. The call drops
+  each new key that would reach no other copy. When the keys serve each copy on the line, the
+  call supersedes a bare pair on the line after them.
+
+  npm matches a key by the spec of each edge into the copy, not by the version of the copy
+  (`getEdgeRule`). The lockfile gives that spec in the entry that depends on the parent. For an
+  exact spec, the first key whose selector admits that version matches. For a range, npm can
+  match any selector that the range intersects. A real lockfile kept nx 22.7.12 beside the key
+  `nx@22.7.7` for an edge of `^22.7.0`. A fresh install then used that key. So the call refuses
+  when a range edge can match a key that the call cannot decide. A tag, a directory or a file
+  takes the first key by name. A git URL skips each qualified key. So the call refuses a key
+  beside such a copy. It also refuses a key that comes first for a copy whose child is on
+  another line. It refuses a key that holds a pin on another line.
+
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
   such a node to the rule that placed it, so a top-level key never matches it, qualified or bare,

@@ -68,7 +68,7 @@ import { satisfiesAll } from './validate.ts'
 type Edge = { readonly parent: string; readonly pver: unknown; readonly cver: unknown }
 
 /** The missing value of an edge, as the rows of node.sh write it. */
-const MISSING = '-'
+export const MISSING = '-'
 
 /**
  * A parent version from outside the registry (#50). A registry version starts
