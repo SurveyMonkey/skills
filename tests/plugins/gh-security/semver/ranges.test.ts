@@ -174,37 +174,108 @@ describe('satisfies', () => {
 })
 
 describe('satisfies, the npm forms of a partial version and a hyphen range (#353)', () => {
-  // Red first: `it.fails` until the fix, because the pre-commit hook runs
-  // this file. Each expected value is the answer of npm's own `semver` 7.8.5,
-  // the copy that npm 11.19.0 bundles.
-  it.fails.each([
+  // Each expected value is the answer of npm's own `semver` 7.8.5, the copy
+  // that npm 11.19.0 bundles: `node -e 'require("semver").satisfies(v, r)'`.
+  // npm reads `22` and `~22` as `>=22.0.0 <23.0.0-0`, and `22.7` and `~22.7`
+  // as `>=22.7.0 <22.8.0-0` (`new Range(r).range`). Each form has a row in
+  // range, a row just outside each bound, and the prerelease at the upper
+  // bound.
+  it.each([
+    ['22.0.0', '22', true],
     ['22.7.7', '22', true],
+    ['21.9.9', '22', false],
+    ['23.0.0', '22', false],
+    ['23.0.0-0', '22', false],
+    ['22.0.0-0', '22', false],
+    ['22.7.0', '22.7', true],
     ['22.7.9', '22.7', true],
+    ['22.6.9', '22.7', false],
+    ['22.8.0', '22.7', false],
+    ['22.8.0-0', '22.7', false],
+    ['22.0.0', '~22', true],
     ['22.7.7', '~22', true],
+    ['21.9.9', '~22', false],
+    ['23.0.0', '~22', false],
+    ['23.0.0-0', '~22', false],
+    ['22.7.0', '~22.7', true],
+    ['22.7.9', '~22.7', true],
+    ['22.6.9', '~22.7', false],
+    ['22.8.0', '~22.7', false],
     ['22.8.0-0', '~22.7', false],
     ['22.7.7', '=22', true],
+    ['23.0.0', '=22', false],
     ['22.7.7', 'v22.7', true],
-    ['1.2.0', '1.2 - 2.3.4', true],
-    ['2.3.4', '1.2 - 2.3.4', true],
-    ['1.2.3', '1.2.3 - 2.3', true],
-    ['2.3.9', '1.2.3 - 2.3', true],
-    ['1.2.3', '1.2.3 - 2', true],
-    ['2.9.9', '1.2.3 - 2', true],
-    ['23.9.9', '22 - 23', true],
-    ['22.7.7', '22.0.0 - 22.9.9', true],
-    ['5.1.0', '1.2.3 - 2.3.4 || 5', true],
+    ['22.8.0', 'v22.7', false],
   ])('reads %s against %s as %s', (version, range, expected) => {
     expect(satisfies(version, range)).toBe(expected)
   })
 
-  it.fails.each([
-    ['22', ['>=22.0.0', '<23.0.0-0']],
-    ['22.7', ['>=22.7.0', '<22.8.0-0']],
-    ['~22', ['>=22.0.0', '<23.0.0-0']],
-    ['~22.7', ['>=22.7.0', '<22.8.0-0']],
-    ['=22', ['>=22.0.0', '<23.0.0-0']],
-  ])('expands %s to %j', (token, expected) => {
-    expect(expandToken(token)).toEqual(expected)
+  // A hyphen range `A - B`. A partial lower end starts its line, and a
+  // partial upper end takes its whole line: npm reads `1.2 - 2.3.4` as
+  // `>=1.2.0 <=2.3.4`, `1.2.3 - 2.3` as `>=1.2.3 <2.4.0-0` and `1.2.3 - 2`
+  // as `>=1.2.3 <3.0.0-0`.
+  it.each([
+    ['1.2.0', '1.2 - 2.3.4', true],
+    ['1.1.9', '1.2 - 2.3.4', false],
+    ['2.3.4', '1.2 - 2.3.4', true],
+    ['2.3.5', '1.2 - 2.3.4', false],
+    ['2.3.5-0', '1.2 - 2.3.4', false],
+    ['1.2.3', '1.2.3 - 2.3', true],
+    ['1.2.2', '1.2.3 - 2.3', false],
+    ['2.3.9', '1.2.3 - 2.3', true],
+    ['2.4.0', '1.2.3 - 2.3', false],
+    ['2.4.0-0', '1.2.3 - 2.3', false],
+    ['1.2.3', '1.2.3 - 2', true],
+    ['1.2.2', '1.2.3 - 2', false],
+    ['2.9.9', '1.2.3 - 2', true],
+    ['3.0.0', '1.2.3 - 2', false],
+    ['3.0.0-0', '1.2.3 - 2', false],
+    ['23.9.9', '22 - 23', true],
+    ['24.0.0-0', '22 - 23', false],
+    ['22.7.7', '22.0.0 - 22.9.9', true],
+    ['22.9.10', '22.0.0 - 22.9.9', false],
+    ['5.1.0', '1.2.3 - 2.3.4 || 5', true],
+    ['4.0.0', '1.2.3 - 2.3.4 || 5', false],
+  ])('reads %s against the hyphen range %s as %s', (version, range, expected) => {
+    expect(satisfies(version, range)).toBe(expected)
+  })
+
+  // Pin examples. They pass when written. npm refuses each of these ranges
+  // ("Invalid comparator: -"), so its `satisfies` answers false. Here the
+  // lone `-` reads as the exact version 0.0.0, which no other comparator of
+  // the alternative admits beside it.
+  it.each([
+    ['1.2.3', '1.2.3 -'],
+    ['0.0.0', '1.2.3 -'],
+    ['1.2.3', '- 1.2.3'],
+    ['0.0.0', '- 1.2.3'],
+    ['2.0.0', '1.2.3 - 2.3.4 - 5'],
+    ['0.0.0', '1.2.3 - 2.3.4 - 5'],
+    ['1.5.0', '>=1 - 2'],
+    ['2.5.0', '1.2.3 - >=2'],
+    ['1.2.3', '1.2.3 - >=2'],
+  ])('reads %s against the malformed hyphen range %s as false', (version, range) => {
+    expect(satisfies(version, range)).toBe(false)
+  })
+
+  // Pin examples, and a known difference from npm. They pass when written.
+  // An end of a hyphen range must be a full or a partial version, so an
+  // x-range end is not read as a hyphen range here. npm answers true for both
+  // rows: it reads `1.x - 2` and `1.2.3 - 2.x` as ranges to `<3.0.0-0`.
+  it.each([
+    ['1.5.0', '1.x - 2'],
+    ['2.5.0', '1.2.3 - 2.x'],
+  ])('reads %s against %s, a hyphen range with an x-range end, as false', (version, range) => {
+    expect(satisfies(version, range)).toBe(false)
+  })
+
+  // Pin example. It passes when written. A full version with no operator
+  // stays an exact match, as npm reads it.
+  it.each([
+    ['22.7.7', '22.7.7', true],
+    ['22.7.8', '22.7.7', false],
+  ])('reads %s against the exact version %s as %s', (version, range, expected) => {
+    expect(satisfies(version, range)).toBe(expected)
   })
 })
 
@@ -264,13 +335,19 @@ describe('wildcardExpand', () => {
 
 describe('expandToken', () => {
   // A caret or tilde becomes the comparator pair it stands for; a wildcard
-  // becomes the pair `wildcardExpand` gives; anything else is left alone for
-  // `evalToken` to read.
+  // becomes the pair `wildcardExpand` gives; a partial version, with or
+  // without a tilde, becomes the pair npm's `new Range(r).range` gives (#353);
+  // anything else is left alone for `evalToken` to read.
   it.each([
     ['^9', ['>=9', '<10.0.0']],
     ['^6.19.0', ['>=6.19.0', '<7.0.0']],
     ['~6.14.0', ['>=6.14.0', '<6.15.0']],
     ['1.x', ['>=1.0.0', '<2.0.0']],
+    ['22', ['>=22.0.0', '<23.0.0-0']],
+    ['22.7', ['>=22.7.0', '<22.8.0-0']],
+    ['~22', ['>=22.0.0', '<23.0.0-0']],
+    ['~22.7', ['>=22.7.0', '<22.8.0-0']],
+    ['=22', ['>=22.0.0', '<23.0.0-0']],
     ['>=1.0.0', ['>=1.0.0']],
     ['4.17.21', ['4.17.21']],
   ])('expands %s to %j', (token, expected) => {

@@ -1543,11 +1543,18 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
 const MAJOR_KEY = 'npm-qualified-major-key'
 
 describe('npm constraint goes inside a qualified key with a bare major selector (#353)', () => {
-  // Red first: `it.fails` until the fix, because the pre-commit hook runs
-  // this file.
-  it.fails('writes inside the nx@22 key of the field case, and no bare key', () => {
+  it('writes inside the nx@22 key of the field case, and no bare key', () => {
     expect(manifestAfter(MAJOR_KEY, smolToml).overrides).toEqual({
       'nx@22': { axios: AXIOS, 'smol-toml': SMOL },
+    })
+  })
+
+  it('reports the entry inside the key, and invalidates the stale lockfile entry', () => {
+    const { written, superseded_keys, lockfile_invalidated } = answer(MAJOR_KEY, smolToml)
+    expect({ written, superseded_keys, lockfile_invalidated }).toEqual({
+      written: [{ parent: 'nx', path: ['overrides', 'nx@22', 'smol-toml'], value: SMOL }],
+      superseded_keys: [],
+      lockfile_invalidated: { performed: true, keys: ['node_modules/smol-toml'] },
     })
   })
 })
@@ -1583,10 +1590,9 @@ const rootDebug = (spec: string): Setup =>
   )
 
 describe('npm constraint goes inside a qualified key for a git edge with a semver range (#359)', () => {
-  // Red first: `it.fails` until each fix, because the pre-commit hook runs
-  // this file. The registry edge waits on #353: the range rules read the
-  // selector `4` as the version 4.0.0.
-  it.fails('writes inside the debug@4 key for a registry edge of ^4.4.0', () => {
+  // Red first: `it.fails` until the fix of #359, because the pre-commit hook
+  // runs this file.
+  it('writes inside the debug@4 key for a registry edge of ^4.4.0', () => {
     expect(manifestAfter(REGISTRY_EDGE, msRange).overrides).toEqual({
       'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' },
     })

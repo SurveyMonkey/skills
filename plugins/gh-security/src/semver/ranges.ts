@@ -2,13 +2,21 @@
 // in `scripts/ecosystems/node.sh` (lines 83-289) and from what the
 // `range_facts` verb (node.sh line 3429) answers with, under RFC 002.
 //
-// The jq semantics are kept exactly. That includes the known divergence from
-// npm's semver, which is documented on `rangeFacts` below and is deliberate
-// rather than pending.
+// The jq semantics are kept, with two declared parity exceptions. The known
+// divergence from npm's semver on prereleases stays. It is documented on
+// `rangeFacts` below, and it is deliberate.
 //
-// One declared parity exception (#304 item 2): a token with a comparator and
-// then a `^` or `~`, such as `<^5.0.0`, is unreadable here. jq reads it as a
-// version with major 0. See `tokenParseable`.
+// Parity exception #304 item 2: a token with a comparator and then a `^` or
+// `~`, such as `<^5.0.0`, is unreadable here. jq reads it as a version with
+// major 0. See `tokenParseable`.
+//
+// Parity exception #353: `satisfies` reads three forms as npm does, and jq
+// does not. A partial version with no operator, such as `22` or `22.7`, is
+// the line it names. A tilde before a partial version is the same line. A
+// hyphen range `A - B` is `>=A <=B`, and a partial end reads as its line. The
+// upper bound of each form ends in `-0`, as npm's does. So `22` does not
+// admit `23.0.0-0`, but `22.x` and `^22` do. See `partialLine` and
+// `foldHyphens`.
 //
 // This file ships. It imports nothing outside the plugin and stays inside the
 // erasable subset (no `enum`, no parameter properties, no namespaces),
@@ -104,10 +112,29 @@ export const wildcardExpand = (token: string): string[] | null => {
 
 const isWild = (part: string | undefined): boolean => part !== undefined && /^[xX*]$/.test(part)
 
+// A version with one or two numeric parts, after any `v` or `=`.
+const PARTIAL = /^[v=]*([0-9]+)(?:\.([0-9]+))?$/
+
+/**
+ * A partial version as the comparator pair of the line it names, as npm reads
+ * it (#353): `22` is `>=22.0.0 <23.0.0-0`, and `22.7` is
+ * `>=22.7.0 <22.8.0-0`. It is null for any other text.
+ */
+const partialLine = (text: string): string[] | null => {
+  const match = PARTIAL.exec(text)
+  if (match === null) return null
+  const major = Number(match[1])
+  if (match[2] === undefined) return [`>=${major}.0.0`, `<${major + 1}.0.0-0`]
+  const minor = Number(match[2])
+  return [`>=${major}.${minor}.0`, `<${major}.${minor + 1}.0-0`]
+}
+
 /** A token as the comparators it stands for. */
 export const expandToken = (token: string): string[] => {
   const wildcard = wildcardExpand(token)
   if (wildcard !== null) return wildcard
+  const line = partialLine(token.startsWith('~') ? token.slice(1) : token)
+  if (line !== null) return line
   const rest = token.slice(1)
   if (token.startsWith('^')) return [`>=${rest}`, `<${caretUpper(rest)}`]
   if (token.startsWith('~')) return [`>=${rest}`, `<${tildeUpper(rest)}`]
@@ -116,6 +143,7 @@ export const expandToken = (token: string): string[] => {
 
 // The prefixes, longest first: `>=` has to be read before `>`, or the `=`
 // becomes part of the version. A token with no operator is an exact match.
+// `expandToken` gives such a token only for a full version.
 const OPERATORS = ['>=', '<=', '>', '<', '='] as const
 
 /** Whether one comparator token admits a version. */
@@ -128,6 +156,29 @@ export const evalToken = (token: string, version: string): boolean => {
   if (operator === '>') return result > 0
   if (operator === '<') return result < 0
   return result === 0
+}
+
+// One end of a hyphen range: a full or a partial version, with no operator.
+const HYPHEN_END = /^[v=]*[0-9]+(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
+
+/**
+ * The tokens of one alternative, with each hyphen range `A - B` as the two
+ * comparators npm reads it as (#353). A partial lower end starts its line. A
+ * partial upper end admits its whole line. Each end must be a version with no
+ * operator. Other tokens, and a `-` with no such end on each side, stay as
+ * they are. npm refuses those ranges.
+ */
+const foldHyphens = (tokens: readonly string[]): string[] => {
+  const [low, dash, high] = tokens
+  if (low === undefined) return []
+  if (dash === '-' && high !== undefined && HYPHEN_END.test(low) && HYPHEN_END.test(high)) {
+    return [
+      partialLine(low)?.[0] ?? `>=${low}`,
+      partialLine(high)?.[1] ?? `<=${high}`,
+      ...foldHyphens(tokens.slice(3)),
+    ]
+  }
+  return [low, ...foldHyphens(tokens.slice(1))]
 }
 
 /**
@@ -153,7 +204,7 @@ export const satisfies = (version: string, range: string): boolean =>
       if (tokens.length === 0) {
         throw new Error(`the range '${range}' has an alternative with no comparator`)
       }
-      return tokens
+      return foldHyphens(tokens)
         .flatMap(expandToken)
         .map((token) => evalToken(token, version))
         .every(Boolean)

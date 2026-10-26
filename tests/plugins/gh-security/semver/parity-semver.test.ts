@@ -30,6 +30,13 @@
 // "range_facts requires a range and a version"), so the empty-range row of
 // that table names no argument pair the verb takes, and a parity row for it
 // would assert the argument guard rather than the semver.
+//
+// One declared parity difference (#353): `satisfies` reads a partial version
+// such as `22` or `22.7`, with or without a tilde, as npm reads it. The jq of
+// node.sh reads `22` as the exact version 22.0.0 and `~22` as `>=22 <22.1.0`.
+// The rows of the last block assert that difference, and nothing else in the
+// answer differs. A hyphen range is the third form of #353. Both sides answer
+// `parseable: false` for it, so `range_facts` shows no difference there.
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -225,5 +232,23 @@ describe('range_facts', () => {
     ['1.0.0', '1.0.1'],
   ])('agrees on %s against %s', (range, version) => {
     expect(checkParity(rangeFactsSubject, [range, version])).toEqual(matched)
+  })
+
+  // The declared parity difference of #353, row by row. The TypeScript side
+  // gives npm's answer: npm's own `semver` 7.8.5 (the copy npm 11.19.0
+  // bundles) answers true for the first three rows and false for the last.
+  // The bash side gives the answers of `node.sh range_facts` on each row.
+  it.each([
+    ['22', '22.7.7', '$.satisfied: bash false, TypeScript true'],
+    ['22.7', '22.7.9', '$.satisfied: bash false, TypeScript true'],
+    ['~22', '22.7.7', '$.satisfied: bash false, TypeScript true'],
+    ['~22.7', '22.8.0-0', '$.satisfied: bash true, TypeScript false'],
+  ])('differs on %s against %s as #353 declares', (range, version, report) => {
+    expect(checkParity(rangeFactsSubject, [range, version])).toEqual({ matched: false, report })
+  })
+
+  // A hyphen range: both sides answer that they cannot read it.
+  it('agrees on the hyphen range 1.2.3 - 2 against 2.0.0', () => {
+    expect(checkParity(rangeFactsSubject, ['1.2.3 - 2', '2.0.0'])).toEqual(matched)
   })
 })
