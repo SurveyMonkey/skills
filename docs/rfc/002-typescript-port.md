@@ -173,7 +173,7 @@ them is authoritative.
 
 The same rule governs the prose pins. `spec/PINS.md` already marks which pins are mechanical
 ([#197](https://github.com/SurveyMonkey/skills/issues/197)); each mechanical pin is retired as its
-successor command lands (#231), never kept beside it. Judgment pins, where prose genuinely is the
+successor command lands (~~#231~~ **revised:** #227 to #230), never kept beside it. Judgment pins, where prose genuinely is the
 implementation, stay.
 
 ### Testing
@@ -298,7 +298,7 @@ ported. P3-4 is the retirement issue and runs last, which is why its row sits at
 | P3-6 | [#228](https://github.com/SurveyMonkey/skills/issues/228) | `preflight-repo` and `build-dispatches` |
 | P3-7 | [#229](https://github.com/SurveyMonkey/skills/issues/229) | `reap-batch` and `summarize-run` |
 | P3-8 | [#230](https://github.com/SurveyMonkey/skills/issues/230) | The `pr-status` renderer per repo, closing #193 |
-| P3-4 | [#231](https://github.com/SurveyMonkey/skills/issues/231) | Retire the ported common scripts and their specs |
+| P3-4 | [#231](https://github.com/SurveyMonkey/skills/issues/231) | Retire the ported common scripts, their specs~~, and the mechanical pins~~ **Revised during #231:** #227 to #230 retired the mechanical pins with their successor commands (`spec/PINS.md`). |
 
 **Phase 4: the drivers.**
 
@@ -367,7 +367,7 @@ which requires only the job id `gates`. C4's checklist is the record of that rul
   superseded is ADR 010's bash-only rule for shipped scripts, not the boundary.
 - **Coverage is 95 to 100 on all four buckets, preferably 100** (#211, ADR 012), ~~with exclusion by
   name and a reason as the only relief~~ with no exclusion by name (**revised in #273**; ADR 012). The existing 100 floor on the workflow file does not move.
-- **The mechanical prose pins retire with the scripts they pin** (#197, #231). A pin is never kept
+- **The mechanical prose pins retire with the scripts they pin** (#197, ~~#231~~ **revised:** #227 to #230). A pin is never kept
   beside its successor: two sources of truth for one behavior is worse than either alone, which is
   the rule ADR 010 already applied to the dispatch script's textual pins.
 - **The `testing` skill stays the policy**, amended rather than replaced (#216).

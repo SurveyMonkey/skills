@@ -139,7 +139,7 @@ mock_gh_cleanup() {
 # at call time, not copied, so a test that later overwrites the same path
 # in place is answered with the new content. The optional third argument is a
 # file of stderr chatter gh should still emit on this otherwise-successful
-# call (the release-upgrade notice).
+# call, such as the release-upgrade notice of gh.
 #
 # The last registration whose key matches a given call wins, so a `Before`
 # hook can register a default and one example can override it.

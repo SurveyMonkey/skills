@@ -44,8 +44,8 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   of its snapshot keys carries a readable version — because an entry that over-covers beats
   writing nothing. The exact-version form is a deliberate staleness tradeoff: it is the shape the
   field PRs validated, and a later bump of a parent copy inertly un-matches its key rather than
-  dragging the new copy onto the wrong line. The fix PR reports each such key as a
-  `stale_qualified_override` observation; a re-run does not refresh it. The same snapshots
+  dragging the new copy onto the wrong line. No PR reports a stale pnpm key: `fix_effects` reads
+  npm only (`fix-effects.ts`, #334). The same snapshots
   record only what each copy *resolved*, never the specifier it was declared with, so a
   multi-copy pnpm parent keeps its per-copy line while its declared ranges stay unread
   (`parents_unreadable`) — under pnpm the risk score sees fewer declared ranges than under npm or
@@ -67,7 +67,9 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   the `EOVERRIDE` shape. Same fallbacks as pnpm, in both directions: a single-version parent and
   a parent with no qualifying copy keep the bare nested key, and the same staleness tradeoff
   applies, since a later bump of a parent copy inertly un-matches its exact key rather than
-  dragging the new copy onto the wrong line. The fix PR reports the stale key. The carve-out's hard edges each have a fixed route:
+  dragging the new copy onto the wrong line. When a later npm fix makes such a key stale, its PR
+  reports the key as a `stale_qualified_override` observation (#334). The carve-out's hard edges
+  each have a fixed route:
   a root spec that ALSO admits an off-line copy of the parent (`*`, `>=3`, a cross-major `||`)
   is refused outright before anything is written, because no key satisfies the byte-identical
   rule and the line separation at once; a root spec the range readers cannot judge (a dist-tag,

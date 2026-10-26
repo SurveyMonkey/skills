@@ -96,14 +96,13 @@ conditional logic in test setup the SDK shape exists to remove.
 `harness/gh.ts` is the first two semantics for vitest: a factory answering with a `GhClient` whose
 every method rejects until the example registers a reply or a failure for it. A registered failure
 rejects with a `GhError` that carries the real wording as its `detail`. It keeps no request log,
-as in the target stack, so the last two semantics and the next section apply to the shellspec
-mock only, until a vitest example needs a log.
+as in the target stack. So a vitest example asserts an absence with a client that fails that
+call: the call, if it occurs, fails the example.
 
-Until the last bash script is ported, the shellspec suite keeps its own command-based `gh` mock
-(`spec/support/gh-mock-dispatch.sh`, registered from `spec/spec_helper.sh`), carrying those same
-four semantics for the specs that still drive a script through its CLI. It retires with the
-scripts it serves ([#241](https://github.com/SurveyMonkey/skills/issues/241)); nothing new is
-written against it.
+The shellspec suite keeps its own command-based `gh` mock (`spec/support/gh-mock-dispatch.sh`,
+registered from `spec/spec_helper.sh`), with those same four semantics. No spec uses it after
+#231. It goes with
+[#241](https://github.com/SurveyMonkey/skills/issues/241), and nothing new is written against it.
 
 ## What a log assertion may claim
 
@@ -112,6 +111,5 @@ written against it.
 
 **Never call count or order.** Retries, pagination and caching change both without changing
 behavior, and an example pinned to them breaks on a refactor that fixed nothing. The exception is
-an absence: "this endpoint was never called" is a behavioral claim, and it is the one the example
-`never reads declared_ranges or installs on the peer-only stop` in
-`tests/plugins/gh-security/subcommands/fix-group.test.ts` makes.
+an absence: "this endpoint was never called" is a behavioral claim. The example `never asks the
+alerts endpoint` in `tests/plugins/gh-security/subcommands/discover-alerts.test.ts` makes it.

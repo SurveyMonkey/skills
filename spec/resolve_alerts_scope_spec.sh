@@ -132,8 +132,8 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     End
 
     # The three answers the question used to offer, and the discovery modes
-    # behind two of them. `--scope` covers the flag of the retired `discover-alerts`
-    # script that carried org and user discovery to the API.
+    # behind two of them. `--scope` covers the flag of the retired
+    # `discover-alerts.sh` that carried org and user discovery to the API.
     Describe 'none of the old modes survive'
       Parameters
         org-option    'This org'

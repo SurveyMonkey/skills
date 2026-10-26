@@ -80,9 +80,9 @@ Describe 'select-adapter.sh'
     # Valid JSON of the wrong *shape* passes the `jq empty` guard and then
     # fails inside the annotation pipeline. Unwrapped, that left raw jq noise
     # on stderr and jq's own exit status where the adapter contract requires a
-    # non-zero exit carrying `{"error": "..."}` (issue #39). This script
-    # consumes the stdout of `discover-alerts` directly, so a regression in the
-    # producer has to surface as a structured error, not unparseable noise.
+    # non-zero exit carrying `{"error": "..."}` (issue #39). The batch mode
+    # read the stdout of `discover-alerts.sh`, which #231 retired. No caller
+    # runs the batch mode now (#223 retires this script).
     malformed_shape() {
       printf '%s' '{"actionable":"oops","skipped":[]}' \
         | "$COMMON/select-adapter.sh" --from-discovery

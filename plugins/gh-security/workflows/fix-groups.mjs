@@ -75,7 +75,8 @@ const RESULT_SCHEMA = {
     // `unscoped_override`, `manifest_pnpm_overrides_ignored` and
     // `pnpm_major_unknown`, `fix-group apply` adds `stale_qualified_override`,
     // `untargeted_downgrade` and `fix_effects_failed` (#334), and the agent
-    // appends `unscoped_override_added`. Only the override shapes carry `key`.
+    // appends `unscoped_override_added`. Only `unscoped_override`,
+    // `stale_qualified_override` and `unscoped_override_added` carry `key`.
     // Do NOT narrow this to an enum: a new type would then fail every result
     // it appears in.
     observations: {

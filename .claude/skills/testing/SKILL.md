@@ -136,7 +136,7 @@ production here are all plausible-looking parses that become a wrong verdict dow
 example has to fail for the reason the bug mattered.
 
 Corollary for the `It` title: it must claim no more than the assertion checks. `runs
-discover-repos first` asserted existence, not order.
+discover-repos.sh first` asserted existence, not order.
 
 ## Expected values come from an independent source
 
