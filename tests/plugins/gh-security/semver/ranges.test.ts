@@ -158,7 +158,7 @@ describe('satisfies', () => {
   // package.json), and a `10.3.0-beta.1` copy is admitted by that plain
   // caret range, which node-semver would exclude.
   //
-  // The upper bound of an x-range and of a caret has no `-0` here, so each
+  // The upper bound of an x-range and of a caret has no `-0` here. So each
   // admits the first prerelease of the next major. npm's `semver` 7.8.5
   // answers false for the last two rows. A partial version such as `22`
   // reads as npm does (#353), and does not admit `23.0.0-0`.
@@ -200,6 +200,7 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
     ['22.6.9', '22.7', false],
     ['22.8.0', '22.7', false],
     ['22.8.0-0', '22.7', false],
+    ['22.7.0-0', '22.7', false],
     ['22.0.0', '~22', true],
     ['22.7.7', '~22', true],
     ['21.9.9', '~22', false],
@@ -249,9 +250,9 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
   })
 
   // Pin examples. They pass when written. npm refuses each of these ranges
-  // ("Invalid comparator: -"), so its `satisfies` answers false. Here the
-  // lone `-` reads as the exact version 0.0.0, which no other comparator of
-  // the alternative admits beside it.
+  // (most with "Invalid comparator: -"), so its `satisfies` answers false.
+  // Here the lone `-` reads as the exact version 0.0.0, which no other
+  // comparator of the alternative admits beside it.
   it.each([
     ['1.2.3', '1.2.3 -'],
     ['0.0.0', '1.2.3 -'],
@@ -307,6 +308,10 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
     ['2.5.0', '1 - =2', true],
     ['2.0.0', '1.2.3+b - 2.0.0+c', true],
     ['2.0.1', '1.2.3+b - 2.0.0+c', false],
+    ['1.2.2', '1.2.3+b.1 - 2', false],
+    ['1.2.3', '1.2.3+b.1 - 2', true],
+    ['1.5.0', '1.X - 2', true],
+    ['3.0.0', '1.X - 2', false],
   ])('reads %s against the hyphen range %s as %s', (version, range, expected) => {
     expect(satisfies(version, range)).toBe(expected)
   })

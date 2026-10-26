@@ -34,7 +34,7 @@
 // One declared parity difference (#353): `satisfies` reads a partial version
 // such as `22` or `22.7`, with or without a tilde, as npm reads it. The jq of
 // node.sh reads `22` as the exact version 22.0.0 and `~22` as `>=22 <22.1.0`.
-// The rows of the last block assert that difference, and nothing else in the
+// The `differs on` rows assert that difference, and nothing else in the
 // answer differs. A hyphen range is the third form of #353. Both sides answer
 // `parseable: false` for it, so `range_facts` shows no difference there.
 import { join } from 'node:path'
