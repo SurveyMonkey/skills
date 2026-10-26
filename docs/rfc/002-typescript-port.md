@@ -298,7 +298,7 @@ ported. P3-4 is the retirement issue and runs last, which is why its row sits at
 | P3-6 | [#228](https://github.com/SurveyMonkey/skills/issues/228) | `preflight-repo` and `build-dispatches` |
 | P3-7 | [#229](https://github.com/SurveyMonkey/skills/issues/229) | `reap-batch` and `summarize-run` |
 | P3-8 | [#230](https://github.com/SurveyMonkey/skills/issues/230) | The `pr-status` renderer per repo, closing #193 |
-| P3-4 | [#231](https://github.com/SurveyMonkey/skills/issues/231) | Retire the ported common scripts, their specs, and the mechanical pins |
+| P3-4 | [#231](https://github.com/SurveyMonkey/skills/issues/231) | Retire the ported common scripts and their specs |
 
 **Phase 4: the drivers.**
 

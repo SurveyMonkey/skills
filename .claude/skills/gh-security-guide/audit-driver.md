@@ -59,7 +59,7 @@ What that header does not say, and what belongs here:
   `$WORK/advisories/` is read by a later invocation than the one that wrote it, so it is written
   to a temporary path and renamed into place, as the state file is, and validated on read by the
   same check the fresh query goes through: object-ness, all five promised fields, and `verdict`
-  being one of the four values `check-advisories.sh` emits. A torn entry read blind dies in the
+  being one of the four values `check-advisories` emits. A torn entry read blind dies in the
   parse with nothing to show for it, as the checkpoint contract's own `needs_judgment`,
   manufactured out of a half-written file.
 - **There is no one generic "is this JSON?" check, and the reason is not that it never fired.** It
@@ -100,7 +100,7 @@ What that header does not say, and what belongs here:
   them deadlocks a repository whose baseline refused every one, since `test-pin` refuses those by
   design and there would be no route to any report at all.
 - **The tested package's advisory answer never absorbs the collateral verdict.** `advisory_verdict`,
-  `advisory_count` and `matched_ranges` are `check-advisories.sh`'s reply about the pinned package
+  `advisory_count` and `matched_ranges` are the reply of `check-advisories` about the pinned package
   and nothing else; a collateral package's result lives in `collateral_verdict`. Derived instead
   from the pin's final status — which the collateral collapse overwrites — a pin whose own delta
   came back `safe` reported `advisory_verdict: "vulnerable"` with `matched_ranges: []`, and

@@ -6,7 +6,6 @@
 // a git that prints nothing, a git that is missing, or a spelling of a path
 // that the system has changed. The expected
 // values are written by hand from the contract in the header of the command.
-// The bash script is compared in `parity-discover-repos.test.ts`.
 import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

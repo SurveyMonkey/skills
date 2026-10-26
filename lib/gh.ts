@@ -22,9 +22,8 @@
 // **The transport is `process.ts`,** through the `run` option. So this
 // file's suite drives each failure in-process, with no `gh` on the machine.
 //
-// **One parity exception:** a `gh` that fails with an empty stderr gives the
-// detail `gh exited <status>`. The bash it replaces gave the empty text
-// (`discover-alerts.sh:441`). The port keeps the status on purpose (#302).
+// **Empty stderr:** a `gh` that fails with an empty stderr gives the detail
+// `gh exited <status>`, so a reader never sees an empty detail (#302).
 //
 // This file ships. It imports nothing outside the plugin, and stays inside
 // the erasable subset.
@@ -207,8 +206,7 @@ const DEFAULT_BRANCH_FIELDS = 'defaultBranchRef'
  * The page size of `listAdvisories`, the largest that the advisories
  * endpoint allows. `check-advisories` (#225) lists every advisory of one
  * package, so this endpoint is also not in the target stack's list, and is a
- * known divergence from it. It is the call that `check-advisories.sh` made,
- * with `--paginate --slurp`.
+ * known divergence from it. The call pages through every advisory.
  */
 const ADVISORY_PAGE_SIZE = 100
 
@@ -216,9 +214,8 @@ const ADVISORY_PAGE_SIZE = 100
  * The page size of `listDependabotAlerts`, the largest that the alerts
  * endpoint allows. `discover-alerts` (#225) reads every open alert of one
  * repository, so this endpoint is not in the target stack's list, and is a
- * known divergence from it. It is the call that `discover-alerts.sh` made,
- * with `--paginate --slurp`. The call also names the host, because a bare
- * path follows `GH_HOST`.
+ * known divergence from it. The call pages through every alert. It also
+ * names the host, because a bare path follows `GH_HOST`.
  */
 const ALERT_PAGE_SIZE = 100
 
@@ -268,9 +265,7 @@ const filter = (name: string, value: string | number | undefined): string[] =>
  *      missing repository without it.
  *   5. The signal, or the status, when stderr is empty.
  *
- * Parity exception, #302 (ruling 9). For an empty stderr the answer is
- * `gh exited <status>`. The bash script keeps the empty text for the same
- * failure (`discover-alerts.sh:441`, `pr_err`). The port names the status,
+ * For an empty stderr the answer is `gh exited <status>` (#302, ruling 9),
  * because a skip with an empty `error` tells a reader nothing.
  */
 const accountOf = (result: RunResult, boundMs?: number): string => {

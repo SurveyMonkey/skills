@@ -6,7 +6,8 @@
 [#216](https://github.com/SurveyMonkey/skills/issues/216)'s rule that nothing in this skill describes a
 bash or jq mechanism the port removes, and
 [#241](https://github.com/SurveyMonkey/skills/issues/241) deletes it.** It governs the shipped
-scripts that have not been ported yet, plus `detect-capacity.sh` and `notice-scan.sh`, which stay
+scripts that the port has not replaced yet (`ecosystems/node.sh`, `common/select-adapter.sh` and
+`common/require-linked-worktree.sh`), plus `detect-capacity.sh` and `notice-scan.sh`, which stay
 bash for good (RFC 002, Non-Goals). Which is which is the rollout table in
 [RFC 002](../../../docs/rfc/002-typescript-port.md). These targets outlive this section, and
 land in a section of their own beside the two scripts when this section goes.

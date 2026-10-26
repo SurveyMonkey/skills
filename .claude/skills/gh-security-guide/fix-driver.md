@@ -84,7 +84,7 @@ What that header does not say, and what belongs here:
 
 ## One group per package major line, and validate decides completeness
 
-`discover-alerts.sh` groups by package **and** the major of `first_patched_version`. Grouping by
+`discover-alerts` groups by package **and** the major of `first_patched_version`. Grouping by
 package alone collapsed every patched version into one `highest_fixed_version`, which described
 only the newest line while the older ones stayed vulnerable under a group reported as fixed
 ([#19](https://github.com/SurveyMonkey/skills/issues/19)). Anything that regroups or renames must

@@ -1,7 +1,6 @@
 // `gh-security ensure-worktree-exclude`. The seam is the exported function and the
 // handler. Every example runs on a real repository built by `harness/git.ts`,
-// and the expected file text is written by hand. The bash script is compared in
-// `parity-ensure-worktree-exclude.test.ts`.
+// and the expected file text is written by hand.
 //
 // The concurrency example starts real processes, because the lock is for
 // processes. Inside one process, the guarded section has no `await`, so two

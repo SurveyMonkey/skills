@@ -15,13 +15,13 @@ Everything else is used for real:
   exactly that, with real git and a mocked `gh`. A mocked collaborator tests the caller against a
   shape nothing emits, which is how two units that each pass their own suite disagree in the
   field.
-  Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh` and
-  `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their own
+  Commands that are pipeline neighbours rather than caller and callee (`discover-alerts` and
+  `classify-lines`, which the skill's pipeline runs in sequence) are each tested on their own
   seam and never against a mock of the other.
 - **Not an adapter, in the adapter's own tests.** It is reached through the contract its callers
   reach it through, and never by reaching past that into something it does not promise.
 - **Not git.** Fixtures are real `git init` repositories in scratch directories
-  (`spec/discover_repos_spec.sh`), including the shapes that are supposed to fail: a bare
+  (`tests/plugins/gh-security/subcommands/discover-repos.test.ts`), including the shapes that are supposed to fail: a bare
   repository, a `.git` with no traverse permission, a checkout missing `HEAD`, a pointer file whose
   gitdir is gone, and where the shape needs one, a real mount.
 - **Not the filesystem.** Real files, real directories, real symlinks, real permission bits, copied
@@ -112,5 +112,7 @@ written against it.
 
 **Never call count or order.** Retries, pagination and caching change both without changing
 behavior, and an example pinned to them breaks on a refactor that fixed nothing. The exception is
-an absence: "this endpoint was never called" is a behavioral claim, and it is the one the allowlist
-in `spec/pr_status_spec.sh` makes.
+an absence: "this endpoint was never called" is a behavioral claim, and it is the one the example
+`runs gh with the number and the repository, and the field list of the client` in
+`tests/plugins/gh-security/subcommands/pr-status.test.ts` makes: it asserts the one call and its
+argv.

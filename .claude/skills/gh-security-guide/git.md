@@ -31,7 +31,7 @@ the narrow window the preflight does not close (`docs/adr/009-decouple-pin-audit
 worktree *paths* not colliding is not the same as repository state not colliding
 ([#35](https://github.com/SurveyMonkey/skills/issues/35)).
 
-- `.git/info/exclude` is written once per repo by `common/ensure-worktree-exclude.sh`, called by
+- `.git/info/exclude` is written once per repo by `ensure-worktree-exclude`, called by
   the orchestrator before it dispatches any agent for that repo. Agents never write it. Two agents
   working the same repo start milliseconds apart, so a read-then-append from each can duplicate the
   line or tear the file.

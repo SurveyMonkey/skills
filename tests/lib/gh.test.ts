@@ -600,10 +600,8 @@ describe('searchOpenPullRequests', () => {
   }
 
   // Pin example. It passes when written. A search that fails with an empty
-  // stderr has the detail `gh exited <status>`. The bash script keeps the empty
-  // text there (`discover-alerts.sh:441`). The port keeps the status on
-  // purpose: a report that says nothing is worse than one with the status.
-  // This is a declared parity exception, #302 (ruling 9). The header of
+  // stderr has the detail `gh exited <status>`. A report that says nothing is
+  // worse than one with the status (#302, ruling 9). The header of
   // `lib/gh.ts` names it too.
   it('names the exit status for a search that fails with no stderr (parity exception, #302)', async () => {
     const { result } = ask({ status: 1 })

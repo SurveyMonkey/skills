@@ -4,15 +4,13 @@
 // The adapter is a stand-in, given through the registry parameter (`mocking.md`,
 // "The injected collaborator"). It stands in for the node adapter, and answers
 // `resolved_versions` and `declared_ranges` with fixed replies for each
-// package. Those replies are the ones that `spec/classify_lines_spec.sh` gives
-// its stand-in adapter, and that spec drew them from the specs of `node.sh`.
+// package. The replies are written by hand from the specs of `node.sh`.
 // `compare_versions` is the real semver of the node adapter, except for a
 // version that the stand-in refuses on purpose. Git is real: the `--base-ref`
 // examples run in repositories with a bare origin from `harness/git.ts`, and
 // a stand-in runner refuses one git call where an example needs a git
 // failure. The expected values are written by hand from the contract in the
-// header of the command. The pipeline of bash scripts is compared in
-// `parity-classify-lines.test.ts`.
+// header of the command.
 import {
   chmodSync,
   existsSync,

@@ -4,8 +4,7 @@
 // real node adapter, except in the examples about a verb that fails, where a
 // stand-in adapter fails on purpose. The advisories are written by hand from
 // the shape that the advisories endpoint gives. The expected values are
-// written by hand from the contract in the header of the command. The bash
-// script is compared in `parity-check-advisories.test.ts`.
+// written by hand from the contract in the header of the command.
 import { describe, expect, it } from 'vitest'
 
 import type { Adapter } from '#gh-security/adapters/adapter.ts'

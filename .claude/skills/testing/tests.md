@@ -43,14 +43,13 @@ names the pair that broke. The seam is the adapter CLI, through `adapter_jq`.
 
 ### The fixture is built so that dropping the guard is observable
 
-`spec/discover_repos_spec.sh`, `make_workspace` and `lists every immediate checkout root, sorted,
-deduped, and nothing else`.
+`tests/plugins/gh-security/subcommands/discover-repos.test.ts`, `workspace` and `lists every
+immediate checkout root, sorted by the path emitted, and nothing else`.
 
-The workspace is real: `git init -q` in a scratch directory for every shape, a bare repository, a
-checkout under a dot-directory, one two levels down, one with a space in its name, plus three
-symlinks. The expectation is the whole emitted list, built from resolved paths, and a second
-`Parameters` block names each shape that must never appear so a leak says which shape leaked
-instead of showing up as a diff.
+The workspace is real: `git init` in a scratch directory for every shape, a bare repository, a
+checkout under a dot-directory, one two levels down, plus symlinks. The expectation is the whole
+emitted list, built from resolved paths, and a second `it.each` table names each shape that must
+never appear so a leak says which shape leaked instead of showing up as a diff.
 
 The load-bearing detail is in the fixture, not the assertion: the link `into-elsewhere` points at
 `elsewhere/sub`, a subdirectory of a checkout **outside** the workspace. Pointed at a subdirectory
@@ -61,20 +60,17 @@ existed.
 
 ### The assertion is the whole shape, so a removed key stays removed
 
-`spec/discover_alerts_spec.sh`, `emits exactly actionable and skipped`.
+`tests/plugins/gh-security/subcommands/discover-alerts.test.ts`, `has every field of a group, read
+from its alerts`.
 
-```sh
-It 'emits exactly actionable and skipped'
-  When call discover 'keys'
-  The status should be success
-  The output should equal '["actionable","skipped"]'
-End
+```ts
+const { actionable } = await answer(['octo/app'])
+expect(actionable[0]).toEqual({ package: 'undici', ecosystem: 'npm', major_line: '7', /* ... */ repo: 'octo/app' })
 ```
 
-Why it is good: the rule is that the script answers for one repository, so there is no
-`skipped_repos` key for a consumer to read as a cross-repo summary (issue #188). `keys` compared to
-an exact array is the only assertion that can see the key come back. A `.actionable` projection, or
-a `should include`, passes either way.
+Why it is good: the group is compared to its whole literal shape, so a key that returns, such as
+a cross-repo `skipped_repos` summary (issue #188), or a key that goes, fails the example. A
+projection of one field, or a `toMatchObject`, passes either way.
 
 ## Bad, with the fix
 
@@ -138,7 +134,7 @@ proves its own pattern is not vacuous.
 
 ### A fixture whose shape never reaches the guard it exists for
 
-`spec/discover_repos_spec.sh`, before the `into-elsewhere` link was pointed out of the workspace.
+`discover-repos.test.ts`, before the `into-elsewhere` link was pointed out of the workspace.
 
 The root-only guard exists so that a symlink to a checkout's **subdirectory** is not listed as a
 checkout root. The fixture had such a link, and the example asserted the link's own name was absent
