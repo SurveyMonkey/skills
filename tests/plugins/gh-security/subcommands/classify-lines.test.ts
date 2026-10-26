@@ -1199,12 +1199,16 @@ describe('the relationship check (#335)', () => {
     },
   )
 
-  // #357. The real adapter on a tree whose root manifest is the JSON value
-  // `null`: the read fails, and the error is named.
-  it('names a root manifest that is not an object, and keeps the value of Dependabot', async () => {
+  // #357. The real adapter on a tree whose root manifest is JSON but not an
+  // object: the read fails, and the error is named.
+  it.each([
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['a number', '5'],
+  ])('names a root manifest that is %s, and keeps the value of Dependabot', async (_case, text) => {
     const fixture = useFixture('npm-dev-direct')
     onTestFinished(fixture.cleanup)
-    writeFileSync(join(fixture.path, 'package.json'), 'null')
+    writeFileSync(join(fixture.path, 'package.json'), text)
     const out = answerIn(
       await classifyLines(
         context(

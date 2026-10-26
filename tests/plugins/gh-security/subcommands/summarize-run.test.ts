@@ -1076,7 +1076,7 @@ describe('the checkouts and repositories that the batch never touched', () => {
     expect(sectionOf(run, 'Observations')).toBe(EXCLUDE_LINE)
   })
 
-  it('reads a failed call with a null or an absent exclude error as having none', () => {
+  it('reads a failed call with a null exclude error as having none', () => {
     const run: Run = {
       ...CLEAN,
       preflight: { [ROOT]: { error: 'a manifest that cannot be read', exclude_error: null } },
