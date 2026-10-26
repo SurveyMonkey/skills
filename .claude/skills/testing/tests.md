@@ -43,38 +43,36 @@ names the pair that broke. The seam is the adapter CLI, through `adapter_jq`.
 
 ### The fixture is built so that dropping the guard is observable
 
-`spec/discover_repos_spec.sh`, `make_workspace` and `lists every immediate checkout root, sorted,
-deduped, and nothing else`.
+`tests/plugins/gh-security/subcommands/discover-repos.test.ts`, `workspace` and `lists every
+immediate checkout root, sorted by the path emitted, and nothing else`.
 
-The workspace is real: `git init -q` in a scratch directory for every shape, a bare repository, a
-checkout under a dot-directory, one two levels down, one with a space in its name, plus three
-symlinks. The expectation is the whole emitted list, built from resolved paths, and a second
-`Parameters` block names each shape that must never appear so a leak says which shape leaked
-instead of showing up as a diff.
+The workspace is real. Each shape is a `git init` in a scratch directory: a bare repository, a
+checkout under a dot-directory, one two levels down, one with a space in its name, and three
+symlinks. The expectation is the whole emitted list, built from resolved paths. A second `it.each`
+table names each shape that must never appear. So a leak names its shape, and is not only a diff.
 
 The load-bearing detail is in the fixture, not the assertion: the link `into-elsewhere` points at
 `elsewhere/sub`, a subdirectory of a checkout **outside** the workspace. Pointed at a subdirectory
 of a checkout the workspace already lists, dropping the root-only guard would change nothing and the
 guard would be untested. Pointed where it is, dropping the guard adds `elsewhere` to the answer and
-the example fails. See the bad counterpart below, which is the same fixture before that link
-existed.
+the example fails. The bad counterpart below is the retired shellspec fixture of the same
+command, before that link existed.
 
 ### The assertion is the whole shape, so a removed key stays removed
 
-`spec/discover_alerts_spec.sh`, `emits exactly actionable and skipped`.
+`tests/plugins/gh-security/subcommands/discover-alerts.test.ts`, `answers empty lists for no
+alerts`.
 
-```sh
-It 'emits exactly actionable and skipped'
-  When call discover 'keys'
-  The status should be success
-  The output should equal '["actionable","skipped"]'
-End
+```ts
+it('answers empty lists for no alerts', async () => {
+  expect(await answer(['octo/app'], { alerts: [] })).toEqual({ actionable: [], skipped: [] })
+})
 ```
 
-Why it is good: the rule is that the script answers for one repository, so there is no
-`skipped_repos` key for a consumer to read as a cross-repo summary (issue #188). `keys` compared to
-an exact array is the only assertion that can see the key come back. A `.actionable` projection, or
-a `should include`, passes either way.
+Why it is good: the command answers for one repository. So the answer has no `skipped_repos` key
+that a consumer can read as a summary of many repositories (issue #188). Only an exact compare of
+the whole answer sees that key come back. A projection of `actionable`, or a `toMatchObject`,
+passes either way.
 
 ## Bad, with the fix
 
@@ -138,7 +136,8 @@ proves its own pattern is not vacuous.
 
 ### A fixture whose shape never reaches the guard it exists for
 
-`spec/discover_repos_spec.sh`, before the `into-elsewhere` link was pointed out of the workspace.
+The shellspec suite of `discover-repos`, before the `into-elsewhere` link was pointed out of the
+workspace, until #231 removed it.
 
 The root-only guard exists so that a symlink to a checkout's **subdirectory** is not listed as a
 checkout root. The fixture had such a link, and the example asserted the link's own name was absent

@@ -137,10 +137,9 @@ mock_gh_cleanup() {
 # string matches an `api` call whose path carries one, without also matching
 # an unrelated branch that merely shares a name prefix. `file` is read
 # at call time, not copied, so a test that later overwrites the same path
-# (many discover-alerts.sh examples rewrite $GH_MOCK_DIR/alerts.json in
-# place) is answered with the new content. The optional third argument is a
+# in place is answered with the new content. The optional third argument is a
 # file of stderr chatter gh should still emit on this otherwise-successful
-# call (the release-upgrade notice pr-status.sh must tolerate).
+# call, such as the release-upgrade notice of gh.
 #
 # The last registration whose key matches a given call wins, so a `Before`
 # hook can register a default and one example can override it.

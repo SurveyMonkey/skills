@@ -6,7 +6,7 @@
 // `head:` search in a map. Version order comes from the real node adapter,
 // except where a stand-in registry breaks `compare_versions` on purpose. The
 // expected values are written by hand from the contract in the header of the
-// command. The bash script is compared in `parity-discover-alerts.test.ts`.
+// command.
 import { describe, expect, it } from 'vitest'
 
 import type { Adapter } from '#gh-security/adapters/adapter.ts'

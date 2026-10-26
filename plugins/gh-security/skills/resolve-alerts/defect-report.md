@@ -31,13 +31,14 @@ package names.
 
 **Consent gates filing.** Propose the drafted title and body and file only on the user's go-ahead,
 unless the user pre-authorized defect reports earlier in this session. Either way, the closing
-report in phase 8 states what was filed or proposed, with the issue number or URL once it exists.
+report states what was filed or proposed, with the issue number or URL once it exists. The closing
+report is phase 8 of `resolve-alerts` and step 7 of `audit-pins`.
 
-**The identity that files the report is resolved separately from the identity that ran the batch,
-and is never assumed to be the same.** The batch's credentials may belong to an account barred from
+**The identity that files the report is resolved separately from the identity of the run,
+and is never assumed to be the same.** The run's credentials may belong to an account barred from
 contributing to outside repositories, such as an Enterprise Managed User.
 
-- Never file under the batch's credentials without the reachability probe above.
+- Never file under the run's credentials without the reachability probe above.
 - When the session context documents another, capable account for this repository (a wrapper
   command or a second `gh` config for its directory), use it for the report, under the same
   consent that covers the report itself. A bare `cd` into that directory is never the mechanism.

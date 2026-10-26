@@ -15,13 +15,13 @@ Everything else is used for real:
   exactly that, with real git and a mocked `gh`. A mocked collaborator tests the caller against a
   shape nothing emits, which is how two units that each pass their own suite disagree in the
   field.
-  Scripts that are pipeline neighbours rather than caller and callee (`discover-alerts.sh` and
-  `classify-lines.sh`, which the skill's pipeline runs in sequence) are each tested on their own
+  Commands that are pipeline neighbours rather than caller and callee (`discover-alerts` and
+  `classify-lines`, which the skill's pipeline runs in sequence) are each tested on their own
   seam and never against a mock of the other.
 - **Not an adapter, in the adapter's own tests.** It is reached through the contract its callers
   reach it through, and never by reaching past that into something it does not promise.
 - **Not git.** Fixtures are real `git init` repositories in scratch directories
-  (`spec/discover_repos_spec.sh`), including the shapes that are supposed to fail: a bare
+  (`tests/plugins/gh-security/subcommands/discover-repos.test.ts`), including the shapes that are supposed to fail: a bare
   repository, a `.git` with no traverse permission, a checkout missing `HEAD`, a pointer file whose
   gitdir is gone, and where the shape needs one, a real mount.
 - **Not the filesystem.** Real files, real directories, real symlinks, real permission bits, copied
@@ -96,13 +96,12 @@ conditional logic in test setup the SDK shape exists to remove.
 `harness/gh.ts` is the first two semantics for vitest: a factory answering with a `GhClient` whose
 every method rejects until the example registers a reply or a failure for it. A registered failure
 rejects with a `GhError` that carries the real wording as its `detail`. It keeps no request log,
-as in the target stack, so the last two semantics and the next section apply to the shellspec
-mock only, until a vitest example needs a log.
+as in the target stack. So a vitest example asserts an absence with a client that fails that
+call: the call, if it occurs, fails the example.
 
-Until the last bash script is ported, the shellspec suite keeps its own command-based `gh` mock
-(`spec/support/gh-mock-dispatch.sh`, registered from `spec/spec_helper.sh`), carrying those same
-four semantics for the specs that still drive a script through its CLI. It retires with the
-scripts it serves ([#241](https://github.com/SurveyMonkey/skills/issues/241)); nothing new is
+The shellspec suite keeps its own command-based `gh` mock (`spec/support/gh-mock-dispatch.sh`,
+registered from `spec/spec_helper.sh`), with those same four semantics. No spec uses it after
+#231. It goes with [#241](https://github.com/SurveyMonkey/skills/issues/241), and nothing new is
 written against it.
 
 ## What a log assertion may claim
@@ -112,5 +111,5 @@ written against it.
 
 **Never call count or order.** Retries, pagination and caching change both without changing
 behavior, and an example pinned to them breaks on a refactor that fixed nothing. The exception is
-an absence: "this endpoint was never called" is a behavioral claim, and it is the one the allowlist
-in `spec/pr_status_spec.sh` makes.
+an absence: "this endpoint was never called" is a behavioral claim. The example `never asks the
+alerts endpoint` in `tests/plugins/gh-security/subcommands/discover-alerts.test.ts` makes it.

@@ -7,7 +7,7 @@
 // which is the `--env-prefix` wrap. `ssh -G` is real, but it reads only the
 // ssh configuration that the example writes (`sshReading`). The expected values are written by hand
 // from the contract in the header of the command, and the repository name is
-// fictitious. The bash script is compared in `parity-detect-scope.test.ts`.
+// fictitious.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

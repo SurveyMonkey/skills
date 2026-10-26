@@ -4,15 +4,13 @@
 // The adapter is a stand-in, given through the registry parameter (`mocking.md`,
 // "The injected collaborator"). It stands in for the node adapter, and answers
 // `resolved_versions` and `declared_ranges` with fixed replies for each
-// package. Those replies are the ones that `spec/classify_lines_spec.sh` gives
-// its stand-in adapter, and that spec drew them from the specs of `node.sh`.
+// package. The replies are written by hand from the specs of `node.sh`.
 // `compare_versions` is the real semver of the node adapter, except for a
 // version that the stand-in refuses on purpose. Git is real: the `--base-ref`
 // examples run in repositories with a bare origin from `harness/git.ts`, and
 // a stand-in runner refuses one git call where an example needs a git
 // failure. The expected values are written by hand from the contract in the
-// header of the command. The pipeline of bash scripts is compared in
-// `parity-classify-lines.test.ts`.
+// header of the command.
 import {
   chmodSync,
   existsSync,
@@ -620,6 +618,28 @@ const realStatuses = async (fixture: string, groups: readonly Group[]) => {
     errors: out.classify_errors,
   }
 }
+
+// The real adapter refuses a Yarn Classic lockfile in `detect`. The group
+// stays actionable as `unknown`, and `classify_errors` names the refusal of
+// the adapter. The error text is the one that the bash adapter wrote
+// (`scripts/ecosystems/node.sh:440`). The stand-in examples above cannot see
+// this join of the real adapter and the command.
+describe('a lockfile that the real adapter refuses', () => {
+  it('keeps the group unknown and names the refusal on a Yarn Classic lockfile', async () => {
+    expect(await realStatuses('yarn-classic', [group('lodash', '4')])).toEqual({
+      actionable: ['lodash@4:unknown'],
+      skipped: [],
+      errors: [
+        {
+          adapter: 'node',
+          package: 'lodash',
+          error:
+            'Yarn Classic (v1) is not supported; only Yarn Berry (v2+). See .github/CONTRIBUTING.md to request support.',
+        },
+      ],
+    })
+  })
+})
 
 // #168. The four field shapes of the issue, on a real `npm install
 // --package-lock-only` lockfile (npm 11.19.0): each package resolves one copy,

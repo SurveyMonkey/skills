@@ -6,9 +6,9 @@
 # repository, discovery went to the API, and a whole phase cloned whatever
 # the machine lacked into a destination the user was asked about.
 #
-# The executable half is spec/discover_repos_spec.sh (the checkout rule) and
-# spec/common_scripts_spec.sh (detect-scope.sh reads one checkout's identity
-# from origin). This file pins the half that lives in prose, because the
+# The executable half is tests/plugins/gh-security/subcommands/discover-repos.test.ts
+# (the checkout rule) and detect-scope.test.ts (one checkout's identity from
+# origin). This file pins the half that lives in prose, because the
 # orchestrator is the only thing that consumes the discovered list, and the
 # things this issue removed — the scope question, the clone step, the
 # temporary directory and its `rm -rf` grant — were never visible to any
@@ -132,8 +132,8 @@ Describe 'scope is the checkouts on disk, in prose (issue #188)'
     End
 
     # The three answers the question used to offer, and the discovery modes
-    # behind two of them. `--scope` covers the discover-alerts.sh flag that
-    # carried org and user discovery to the API.
+    # behind two of them. `--scope` covers the flag of the retired
+    # `discover-alerts.sh` that carried org and user discovery to the API.
     Describe 'none of the old modes survive'
       Parameters
         org-option    'This org'

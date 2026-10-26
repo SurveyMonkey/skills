@@ -48,7 +48,7 @@ carries the marker. A new mechanical pin needs a new successor script, and a cha
 
 ## Totals
 
-237 pins across 15 files: 237 `judgment`, 0 `mechanical`.
+238 pins across 15 files: 238 `judgment`, 0 `mechanical`.
 
 Each mechanical pin was retired in the same change that landed its successor, a command in the
 TypeScript port of gh-security. No mechanical pin remains.
@@ -154,10 +154,11 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 351 | scopes the scripts dependency rule to what runs on a user machine | judgment | - |
 | 357 | forbids the shipped code from importing the workflow file | judgment | - |
 
-### `spec/audit_pins_rules_spec.sh`: 44 pins (44 judgment, 0 mechanical)
+### `spec/audit_pins_rules_spec.sh`: 45 pins (45 judgment, 0 mechanical)
 
 | Line | `It` title | Class | Successor script |
 |---|---|---|---|
+| 43 | has a definition that maps a non-zero count onto collateral_changes null | judgment | - |
 | 78 | requires the combined test before any PR | judgment | - |
 | 88 | routes a failed combined install to the compose phase | judgment | - |
 | 97 | routes a broken advisory lookup to the advisories phase, not a failed attempt | judgment | - |
@@ -224,7 +225,7 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 72 | forbids naming the target repository, owner, org, or topology | judgment | - |
 | 80 | gates filing on the user'"'"'s go-ahead, or a prior in-session authorization | judgment | - |
 | 86 | requires the closing report to say what was filed or proposed | judgment | - |
-| 94 | resolves the reporting identity separately from the batch identity | judgment | - |
+| 94 | resolves the reporting identity separately from the run identity | judgment | - |
 | 100 | names the EMU case as barred from contributing here | judgment | - |
 | 106 | allows switching to a discoverable capable account under the same consent | judgment | - |
 | 112 | never invents a switched identity silently | judgment | - |

@@ -24,7 +24,7 @@ it, and carries it in the dispatch payload. Each agent then prepends it verbatim
 `git`, package-manager, and adapter-script invocation — composed **after** the command's own `cd`
 locator, because the prefix injects environment without changing directory — and runs those
 commands bare when the field is absent. It wraps a command, not a shell builtin, so it can never
-stand in for a `cd`. `check-advisories.sh` makes its own `gh` call, so it takes the same wrapping.
+stand in for a `cd`.
 The ported commands `pr-status` and `check-advisories` take `--env-prefix` and wrap their `gh` calls
 with it. The ported command `detect-scope` takes `--env-prefix` and wraps its `gh`, `git` and `ssh -G`
 calls with it. The ported command `discover-repos` runs `git` and takes no `--env-prefix`. The ported

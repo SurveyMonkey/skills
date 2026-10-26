@@ -3,8 +3,7 @@
 // client from `harness/gh.ts`, or the real client on a runner that records its
 // argv. `gh` is the one mock boundary (`mocking.md`). The expected entries are
 // written by hand from the contract in the header of the command, and the
-// recorded reply is a real `gh pr view` answer. The bash script is compared
-// in `parity-pr-status.test.ts`.
+// recorded reply is a real `gh pr view` answer.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -184,6 +183,7 @@ describe('the checks derivation', () => {
       ['lint'],
     ],
     ['a cancelled check', [checkRun('e2e', 'CANCELLED')], 'failed', [1, 0, 1, 0], ['e2e']],
+    ['a timed out check', [checkRun('e2e', 'TIMED_OUT')], 'failed', [1, 0, 1, 0], ['e2e']],
     [
       'a check that finished with no conclusion',
       [checkRun('e2e', null)],

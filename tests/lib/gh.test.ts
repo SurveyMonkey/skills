@@ -600,12 +600,10 @@ describe('searchOpenPullRequests', () => {
   }
 
   // Pin example. It passes when written. A search that fails with an empty
-  // stderr has the detail `gh exited <status>`. The bash script keeps the empty
-  // text there (`discover-alerts.sh:441`). The port keeps the status on
-  // purpose: a report that says nothing is worse than one with the status.
-  // This is a declared parity exception, #302 (ruling 9). The header of
+  // stderr has the detail `gh exited <status>`. A report that says nothing is
+  // worse than one with the status (#302, ruling 9). The header of
   // `lib/gh.ts` names it too.
-  it('names the exit status for a search that fails with no stderr (parity exception, #302)', async () => {
+  it('names the exit status for a search that fails with no stderr (#302)', async () => {
     const { result } = ask({ status: 1 })
     const error = (await result.catch((thrown: unknown) => thrown)) as GhError
     expect({ detail: error.detail, status: error.status }).toEqual({
@@ -799,7 +797,7 @@ describe('createLabel', () => {
     expect(error).toBeInstanceOf(GhError)
   })
 
-  it('names the exit status for a failure with no stderr (parity exception, #302)', async () => {
+  it('names the exit status for a failure with no stderr (#302)', async () => {
     const error = (await ask({ status: 1, stdout: 'only on stdout\n' }).result.catch(
       (thrown: unknown) => thrown,
     )) as GhError
