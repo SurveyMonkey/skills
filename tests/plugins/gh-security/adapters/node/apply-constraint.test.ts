@@ -1608,13 +1608,17 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
 
   // Each git spec form that npm-package-arg reads with a `#semver:` range of
   // `^4.4.0` (probe: `npa('debug@<spec>').gitRange` of npm 11.19.0). A
-  // `::path:` part after the range does not change the range.
+  // `::path:` part, or a `:` part, after the range does not change the range.
   it.each([
     ['github:debug-js/debug#semver:^4.4.0'],
+    ['gitlab:debug-js/debug#semver:^4.4.0'],
+    ['bitbucket:debug-js/debug#semver:^4.4.0'],
+    ['gist:debug-js/debug#semver:^4.4.0'],
     ['debug-js/debug#semver:^4.4.0'],
     ['git+ssh://git@github.com/debug-js/debug.git#semver:^4.4.0'],
     ['git://github.com/debug-js/debug.git#semver:^4.4.0'],
     [`${DEBUG_GIT}#semver:^4.4.0::path:packages/debug`],
+    [`${DEBUG_GIT}#semver:^4.4.0:extra`],
   ])('writes inside the debug@4 key for the git edge %s', (spec) => {
     expect(manifestAfter(GIT_EDGE, msRange, rootDebug(spec)).overrides).toEqual({
       'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' },
@@ -1632,9 +1636,12 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
     )
   })
 
+  // npm-package-arg reads `%5E4.4.0` as `^4.4.0`. The pass does not decode
+  // it, and refuses.
   it.each([
     ['latest', `${DEBUG_GIT}#semver:latest`, '["latest"]'],
     ['an empty range', `${DEBUG_GIT}#semver:`, '[""]'],
+    ['percent-encoded', `${DEBUG_GIT}#semver:%5E4.4.0`, '["%5E4.4.0"]'],
   ])('refuses a git edge whose #semver: range is %s', (_title, spec, ranges) => {
     expect(refusalOf(GIT_EDGE, msRange, rootDebug(spec))).toBe(
       `apply_constraint: cannot scope 'ms': a git edge into a copy of its parent has a '#semver:' range that the range rules cannot read, beside pre-existing version-qualified override keys for that parent: [{"parent":"debug","keys":["debug@4"],"ranges":${ranges}}]. npm matches a key for such an edge only through that range, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #359), so nothing was written; reconcile the existing override by hand.`,
@@ -1653,9 +1660,19 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
       'https://github.com/debug-js/debug.git#semver:^4.4.0',
     ],
     ['a directory with a #semver: part', 'file:vendor/debug#semver:^4.4.0'],
+    ['a relative directory with a #semver: part', './debug#semver:^4.4.0'],
   ])('refuses a key beside an edge from %s', (_title, spec) => {
     expect(refusalOf(GIT_EDGE, msRange, rootDebug(spec))).toBe(
       OTHER('[{"parent":"debug","keys":["debug@4"],"versions":["4.4.3"]}]', 'ms'),
+    )
+  })
+
+  // npm-package-arg reads `~/debug#semver:^4.4.0` as a directory. The pass
+  // does not read it as git. Its leading `~` then reads as a range that
+  // admits no version, so the key is unsure.
+  it('refuses a key beside an edge from a home directory with a #semver: part', () => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug('~/debug#semver:^4.4.0'))).toBe(
+      UNSURE('[{"parent":"debug","key":"debug@4","versions":["4.4.3"]}]', 'ms'),
     )
   })
 })

@@ -126,14 +126,18 @@ export const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?
 // A git spec, as npm-package-arg reads one: a `git+` or `git:` URL, a host
 // prefix, or an `owner/repo` shorthand. A git spec of another form, such as an
 // https URL of a host, does not match. Its edge is then an edge of another
-// spec, and the pass refuses it.
-const GIT_SPEC = /^(?:git\+[a-z]+:|git:|github:|gitlab:|bitbucket:|gist:|[^/:@#\s]+\/[^/:#\s]+#)/i
+// spec, and the pass refuses it. npm-package-arg reads a spec that starts
+// with `.` or `~` as a directory, so the shorthand does not start with one.
+const GIT_SPEC =
+  /^(?:git\+[a-z]+:|git:|github:|gitlab:|bitbucket:|gist:|(?![.~])[^/:@#\s]+\/[^/:#\s]+#)/i
 
 /**
  * The `#semver:` range of a git spec, as `setGitAttrs` of npm-package-arg
  * reads it: the text after `semver:` up to the next `:`, in the part of the
  * committish that starts with `semver:`. Parts split at `::`. It is null for a
  * git spec with no such part, and for a spec that is not a git spec.
+ * npm-package-arg also decodes percent escapes in the range. This function
+ * does not, so the pass refuses such a range as one it cannot read.
  */
 export const gitRangeOf = (spec: string): string | null => {
   const hash = spec.indexOf('#')
