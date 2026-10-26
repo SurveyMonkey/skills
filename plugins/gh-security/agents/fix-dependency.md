@@ -175,7 +175,9 @@ not: an `alias_lookup` with `source: "lockfile"` (npm, Yarn Berry) with a non-em
 `parents_unresolved` (an aliased copy did not move); each of `parents_unreadable`, marked when
 also in `parents_malformed`; `superseded_keys`; and the observations `pnpm_major_unknown` and
 `manifest_pnpm_overrides_ignored`. An `alias_lookup` with `source: "unsupported"` (pnpm) is a
-known limit, not a warning ([#49](https://github.com/SurveyMonkey/skills/issues/49)).
+known limit, not a warning ([#49](https://github.com/SurveyMonkey/skills/issues/49)). The body
+lists the observations `stale_qualified_override`, `untargeted_downgrade` and
+`fix_effects_failed` in its own section. Do not restate them.
 
 A failed `create` that carries `pr_url` opened that PR. Do not retry: fail (phase `pr`) with that
 `pr_url`. Never merge the PR, never enable auto-merge on it, and do not offer to either.
@@ -219,7 +221,9 @@ End your final message with exactly one fenced JSON block:
 
 - `action`, `resolved_version`, `bare_override` and `requires_major_bump` are `ready_for_pr`'s.
   `risk` is `band`, `score`, `f4` and `f5` of the `risk` in `ready_for_pr`.
-- `observations` is the driver's array verbatim. When `bare_override` is `added`, append
+- `observations` is the driver's array verbatim: the entries of `apply_constraint`, then
+  `stale_qualified_override`, `untargeted_downgrade` and `fix_effects_failed` from
+  `fix-group apply`. When `bare_override` is `added`, append
   `{"type": "unscoped_override_added", "key", "range", "targets_this_package": true, "reason"}`,
   whose `reason` names the resolved copies and the scoped parents you tried.
 - `cleanup` is required on every result, and it is `null` only

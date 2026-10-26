@@ -84,15 +84,15 @@ Describe 'the defect-report guidance in resolve-alerts (#148)'
     End
 
     It 'requires the closing report to say what was filed or proposed'
-      When call phrase_in "$DEFECT" 'the closing report in phase 8 states what was filed'
+      When call phrase_in "$DEFECT" 'the closing report states what was filed'
       The status should be success
       The output should equal '1'
     End
   End
 
   Describe 'the identity sentence'
-    It 'resolves the reporting identity separately from the batch identity'
-      When call phrase_in "$DEFECT" 'The identity that files the report is resolved separately from the identity that ran the batch'
+    It 'resolves the reporting identity separately from the run identity'
+      When call phrase_in "$DEFECT" 'The identity that files the report is resolved separately from the identity of the run'
       The status should be success
       The output should equal '1'
     End

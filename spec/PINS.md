@@ -225,7 +225,7 @@ TypeScript port of gh-security. No mechanical pin remains.
 | 72 | forbids naming the target repository, owner, org, or topology | judgment | - |
 | 80 | gates filing on the user'"'"'s go-ahead, or a prior in-session authorization | judgment | - |
 | 86 | requires the closing report to say what was filed or proposed | judgment | - |
-| 94 | resolves the reporting identity separately from the batch identity | judgment | - |
+| 94 | resolves the reporting identity separately from the run identity | judgment | - |
 | 100 | names the EMU case as barred from contributing here | judgment | - |
 | 106 | allows switching to a discoverable capable account under the same consent | judgment | - |
 | 112 | never invents a switched identity silently | judgment | - |

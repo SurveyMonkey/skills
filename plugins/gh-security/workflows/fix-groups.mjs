@@ -6,8 +6,8 @@
 // and it does exactly two things: fan one `fix-dependency` agent out per
 // approved group, bounded by the machine capacity cap, and validate each
 // result against the Result contract in agents/fix-dependency.md. The reap
-// (one common/post-agent.sh call per returned entry) and the phase 7 summary
-// stay with the orchestrator; see ADR 003's amendments.
+// (`gh-security reap-batch`, one report per returned entry) and the phase 7
+// summary stay with the orchestrator; see ADR 003's amendments.
 //
 // ---------------------------------------------------------------------------
 // Why this file has no `import`, and why it is split by markers
@@ -64,7 +64,7 @@ const RESULT_SCHEMA = {
       required: ['band', 'score', 'f4', 'f5'],
       properties: {
         // The scorer's own three bands (docs/adr/006, and the
-        // merge-risk:low/medium/high labels render-pr.sh applies).
+        // merge-risk:low/medium/high labels `gh-security render-pr` applies).
         band: { enum: ['Low', 'Medium', 'High'] },
         score: { type: 'number' },
         f4: { type: 'number' },
@@ -73,10 +73,11 @@ const RESULT_SCHEMA = {
     },
     // `type` is the only field every observation carries: the adapter emits
     // `unscoped_override`, `manifest_pnpm_overrides_ignored` and
-    // `pnpm_major_unknown`, the agent appends `unscoped_override_added`, and
-    // only the two override shapes carry `key`.
-    // Do NOT narrow this to an enum: an adapter gaining a fourth type would
-    // then fail every result it appears in.
+    // `pnpm_major_unknown`, `fix-group apply` adds `stale_qualified_override`,
+    // `untargeted_downgrade` and `fix_effects_failed` (#334), and the agent
+    // appends `unscoped_override_added`. Only the override shapes carry `key`.
+    // Do NOT narrow this to an enum: a new type would then fail every result
+    // it appears in.
     observations: {
       type: 'array',
       items: {
@@ -121,7 +122,7 @@ const RESULT_SCHEMA = {
         detail: { type: 'string' },
       },
     },
-    // `fix-group.sh cleanup` runs AFTER the commit, push and `gh pr create`,
+    // `gh-security fix-group cleanup` runs AFTER the commit, push and `gh pr create`,
     // and exits 3 when it leaves a worktree behind. That failure can follow
     // completed work, so it is reported here rather than through `failure`:
     // null when cleanup finished with no errors, otherwise the driver's own
@@ -131,7 +132,7 @@ const RESULT_SCHEMA = {
     // Forcing a cleanup error into the `failure` branch would make the agent
     // choose between reporting `success` and hiding the leak — the exact
     // thing `exit 3` exists to prevent — or reporting `failure`, which hides
-    // a real open PR from phase 7 AND suppresses `post-agent.sh`'s reap,
+    // a real open PR from phase 7 AND suppresses the reap of `reap-batch`,
     // since that only reaps a verified-open PR from a `success`. The leak
     // would then be missed by the second line of defence too. So
     // `crossFieldViolations` below deliberately says nothing about `cleanup`.
@@ -140,7 +141,7 @@ const RESULT_SCHEMA = {
     // and acted on, which can differ textually from the ones the orchestrator
     // dispatched (`/private/var/...` against `/var/...` on macOS is the
     // specimen). Anything correlating them with a path built anywhere else —
-    // `post-agent.sh` derives its own, unresolved — must resolve or
+    // `reap-batch` derives its own, unresolved — must resolve or
     // suffix-match rather than compare strings, or one leaked directory reads
     // as two.
     cleanup: {
@@ -177,8 +178,8 @@ const RESULT_SCHEMA = {
 
 // Exactly one of no_op/failure is non-null, both are null on success, and
 // each agrees with `status`. Without this, {"status":"failure",
-// "failure":null} is field-for-field structurally valid, clears
-// post-agent.sh's gate (which reads only branch/package/major_line), and
+// "failure":null} is field-for-field structurally valid, clears the gate of
+// `reap-batch` (which reads only branch/package/major_line), and
 // reaches phase 7's "failures get their phase and detail" with no data.
 //
 // bare_override must agree with action, in both directions — but ONLY on
@@ -195,7 +196,7 @@ const RESULT_SCHEMA = {
 // validator and the instruction the model actually reads agree.
 //
 // Returns an array of violation strings; empty means the result is
-// consistent. Never throws: `post-agent.sh` and phase 7 read `no_op`,
+// consistent. Never throws: `reap-batch` and phase 7 read `no_op`,
 // `failure`, `action` and `bare_override` directly off the result already,
 // so a violation here is logged rather than failing the whole batch — the
 // same information those two readers would otherwise silently disagree
@@ -376,7 +377,7 @@ const worker = async () => {
       throw e
     }
     // The schema can no longer express these rules (#200), so check them here
-    // and warn: `post-agent.sh` and phase 7 read `no_op`/`failure`/`action`/
+    // and warn: `reap-batch` and phase 7 read `no_op`/`failure`/`action`/
     // `bare_override` off this same result directly, so failing the batch
     // over an inconsistency they will surface anyway would lose a completed
     // fix — including one that already opened a pull request — for a defect
