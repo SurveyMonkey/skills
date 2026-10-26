@@ -94,6 +94,11 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     load: async () => (await import('../subcommands/reap-batch.ts')).reapBatchCommand,
     out: 'every call',
   },
+  'remove-run': {
+    description:
+      'Remove the directory of one resolve-alerts run, only under plugins/data/<id>/runs/: remove-run <dir>',
+    load: async () => (await import('../subcommands/remove-run.ts')).removeRunCommand,
+  },
   'render-pr': {
     description:
       'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',

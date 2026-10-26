@@ -21,6 +21,7 @@ import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
+import { removeRunCommand } from '#gh-security/subcommands/remove-run.ts'
 import { renderPrCommand } from '#gh-security/subcommands/render-pr.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
@@ -56,6 +57,7 @@ describe('the registry', () => {
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/reap-batch.ts')",
+      "import('../subcommands/remove-run.ts')",
       "import('../subcommands/render-pr.ts')",
       "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/score-merge-risk.ts')",
@@ -79,6 +81,7 @@ describe('the discovery entries', () => {
     ['preflight-repo', preflightRepoCommand],
     ['prepare-checkout', prepareCheckoutCommand],
     ['reap-batch', reapBatchCommand],
+    ['remove-run', removeRunCommand],
     ['render-pr-status', renderPrStatusCommand],
     ['summarize-run', summarizeRunCommand],
   ])('loads the handler of %s', async (name, handler) => {
@@ -111,6 +114,7 @@ describe('the discovery entries', () => {
     ],
     ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root> [--out <file>]'],
     ['reap-batch', 'reap-batch <results.json> [--out <file>]'],
+    ['remove-run', 'remove-run <dir>'],
     [
       'summarize-run',
       'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
