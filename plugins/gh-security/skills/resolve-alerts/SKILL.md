@@ -150,7 +150,7 @@ case where the remedy is your login flow for that registry) and that a new run p
 a user who wants to dispatch past a failed probe says so in conversation.
 
 Write `<run>/preflights.json`: one object from each repo's `checkout` (as `merged.json` spells it)
-to its answer. For a non-zero exit, use the JSON that the command wrote on stdout: `{"error": ..., "exclude_error": ...}`.
+to its answer. For a non-zero exit, use the JSON that the command wrote on stdout: `{"error": ...}`, with an `exclude_error` when the probe failed.
 
 ## Phase 6: Dispatch the fix workflow
 

@@ -491,7 +491,7 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
         checkout,
         nwo,
         error: text(answer.error, `${at}.error`),
-        // Absent or null: the call failed before it tried the exclude.
+        // Absent: the call failed before the exclude. Null: the exclude worked.
         excludeError:
           answer.exclude_error === undefined
             ? null
