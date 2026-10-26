@@ -173,6 +173,41 @@ describe('satisfies', () => {
   )
 })
 
+describe('satisfies, the npm forms of a partial version and a hyphen range (#353)', () => {
+  // Red first: `it.fails` until the fix, because the pre-commit hook runs
+  // this file. Each expected value is the answer of npm's own `semver` 7.8.5,
+  // the copy that npm 11.19.0 bundles.
+  it.fails.each([
+    ['22.7.7', '22', true],
+    ['22.7.9', '22.7', true],
+    ['22.7.7', '~22', true],
+    ['22.8.0-0', '~22.7', false],
+    ['22.7.7', '=22', true],
+    ['22.7.7', 'v22.7', true],
+    ['1.2.0', '1.2 - 2.3.4', true],
+    ['2.3.4', '1.2 - 2.3.4', true],
+    ['1.2.3', '1.2.3 - 2.3', true],
+    ['2.3.9', '1.2.3 - 2.3', true],
+    ['1.2.3', '1.2.3 - 2', true],
+    ['2.9.9', '1.2.3 - 2', true],
+    ['23.9.9', '22 - 23', true],
+    ['22.7.7', '22.0.0 - 22.9.9', true],
+    ['5.1.0', '1.2.3 - 2.3.4 || 5', true],
+  ])('reads %s against %s as %s', (version, range, expected) => {
+    expect(satisfies(version, range)).toBe(expected)
+  })
+
+  it.fails.each([
+    ['22', ['>=22.0.0', '<23.0.0-0']],
+    ['22.7', ['>=22.7.0', '<22.8.0-0']],
+    ['~22', ['>=22.0.0', '<23.0.0-0']],
+    ['~22.7', ['>=22.7.0', '<22.8.0-0']],
+    ['=22', ['>=22.0.0', '<23.0.0-0']],
+  ])('expands %s to %j', (token, expected) => {
+    expect(expandToken(token)).toEqual(expected)
+  })
+})
+
 describe('caretUpper', () => {
   // The bound a caret expands to, hand-written from the definition: the
   // first non-zero core component is the one that moves, so a 0.x line is
