@@ -91,18 +91,28 @@ Describe 'the prose pin inventory (issue #197)'
     inline_fns=$(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{.*\.md"' "$f" \
       | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/' | sort -u)
     fnpat=$(printf '%s\n' "$inline_fns" | paste -sd'|' -)
+    # A helper is called by its whole name: the pattern below brackets each
+    # name with a character that cannot continue an identifier. No \< \>
+    # word boundaries, because BSD awk (the macOS default) does not support
+    # them.
     pat='phrase_in|count_in|rule_in'
+    if [ -n "$varpat" ]; then
+      # A one-line helper declared in this file whose body reads a path
+      # variable (audit_pins_rules_spec.sh's `rule()`). The declaring line
+      # is found here, and each call site is counted by the name.
+      var_fns=$(grep -E "^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\\(\\)[[:space:]]*\\{.*\\\$($varpat)([^A-Za-z0-9_]|\$)" "$f" \
+        | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/' | sort -u)
+      fnpat=$(printf '%s\n%s\n' "$inline_fns" "$var_fns" | sed '/^$/d' | sort -u | paste -sd'|' -)
+    fi
+    if [ -n "$fnpat" ]; then
+      pat="$pat|$fnpat"
+    fi
+    pat="(^|[^A-Za-z0-9_])($pat)([^A-Za-z0-9_]|\$)"
     if [ -n "$varpat" ]; then
       # Two literal backslashes: awk -v unescapes one level, so the regex
       # it evaluates ends up with the single \$( that matches a quoted
       # "$VAR" reference.
       pat="$pat|\\\\\$($varpat)"
-    fi
-    if [ -n "$fnpat" ]; then
-      # No \< \> word boundaries: BSD awk (the macOS default) does not
-      # support them. A bare substring match is safe here because the name
-      # comes from an actual declared helper in this same file, not a guess.
-      pat="$pat|($fnpat)"
     fi
     awk -v pat="$pat" '
       /^[ \t]*It / { in_it = 1; has = 0 }
