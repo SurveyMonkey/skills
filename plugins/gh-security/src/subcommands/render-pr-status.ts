@@ -1,4 +1,4 @@
-// `gh-security render-pr-status --bands <bands.json> <report.json>...`: write
+// `gh-security render-pr-status --results <results.json> <report.json>...`: write
 // the closing table of `resolve-alerts` phase 8 from the answers of
 // `pr-status`. This is the contract of #193 and #230, built here and not
 // ported.
@@ -9,11 +9,16 @@
 //                 one call of `pr-status` for each repository, under the
 //                 `env_prefix` of that repository. So it has one file for each
 //                 call. Two files of the same repository give one table.
-//   --bands       one JSON object, from each PR URL to its merge-risk band
-//                 (`Low`, `Medium` or `High`) or to `null` for a PR that has no
-//                 score. The report of `pr-status` has no band. The band is in
-//                 the `risk` of the Workflow result that opened the PR. So the
-//                 caller passes it here, and this command does not guess it.
+//   --results     the Workflow entries of the run, `<run>/results.json`: a
+//                 list of `{dispatch, result, mispaired}` (#346, ruling 2).
+//                 The report of `pr-status` has no band. The band of a PR is
+//                 the `risk.band` (`Low`, `Medium` or `High`) of the result
+//                 whose `pr_url` is that PR. A result with `risk` null, and a
+//                 PR that no result names, show `not scored`. A `null` result,
+//                 and a result with no `pr_url` text, name no PR. Only
+//                 `result`, `pr_url` and `risk` are read.
+//                 `--bands`, a file that the model wrote, is gone: the model
+//                 copied each band by hand from this same file.
 //
 // Output: `{"markdown": "..."}`. A command can only write JSON (`run.ts`).
 //   - one table for each repository, in the order of first appearance. The
@@ -32,13 +37,15 @@
 // entry: `pr-status` already failed, and this command did its job.
 //
 // The command fails, with exit 1, in these cases:
-//   - a bad command line, no `--bands` or no file,
+//   - a bad command line, no `--results` or no file,
 //   - a file that cannot be read, is not JSON, or has not the shape of an
 //     answer of `pr-status`, or has no entry,
 //   - a PR URL that two entries give,
-//   - a bands file that is not an object, has a band that is not one of the
-//     three or `null`, lacks a PR of the reports, or names a PR that no
-//     report has.
+//   - a results file that is not a list, an entry with no `result` that is
+//     an object or `null`, a result with a PR whose `risk` is not `null` or
+//     an object with a band of the three, or two results with one PR.
+//
+// `--out <file>` is not an option here: no later command reads this answer.
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -49,7 +56,7 @@ import type { CommandContext, CommandHandler, CommandResult } from '../cli/comma
 import { parseCommandLine } from '../lib/args.ts'
 import { failed, type JsonValue, ok } from '../lib/envelope.ts'
 
-const USAGE = 'usage: gh-security render-pr-status --bands <bands.json> <report.json>...'
+const USAGE = 'usage: gh-security render-pr-status --results <results.json> <report.json>...'
 
 /** https://github.com/OWNER/REPO/pull/123, and nothing else. */
 const PULL_REQUEST_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/[0-9]+$/
@@ -168,15 +175,28 @@ const entriesOf = (value: JsonValue, given: string): Entry[] | string => {
   return entries
 }
 
-/** The band of each PR URL, or the reason that the file is not a bands file. */
+/** The band of a result with a PR, or the reason that its `risk` has none. */
+const bandOf = (risk: unknown): string | null | undefined => {
+  if (risk === null) return null
+  return isRecord(risk) && BANDS.includes(risk.band as string) ? (risk.band as string) : undefined
+}
+
+/** The band of each PR URL that a result names, or the reason that the file is not a results file. */
 const bandsOf = (value: JsonValue, given: string): Map<string, string | null> | string => {
-  if (!isRecord(value)) return `${given} is not a JSON object`
+  if (!Array.isArray(value)) return `${given} is not a list of workflow entries`
   const bands = new Map<string, string | null>()
-  for (const [url, band] of Object.entries(value)) {
-    if (band !== null && !BANDS.includes(band as string)) {
-      return `${given} gives ${url} a band that is not ${BANDS.join(', ')} or null`
+  for (const [index, element] of value.entries()) {
+    const result = isRecord(element) ? element.result : undefined
+    if (result !== null && !isRecord(result)) {
+      return `${given}[${index}] has no result that is an object or null`
     }
-    bands.set(url, band as string | null)
+    if (result === null || typeof result.pr_url !== 'string') continue
+    const band = bandOf(result.risk)
+    if (band === undefined) {
+      return `${given}[${index}].result.risk is not null or an object with a band of ${BANDS.join(', ')}`
+    }
+    if (bands.has(result.pr_url)) return `${given} gives ${result.pr_url} in two results`
+    bands.set(result.pr_url, band)
   }
   return bands
 }
@@ -269,15 +289,15 @@ const footnotes = (entries: readonly Entry[]): string[] => {
 
 /** The handler. The current directory is a parameter. */
 export const renderPrStatus = (context: CommandContext, cwd: string): CommandResult => {
-  const parsed = parseCommandLine(context.args, { bands: { type: 'string', default: '' } })
+  const parsed = parseCommandLine(context.args, { results: { type: 'string', default: '' } })
   if (parsed.outcome !== 'ok') return parsed
   const { options, positionals: files } = parsed.value
-  if (options.bands === '' || files.length === 0) return failed(USAGE)
+  if (options.results === '' || files.length === 0) return failed(USAGE)
   const fail = (why: string) => failed(`render-pr-status: ${why}`)
 
-  const bandsText = readJson(resolve(cwd, options.bands), options.bands)
-  if (typeof bandsText === 'string') return fail(bandsText)
-  const bands = bandsOf(bandsText.value, options.bands)
+  const resultsText = readJson(resolve(cwd, options.results), options.results)
+  if (typeof resultsText === 'string') return fail(resultsText)
+  const bands = bandsOf(resultsText.value, options.results)
   if (typeof bands === 'string') return fail(bands)
 
   const entries: Entry[] = []
@@ -293,10 +313,6 @@ export const renderPrStatus = (context: CommandContext, cwd: string): CommandRes
     (entry, index) => entries.findIndex((e) => e.url === entry.url) < index,
   )
   if (twice !== undefined) return fail(`the PR ${twice.url} is in two entries`)
-  const lacking = entries.find((entry) => !bands.has(entry.url))
-  if (lacking !== undefined) return fail(`${options.bands} has no band for ${lacking.url}`)
-  const unknown = [...bands.keys()].find((url) => !entries.some((entry) => entry.url === url))
-  if (unknown !== undefined) return fail(`${options.bands} names ${unknown}, which no report has`)
 
   const repos = [...new Set(entries.map((entry) => entry.repo))]
   const tables = repos.map((repo) =>

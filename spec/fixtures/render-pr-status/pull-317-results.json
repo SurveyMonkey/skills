@@ -1,0 +1,1 @@
+[{"dispatch":{"group":{"package":"example-pkg","major_line":"1","branch_name":"wktr-228-preflight-dispatch"},"repo":"SurveyMonkey/skills"},"result":{"status":"success","pr_url":"https://github.com/SurveyMonkey/skills/pull/317","risk":{"band":"Medium","score":12,"f4":0,"f5":0}},"mispaired":false}]

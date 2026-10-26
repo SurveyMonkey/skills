@@ -107,7 +107,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'render-pr-status': {
     description:
-      'Write the phase 8 table from the pr-status answers of each repository: render-pr-status --bands <bands.json> <report.json>...',
+      'Write the phase 8 table from the pr-status answers of each repository: render-pr-status --results <results.json> <report.json>...',
     load: async () => (await import('../subcommands/render-pr-status.ts')).renderPrStatusCommand,
   },
   'score-merge-risk': {
