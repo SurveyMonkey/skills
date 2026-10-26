@@ -14,7 +14,7 @@
 // does not. A partial version with no operator, such as `22` or `22.7`, is
 // the line it names. A tilde before a partial version is the same line. A
 // hyphen range `A - B` is `>=A <=B`, and a partial or x-range end reads as
-// its line. The upper bound of each form ends in `-0`, as npm's does. The
+// its line. The upper bound of a line ends in `-0`, as npm's does. The
 // upper bound of `22.x` and `^22` has no `-0` here, unlike npm (the
 // prerelease divergence). So here `22` does not admit `23.0.0-0`, but `22.x`
 // and `^22` do. See `partialLine` and `foldHyphens`.
