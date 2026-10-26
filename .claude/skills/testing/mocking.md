@@ -101,8 +101,8 @@ call: the call, if it occurs, fails the example.
 
 The shellspec suite keeps its own command-based `gh` mock (`spec/support/gh-mock-dispatch.sh`,
 registered from `spec/spec_helper.sh`), with those same four semantics. No spec uses it after
-#231. It goes with
-[#241](https://github.com/SurveyMonkey/skills/issues/241), and nothing new is written against it.
+#231. It goes with [#241](https://github.com/SurveyMonkey/skills/issues/241), and nothing new is
+written against it.
 
 ## What a log assertion may claim
 
