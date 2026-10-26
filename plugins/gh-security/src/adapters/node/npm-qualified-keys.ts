@@ -19,7 +19,9 @@
 //     any other selector through the range, so that key is unsure.
 //   - A git spec with a `#semver:<range>` part: npm matches a key through that
 //     range, as for a range edge (`getEdgeRule`, `lib/override-set.js:103-109`
-//     in arborist 9.9.1). The pass reads the edge as that range (#359).
+//     in arborist 9.9.1). The pass reads the edge as that range (#359), when
+//     `rangeParseable` accepts it. It refuses any other range, such as a
+//     hyphen range, which `satisfies` reads but `rangeParseable` does not.
 //   - Any other spec, such as a tag, a git URL with no range or a directory:
 //     npm takes the first key by name, or skips each qualified key for a git
 //     URL.
@@ -126,15 +128,17 @@ export const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?
 // A git spec, as npm-package-arg reads one: a `git+` or `git:` URL, a host
 // prefix, or an `owner/repo` shorthand. A git spec of another form, such as an
 // https URL of a host, does not match. Its edge is then an edge of another
-// spec, and the pass refuses it. npm-package-arg reads a spec that starts
-// with `.` or `~` as a directory, so the shorthand does not start with one.
+// spec, and the pass refuses it. The shorthand has no `@` before the `#`.
+// npm-package-arg reads a spec that starts with `.` or `~/` as a directory
+// (`isPosixFile`, `npa.js:20`). The shorthand here does not start with `.` or
+// `~`. npm reads `~owner/repo` as git, but no GitHub owner starts with `~`.
 const GIT_SPEC =
-  /^(?:git\+[a-z]+:|git:|github:|gitlab:|bitbucket:|gist:|(?![.~])[^/:@#\s]+\/[^/:#\s]+#)/i
+  /^(?:git\+[a-z]+:|git:|github:|gitlab:|bitbucket:|gist:|(?![.~])[^/:@#\s]+\/[^/:@#\s]+#)/i
 
 /**
  * The `#semver:` range of a git spec, as `setGitAttrs` of npm-package-arg
- * reads it: the text after `semver:` up to the next `:`, in the part of the
- * committish that starts with `semver:`. Parts split at `::`. It is null for a
+ * reads it. It is the text after `semver:` up to the next `:`. It comes from
+ * the part of the committish that starts with `semver:`. Parts split at `::`. It is null for a
  * git spec with no such part, and for a spec that is not a git spec.
  * npm-package-arg also decodes percent escapes in the range. This function
  * does not, so the pass refuses such a range as one it cannot read.
