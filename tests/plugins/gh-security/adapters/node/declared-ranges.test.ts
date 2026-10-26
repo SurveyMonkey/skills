@@ -655,6 +655,22 @@ describe('declared_ranges refusals', () => {
     })
   })
 
+  // A root manifest that parses but is not an object is a failed read. A
+  // `null` root used to give `root_range: null` with no error (#357).
+  it.each([
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['a number', '5'],
+    ['a string', '"x"'],
+  ])('fails for a root manifest that is %s', (_case, text) => {
+    const { root, detection } = copyOf('npm-v3')
+    writeFileSync(join(root, 'package.json'), text)
+    expect(node.declaredRanges({ root, detection }, 'lodash', null)).toEqual({
+      outcome: 'failed',
+      error: 'declared_ranges: the root package.json is not an object',
+    })
+  })
+
   it('fails for a tree with no root manifest', () => {
     const { root, detection } = copyOf('npm-v3')
     rmSync(join(root, 'package.json'))

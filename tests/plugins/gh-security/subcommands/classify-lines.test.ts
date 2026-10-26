@@ -24,7 +24,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 
 import type { Adapter, ResolvedVersionsAnswer } from '#gh-security/adapters/adapter.ts'
 import type { NodeDetection } from '#gh-security/adapters/node/detect.ts'
@@ -38,7 +38,7 @@ import {
   classifyLinesCommand,
   type Signals,
 } from '#gh-security/subcommands/classify-lines.ts'
-import { FIXTURES_ROOT } from '#harness/fixtures.ts'
+import { FIXTURES_ROOT, useFixture } from '#harness/fixtures.ts'
 import { createGitFixtures } from '#harness/git.ts'
 import { pluginFile } from '#harness/paths.ts'
 import { createSandbox, type Sandbox } from '#harness/sandbox.ts'
@@ -1198,6 +1198,43 @@ describe('the relationship check (#335)', () => {
       })
     },
   )
+
+  // #357. The real adapter on a tree whose root manifest is JSON but not an
+  // object: the read fails, and the error is named.
+  it.each([
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['a number', '5'],
+  ])('names a root manifest that is %s, and keeps the value of Dependabot', async (_case, text) => {
+    const fixture = useFixture('npm-dev-direct')
+    onTestFinished(fixture.cleanup)
+    writeFileSync(join(fixture.path, 'package.json'), text)
+    const out = answerIn(
+      await classifyLines(
+        context(
+          ['--repo-root', fixture.path],
+          envelope([group('debug', '4', { alerts: [dependabot('transitive')] })]),
+        ),
+        run,
+        selectAdapter,
+        '/',
+      ),
+    )
+    expect({
+      alerts: [...out.actionable, ...out.skipped].map((entry) => entry.alerts),
+      errors: out.classify_errors,
+    }).toEqual({
+      alerts: [[dependabot('transitive')]],
+      errors: [
+        {
+          adapter: 'node',
+          package: 'debug',
+          error:
+            'declared_ranges: the root package.json is not an object; relationship check skipped',
+        },
+      ],
+    })
+  })
 
   it('makes an alert with the manifest unknown direct, as a root alert', async () => {
     // `discover-alerts` writes `unknown` for an alert with no manifest path.

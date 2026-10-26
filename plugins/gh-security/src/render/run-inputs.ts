@@ -442,8 +442,8 @@ export const discoveryOf = (value: unknown): Discovery => {
  * The answer of `preflight-repo` for one checkout, with the `nwo` of that
  * checkout. It is an excluded checkout, a call that failed, or an `ok`
  * answer with an `exclude_error`.
- * `excludeError` is the `exclude_error` of the answer: null for none, and
- * for a call that failed, which has no answer.
+ * `excludeError` is the `exclude_error` of the answer: null for none. A call
+ * that failed can carry one too, from its report (#356).
  */
 export type Preflight =
   | {
@@ -459,7 +459,7 @@ export type Preflight =
       readonly checkout: string
       readonly nwo: string
       readonly error: string
-      readonly excludeError: null
+      readonly excludeError: string | null
     }
   | {
       readonly checkout: string
@@ -471,7 +471,8 @@ export type Preflight =
 
 /**
  * The preflight file: from the `checkout` of a kept checkout to the answer
- * of `preflight-repo` for it, or to its failure `{error}`. An entry is kept
+ * of `preflight-repo` for it, or to its failure `{error}` or `{error,
+ * exclude_error}`. An entry is kept
  * when the checkout was excluded, the call failed, or the answer has an
  * `exclude_error`. An answer with `ok` true and no `exclude_error` is
  * dropped. The order of the file stays.
@@ -490,7 +491,11 @@ export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonl
         checkout,
         nwo,
         error: text(answer.error, `${at}.error`),
-        excludeError: null,
+        // Absent: the call failed before the exclude. Null: the exclude worked.
+        excludeError:
+          answer.exclude_error === undefined
+            ? null
+            : textOrNull(answer.exclude_error, `${at}.exclude_error`),
       })
       continue
     }
