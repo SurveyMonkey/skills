@@ -239,10 +239,10 @@ describe('range_facts', () => {
   // bundles) answers true for the first three rows and false for the last.
   // The bash side gives the answers of `node.sh range_facts` on each row.
   it.each([
-    ['22', '22.7.7', '$.satisfied: bash false, TypeScript true'],
-    ['22.7', '22.7.9', '$.satisfied: bash false, TypeScript true'],
-    ['~22', '22.7.7', '$.satisfied: bash false, TypeScript true'],
-    ['~22.7', '22.8.0-0', '$.satisfied: bash true, TypeScript false'],
+    ['22', '22.7.7', 'they differ at $.satisfied: bash false, TypeScript true'],
+    ['22.7', '22.7.9', 'they differ at $.satisfied: bash false, TypeScript true'],
+    ['~22', '22.7.7', 'they differ at $.satisfied: bash false, TypeScript true'],
+    ['~22.7', '22.8.0-0', 'they differ at $.satisfied: bash true, TypeScript false'],
   ])('differs on %s against %s as #353 declares', (range, version, report) => {
     expect(checkParity(rangeFactsSubject, [range, version])).toEqual({ matched: false, report })
   })
