@@ -98,8 +98,8 @@ Describe 'the prose pin inventory (issue #197)'
     pat='phrase_in|count_in|rule_in'
     if [ -n "$varpat" ]; then
       # A one-line helper declared in this file whose body reads a path
-      # variable (audit_pins_rules_spec.sh's `rule()`). The declaring line
-      # is found here, and each call site is counted by the name.
+      # variable (audit_pins_rules_spec.sh's `rule()`). This grep finds the
+      # declaring line, and the awk below counts each call by the name.
       var_fns=$(grep -E "^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\\(\\)[[:space:]]*\\{.*\\\$($varpat)([^A-Za-z0-9_]|\$)" "$f" \
         | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/' | sort -u)
       fnpat=$(printf '%s\n%s\n' "$inline_fns" "$var_fns" | sed '/^$/d' | sort -u | paste -sd'|' -)
@@ -114,8 +114,11 @@ Describe 'the prose pin inventory (issue #197)'
       # "$VAR" reference.
       pat="$pat|\\\\\$($varpat)"
     fi
+    # The awk reads only the body of an `It` block. A helper name in the
+    # title, or in a comment line, is not a call.
     awk -v pat="$pat" '
-      /^[ \t]*It / { in_it = 1; has = 0 }
+      /^[ \t]*It / { in_it = 1; has = 0; next }
+      in_it && /^[ \t]*#/ { next }
       in_it && $0 ~ pat { has = 1 }
       in_it && /^[ \t]*End[ \t]*$/ {
         if (has) n++
@@ -124,6 +127,33 @@ Describe 'the prose pin inventory (issue #197)'
       END { print n + 0 }
     ' "$f"
   }
+
+  # The pin count of a scratch spec file with four `It` blocks. Two are
+  # pins: one calls a helper that reads a path variable, and one calls
+  # phrase_in. One has the word rule in its title and a comment, and one
+  # calls myrule. Neither of these two is a call of a pin helper.
+  count_of_specimen() {
+    dir=$(mktemp -d) || return 1
+    printf '%s\n' \
+      "Describe 'specimen'" \
+      '  DOC="doc.md"' \
+      "  rule() { grep -c \"\$1\" \"\$DOC\"; }" \
+      '  myrule() { echo 1; }' \
+      "  It 'calls the helper'" "    When call rule 'x'" '  End' \
+      "  It 'calls phrase_in'" "    When call phrase_in \"\$DOC\" 'x'" '  End' \
+      "  It 'keeps the rule apart'" '    # rule' '    When call true' '  End' \
+      "  It 'calls another name'" '    When call myrule' '  End' \
+      'End' > "$dir/example_spec.sh"
+    (SPEC_DIR=$dir pin_example_count example_spec.sh)
+    rm -rf "$dir"
+  }
+
+  It 'counts only a call of a pin helper in the body of an It block' # positive
+    # control: each of the four blocks fails it when its rule breaks.
+    When call count_of_specimen
+    The status should be success
+    The output should equal '2'
+  End
 
   # Mechanical markers physically present in the file (ground truth for
   # "retired by" grep, independent of what PINS.md claims).
