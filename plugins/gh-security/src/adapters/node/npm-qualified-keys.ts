@@ -17,8 +17,14 @@
 //   - A range that the copy satisfies: a selector that admits the copy
 //     matches. An exact selector outside the range does not. npm can match
 //     any other selector through the range, so that key is unsure.
-//   - Any other spec, such as a tag, a git URL or a directory: npm takes the
-//     first key by name, or skips each qualified key for a git URL.
+//   - A git spec with a `#semver:<range>` part: npm matches a key through that
+//     range, as for a range edge (`getEdgeRule`, `lib/override-set.js:103-109`
+//     in arborist 9.9.1). The pass reads the edge as that range (#359), when
+//     `rangeParseable` accepts it. It refuses any other range, such as a
+//     hyphen range, which `satisfies` reads but `rangeParseable` does not.
+//   - Any other spec, such as a tag, a git URL with no range or a directory:
+//     npm takes the first key by name, or skips each qualified key for a git
+//     URL.
 //
 // For each normal copy of a parent on the line, the pass finds the first key
 // that matches it. When that key has a selector, the constraint goes inside
@@ -30,8 +36,10 @@
 // after them has no effect. The pass supersedes a pair on the line, and
 // reports it. A pair on another line stays as it is.
 //
-// Four refusals, each before any write, for a parent with a qualified key:
+// Five refusals, each before any write, for a parent with a qualified key:
 //
+//   - A git edge into a copy has a `#semver:` range that the range rules
+//     cannot read.
 //   - A copy of the parent has an edge of any other spec, or no edge.
 //   - A copy, on any line, has an unsure key before its first match, or two
 //     edges that match different keys.
@@ -43,7 +51,7 @@
 // This file ships. It imports nothing outside the plugin.
 
 import { type Failure, failed } from '../../lib/envelope.ts'
-import { rangeFloorMajor } from '../../semver/ranges.ts'
+import { rangeFloorMajor, rangeParseable } from '../../semver/ranges.ts'
 import { entriesOf, equal, get, or, render, toText, unique } from './jq-json.ts'
 import { stripSelector } from './list-pins.ts'
 import { isRecord } from './manifest.ts'
@@ -117,6 +125,35 @@ export const LOOKS_RANGE = /^[v=^~><*0-9]/
 /** The version of an exact spec or selector, or null. */
 export const exactOf = (spec: string): string | null => EXACT.exec(spec.trim())?.[1] ?? null
 
+// A git spec, as npm-package-arg reads one: a `git+` or `git:` URL, a host
+// prefix, or an `owner/repo` shorthand. A git spec of another form, such as an
+// https URL of a host, does not match. Its edge is then an edge of another
+// spec, and the pass refuses it. The shorthand has no `@` before the `#`.
+// npm-package-arg reads a spec that starts with `.` or `~/` as a directory
+// (`isPosixFile`, `npa.js:20`). The shorthand here does not start with `.` or
+// `~`. npm reads `~owner/repo` as git, but no GitHub owner starts with `~`.
+const GIT_SPEC =
+  /^(?:git\+[a-z]+:|git:|github:|gitlab:|bitbucket:|gist:|(?![.~])[^/:@#\s]+\/[^/:@#\s]+#)/i
+
+/**
+ * The `#semver:` range of a git spec, as `setGitAttrs` of npm-package-arg
+ * reads it. It is the text after `semver:` up to the next `:`. It comes from
+ * the part of the committish that starts with `semver:`. Parts split at `::`.
+ * It is null for a git spec with no such part, and for a spec that is not a
+ * git spec.
+ * npm-package-arg also decodes percent escapes in the range. This function
+ * does not, so the pass refuses such a range as one it cannot read.
+ */
+export const gitRangeOf = (spec: string): string | null => {
+  const hash = spec.indexOf('#')
+  if (hash < 0 || !GIT_SPEC.test(spec)) return null
+  const part = spec
+    .slice(hash + 1)
+    .split('::')
+    .find((each) => each.startsWith('semver:'))
+  return part === undefined ? null : part.slice('semver:'.length).replace(/:.*$/, '')
+}
+
 const EDGE_BLOCKS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
 
 /** The specs of the edges into the copy at `path`, from each entry that depends on it. */
@@ -141,6 +178,8 @@ type Copy = {
   readonly unsure: readonly string[]
   /** An edge into the copy has a spec that is not a version or a range, or no edge comes in. */
   readonly other: boolean
+  /** The `#semver:` ranges of git edges into the copy that the range rules cannot read. */
+  readonly unreadable: readonly string[]
 }
 
 /**
@@ -208,7 +247,12 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
           ),
           MISSING,
         ].find((each) => each !== null)
-        const specs = specsInto(lock, path).map(toText)
+        // A git edge with a `#semver:` range is read as that range.
+        const edges = specsInto(lock, path).map((spec) => {
+          const text = toText(spec)
+          return { text, git: gitRangeOf(text.trim()) }
+        })
+        const specs = edges.map(({ text, git }) => git ?? text)
         const readable = specs.filter((spec) => LOOKS_RANGE.test(spec.trim()))
         const found = readable.map((spec) => scan(version, spec))
         const firsts = unique(found.map(({ first }) => first))
@@ -221,9 +265,18 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
             ...(firsts.length > 1 ? firsts.filter((each) => each !== null) : []),
           ]),
           other: readable.length === 0 || readable.length < specs.length,
+          unreadable: edges.flatMap(({ git }) =>
+            git === null || rangeParseable(git) ? [] : [git],
+          ),
         }
       })
     const qualified = own.flatMap(({ key, selector }) => (selector === null ? [] : [key]))
+    const ranges = unique(copies.flatMap(({ unreadable }) => unreadable))
+    if (ranges.length > 0) {
+      return failed(
+        `apply_constraint: cannot scope '${pkg}': a git edge into a copy of its parent has a '#semver:' range that the range rules cannot read, beside pre-existing version-qualified override keys for that parent: ${render([{ parent, keys: qualified, ranges }], null)}. npm matches a key for such an edge only through that range, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #359), so nothing was written; reconcile the existing override by hand.`,
+      )
+    }
     const others = unique(copies.filter(({ other }) => other).map(({ pver }) => pver))
     if (others.length > 0) {
       return failed(

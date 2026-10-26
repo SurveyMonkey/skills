@@ -1,0 +1,13 @@
+{
+  "name": "npm-qualified-key-git-edge",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "git+https://github.com/debug-js/debug.git#semver:^4.4.0"
+  },
+  "overrides": {
+    "debug@4": {
+      ".": "$debug"
+    }
+  }
+}

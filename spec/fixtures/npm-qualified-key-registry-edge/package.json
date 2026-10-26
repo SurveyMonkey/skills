@@ -1,0 +1,13 @@
+{
+  "name": "npm-qualified-key-registry-edge",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "^4.4.0"
+  },
+  "overrides": {
+    "debug@4": {
+      ".": "$debug"
+    }
+  }
+}

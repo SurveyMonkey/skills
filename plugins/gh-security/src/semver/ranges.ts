@@ -2,13 +2,23 @@
 // in `scripts/ecosystems/node.sh` (lines 83-289) and from what the
 // `range_facts` verb (node.sh line 3429) answers with, under RFC 002.
 //
-// The jq semantics are kept exactly. That includes the known divergence from
-// npm's semver, which is documented on `rangeFacts` below and is deliberate
-// rather than pending.
+// The jq semantics are kept, with two declared parity exceptions. The known
+// divergence from npm's semver on prereleases stays. It is documented on
+// `rangeFacts` below, and it is deliberate.
 //
-// One declared parity exception (#304 item 2): a token with a comparator and
-// then a `^` or `~`, such as `<^5.0.0`, is unreadable here. jq reads it as a
-// version with major 0. See `tokenParseable`.
+// Parity exception #304 item 2: a token with a comparator and then a `^` or
+// `~`, such as `<^5.0.0`, is unreadable here. jq reads it as a version with
+// major 0. See `tokenParseable`.
+//
+// Parity exception #353: `satisfies` reads three forms as npm does, and jq
+// does not. A partial version with no operator, or with only `=` or `v`
+// before it, is the line it names. Examples are `22`, `=22` and `v22.7`. A
+// tilde before a partial version is the same line. A hyphen range `A - B`
+// is `>=A <=B`, and a partial or x-range end reads as its line. The upper
+// bound of a line ends in `-0`, as npm's does. The upper bound of `22.x`
+// and `^22` has no `-0` here, unlike npm (the prerelease divergence). So
+// here `22` does not admit `23.0.0-0`, but `22.x` and `^22` do. See
+// `partialLine` and `foldHyphens`.
 //
 // This file ships. It imports nothing outside the plugin and stays inside the
 // erasable subset (no `enum`, no parameter properties, no namespaces),
@@ -104,10 +114,33 @@ export const wildcardExpand = (token: string): string[] | null => {
 
 const isWild = (part: string | undefined): boolean => part !== undefined && /^[xX*]$/.test(part)
 
+// A version with one or two numeric parts, after any `v` or `=`.
+const PARTIAL = /^[v=]*([0-9]+)(?:\.([0-9]+))?$/
+
+/** The comparator pair of the line of a major, or of a major and a minor. */
+const lineOf = (major: string | undefined, minor: string | undefined): [string, string] => {
+  const one = Number(major)
+  if (minor === undefined) return [`>=${one}.0.0`, `<${one + 1}.0.0-0`]
+  const two = Number(minor)
+  return [`>=${one}.${two}.0`, `<${one}.${two + 1}.0-0`]
+}
+
+/**
+ * A partial version as the comparator pair of the line it names, as npm reads
+ * it (#353): `22` is `>=22.0.0 <23.0.0-0`, and `22.7` is
+ * `>=22.7.0 <22.8.0-0`. It is null for any other text.
+ */
+const partialLine = (text: string): string[] | null => {
+  const match = PARTIAL.exec(text)
+  return match === null ? null : lineOf(match[1], match[2])
+}
+
 /** A token as the comparators it stands for. */
 export const expandToken = (token: string): string[] => {
   const wildcard = wildcardExpand(token)
   if (wildcard !== null) return wildcard
+  const line = partialLine(token.startsWith('~') ? token.slice(1) : token)
+  if (line !== null) return line
   const rest = token.slice(1)
   if (token.startsWith('^')) return [`>=${rest}`, `<${caretUpper(rest)}`]
   if (token.startsWith('~')) return [`>=${rest}`, `<${tildeUpper(rest)}`]
@@ -116,6 +149,8 @@ export const expandToken = (token: string): string[] => {
 
 // The prefixes, longest first: `>=` has to be read before `>`, or the `=`
 // becomes part of the version. A token with no operator is an exact match.
+// `expandToken` gives such a token for a full version, and for a token that
+// it cannot read.
 const OPERATORS = ['>=', '<=', '>', '<', '='] as const
 
 /** Whether one comparator token admits a version. */
@@ -129,6 +164,41 @@ export const evalToken = (token: string, version: string): boolean => {
   if (operator === '<') return result < 0
   return result === 0
 }
+
+// One end of a hyphen range, as npm's `XRANGEPLAIN` reads it: up to three
+// parts, each a number or `x`, `X` or `*`, and a prerelease or build only
+// after three parts. The whole alternative must be `A - B`, as npm's
+// `HYPHENRANGE` is anchored at both ends.
+const HYPHEN_PART = '(?:[0-9]+|[xX*])'
+const HYPHEN_END = `[v=]*${HYPHEN_PART}(?:\\.${HYPHEN_PART}(?:\\.${HYPHEN_PART}(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?)?)?`
+const HYPHEN_RANGE = new RegExp(`^(${HYPHEN_END}) - (${HYPHEN_END})$`)
+
+/**
+ * One end of a hyphen range as its comparator. A full lower end is `>=A`, and
+ * a full upper end is `<=B`. A partial end, or an end with an x part, reads
+ * as the line of the parts before the first x part. An end that starts with
+ * an x part has no bound.
+ */
+const hyphenBound = (end: string, upper: boolean): string[] => {
+  const version = end.replace(/^[v=]+/, '')
+  const parts = version.replace(/[-+].*$/, '').split('.')
+  const wild = parts.findIndex(isWild)
+  const kept = wild < 0 ? parts : parts.slice(0, wild)
+  if (kept.length === 0) return []
+  if (kept.length === 3) return [`${upper ? '<=' : '>='}${version}`]
+  return [lineOf(kept[0], kept[1])[upper ? 1 : 0]]
+}
+
+/**
+ * The tokens of one alternative. An alternative that is all one hyphen range
+ * `A - B` gives the comparators npm reads it as (#353). Any other alternative
+ * stays as it is. A `-` in it then reads as the exact version 0.0.0, and npm
+ * refuses that range.
+ */
+const foldHyphens = (tokens: string[]): string[] =>
+  HYPHEN_RANGE.exec(tokens.join(' '))
+    ?.slice(1)
+    .flatMap((end, index) => hyphenBound(end, index === 1)) ?? tokens
 
 /**
  * Whether a version is admitted by a range.
@@ -153,7 +223,7 @@ export const satisfies = (version: string, range: string): boolean =>
       if (tokens.length === 0) {
         throw new Error(`the range '${range}' has an alternative with no comparator`)
       }
-      return tokens
+      return foldHyphens(tokens)
         .flatMap(expandToken)
         .map((token) => evalToken(token, version))
         .every(Boolean)

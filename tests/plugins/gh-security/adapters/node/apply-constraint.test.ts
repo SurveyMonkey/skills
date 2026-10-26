@@ -1107,11 +1107,11 @@ const rootSpec = (spec: string): Setup =>
     }),
   )
 
-const UNSURE = (detail: string): string =>
-  `apply_constraint: cannot scope 'smol-toml': npm can match a pre-existing version-qualified override key for its parent through an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
+const UNSURE = (detail: string, pkg = 'smol-toml'): string =>
+  `apply_constraint: cannot scope '${pkg}': npm can match a pre-existing version-qualified override key for its parent through an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
-const OTHER = (detail: string): string =>
-  `apply_constraint: cannot scope 'smol-toml': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
+const OTHER = (detail: string, pkg = 'smol-toml'): string =>
+  `apply_constraint: cannot scope '${pkg}': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
 describe('npm constraint goes inside a qualified key that matches the parent', () => {
   it('writes inside the qualified key of the field case, and no bare key', () => {
@@ -1528,6 +1528,161 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
     expect(refusalOf(QUALIFIED, smolToml, versionless)).toBe(
       UNSURE('[{"parent":"nx","key":"nx@22.7.7","versions":["-"]}]'),
+    )
+  })
+})
+
+// The specimen of #353. A real `npm install --package-lock-only
+// --ignore-scripts` of npm 11.19.0 wrote the lockfile, for the manifest as it
+// is. The fixture keeps the root, @nx/workspace, nx, smol-toml and axios
+// entries of that lockfile, each as npm wrote it. @nx/workspace 22.7.7
+// declares nx at 22.7.7. The `nx@22` key has no "." value, so npm sets nx to
+// its selector `22`. nx resolved to 22.7.12, which pins smol-toml at
+// 1.6.1. In the same runs, a bare `nx` key after `nx@22` kept smol-toml at
+// 1.6.1. The constraint inside `nx@22` gave 1.9.1.
+const MAJOR_KEY = 'npm-qualified-major-key'
+
+describe('npm constraint goes inside a qualified key with a bare major selector (#353)', () => {
+  it('writes inside the nx@22 key of the field case, and no bare key', () => {
+    expect(manifestAfter(MAJOR_KEY, smolToml).overrides).toEqual({
+      'nx@22': { axios: AXIOS, 'smol-toml': SMOL },
+    })
+  })
+
+  it('reports the entry inside the key, and invalidates the stale lockfile entry', () => {
+    const { written, superseded_keys, lockfile_invalidated } = answer(MAJOR_KEY, smolToml)
+    expect({ written, superseded_keys, lockfile_invalidated }).toEqual({
+      written: [{ parent: 'nx', path: ['overrides', 'nx@22', 'smol-toml'], value: SMOL }],
+      superseded_keys: [],
+      lockfile_invalidated: { performed: true, keys: ['node_modules/smol-toml'] },
+    })
+  })
+})
+
+// The specimens of #359. Real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote both lockfiles, each for the
+// manifest beside it. The root declares debug as
+// `git+https://github.com/debug-js/debug.git#semver:^4.4.0` in one, and as
+// `^4.4.0` in the other. Each resolved debug 4.4.3, which declares ms at
+// `^2.1.3`. The key `debug@4` has the "." value `$debug`, because npm
+// refuses a key that changes the spec of a direct dependency (EOVERRIDE). In
+// the same runs, with each edge, `"ms": "2.1.2"` inside `debug@4` gave ms
+// 2.1.2. A bare `debug` key after it kept ms at 2.1.3. With a git edge
+// that has no `#semver:` range, npm skipped `debug@4`, and the bare key gave
+// ms 2.1.2.
+const GIT_EDGE = 'npm-qualified-key-git-edge'
+
+const REGISTRY_EDGE = 'npm-qualified-key-registry-edge'
+
+const msRange = ['ms', '>=2.1.3 <3', 'debug']
+
+const DEBUG_GIT = 'git+https://github.com/debug-js/debug.git'
+
+/** The root declares debug as `spec`, in package.json and in the root entry of the lockfile. */
+const rootDebug = (spec: string): Setup =>
+  both(
+    manifestEdit((manifest) => {
+      manifest.dependencies = { debug: spec }
+    }),
+    lockEdit((packages) => {
+      packages[''] = { ...(packages[''] as Json), dependencies: { debug: spec } }
+    }),
+  )
+
+describe('npm constraint goes inside a qualified key for a git edge with a semver range (#359)', () => {
+  // The same answer for each edge: the real runs moved ms inside `debug@4`
+  // for both.
+  it.each([
+    ['a registry edge of ^4.4.0', REGISTRY_EDGE],
+    ['a git edge of #semver:^4.4.0', GIT_EDGE],
+  ])('writes inside the debug@4 key for %s', (_title, fixture) => {
+    const { envelope, dir } = apply(fixture, msRange)
+    expect({
+      overrides: readJson(dir, 'package.json').overrides,
+      written: answerOf(envelope).written,
+    }).toEqual({
+      overrides: { 'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' } },
+      written: [{ parent: 'debug', path: ['overrides', 'debug@4', 'ms'], value: '>=2.1.3 <3' }],
+    })
+  })
+
+  // Each git spec form that npm-package-arg reads with a `#semver:` range of
+  // `^4.4.0` (probe: `npa('debug@<spec>').gitRange` of npm 11.19.0). A
+  // `::path:` part before or after the range, or a `:` part after it, does not
+  // change the range.
+  it.each([
+    ['github:debug-js/debug#semver:^4.4.0'],
+    ['gitlab:debug-js/debug#semver:^4.4.0'],
+    ['bitbucket:debug-js/debug#semver:^4.4.0'],
+    ['gist:debug-js/debug#semver:^4.4.0'],
+    ['debug-js/debug#semver:^4.4.0'],
+    ['git+ssh://git@github.com/debug-js/debug.git#semver:^4.4.0'],
+    ['git://github.com/debug-js/debug.git#semver:^4.4.0'],
+    [`${DEBUG_GIT}#semver:^4.4.0::path:packages/debug`],
+    [`${DEBUG_GIT}#semver:^4.4.0:extra`],
+    [`${DEBUG_GIT}#path:packages/debug::semver:^4.4.0`],
+  ])('writes inside the debug@4 key for the git edge %s', (spec) => {
+    expect(manifestAfter(GIT_EDGE, msRange, rootDebug(spec)).overrides).toEqual({
+      'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' },
+    })
+  })
+
+  // The same refusal for each edge. The range does not admit the copy. The
+  // pass does not test if the range and the selector intersect, so it cannot
+  // show if npm matches the key.
+  it.each([
+    ['a registry edge', '^3.0.0'],
+    ['a git edge', `${DEBUG_GIT}#semver:^3.0.0`],
+  ])('refuses %s whose range does not admit the copy', (_title, spec) => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug(spec))).toBe(
+      UNSURE('[{"parent":"debug","key":"debug@4","versions":["4.4.3"]}]', 'ms'),
+    )
+  })
+
+  // npm-package-arg reads `%5E4.4.0` as `^4.4.0`. The pass does not decode
+  // it, and refuses. `<^5.0.0` looks like a range, but `rangeParseable`
+  // refuses it (#304), and npm refuses it too. `satisfies` reads a hyphen
+  // range, but `rangeParseable` does not, so the pass refuses it.
+  it.each([
+    ['latest', `${DEBUG_GIT}#semver:latest`, '["latest"]'],
+    ['an empty range', `${DEBUG_GIT}#semver:`, '[""]'],
+    ['percent-encoded', `${DEBUG_GIT}#semver:%5E4.4.0`, '["%5E4.4.0"]'],
+    ['<^5.0.0', `${DEBUG_GIT}#semver:<^5.0.0`, '["<^5.0.0"]'],
+    ['a hyphen range', `${DEBUG_GIT}#semver:4.0.0 - 5.0.0`, '["4.0.0 - 5.0.0"]'],
+  ])('refuses a git edge whose #semver: range is %s', (_title, spec, ranges) => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug(spec))).toBe(
+      `apply_constraint: cannot scope 'ms': a git edge into a copy of its parent has a '#semver:' range that the range rules cannot read, beside pre-existing version-qualified override keys for that parent: [{"parent":"debug","keys":["debug@4"],"ranges":${ranges}}]. npm matches a key for such an edge only through that range, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #359), so nothing was written; reconcile the existing override by hand.`,
+    )
+  })
+
+  // npm skips each qualified key for a git edge with no `#semver:` range: the
+  // real run with no range kept ms at 2.1.3 for a constraint inside the key.
+  // A `#semver:` part of a spec that the pass does not read as git, such as a
+  // directory or an https URL, also stays an edge of another spec.
+  it.each([
+    ['a git URL with no committish', DEBUG_GIT],
+    ['a git URL with a committish', `${DEBUG_GIT}#4.4.3`],
+    [
+      'an https git URL with a #semver: range',
+      'https://github.com/debug-js/debug.git#semver:^4.4.0',
+    ],
+    ['a directory with a #semver: part', 'file:vendor/debug#semver:^4.4.0'],
+    ['a relative directory with a #semver: part', './debug#semver:^4.4.0'],
+    ['an absolute directory with a #semver: part', '/vendor/debug#semver:^4.4.0'],
+    ['a directory of three segments with a #semver: part', 'a/b/c#semver:^4.4.0'],
+    ['a directory with an @ and a #semver: part', 'debug-js/debug@x#semver:^4.4.0'],
+  ])('refuses a key beside an edge from %s', (_title, spec) => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug(spec))).toBe(
+      OTHER('[{"parent":"debug","keys":["debug@4"],"versions":["4.4.3"]}]', 'ms'),
+    )
+  })
+
+  // npm-package-arg reads `~/debug#semver:^4.4.0` as a directory. The pass
+  // does not read it as git. The `~` at its start makes it look like a tilde
+  // range. That range does not admit the copy 4.4.3, so the key is unsure.
+  it('refuses a key beside an edge from a home directory with a #semver: part', () => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug('~/debug#semver:^4.4.0'))).toBe(
+      UNSURE('[{"parent":"debug","key":"debug@4","versions":["4.4.3"]}]', 'ms'),
     )
   })
 })

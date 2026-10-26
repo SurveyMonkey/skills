@@ -71,8 +71,11 @@ type BaselineCopy = { readonly version: string; readonly path: string | null }
 /**
  * jq's `satisfies`. It is the function of `src/semver/ranges.ts`, which stops
  * where jq stops (#303): on a comparator with no version, also after a match,
- * and on an alternative with no comparator. The placement, parent and
- * lockfile helpers of `apply_constraint` import this name from here.
+ * and on an alternative with no comparator. It reads a partial version, a
+ * tilde before a partial version and a hyphen range as npm does, and jq does
+ * not (#353, a declared parity exception in the header of that file). The
+ * placement, parent and lockfile helpers of `apply_constraint` import this
+ * name from here.
  */
 export const satisfiesAll = satisfies
 
