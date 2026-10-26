@@ -140,8 +140,8 @@ const RESULT_SCHEMA = {
     // `worktree.path` and `work_dir.path` are the paths the driver RESOLVED
     // and acted on, which can differ textually from the ones the orchestrator
     // dispatched (`/private/var/...` against `/var/...` on macOS is the
-    // specimen). Anything correlating them with a path built anywhere else —
-    // `reap-batch` derives its own, unresolved — must resolve or
+    // specimen). Anything correlating them with a path built anywhere else
+    // (`reap-batch` derives its own, unresolved) must resolve or
     // suffix-match rather than compare strings, or one leaked directory reads
     // as two.
     cleanup: {
