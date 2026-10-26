@@ -284,6 +284,7 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
     ['3.0.0-0', '1.x - 2', false],
     ['2.5.0', '1.2.3 - 2.x', true],
     ['1.2.2', '1.2.3 - 2.x', false],
+    ['0.0.0', '* - 2', true],
     ['0.0.1', '* - 2', true],
     ['3.0.0', '* - 2', false],
     ['9.0.0', '1 - *', true],
@@ -301,6 +302,9 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
     ['2.0.0', '1.0.0 - 2.0.0-rc.1', false],
     ['1.5.0', 'v1.2.3 - 2', true],
     ['1.2.2', 'v1.2.3 - 2', false],
+    ['1.5.0', 'vv1 - 2', true],
+    ['0.9.9', 'vv1 - 2', false],
+    ['2.5.0', '1 - =2', true],
     ['2.0.0', '1.2.3+b - 2.0.0+c', true],
     ['2.0.1', '1.2.3+b - 2.0.0+c', false],
   ])('reads %s against the hyphen range %s as %s', (version, range, expected) => {
