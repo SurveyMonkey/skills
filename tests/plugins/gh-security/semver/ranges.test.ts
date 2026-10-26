@@ -5,7 +5,8 @@
 //
 // Expected values are copied from the shellspec tables named above each
 // block, or hand-written from the definition being ported and from
-// semver.org. None is recomputed the way the module computes it, and parity
+// semver.org. The #353 rows come from npm's own `semver`, as their block
+// says. None is recomputed the way the module computes it, and parity
 // against `node.sh` is not asserted here: the parity runner lands in #219,
 // which this issue's plan comment carries that criterion to (ruling B).
 import { describe, expect, it } from 'vitest'
@@ -156,9 +157,16 @@ describe('satisfies', () => {
   // fixture declares `minimatch` at `^10.2.5` (spec/fixtures/npm-cross-line/
   // package.json), and a `10.3.0-beta.1` copy is admitted by that plain
   // caret range, which node-semver would exclude.
+  //
+  // The upper bound of an x-range and of a caret has no `-0` here, so each
+  // admits the first prerelease of the next major. npm's `semver` 7.8.5
+  // answers false for the last two rows. A partial version such as `22`
+  // reads as npm does (#353), and does not admit `23.0.0-0`.
   it.each([
     ['2.0.0-alpha', '1.x', true],
     ['10.3.0-beta.1', '^10.2.5', true],
+    ['23.0.0-0', '22.x', true],
+    ['23.0.0-0', '^22', true],
   ])('admits the prerelease %s into %s, unlike npm', (version, range, expected) => {
     expect(satisfies(version, range)).toBe(expected)
   })
