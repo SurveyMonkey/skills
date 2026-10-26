@@ -262,19 +262,49 @@ describe('satisfies, the npm forms of a partial version and a hyphen range (#353
     ['1.5.0', '>=1 - 2'],
     ['2.5.0', '1.2.3 - >=2'],
     ['1.2.3', '1.2.3 - >=2'],
+    ['1.5.0', '1.2-rc - 2'],
   ])('reads %s against the malformed hyphen range %s as false', (version, range) => {
     expect(satisfies(version, range)).toBe(false)
   })
 
-  // Pin examples, and a known difference from npm. They pass when written.
-  // An end of a hyphen range must be a full or a partial version, so an
-  // x-range end is not read as a hyphen range here. npm answers true for both
-  // rows: it reads `1.x - 2` and `1.2.3 - 2.x` as ranges to `<3.0.0-0`.
+  // npm reads a hyphen range only when it is the whole alternative. So npm
+  // refuses each of these ranges, and its `satisfies` answers false.
   it.each([
-    ['1.5.0', '1.x - 2'],
-    ['2.5.0', '1.2.3 - 2.x'],
-  ])('reads %s against %s, a hyphen range with an x-range end, as false', (version, range) => {
+    ['1.5.0', '>=1.0.0 1.2.3 - 2.0.0'],
+    ['1.5.0', '1.2.3 - 2.0.0 >=1'],
+  ])('reads %s against %s, a hyphen range beside a comparator, as false', (version, range) => {
     expect(satisfies(version, range)).toBe(false)
+  })
+
+  // An end with an x part reads as the line of the parts before it, and an
+  // end that starts with one has no bound. A prerelease, a build or a `v` on
+  // an end reads as npm reads it. Each expected value is npm's answer.
+  it.each([
+    ['1.5.0', '1.x - 2', true],
+    ['3.0.0-0', '1.x - 2', false],
+    ['2.5.0', '1.2.3 - 2.x', true],
+    ['1.2.2', '1.2.3 - 2.x', false],
+    ['0.0.1', '* - 2', true],
+    ['3.0.0', '* - 2', false],
+    ['9.0.0', '1 - *', true],
+    ['0.9.0', '1 - *', false],
+    ['9.0.0', '* - *', true],
+    ['1.3.0', '1.2.x - 1.4', true],
+    ['1.1.9', '1.2.x - 1.4', false],
+    ['1.5.0', '1.2.x - 1.4', false],
+    ['1.0.0', '1.x.3 - 2', true],
+    ['2.5.0', '1 - 2.x.5', true],
+    ['1.5.0', '1.2.3-rc.1 - 2.0.0', true],
+    ['1.2.3-rc.1', '1.2.3-rc.1 - 2.0.0', true],
+    ['1.2.3-rc.0', '1.2.3-rc.1 - 2.0.0', false],
+    ['2.0.0-rc.1', '1.0.0 - 2.0.0-rc.1', true],
+    ['2.0.0', '1.0.0 - 2.0.0-rc.1', false],
+    ['1.5.0', 'v1.2.3 - 2', true],
+    ['1.2.2', 'v1.2.3 - 2', false],
+    ['2.0.0', '1.2.3+b - 2.0.0+c', true],
+    ['2.0.1', '1.2.3+b - 2.0.0+c', false],
+  ])('reads %s against the hyphen range %s as %s', (version, range, expected) => {
+    expect(satisfies(version, range)).toBe(expected)
   })
 
   // Pin example. It passes when written. A full version with no operator
