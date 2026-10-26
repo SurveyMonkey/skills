@@ -1110,8 +1110,8 @@ const rootSpec = (spec: string): Setup =>
 const UNSURE = (detail: string): string =>
   `apply_constraint: cannot scope 'smol-toml': npm can match a pre-existing version-qualified override key for its parent through an edge into a copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
-const OTHER = (detail: string): string =>
-  `apply_constraint: cannot scope 'smol-toml': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
+const OTHER = (detail: string, pkg = 'smol-toml'): string =>
+  `apply_constraint: cannot scope '${pkg}': a copy of its parent has an edge whose spec is not a version or a range, such as a tag, a git URL or a directory, beside pre-existing version-qualified override keys for that parent: ${detail}. npm gives such an edge the first key by name, or skips each qualified key for a git URL, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #333), so nothing was written; reconcile the existing override by hand.`
 
 describe('npm constraint goes inside a qualified key that matches the parent', () => {
   it('writes inside the qualified key of the field case, and no bare key', () => {
@@ -1549,6 +1549,68 @@ describe('npm constraint goes inside a qualified key with a bare major selector 
     expect(manifestAfter(MAJOR_KEY, smolToml).overrides).toEqual({
       'nx@22': { axios: AXIOS, 'smol-toml': SMOL },
     })
+  })
+})
+
+// The specimens of #359. Real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote both lockfiles, each for the
+// manifest beside it. The root declares debug as
+// `git+https://github.com/debug-js/debug.git#semver:^4.4.0` in one, and as
+// `^4.4.0` in the other. Each resolved debug 4.4.3, which declares ms at
+// `^2.1.3`. The key `debug@4` has the "." value `$debug`, because npm
+// refuses a key that changes the spec of a direct dependency (EOVERRIDE). In
+// the same runs, with each edge, `"ms": "2.1.2"` inside `debug@4` gave ms
+// 2.1.2, and a bare `debug` key after it kept ms at 2.1.3. With a git edge
+// that has no `#semver:` range, npm skipped `debug@4`, and the bare key gave
+// ms 2.1.2.
+const GIT_EDGE = 'npm-qualified-key-git-edge'
+
+const REGISTRY_EDGE = 'npm-qualified-key-registry-edge'
+
+const msRange = ['ms', '>=2.1.3 <3', 'debug']
+
+const DEBUG_GIT = 'git+https://github.com/debug-js/debug.git'
+
+/** The root declares debug as `spec`, in package.json and in the root entry of the lockfile. */
+const rootDebug = (spec: string): Setup =>
+  both(
+    manifestEdit((manifest) => {
+      manifest.dependencies = { debug: spec }
+    }),
+    lockEdit((packages) => {
+      packages[''] = { ...(packages[''] as Json), dependencies: { debug: spec } }
+    }),
+  )
+
+describe('npm constraint goes inside a qualified key for a git edge with a semver range (#359)', () => {
+  // Red first: `it.fails` until each fix, because the pre-commit hook runs
+  // this file. The registry edge waits on #353: the range rules read the
+  // selector `4` as the version 4.0.0.
+  it.fails('writes inside the debug@4 key for a registry edge of ^4.4.0', () => {
+    expect(manifestAfter(REGISTRY_EDGE, msRange).overrides).toEqual({
+      'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' },
+    })
+  })
+
+  it.fails('writes inside the debug@4 key for a git edge of #semver:^4.4.0', () => {
+    expect(manifestAfter(GIT_EDGE, msRange).overrides).toEqual({
+      'debug@4': { '.': '$debug', ms: '>=2.1.3 <3' },
+    })
+  })
+
+  it.fails('refuses a git edge whose #semver: range the range rules cannot read', () => {
+    const setup = rootDebug(`${DEBUG_GIT}#semver:latest`)
+    expect(refusalOf(GIT_EDGE, msRange, setup)).toBe(
+      `apply_constraint: cannot scope 'ms': a git edge into a copy of its parent has a '#semver:' range that the range rules cannot read, beside pre-existing version-qualified override keys for that parent: [{"parent":"debug","keys":["debug@4"],"ranges":["latest"]}]. npm matches a key for such an edge only through that range, so neither a constraint inside a key nor a new key after it can be shown to take effect (issue #359), so nothing was written; reconcile the existing override by hand.`,
+    )
+  })
+
+  // Pin example. It passes when written. npm skips each qualified key for a
+  // git edge with no `#semver:` range.
+  it('refuses a key beside a git edge with no #semver: range', () => {
+    expect(refusalOf(GIT_EDGE, msRange, rootDebug(DEBUG_GIT))).toBe(
+      OTHER('[{"parent":"debug","keys":["debug@4"],"versions":["4.4.3"]}]', 'ms'),
+    )
   })
 })
 
