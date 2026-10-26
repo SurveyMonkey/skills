@@ -244,7 +244,7 @@ const probing = (...probes: RunResult[]): Runner => {
 }
 
 describe('a checkout that is kept', SLOW, () => {
-  // pin: pipes phase 2 discovery through `classify-lines` at one venue
+  // pin: pipes phase 2 discovery through classify-lines.sh at one venue
   // pin: withdraws a requires_major_bump group in phase 2, before the question is asked
   it('answers with its identity, its branch style and its classified groups', async () => {
     const w = world()
@@ -644,8 +644,8 @@ describe('the prefix', SLOW, () => {
     return tool === 'git' ? `git ${words[3]}` : `gh ${words[1]}`
   }
 
-  // pin: resolves env_prefix before `detect-scope`
-  // pin: runs `detect-scope` under the prefix and says why
+  // pin: resolves env_prefix before detect-scope.sh
+  // pin: runs detect-scope.sh under the prefix and says why
   // pin: wraps every stage of the phase 2 pipeline, not only the first
   it('runs every child of every step under the prefix', async () => {
     const w = world()
@@ -738,7 +738,7 @@ describe('the command line', SLOW, () => {
     expect(await prepare(w, ['.'], {})).toEqual(failed('prepare-checkout: not a git checkout: .'))
   })
 
-  // pin: grants `discover-repos`
+  // pin: grants discover-repos.sh
   // pin: grants the ls-remote namespace probe
   it.each([
     'discover-repos /work',

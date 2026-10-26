@@ -619,6 +619,28 @@ const realStatuses = async (fixture: string, groups: readonly Group[]) => {
   }
 }
 
+// The real adapter refuses a Yarn Classic lockfile in `detect`. The group
+// stays actionable as `unknown`, and `classify_errors` names the refusal of
+// the adapter. The error text is the one that the bash adapter wrote
+// (`scripts/ecosystems/node.sh:440`). The stand-in examples above cannot see
+// this join of the real adapter and the command.
+describe('a lockfile that the real adapter refuses', () => {
+  it('keeps the group unknown and names the refusal on a Yarn Classic lockfile', async () => {
+    expect(await realStatuses('yarn-classic', [group('lodash', '4')])).toEqual({
+      actionable: ['lodash@4:unknown'],
+      skipped: [],
+      errors: [
+        {
+          adapter: 'node',
+          package: 'lodash',
+          error:
+            'Yarn Classic (v1) is not supported; only Yarn Berry (v2+). See .github/CONTRIBUTING.md to request support.',
+        },
+      ],
+    })
+  })
+})
+
 // #168. The four field shapes of the issue, on a real `npm install
 // --package-lock-only` lockfile (npm 11.19.0): each package resolves one copy,
 // below the line of its group, and the alert range of the group covers it.

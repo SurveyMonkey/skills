@@ -23,7 +23,8 @@
 // file's suite drives each failure in-process, with no `gh` on the machine.
 //
 // **Empty stderr:** a `gh` that fails with an empty stderr gives the detail
-// `gh exited <status>`, so a reader never sees an empty detail (#302).
+// `gh exited <status>`, or the signal that killed it. So a reader never sees
+// an empty detail (#302).
 //
 // This file ships. It imports nothing outside the plugin, and stays inside
 // the erasable subset.

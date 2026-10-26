@@ -183,6 +183,7 @@ describe('the checks derivation', () => {
       ['lint'],
     ],
     ['a cancelled check', [checkRun('e2e', 'CANCELLED')], 'failed', [1, 0, 1, 0], ['e2e']],
+    ['a timed out check', [checkRun('e2e', 'TIMED_OUT')], 'failed', [1, 0, 1, 0], ['e2e']],
     [
       'a check that finished with no conclusion',
       [checkRun('e2e', null)],
