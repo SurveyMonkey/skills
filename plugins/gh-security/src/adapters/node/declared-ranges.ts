@@ -18,6 +18,10 @@
 // then the hoisted one. For pnpm, the root gets its line from `importers:`,
 // and each parent from its rows.
 //
+// A root `package.json` that is JSON but not an object (`null`, a list, a
+// number or a string) is a failed read (#357). jq reads `null` as an empty
+// object, so node.sh gives no range there. No parity fixture has such a root.
+//
 // The verb does not run `detect`.
 //
 // This file ships. It imports nothing outside the plugin.
@@ -175,9 +179,15 @@ const collect = (tree: Tree<NodeDetection>, pkg: string, line: string | null) =>
   const text = lockfileText(tree)
   const reader = readerOf(tree)
   const parents = namesOf(reader.parents(text, pkg))
+  const rootManifest = readManifest(join(root, 'package.json'))
+  // A root manifest of no document declares nothing. Any other value that is
+  // not an object is a failed read, and not a root with no range (#357).
+  if (rootManifest !== NO_DOCUMENT && !isRecord(rootManifest)) {
+    throw new Error('declared_ranges: the root package.json is not an object')
+  }
   let rootRange =
     rangesIn(
-      readManifest(join(root, 'package.json')),
+      rootManifest,
       ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies'],
       pkg,
     )[0] ?? ''
