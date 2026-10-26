@@ -122,7 +122,7 @@ const RESULT_SCHEMA = {
         detail: { type: 'string' },
       },
     },
-    // `gh-security fix-group cleanup` runs AFTER the commit, push and `gh pr create`,
+    // `gh-security fix-group cleanup` runs AFTER the commit, push and `render-pr create`,
     // and exits 3 when it leaves a worktree behind. That failure can follow
     // completed work, so it is reported here rather than through `failure`:
     // null when cleanup finished with no errors, otherwise the driver's own

@@ -113,6 +113,5 @@ written against it.
 **Never call count or order.** Retries, pagination and caching change both without changing
 behavior, and an example pinned to them breaks on a refactor that fixed nothing. The exception is
 an absence: "this endpoint was never called" is a behavioral claim, and it is the one the example
-`runs gh with the number and the repository, and the field list of the client` in
-`tests/plugins/gh-security/subcommands/pr-status.test.ts` makes: it asserts the one call and its
-argv.
+`never reads declared_ranges or installs on the peer-only stop` in
+`tests/plugins/gh-security/subcommands/fix-group.test.ts` makes.

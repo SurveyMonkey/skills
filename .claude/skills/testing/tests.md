@@ -68,9 +68,9 @@ const { actionable } = await answer(['octo/app'])
 expect(actionable[0]).toEqual({ package: 'undici', ecosystem: 'npm', major_line: '7', /* ... */ repo: 'octo/app' })
 ```
 
-Why it is good: the group is compared to its whole literal shape, so a key that returns, such as
-a cross-repo `skipped_repos` summary (issue #188), or a key that goes, fails the example. A
-projection of one field, or a `toMatchObject`, passes either way.
+Why it is good: the group is compared to its whole literal shape, so a field that is added to a
+group, or dropped from it, fails the example. A projection of one field, or a `toMatchObject`,
+passes either way.
 
 ## Bad, with the fix
 
