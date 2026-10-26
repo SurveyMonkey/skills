@@ -1608,7 +1608,8 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
 
   // Each git spec form that npm-package-arg reads with a `#semver:` range of
   // `^4.4.0` (probe: `npa('debug@<spec>').gitRange` of npm 11.19.0). A
-  // `::path:` part, or a `:` part, after the range does not change the range.
+  // `::path:` part before or after the range, or a `:` part after it, does not
+  // change the range.
   it.each([
     ['github:debug-js/debug#semver:^4.4.0'],
     ['gitlab:debug-js/debug#semver:^4.4.0'],

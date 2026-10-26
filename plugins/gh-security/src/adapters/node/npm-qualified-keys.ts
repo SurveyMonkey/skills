@@ -138,8 +138,9 @@ const GIT_SPEC =
 /**
  * The `#semver:` range of a git spec, as `setGitAttrs` of npm-package-arg
  * reads it. It is the text after `semver:` up to the next `:`. It comes from
- * the part of the committish that starts with `semver:`. Parts split at `::`. It is null for a
- * git spec with no such part, and for a spec that is not a git spec.
+ * the part of the committish that starts with `semver:`. Parts split at `::`.
+ * It is null for a git spec with no such part, and for a spec that is not a
+ * git spec.
  * npm-package-arg also decodes percent escapes in the range. This function
  * does not, so the pass refuses such a range as one it cannot read.
  */

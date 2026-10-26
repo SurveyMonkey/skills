@@ -12,11 +12,11 @@
 //
 // Parity exception #353: `satisfies` reads three forms as npm does, and jq
 // does not. A partial version with no operator, or with only `=` or `v`
-// before it, is the line it names. Examples are `22`, `=22` and `v22.7`. A tilde before a partial version is the same line. A
-// hyphen range `A - B` is `>=A <=B`, and a partial or x-range end reads as
-// its line. The upper bound of a line ends in `-0`, as npm's does. The
-// upper bound of `22.x` and `^22` has no `-0` here, unlike npm (the
-// prerelease divergence). So here `22` does not admit `23.0.0-0`, but `22.x`
+// before it, is the line it names. Examples are `22`, `=22` and `v22.7`. A
+// tilde before a partial version is the same line. A hyphen range `A - B`
+// is `>=A <=B`, and a partial or x-range end reads as its line. The upper
+// bound of a line ends in `-0`, as npm's does. The upper bound of `22.x`
+// and `^22` has no `-0` here, unlike npm (the prerelease divergence). So here `22` does not admit `23.0.0-0`, but `22.x`
 // and `^22` do. See `partialLine` and `foldHyphens`.
 //
 // This file ships. It imports nothing outside the plugin and stays inside the
