@@ -1,6 +1,7 @@
 // `gh-security summarize-run --workflow <workflow.json> --reports
-// <reports.json> --discovery <merged.json> [--preflight <preflights.json>]
-// [--args <args.json>]`: write the summary of `resolve-alerts` phase 7. This
+// <reports.json> --discovery <merged.json> [--args <args.json>]
+// [<checkout>=<preflight.json>]... [--out <file>]`: write the summary of
+// `resolve-alerts` phase 7. This
 // is the contract of #229. Phase 7 was prose that the model did by hand, so
 // there is no script to port and no parity run.
 //
@@ -14,14 +15,20 @@
 //   --discovery  the answer of `merge-envelopes`: `checkouts` (`checkout`,
 //                `nwo`, `branch_style`), `excluded` (`checkout`, `reason`,
 //                `stderr`) and `skipped`. Its `actionable` is not read.
-//   --preflight  optional. One JSON object, from the `checkout` of a kept
-//                checkout to the answer of `preflight-repo` for it, or to
-//                the report of a call that failed, `{error, exclude_error}`.
-//                Each answer has an `exclude_error`, text or null. A report
-//                has one too, and `{error}` alone means none. A failed call
-//                and its exclude error give one line each. Without the file,
-//                the registry preflight excluded no repository, and no
-//                answer has an `exclude_error`.
+//   <checkout>=<preflight.json>
+//                optional, one word for each repository of phase 5 (#346).
+//                `<checkout>` is a kept checkout, as the discovery spells it.
+//                It is the text before the last `=`, so a checkout may hold
+//                one. `<preflight.json>` is the file that `preflight-repo
+//                --out` wrote for it: the answer, or the report of a call
+//                that failed, `{error, exclude_error}`, or the `{error}` of a
+//                call that failed with no report. Each answer has an
+//                `exclude_error`, text or null. A report has one too, and
+//                `{error}` alone means none. A failed call and its exclude
+//                error give one line each. With no such word, the registry
+//                preflight excluded no repository, and no answer has an
+//                `exclude_error`. The words are words and not a flag, so the
+//                allow hook passes each one (`cli.md`).
 //   --args       optional. The Workflow `args`, `{cap, dispatches}`. Give it
 //                for a run that was interrupted. Each entry then names a
 //                dispatch by its `repo` and `branch_name`, and a dispatch with
@@ -90,9 +97,13 @@
 //       Last, each preflight answer with an `exclude_error`, `ok` or not, is
 //       one line with the repository and the error.
 //
+// `--out <file>` writes the answer to the file too (`cli/out-file.ts`).
+//
 // The command fails, with exit 1, before it writes anything, in these cases:
-//   - a bad command line: an option it does not know, a required flag that
-//     is missing, or a word that is not a flag,
+//   - a bad command line: an option it does not know, or a required flag
+//     that is missing,
+//   - a word that is not `<checkout>=<file>` with neither part empty, or two
+//     words for one checkout,
 //   - a file that cannot be read, or is not JSON,
 //   - a file without its shape, or a field that the summary reads that is
 //     missing or of another type. The message names the file and the path,
@@ -106,7 +117,7 @@
 //     `reason`,
 //   - a result whose `status` is not the `result_status` of its report,
 //   - a log warning about a group that is not in the batch,
-//   - a preflight entry for a path that is not a kept checkout.
+//   - a preflight word for a path that is not a kept checkout.
 //
 // Differences from the prose of phase 7, each with #229:
 //   - A `null` result is a failure, as phase 7 says. A mispaired entry is
@@ -150,7 +161,18 @@ import {
 import { type Kind, type Row, renderSummary } from '../render/run-summary.ts'
 
 const USAGE =
-  'usage: gh-security summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]'
+  'usage: gh-security summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--args <args.json>] [<checkout>=<preflight.json>]...'
+
+/** One `<checkout>=<file>` word, split at its last `=`. */
+const preflightWord = (word: string): { checkout: string; file: string } => {
+  const at = word.lastIndexOf('=')
+  const checkout = word.slice(0, Math.max(at, 0))
+  const file = word.slice(at + 1)
+  if (checkout === '' || file === '') {
+    throw new Refusal(`${word} is not <checkout>=<preflight.json>`)
+  }
+  return { checkout, file }
+}
 
 /** The line that `fix-groups.mjs` logs for a result that breaks a cross-field rule. */
 const WARNING = /^Cross-field inconsistency in the result for (.+?): (.*)$/
@@ -263,27 +285,25 @@ export const summarizeRun = (context: CommandContext, cwd: string): CommandResul
     workflow: { type: 'string', default: '' },
     reports: { type: 'string', default: '' },
     discovery: { type: 'string', default: '' },
-    preflight: { type: 'string', default: '' },
     args: { type: 'string', default: '' },
   })
   if (parsed.outcome !== 'ok') return parsed
   const { options, positionals } = parsed.value
-  if (
-    options.workflow === '' ||
-    options.reports === '' ||
-    options.discovery === '' ||
-    positionals.length > 0
-  ) {
+  if (options.workflow === '' || options.reports === '' || options.discovery === '') {
     return failed(USAGE)
   }
   try {
     const workflow = readFile(cwd, options.workflow, workflowOf)
     const reports = readFile(cwd, options.reports, reportsOf)
     const discovery = readFile(cwd, options.discovery, discoveryOf)
-    const preflights =
-      options.preflight === ''
-        ? []
-        : readFile(cwd, options.preflight, (value) => preflightsOf(value, discovery.checkouts))
+    const words = positionals.map(preflightWord)
+    const twice = words.find((word, index) =>
+      words.slice(0, index).some((before) => before.checkout === word.checkout),
+    )
+    if (twice !== undefined) throw new Refusal(`${twice.checkout} has two preflight answers`)
+    const preflights = words.flatMap(({ checkout, file }) =>
+      readFile(cwd, file, (value) => preflightsOf({ [checkout]: value }, discovery.checkouts)),
+    )
     const dispatches = options.args === '' ? null : readFile(cwd, options.args, argsOf)
     if (dispatches === null && workflow.entries.length === 0) {
       throw new Refusal(`${options.workflow}: result has no entry`)

@@ -121,7 +121,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'summarize-run': {
     description:
-      'Write the phase 7 summary of a resolve-alerts run from the workflow result, the reap reports and the exclusions: summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>] [--out <file>]',
+      'Write the phase 7 summary of a resolve-alerts run from the workflow result, the reap reports and the exclusions: summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--args <args.json>] [<checkout>=<preflight.json>]... [--out <file>]',
     load: async () => (await import('../subcommands/summarize-run.ts')).summarizeRunCommand,
     out: 'every call',
   },

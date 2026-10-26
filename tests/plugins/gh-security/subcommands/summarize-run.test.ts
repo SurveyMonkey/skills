@@ -36,7 +36,7 @@ vi.setConfig({ testTimeout: 60_000 })
 const FIELD = join(FIXTURES_ROOT, 'summarize-run', 'field-run')
 
 const USAGE =
-  'usage: gh-security summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]'
+  'usage: gh-security summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--args <args.json>] [<checkout>=<preflight.json>]...'
 
 const specimen = (name: string): JsonValue =>
   JSON.parse(readFileSync(join(FIELD, name), 'utf8')) as JsonValue
@@ -217,7 +217,6 @@ describe('the command line', () => {
     [['--reports', 'r.json', '--discovery', 'd.json']],
     [['--workflow', 'w.json', '--discovery', 'd.json']],
     [['--workflow', 'w.json', '--reports', 'r.json']],
-    [['--workflow', 'w.json', '--reports', 'r.json', '--discovery', 'd.json', 'extra']],
   ])('refuses %j with the usage', (args) => {
     expect(message(summarizeRun(context(args), '/'))).toBe(USAGE)
   })
@@ -350,7 +349,7 @@ interface Run {
   readonly reports: readonly JsonValue[]
   readonly discovery?: JsonValue
   readonly logs?: readonly string[]
-  readonly preflight?: JsonValue
+  readonly preflight?: Readonly<Record<string, JsonValue>>
   readonly args?: JsonValue
 }
 
@@ -363,9 +362,11 @@ const summarize = (run: Run): CommandResult => {
   }
   const args = ['--workflow', 'workflow.json', '--reports', 'reports.json']
   args.push('--discovery', 'merged.json')
-  if (run.preflight !== undefined) {
-    files['preflight.json'] = run.preflight
-    args.push('--preflight', 'preflight.json')
+  // Each preflight answer is a file of its own, as `preflight-repo --out`
+  // writes it, named with its checkout.
+  for (const [index, [checkout, answer]] of Object.entries(run.preflight ?? {}).entries()) {
+    files[`preflight-${index + 1}.json`] = answer
+    args.push(`${checkout}=preflight-${index + 1}.json`)
   }
   if (run.args !== undefined) {
     files['args.json'] = run.args
@@ -1714,8 +1715,12 @@ describe('an input that is refused', () => {
         { package: 'd', major_line: '1', repo: 'octo/app', reason: 'PR check failed', error: 'e' },
       ],
     }),
-    'preflight.json': {
-      [ROOT]: { ok: false, probe_package: 'a', cause: 'auth', stderr: null, exclude_error: null },
+    'preflight-1.json': {
+      ok: false,
+      probe_package: 'a',
+      cause: 'auth',
+      stderr: null,
+      exclude_error: null,
     },
     'args.json': {
       cap: 1,
@@ -1730,10 +1735,9 @@ describe('an input that is refused', () => {
     'reports.json',
     '--discovery',
     'merged.json',
-    '--preflight',
-    'preflight.json',
     '--args',
     'args.json',
+    `${ROOT}=preflight-1.json`,
   ]
 
   const GONE = Symbol('gone')
@@ -2066,23 +2070,23 @@ describe('an input that is refused', () => {
     ['merged.json', ['skipped', 2, 'open_pr_url'], GONE, 'skipped[2].open_pr_url is not text'],
     ['merged.json', ['skipped', 3, 'error'], '', 'skipped[3].error is not text'],
     // The preflight answers.
-    ['preflight.json', [], [], 'the file is not an object'],
-    ['preflight.json', [ROOT], 'failed', `"${ROOT}" is not an object`],
-    ['preflight.json', [ROOT, 'ok'], GONE, `"${ROOT}".ok is not true or false`],
+    ['preflight-1.json', [], 5, `"${ROOT}" is not an object`],
+    ['preflight-1.json', [], [], `"${ROOT}" is not an object`],
+    ['preflight-1.json', ['ok'], GONE, `"${ROOT}".ok is not true or false`],
     [
-      'preflight.json',
-      [ROOT, 'cause'],
+      'preflight-1.json',
+      ['cause'],
       'dns',
       `"${ROOT}".cause is not one of auth, not-found, network, start, detect`,
     ],
-    ['preflight.json', [ROOT, 'probe_package'], GONE, `"${ROOT}".probe_package is not text`],
-    ['preflight.json', [ROOT, 'stderr'], GONE, `"${ROOT}".stderr is not text`],
-    ['preflight.json', [ROOT, 'exclude_error'], GONE, `"${ROOT}".exclude_error is not text`],
-    ['preflight.json', [ROOT, 'exclude_error'], 5, `"${ROOT}".exclude_error is not text`],
-    ['preflight.json', [ROOT, 'exclude_error'], '', `"${ROOT}".exclude_error is not text`],
+    ['preflight-1.json', ['probe_package'], GONE, `"${ROOT}".probe_package is not text`],
+    ['preflight-1.json', ['stderr'], GONE, `"${ROOT}".stderr is not text`],
+    ['preflight-1.json', ['exclude_error'], GONE, `"${ROOT}".exclude_error is not text`],
+    ['preflight-1.json', ['exclude_error'], 5, `"${ROOT}".exclude_error is not text`],
+    ['preflight-1.json', ['exclude_error'], '', `"${ROOT}".exclude_error is not text`],
     [
-      'preflight.json',
-      [ROOT],
+      'preflight-1.json',
+      [],
       {
         ok: true,
         pm: 'npm',
@@ -2094,18 +2098,12 @@ describe('an input that is refused', () => {
       },
       `"${ROOT}".exclude_error is not text`,
     ],
-    ['preflight.json', [ROOT], { error: '' }, `"${ROOT}".error is not text`],
+    ['preflight-1.json', [], { error: '' }, `"${ROOT}".error is not text`],
     [
-      'preflight.json',
-      [ROOT],
+      'preflight-1.json',
+      [],
       { error: 'x', exclude_error: 5 },
       `"${ROOT}".exclude_error is not text`,
-    ],
-    [
-      'preflight.json',
-      ['/Users/example/src/octo/x'],
-      { ok: true },
-      '"/Users/example/src/octo/x" is not a kept checkout of the discovery',
     ],
     // The Workflow args.
     ['args.json', [], 5, 'the file is not an object'],
@@ -2119,6 +2117,53 @@ describe('an input that is refused', () => {
     ],
   ] as const)('refuses %s where %j is %j', (file, path, to, problem) => {
     expect(refusal(file, path, to)).toBe(`summarize-run: ${file}: ${problem}`)
+  })
+
+  // The preflight answers are words `<checkout>=<file>` (#346). The checkout
+  // is the text before the last `=`.
+  const withPreflights = (...words: string[]) => [...ARGS.slice(0, -1), ...words]
+
+  it.each([
+    ['a word with no =', ['extra'], 'extra is not <checkout>=<preflight.json>'],
+    [
+      'an empty checkout',
+      ['=preflight-1.json'],
+      '=preflight-1.json is not <checkout>=<preflight.json>',
+    ],
+    ['an empty file', [`${ROOT}=`], `${ROOT}= is not <checkout>=<preflight.json>`],
+    [
+      'one checkout twice',
+      [`${ROOT}=preflight-1.json`, `${ROOT}=preflight-1.json`],
+      `${ROOT} has two preflight answers`,
+    ],
+    [
+      'a checkout that is not kept',
+      ['/Users/example/src/octo/x=preflight-1.json'],
+      'preflight-1.json: "/Users/example/src/octo/x" is not a kept checkout of the discovery',
+    ],
+  ])('refuses %s', (_case, words, problem) => {
+    expect(message(summarizeRun(context(withPreflights(...words)), inputs(base())))).toBe(
+      `summarize-run: ${problem}`,
+    )
+  })
+
+  it('refuses a preflight answer file that cannot be read', () => {
+    expect(
+      message(summarizeRun(context(withPreflights(`${ROOT}=gone.json`)), inputs(base()))),
+    ).toMatch(/^summarize-run: cannot read gone\.json: ENOENT/)
+  })
+
+  it('reads the checkout up to the last =, so a checkout may hold one', () => {
+    const odd = '/Users/example/src/a=b'
+    const files = {
+      ...base(),
+      'merged.json': discovery({ checkouts: [{ ...CHECKOUT, checkout: odd }] }),
+      'preflight-2.json': { error: 'preflight-repo: no package', exclude_error: 'locked' },
+    }
+    const text = markdown(
+      summarizeRun(context([...ARGS.slice(0, -1), `${odd}=preflight-2.json`]), inputs(files)),
+    )
+    expect(text).toContain(`(\`${odd}\`)`)
   })
 
   it.each([
@@ -2150,7 +2195,10 @@ describe('an input that is refused', () => {
 
   it('refuses a Workflow result with no entry and no args', () => {
     expect(
-      withFile('workflow.json', (w: Workflow) => ({ ...w, result: [] }), ARGS.slice(0, 8)),
+      withFile('workflow.json', (w: Workflow) => ({ ...w, result: [] }), [
+        ...ARGS.slice(0, 6),
+        ARGS[8] as string,
+      ]),
     ).toBe('summarize-run: workflow.json: result has no entry')
   })
 
@@ -2191,9 +2239,12 @@ describe('an input that is refused', () => {
     expect(withFile('reports.json', (r: unknown[]) => r.slice(0, 2))).toBe(
       'summarize-run: reports.json has 2 reports for 3 groups',
     )
-    expect(withFile('reports.json', (r: unknown[]) => r.slice(0, 2), ARGS.slice(0, 8))).toBe(
-      'summarize-run: reports.json has 2 reports for 3 groups',
-    )
+    expect(
+      withFile('reports.json', (r: unknown[]) => r.slice(0, 2), [
+        ...ARGS.slice(0, 6),
+        ARGS[8] as string,
+      ]),
+    ).toBe('summarize-run: reports.json has 2 reports for 3 groups')
   })
 
   it.each([

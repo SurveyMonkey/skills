@@ -117,7 +117,7 @@ describe('the discovery entries', () => {
     ['remove-run', 'remove-run <dir>'],
     [
       'summarize-run',
-      'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
+      'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--args <args.json>] [<checkout>=<preflight.json>]... [--out <file>]',
     ],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
