@@ -1532,6 +1532,26 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
   })
 })
 
+// The specimen of #353. A real `npm install --package-lock-only
+// --ignore-scripts` of npm 11.19.0 wrote the lockfile, for the manifest as it
+// is. The fixture keeps the root, @nx/workspace, nx, smol-toml and axios
+// entries of that lockfile, each as npm wrote it. @nx/workspace 22.7.7
+// declares nx at 22.7.7. The `nx@22` key has no "." value, so npm sets nx to
+// its selector `22`, and nx resolved to 22.7.12, which pins smol-toml at
+// 1.6.1. In the same runs, a bare `nx` key after `nx@22` kept smol-toml at
+// 1.6.1. The constraint inside `nx@22` gave 1.9.1.
+const MAJOR_KEY = 'npm-qualified-major-key'
+
+describe('npm constraint goes inside a qualified key with a bare major selector (#353)', () => {
+  // Red first: `it.fails` until the fix, because the pre-commit hook runs
+  // this file.
+  it.fails('writes inside the nx@22 key of the field case, and no bare key', () => {
+    expect(manifestAfter(MAJOR_KEY, smolToml).overrides).toEqual({
+      'nx@22': { axios: AXIOS, 'smol-toml': SMOL },
+    })
+  })
+})
+
 describe('npm placement detection is grounded in the lockfile', () => {
   it.each([
     ['the rule root is absent from the lockfile', { 'unrelated-pkg': { nx: '^22' } }],
