@@ -88,11 +88,11 @@ flowchart TD
     D4L -->|"ladder exhausted: exit 2<br/>validate_failed_after_ladder"| FVAL3["failure: phase validate, naming the copies<br/>and parents (the agent never narrows a key)"]
     D4L -->|"4. line_present false"| FVAL2["failure: phase validate, naming<br/>requires_major_bump; the override does nothing"]
 
-    D5["Phase 5: node &lt;cli&gt; fix-group score --work WORK:<br/>declared_ranges --line, then the scorer in process<br/>(F1-F7 as the scorer defines them today;<br/>no repo scripts run); answers ready_for_pr"] --> D6
-    D6["Phase 6: git -C WORK/fix add, node &lt;cli&gt; render-pr commit-msg<br/>--state FILE --group-json FILE --repo NWO,<br/>git -C WORK/fix commit -F, git -C WORK/fix push"] --> D6Q{"repo hooks"}
+    D5["Phase 5: node &lt;cli&gt; fix-group score --work WORK<br/>--out WORK/ready-for-pr.json: declared_ranges --line, then the scorer in process<br/>(F1-F7 as the scorer defines them today;<br/>no repo scripts run); answers ready_for_pr"] --> D6
+    D6["Phase 6: git -C WORK/fix add, node &lt;cli&gt; render-pr commit-msg<br/>--state FILE --group-json FILE --repo NWO --out WORK/commit-msg.txt,<br/>git -C WORK/fix commit -F, git -C WORK/fix push"] --> D6Q{"repo hooks"}
     D6Q -->|"pre-commit or pre-push fails"| FPUSH["failure: phase push,<br/>quoting the hook (never --no-verify)"]
     D6Q -->|"push rejected: directory file conflict"| FPUSH
-    D6Q -->|pass| D6PR["node &lt;cli&gt; render-pr labels --repo NWO --band BAND,<br/>render-pr body --state FILE --group-json FILE --repo NWO,<br/>render-pr create --repo NWO --head BRANCH --band BAND<br/>--title TITLE --body-file FILE (ready for review;<br/>the agent never merges it or arms auto-merge)"]
+    D6Q -->|pass| D6PR["node &lt;cli&gt; render-pr labels --repo NWO --band BAND,<br/>render-pr body --state FILE --group-json FILE --repo NWO --out FILE,<br/>render-pr create --repo NWO --head BRANCH --band BAND<br/>--title-file WORK/commit-msg.txt --body-file FILE (ready for review;<br/>the agent never merges it or arms auto-merge)"]
     D6PR --> D6PRQ{"PR created?"}
     D6PRQ -->|"no, or gh opened it and then failed:<br/>the failure carries pr_url"| FPR["failure: phase pr<br/>(pr_url kept when gh opened one; no retry)"]
     D6PRQ -->|yes| SUCC(["success: pr_url, action, risk band,<br/>requires_major_bump[], observations[]"])

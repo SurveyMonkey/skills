@@ -9,7 +9,7 @@ plugin reaches it through the committed symlink `src/lib -> ../../../lib`
 | Path | Scope |
 |---|---|
 | `scripts/gh-security.ts` | The one entry point: the Node-floor preamble, then the CLI |
-| `src/cli/` | `registry.ts`, the subcommand map; `run.ts`, parse, dispatch, render, exit; `command.ts`, what a command is and the real io |
+| `src/cli/` | `registry.ts`, the subcommand map; `run.ts`, parse, dispatch, render, exit; `command.ts`, what a command is and the real io; `out-file.ts`, the `--out` writer |
 | `lib/envelope.ts` | The four ADR 001 outcomes as one typed result, and the exit codes |
 | `lib/node-floor.ts` | The runtime floor, as a pure function over a version string |
 | `lib/process.ts` | Runs one child with no shell and an optional time limit; never rejects |
@@ -58,6 +58,23 @@ A command may also answer with silence, which is exit 0 and nothing written at a
 A command that makes a file's content may write that text itself to stdout, and then answer with
 silence. `render-pr commit-msg` and `render-pr body` do this. A failure of either is still
 `{"error": ...}` on stdout with the message on stderr, and no part of the text is written.
+**`--out <file>` writes a command's answer to a file as well** (#346). A later command reads that
+file, so the model never copies an answer with the Write tool, and no call needs a redirection.
+`src/cli/out-file.ts` is the one writer, and `run.ts` applies it to each call that the registry
+entry opts in (`out`): `prepare-checkout`, `merge-envelopes`, `preflight-repo`,
+`build-dispatches`, `reap-batch`, `summarize-run`, `pr-status`, `render-pr commit-msg` and
+`body`, and `fix-group score`. `run.ts` takes the flag out before the handler runs. The file gets
+the bytes that stdout gets, and stdout does not change. A failure with a report writes the report
+to the file. Any other failure, a throw included, writes its `{"error": ...}` envelope. The parent
+directories are made. A file that cannot be written is exit 1, with
+`{"error": "<command>: cannot write --out <file>: <reason>"}` in place of the answer. `--out`
+with no file, or twice, fails before the command runs. A command that does not opt in gets the
+flag as an argument, and its own parser refuses it.
+`render-pr create` reads its title from the first line of `--title-file`, the commit message
+that `commit-msg --out` wrote. A title has spaces, so no `--title` value could pass the allow hook.
+`remove-run <dir>` removes the run directory of `resolve-alerts`,
+`${CLAUDE_PLUGIN_DATA}/runs/<stamp>`. It removes only a real path of the shape
+`plugins/data/<id>/runs/<run>`, and refuses a relative path, a `..` segment and a symbolic link.
 A handler may return a promise, and `run.ts` waits for it. A command may compose other commands
 in process. It calls their exported handlers, and never starts this CLI as a child:
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler

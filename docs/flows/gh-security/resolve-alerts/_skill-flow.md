@@ -31,7 +31,9 @@ The boxes hold the steps, not their verdicts. A driver's failure terminals sit o
 purpose: the driver decides them, and the agent is what maps them onto a result block and reports
 them.
 
-Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
+`RUN` is the run directory, `${CLAUDE_PLUGIN_DATA}/runs/<stamp>`. Each command whose answer a
+later command reads writes it there with `--out`, and `remove-run` removes the directory at the
+end. Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
 decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
 approval, and phase 8's offer of the groups declined at phase 3. Phase 1 asks nothing: scope is the
 checkouts on disk, read by `discover-repos`, and nothing is ever cloned
@@ -63,7 +65,7 @@ flowchart TD
     P1F -->|"non-zero: a git failure, or a target that is<br/>unreadable or not a directory"| STOPD(["Stop: report the script's error;<br/>nothing is in scope"])
     P1F -->|zero| P1Q{"any checkout roots?"}
     P1Q -->|"none"| STOP0(["Stop: no git repositories<br/>directly inside the current directory"])
-    P1Q -->|"one or more"| P1E["Per checkout root: env_prefix first, from what session context<br/>states for that tree, then node &lt;entry&gt; prepare-checkout<br/>[--env-prefix P] ROOT: identity, default branch, the branch-namespace<br/>probe, discovery and classification, all under the prefix"]
+    P1Q -->|"one or more"| P1E["Per checkout root: env_prefix first, from what session context<br/>states for that tree, then node &lt;entry&gt; prepare-checkout<br/>[--env-prefix P] --out RUN/CHECKOUT-N.json ROOT: identity, default branch, the branch-namespace<br/>probe, discovery and classification, all under the prefix"]
     P1E --> P1R{"per root: excluded: true?"}
     P1R -->|"no usable origin, no default branch,<br/>probe failed twice, or discovery<br/>or classification failed"| P1X["Reported by name with reason and stderr,<br/>and excluded; the other roots continue"]
     P1X --> P1S{"any root left?"}
@@ -71,7 +73,7 @@ flowchart TD
     P1S -->|yes| P2
     P1R -->|"no: kept"| P2
 
-    P2["Phase 2: node &lt;entry&gt; merge-envelopes<br/>CHECKOUT-1.json CHECKOUT-2.json ..."] --> P2R{"classification verdict<br/>per group, before the table"}
+    P2["Phase 2: node &lt;entry&gt; merge-envelopes<br/>--out RUN/MERGED.json CHECKOUT-1.json CHECKOUT-2.json ..."] --> P2R{"classification verdict<br/>per group, before the table"}
     P2R -->|requires_major_bump| P2W["Withdrawn before the plan is shown;<br/>reported in phase 7 with resolved_majors context"] --> P7AGG
     P2R -->|cross_line_collision| P2WC["Withdrawn before the plan is shown; reported in<br/>phase 7 under 'shared parent across major lines'<br/>with collision_parents"] --> P7AGG
     P2R -->|"remaining groups"| P2REP["Report every excluded checkout by name"]
@@ -89,18 +91,18 @@ flowchart TD
     P4ASK1 -->|decline| STOP3(["Stop: nothing dispatched"])
     P4OK["Batch approved"] --> P5
 
-    P5["Phase 5: per distinct repo in the approved batch:<br/>node &lt;entry&gt; preflight-repo [--env-prefix P]<br/>--fallback-package PKG ROOT: worktree exclude (a failure is<br/>reported, not fatal), detect, registry probe with one retry"] --> P6P{"preflight answer"}
+    P5["Phase 5: per distinct repo in the approved batch:<br/>node &lt;entry&gt; preflight-repo [--env-prefix P]<br/>--fallback-package PKG --out RUN/PREFLIGHT-N.json ROOT: worktree exclude (a failure is<br/>reported, not fatal), detect, registry probe with one retry"] --> P6P{"preflight answer"}
     P6P -->|"non-zero exit, or ok: false<br/>(detect, start, auth, not-found or network)"| P6X["Exclude that repo's groups; reported in phase 7<br/>as possibly transient, re-running re-probes"] --> P7AGG
-    P6P -->|"ok: true"| P6Q["Phase 6: node &lt;entry&gt; build-dispatches --envelope MERGED.json<br/>--cap N [--env-prefixes PREFIXES.json] REPO:BRANCH ...:<br/>every approved group across every repo, in ranked order"]
+    P6P -->|"ok: true"| P6Q["Phase 6: node &lt;entry&gt; build-dispatches --envelope MERGED.json<br/>--cap N [--env-prefixes PREFIXES.json] --out RUN/ARGS.json REPO:BRANCH ...:<br/>every approved group across every repo, in ranked order"]
     P6Q --> P6D["One Workflow call, machine-wide: cap workers over the list,<br/>one fix-dependency agent per group, each result<br/>schema-validated against the agent Result contract"]
     P6D --> P6I{"returned one entry per dispatch?"}
     P6I -->|"threw, cancelled or short"| P6J{"resume from runId?<br/>(ask first if the user interrupted)"}
     P6J -->|yes| P6D
     P6J -->|"no: a null entry for each<br/>dispatch with none"| P6R
-    P6I -->|yes| P6R["node &lt;entry&gt; reap-batch RESULTS.json<br/>(PR verified, then reap or leave, always reported)"]
+    P6I -->|yes| P6R["node &lt;entry&gt; reap-batch --out RUN/REPORTS.json RESULTS.json<br/>(PR verified, then reap or leave, always reported)"]
     P6R --> P7
 
-    P7["Phase 7: node &lt;entry&gt; summarize-run --workflow WORKFLOW.json<br/>--reports REPORTS.json --discovery MERGED.json<br/>--preflight PREFLIGHTS.json --args ARGS.json"] --> P7Q{"per entry"}
+    P7["Phase 7: node &lt;entry&gt; summarize-run --workflow WORKFLOW.json<br/>--reports REPORTS.json --discovery MERGED.json<br/>--args ARGS.json ROOT=PREFLIGHT-1.json ..."] --> P7Q{"per entry"}
     P7Q -->|success| P7S["Fix table row: PR, risk, F4/F5, bare-override note"]
     P7Q -->|"no-op"| P7N["Its own 'already fixed' line,<br/>never the failure list"]
     P7Q -->|failure| P7F["Failure list: phase + detail"]
@@ -115,8 +117,9 @@ flowchart TD
     P8 -->|yes| P8ASK0{"ask: fix the groups declined at phase 3?"}
     P8ASK0 -->|yes| P3
     P8ASK0 -->|no| P8REP
-    P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); per repo node &lt;entry&gt; pr-status<br/>[--env-prefix P] URL ..., then node &lt;entry&gt; render-pr-status<br/>--bands BANDS.json PR-STATUS-1.json ...:<br/>reported as information"]
-    P8REP --> DONE
+    P8 -->|no| P8REP["Point at /gh-security:audit-pins as separate<br/>follow-up work, run once these fix PRs have<br/>landed (#108); per repo node &lt;entry&gt; pr-status<br/>[--env-prefix P] --out RUN/PR-STATUS-N.json URL ..., then node &lt;entry&gt;<br/>render-pr-status --results RESULTS.json PR-STATUS-1.json ...:<br/>reported as information"]
+    P8REP --> P8RM["node &lt;entry&gt; remove-run RUN"]
+    P8RM --> DONE
     DONE(["Done: every PR URL with its band and check state,<br/>every excluded checkout, and what would unblock each"])
 
     subgraph WFBOX["workflows/fix-groups.mjs: tested JavaScript, not model-executed prose"]
@@ -130,6 +133,7 @@ flowchart TD
         P6Q
         P6R
         P7
+        P8RM
     end
 ```
 

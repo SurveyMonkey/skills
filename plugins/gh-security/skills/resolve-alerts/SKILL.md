@@ -21,9 +21,15 @@ in parallel, and report the pull requests they open.
 **Each step is one command; run it, read its JSON, and decide.** Do not reimplement a command.
 Write every call on one line, as shown, with literal paths and no variable, quote, pipe or
 redirection, so the plugin's allow hook passes it. A call with `--env-prefix "<env_prefix>"`
-cannot pass the hook, and prompts. Save an answer that a later command reads with
-the Write tool, under `<run>`: the directory `.gh-security-dispatch/` at the root of the working
-directory. **What a failure costs depends on what the script was run for.** A run-level script
+cannot pass the hook, and prompts.
+
+`<run>` is `${CLAUDE_PLUGIN_DATA}/runs/<stamp>`, written out in full in each call. `<stamp>` is
+the UTC time at the start of the run, as `YYYYMMDDTHHMMSSZ`. A command whose answer a later
+command reads takes `--out <run>/<file>`, and writes the answer to that file. Never copy a
+command's answer with the Write tool. You write only `prefixes.json`, `results.json` and
+`workflow.json` under `<run>`.
+
+**What a failure costs depends on what the script was run for.** A run-level script
 (`discover-repos`, `detect-capacity.sh`) failing means report its error and stop.
 `merge-envelopes` and `build-dispatches` are run-level too. After the dispatch, pull requests
 exist: when `reap-batch`, `summarize-run` or `render-pr-status` fails, report its error and each
@@ -74,11 +80,11 @@ below that names a checkout takes `--env-prefix "<env_prefix>"` when that checko
 ### Prepare each checkout
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" prepare-checkout <repo_root>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" prepare-checkout --out <run>/checkout-1.json <repo_root>
 ```
 
-Add `--env-prefix "<env_prefix>"` before `<repo_root>` when the checkout has one. Write each answer
-to `<run>/checkout-<n>.json`. An answer with `excluded: true` names its `reason` and `stderr`:
+Use `checkout-<n>.json` for checkout `n`. Add `--env-prefix "<env_prefix>"` before `<repo_root>`
+when the checkout has one. An answer with `excluded: true` names its `reason` and `stderr`:
 report both, verbatim, and go on. A non-zero exit also excludes the checkout: report its
 error by name, leave its file out of phase 2, and name it again in phase 8. The command resolves
 the repo, probes the branch namespace, discovers the alerts and classifies each group against `origin/<default_branch>`.
@@ -86,12 +92,11 @@ the repo, probes the branch namespace, discovers the alerts and classifies each 
 ## Phase 2: Merge and rank
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" merge-envelopes <run>/checkout-1.json <run>/checkout-2.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" merge-envelopes --out <run>/merged.json <run>/checkout-1.json <run>/checkout-2.json
 ```
 
-Name every file of phase 1. Write the answer to `<run>/merged.json`. **Report every excluded
-checkout by name**, with its reason, whether or not `actionable` is empty. If `actionable` is
-empty, report every skipped group and stop.
+Name every file of phase 1. **Report every excluded checkout by name**, with its reason, whether
+or not `actionable` is empty. If `actionable` is empty, report every skipped group and stop.
 
 A group is one major line of one package in one repo. Two groups with the same `package` and
 different `major_line`, or in different `repo`s, are independent work, never a duplicate. A group
@@ -138,19 +143,19 @@ user knows that approving the batch approves every group in it. No group joins t
 Once per distinct repo in the approved batch:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" preflight-repo --fallback-package <package> <repo_root>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" preflight-repo --fallback-package <package> --out <run>/preflight-1.json <repo_root>
 ```
 
-`<package>` is the top-ranked approved package of that repo. Add `--env-prefix "<env_prefix>"`
-when the repo has one. The command writes the worktree exclude, detects the package manager, and
-probes the registry with one retry. A non-zero exit, or an answer with `ok: false`, excludes every
+Use `preflight-<n>.json` for repo `n`. `<package>` is the top-ranked approved package of that
+repo. Add `--env-prefix "<env_prefix>"` when the repo has one. The command writes the worktree
+exclude, detects the package manager, and probes the registry with one retry. A non-zero exit, or an answer with `ok: false`, excludes every
 group of that repo: report the `probe_package`, the `stderr`, the `cause` (`auth` is the one
 case where the remedy is your login flow for that registry) and that a new run probes again. A non-null
 `exclude_error` is not fatal: report it and dispatch anyway. There is no proceed-anyway machinery:
 a user who wants to dispatch past a failed probe says so in conversation.
 
-Write `<run>/preflights.json`: one object from each repo's `checkout` (as `merged.json` spells it)
-to its answer. For a non-zero exit, use the JSON that the command wrote on stdout: `{"error": ...}`, with an `exclude_error` when the probe failed.
+On a non-zero exit, the file holds the JSON that the command wrote on stdout: `{"error": ...}`,
+with an `exclude_error` when the probe failed. Phase 7 reads each file.
 
 ## Phase 6: Dispatch the fix workflow
 
@@ -158,26 +163,27 @@ Write `<run>/prefixes.json`, from each `checkout` with a prefix to that prefix, 
 Then build the Workflow `args`, naming each approved group that phase 5 kept:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" build-dispatches --envelope <run>/merged.json --cap <cap> --env-prefixes <run>/prefixes.json <repo>:<branch_name>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" build-dispatches --envelope <run>/merged.json --cap <cap> --env-prefixes <run>/prefixes.json --out <run>/args.json <repo>:<branch_name>
 ```
 
-Drop `--env-prefixes` when no checkout has a prefix. Write the answer to `<run>/args.json`.
+Drop `--env-prefixes` when no checkout has a prefix.
 
 **Dispatch is one Workflow call.** The script is thin on purpose: it dispatches and it validates, and nothing else. The reap and the summary stay outside it. **Pass `args` as an actual JSON value, never as a JSON-encoded string**: a string arrives with no `dispatches`, and the script refuses it.
 
 **The Workflow tool only accepts a `scriptPath` it can already read**, and the plugin tree is
 outside the working directory. Stage a verified copy:
 
-1. Copy the file byte-for-byte from `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` to `<run>/`:
-   a path under the working directory itself, not the session scratchpad, which is a session-scoped
-   path outside it.
+1. Copy the file byte-for-byte from `${CLAUDE_PLUGIN_ROOT}/workflows/fix-groups.mjs` to
+   `.gh-security-dispatch/fix-groups.mjs` at the root of the working directory: a path under the
+   working directory itself, not the session scratchpad, which is a session-scoped path outside it.
+   `<run>` is outside it too, so the copy does not go there.
 2. Checksum both the source and the copy and confirm they match before launching. On a mismatch,
    copy again; never patch the copy.
 3. Launch `Workflow` with `scriptPath` pointing at the checksum-verified copy, not the plugin path.
 4. Keep the staged copy in place for the life of the run, including any resume.
 
 ```
-Workflow({ scriptPath: "<run>/fix-groups.mjs", args: <the answer of build-dispatches> })
+Workflow({ scriptPath: ".gh-security-dispatch/fix-groups.mjs", args: <the answer of build-dispatches> })
 ```
 
 The script is a real file: it is version-controlled, unit-tested by `spec/js/`, and its result schema is executed against a validator rather than read ([ADR 010](../../../../docs/adr/010-workflow-scripts-are-files-with-a-js-toolchain.md)). Never inline a copy of it, and never hand-edit a variant for one run. A checksum-verified byte-for-byte copy staged only so the tool can read it is neither of those.
@@ -199,11 +205,10 @@ Write the workflow's entries to `<run>/results.json`, one for each dispatch, in 
 Then verify and reap each group:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" reap-batch <run>/results.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" reap-batch --out <run>/reports.json <run>/results.json
 ```
 
-Write the answer to `<run>/reports.json`. It reaps a group only when its PR reads `OPEN`, and it
-reports every group either way.
+It reaps a group only when its PR reads `OPEN`, and it reports every group either way.
 
 Agents for the same repo share its repository-global git state, so while any agent is in flight no agent may touch it, and neither may you: no `git worktree prune`, no `git gc`, no config or ref writes.
 
@@ -212,8 +217,11 @@ Agents for the same repo share its repository-global git state, so while any age
 Write the Workflow tool's result (`result` and `logs`) to `<run>/workflow.json`. Then:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" summarize-run --workflow <run>/workflow.json --reports <run>/reports.json --discovery <run>/merged.json --preflight <run>/preflights.json --args <run>/args.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" summarize-run --workflow <run>/workflow.json --reports <run>/reports.json --discovery <run>/merged.json --args <run>/args.json <repo_root>=<run>/preflight-1.json
 ```
+
+Add one `<repo_root>=<run>/preflight-<n>.json` word for each file of phase 5, with the
+`checkout` of that repo as `merged.json` spells it.
 
 Show its `markdown` verbatim, and tell the story around it: what shipped, what is still open and
 why, and what the user does next. The summary describes the whole approved batch, and when the
@@ -238,15 +246,14 @@ question**: back to phase 3 with the remaining groups.
 Otherwise read the PRs this run opened, once, one call per repo, with its `--env-prefix` when it has one:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" pr-status <pr-url> <pr-url>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" pr-status --out <run>/pr-status-1.json <pr-url> <pr-url>
 ```
 
-Pass each `success` `pr_url` of that repo. A non-zero exit still carries a full report. Write each
-answer to `<run>/pr-status-<n>.json`, and write `<run>/bands.json`: each URL to its result's
-`risk.band`, or `null`. Then:
+Use `pr-status-<n>.json` for repo `n`. Pass each `success` `pr_url` of that repo. A non-zero exit
+still carries a full report. Then name every file:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" render-pr-status --bands <run>/bands.json <run>/pr-status-1.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" render-pr-status --results <run>/results.json <run>/pr-status-1.json
 ```
 
 Show its `markdown` verbatim. Report done, with every excluded checkout and repo and what would
@@ -261,5 +268,14 @@ mark anything ready, merge anything, arm auto-merge, or re-check later (ADR 008)
 is scoped to PR actions; it does not withdraw phase 7's defect-report offer.
 
 Remove `<run>` when the run ends at any phase: after the closing report, at each stop before it,
-and when the user declines to resume an interrupted run. When the working directory is a
-checkout, `<run>` is an untracked directory in the user's tree.
+and when the user declines to resume an interrupted run:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" remove-run <run>
+```
+
+A `no such directory` failure means that no command of the run wrote a file: there is nothing to
+remove.
+
+Also remove `.gh-security-dispatch/` when phase 6 made it. When the working directory is a
+checkout, it is an untracked directory in the user's tree.
