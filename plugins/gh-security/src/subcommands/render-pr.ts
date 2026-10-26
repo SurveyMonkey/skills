@@ -3,12 +3,13 @@
 // the port of `render-pr.sh` (#233, deleted in #236). The text is a template
 // over typed inputs (`src/render/`), and not a join of jq strings.
 //
-//   render-pr commit-msg --state <file> --group-json <file> --repo <nwo>
+//   render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>]
 //   render-pr body       --state <file> --group-json <file> --repo <nwo>
 //                        [--collateral-note <file>] [--global-override-note <file>]
+//                        [--out <file>]
 //   render-pr labels     --repo <nwo> --band <low|medium|high> [--label <name>]...
 //                        [--env-prefix "<string>"]
-//   render-pr create     --repo <nwo> --head <branch> --title <string> --body-file <file>
+//   render-pr create     --repo <nwo> --head <branch> --title-file <file> --body-file <file>
 //                        --band <low|medium|high> [--label <name>]... [--env-prefix "<string>"]
 //
 // `--state` is the `ready_for_pr` answer of `fix-group score`. `--group-json`
@@ -17,7 +18,16 @@
 // commit message and the body are the files that a caller needs. A caller
 // that gets them as JSON must unwrap them. When a check fails, no part of
 // the text is written. A failure is `{"error": ...}` on stdout, as for every
-// command, with the message on stderr.
+// command, with the message on stderr. `--out <file>` writes the same text, or
+// the same failure, to the file too (`cli/out-file.ts`). The agent passes
+// `--out` and not a redirection, because the allow hook passes no
+// redirection (#346).
+//
+// `create` reads the title from the first line of `--title-file`, the commit
+// message that `commit-msg --out` wrote (ruling 5 of round 9 on #346). A `\r`
+// at the end of the line is not part of the title. A first line that is
+// empty, or only white space, is an error. `--title` is gone: a title has
+// spaces, so the allow hook could never pass it, and no prompt passes it.
 //
 // `labels` and `create` run `gh label create` and `gh pr create`, through
 // the `gh` client (`lib/gh.ts`). `create` never passes `--draft`: a PR opens
@@ -79,7 +89,7 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   'commit-msg': ['--state', '--group-json', '--repo'],
   body: ['--state', '--group-json', '--repo', '--collateral-note', '--global-override-note'],
   labels: ['--repo', '--band', '--label', '--env-prefix'],
-  create: ['--repo', '--head', '--title', '--body-file', '--band', '--label', '--env-prefix'],
+  create: ['--repo', '--head', '--title-file', '--body-file', '--band', '--label', '--env-prefix'],
 }
 
 /** The flags that take no value check, because an empty value means none. */
@@ -146,6 +156,14 @@ const readNote = (flag: string, path: string): Envelope<string> => {
   } catch (error) {
     return failed(`${flag}: cannot read ${path}: ${(error as Error).message}`)
   }
+}
+
+/** The first line of the title file, without a `\r` at its end. */
+const titleOf = (path: string): Envelope<string> => {
+  const text = readNote('--title-file', path)
+  if (text.outcome !== 'ok') return text
+  const line = (text.value.split('\n')[0] as string).replace(/\r$/, '')
+  return line.trim() === '' ? failed(`--title-file: the first line of ${path} is empty`) : ok(line)
 }
 
 /** The two files that `commit-msg` and `body` read, once each flag has its file. */
@@ -294,8 +312,10 @@ const create = async (
   if (repository === '') return failed('create requires --repo')
   const head = flagOf(options, '--head')
   if (head === '') return failed('create requires --head')
-  const title = flagOf(options, '--title')
-  if (title === '') return failed('create requires --title')
+  const titleFile = needFile('--title-file', flagOf(options, '--title-file'))
+  if (titleFile.outcome !== 'ok') return titleFile
+  const title = titleOf(titleFile.value)
+  if (title.outcome !== 'ok') return title
   const bodyFile = needFile('--body-file', flagOf(options, '--body-file'))
   if (bodyFile.outcome !== 'ok') return bodyFile
   const band = bandOf(options)
@@ -308,7 +328,7 @@ const create = async (
       repository,
       head,
       labels: ['security', 'dependencies', `merge-risk:${band}`, ...options.labels],
-      title,
+      title: title.value,
       bodyFile: bodyFile.value,
     })
     return ok({ status: 'ok', pr_url: url })

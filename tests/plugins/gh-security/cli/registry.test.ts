@@ -133,7 +133,7 @@ describe('the render-pr entry', () => {
     'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] |',
     'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] |',
     'render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] |',
-    'render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+    'render-pr create --repo <nwo> --head <branch> --title-file <file> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['render-pr']?.description).toContain(usage)
   })

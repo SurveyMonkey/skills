@@ -101,7 +101,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'render-pr': {
     description:
-      'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+      'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title-file <file> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
     load: async () => (await import('../subcommands/render-pr.ts')).renderPrCommand,
     out: ['commit-msg', 'body'],
   },
