@@ -54,6 +54,10 @@
 // Additions to the contract on #228, in the contract comment there:
 // `exclude_error`, and the causes `detect` and `start`.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { statSync } from 'node:fs'

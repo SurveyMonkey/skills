@@ -46,6 +46,10 @@
 //   - A failure is `{"error": ...}` on stdout and prose on stderr, as
 //     `cli.md` says.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { readFileSync } from 'node:fs'

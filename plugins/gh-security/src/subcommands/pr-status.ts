@@ -39,6 +39,10 @@
 // #193). It wraps the runner that the `gh` client uses, so `gh` runs as
 // `<prefix> gh ...`. Nothing here names a tool, or looks for one.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
