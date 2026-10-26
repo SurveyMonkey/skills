@@ -1062,6 +1062,28 @@ describe('the checkouts and repositories that the batch never touched', () => {
     )
   })
 
+  // #356. A failed probe call can carry the exclude error of its run.
+  it('names the exclude error and the failed call of one preflight, one line each', () => {
+    const run: Run = {
+      ...CLEAN,
+      preflight: {
+        [ROOT]: { error: 'a manifest that cannot be read', exclude_error: 'lock held' },
+      },
+    }
+    expect(sectionOf(run, 'Excluded checkouts and repositories')).toBe(
+      `${HEAD} preflight-repo failed: a manifest that cannot be read. ${TAIL}`,
+    )
+    expect(sectionOf(run, 'Observations')).toBe(EXCLUDE_LINE)
+  })
+
+  it('reads a failed call with a null or an absent exclude error as having none', () => {
+    const run: Run = {
+      ...CLEAN,
+      preflight: { [ROOT]: { error: 'a manifest that cannot be read', exclude_error: null } },
+    }
+    expect(sectionOf(run, 'Observations')).toBeNull()
+  })
+
   it('names no exclude error when a failed preflight has none', () => {
     const run: Run = {
       ...CLEAN,
@@ -2073,6 +2095,12 @@ describe('an input that is refused', () => {
       `"${ROOT}".exclude_error is not text`,
     ],
     ['preflight.json', [ROOT], { error: '' }, `"${ROOT}".error is not text`],
+    [
+      'preflight.json',
+      [ROOT],
+      { error: 'x', exclude_error: 5 },
+      `"${ROOT}".exclude_error is not text`,
+    ],
     [
       'preflight.json',
       ['/Users/example/src/octo/x'],

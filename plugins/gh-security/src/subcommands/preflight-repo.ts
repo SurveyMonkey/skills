@@ -45,6 +45,12 @@
 // manifest that cannot be read. The dispatcher excludes the repository on a
 // non-zero exit, and also on an answer with `ok` false (exit 0).
 //
+// A failed `probeRegistry` reports and fails, as `pr-status` does (`failedReport`
+// in `cli/command.ts`). The report on stdout is `{error, exclude_error}`:
+// the same `exclude_error` as in an answer, so a failed exclude of the same
+// run is not lost (#356). The other two failures have no report, because
+// they happen before step 1.
+//
 // Additions to the contract on #228, in the contract comment there:
 // `exclude_error`, and the causes `detect` and `start`.
 //
@@ -56,7 +62,12 @@ import { resolve } from 'node:path'
 import type { Adapter, RegistryProbeAnswer } from '../adapters/adapter.ts'
 import type { NodeDetection } from '../adapters/node/detect.ts'
 import { node } from '../adapters/node.ts'
-import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
+import {
+  type CommandContext,
+  type CommandHandler,
+  type CommandResult,
+  failedReport,
+} from '../cli/command.ts'
 import { parseCommandLine } from '../lib/args.ts'
 import { parseEnvPrefix, withEnvPrefix } from '../lib/env-prefix.ts'
 import { failed, ok } from '../lib/envelope.ts'
@@ -138,7 +149,10 @@ export const preflightRepo = async (
   if (attempt.outcome === 'ok' && !attempt.value.ok) {
     attempt = await adapter.probeRegistry(tree, fallback, source)
   }
-  if (attempt.outcome !== 'ok') return failed(`preflight-repo: ${attempt.error}`)
+  if (attempt.outcome !== 'ok') {
+    const error = `preflight-repo: ${attempt.error}`
+    return failedReport(error, { error, exclude_error: excludeError })
+  }
   const answer = attempt.value
 
   // 4. The cause.

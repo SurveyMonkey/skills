@@ -373,12 +373,31 @@ describe('preflight-repo: the probe package', () => {
   it('fails, and probes nothing, when there is no package to probe', async () => {
     const w = world({ name: 'app' })
     const { calls, runner } = recorder()
+    const error =
+      'preflight-repo: probeRegistry: package.json has no scoped registry dependency, and the caller gave no fallback package'
     expect(await preflightRepo(context([w.root], w.sandbox.env), node, runner, w.scene)).toEqual({
       outcome: 'failed',
-      error:
-        'preflight-repo: probeRegistry: package.json has no scoped registry dependency, and the caller gave no fallback package',
+      error,
+      report: { error, exclude_error: null },
     })
     expect(calls).toEqual([])
+  })
+
+  // #356. The report of a failed probe carries the exclude error of the same run.
+  it('keeps the exclude error in the report when the probe fails too', async () => {
+    const sandbox = createSandbox()
+    const root = join(realpathSync(sandbox.path), 'plain')
+    mkdirSync(root)
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app' }))
+    writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
+    const { runner } = recorder()
+    const error =
+      'preflight-repo: probeRegistry: package.json has no scoped registry dependency, and the caller gave no fallback package'
+    expect(await preflightRepo(context([root], sandbox.env), node, runner, root)).toEqual({
+      outcome: 'failed',
+      error,
+      report: { error, exclude_error: `not a git repository: ${root}` },
+    })
   })
 })
 
@@ -462,6 +481,24 @@ describe('the process', () => {
           'bun is not a supported package manager. See .github/CONTRIBUTING.md to request support.',
         exclude_error: null,
       },
+    })
+  })
+
+  it('exits 1 with the report of a failed probe on stdout, and the exclude error in it', async () => {
+    const sandbox = createSandbox()
+    const root = join(realpathSync(sandbox.path), 'plain')
+    mkdirSync(root)
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app' }))
+    writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
+    const result = await run(process.execPath, [ENTRY, 'preflight-repo', root], {
+      env: sandbox.env,
+    })
+    const error =
+      'preflight-repo: probeRegistry: package.json has no scoped registry dependency, and the caller gave no fallback package'
+    expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({
+      status: 1,
+      stdout: `${JSON.stringify({ error, exclude_error: `not a git repository: ${root}` })}\n`,
+      stderr: `${error}\n`,
     })
   })
 

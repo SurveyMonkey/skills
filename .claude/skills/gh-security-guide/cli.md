@@ -63,7 +63,8 @@ in process. It calls their exported handlers, and never starts this CLI as a chi
 `prepare-checkout` runs `detect-scope`, `discover-alerts` and `classify-lines` this way. A handler
 may also fail with a report (`failedReport` in `src/cli/command.ts`). The report goes to stdout,
 the message goes to stderr, and the exit code is 1. `pr-status` does this, so a caller reads the
-same JSON on stdout when a URL failed. `render-pr create` does this when `gh pr create` opened a
+same JSON on stdout when a URL failed. `preflight-repo` does this when its probe fails: the report
+is `{"error": ..., "exclude_error": ...}`. `render-pr create` does this when `gh pr create` opened a
 pull request and then failed: the report is `{"error": ..., "pr_url": ...}` (ruling 18 of #233).
 A report can also name exit 2 or 3. `fix-group` uses 3 for a failed phase. Exit 2 is for a decision
 that goes back to the agent (`needs_judgment`), which `apply` gives. These two codes were the codes
