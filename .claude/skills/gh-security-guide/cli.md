@@ -60,10 +60,10 @@ silence. `render-pr commit-msg` and `render-pr body` do this. A failure of eithe
 `{"error": ...}` on stdout with the message on stderr, and no part of the text is written.
 **`--out <file>` writes a command's answer to a file as well** (#346). A later command reads that
 file, so the model never copies an answer with the Write tool, and no call needs a redirection.
-`src/cli/out-file.ts` is the one writer, and `run.ts` applies it to each call that the registry
-entry opts in (`out`): `prepare-checkout`, `merge-envelopes`, `preflight-repo`,
-`build-dispatches`, `reap-batch`, `summarize-run`, `pr-status`, `render-pr commit-msg` and
-`body`, and `fix-group score`. `run.ts` takes the flag out before the handler runs. The file gets
+`src/cli/out-file.ts` is the one writer. `run.ts` applies it to each call that the registry entry
+opts in (`out`). Those calls are `prepare-checkout`, `merge-envelopes`, `preflight-repo`,
+`build-dispatches`, `reap-batch`, `summarize-run` and `pr-status`. They are also
+`render-pr commit-msg`, `render-pr body` and `fix-group score`. `run.ts` takes the flag out before the handler runs. The file gets
 the bytes that stdout gets, and stdout does not change. A failure with a report writes the report
 to the file. Any other failure, a throw included, writes its `{"error": ...}` envelope. The parent
 directories are made. A file that cannot be written is exit 1, with
