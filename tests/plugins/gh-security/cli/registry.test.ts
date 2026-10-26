@@ -161,7 +161,7 @@ describe('the fix driver entry', () => {
     'fix-group classify --work <dir>',
     'fix-group baseline --work <dir>',
     'fix-group apply --work <dir>',
-    'fix-group score --work <dir>',
+    'fix-group score --work <dir> [--out <file>] |',
     'fix-group cleanup --work <dir> [--pushed]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
@@ -187,7 +187,7 @@ describe('the pin-audit driver entry', () => {
 describe('the calls that take --out (#346)', () => {
   // Each command whose answer a later command reads, and no other. A
   // command missing here would leave the model to copy its answer by hand.
-  it('opts in exactly the commands and the render-pr verbs whose answer a later command reads', () => {
+  it('opts in exactly the commands and the verbs whose answer a later command reads', () => {
     const scopes = Object.fromEntries(
       Object.entries(COMMANDS)
         .filter(([, entry]) => entry.out !== undefined)
@@ -195,6 +195,7 @@ describe('the calls that take --out (#346)', () => {
     )
     expect(scopes).toEqual({
       'build-dispatches': 'every call',
+      'fix-group': ['score'],
       'merge-envelopes': 'every call',
       'pr-status': 'every call',
       'preflight-repo': 'every call',

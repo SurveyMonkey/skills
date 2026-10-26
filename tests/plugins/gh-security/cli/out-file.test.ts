@@ -91,6 +91,19 @@ describe('--out on each command whose answer a later command reads', () => {
     },
   )
 
+  it('fix-group score writes its answer to the file, and its report on a failed phase', async () => {
+    const seen = substitute('fix-group', () =>
+      failedReport('fix-group: score failure: no why', { status: 'failure', phase: 'score' }, 3),
+    )
+    const file = join(scratch, 'work', 'ready-for-pr.json')
+    const { io } = capturing()
+    expect(await runCli(['fix-group', 'score', '--work', '/w', '--out', file], {}, io)).toBe(3)
+    expect({ file: readFileSync(file, 'utf8'), seen }).toEqual({
+      file: '{"status":"failure","phase":"score"}\n',
+      seen: [['score', '--work', '/w']],
+    })
+  })
+
   it.each([['commit-msg'], ['body']])(
     'render-pr %s writes its text to the file and to stdout',
     async (verb) => {
@@ -277,6 +290,7 @@ describe('--out on a command line that is wrong', () => {
     ['version', ['version', '--out', 'x.json']],
     ['render-pr labels', ['render-pr', 'labels', '--out', 'x.json']],
     ['render-pr create', ['render-pr', 'create', '--out', 'x.json']],
+    ['fix-group apply', ['fix-group', 'apply', '--out', 'x.json']],
   ])('gives the flag to %s, which does not take it, as an argument', async (_case, argv) => {
     const seen = substitute(argv[0] as string, () => undefined)
     const { io } = capturing()

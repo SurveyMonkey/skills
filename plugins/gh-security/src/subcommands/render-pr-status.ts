@@ -17,8 +17,6 @@
 //                 PR that no result names, show `not scored`. A `null` result,
 //                 and a result with no `pr_url` text, name no PR. Only
 //                 `result`, `pr_url` and `risk` are read.
-//                 `--bands`, a file that the model wrote, is gone: the model
-//                 copied each band by hand from this same file.
 //
 // Output: `{"markdown": "..."}`. A command can only write JSON (`run.ts`).
 //   - one table for each repository, in the order of first appearance. The
