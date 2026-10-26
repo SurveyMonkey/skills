@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 
 import type { Envelope, JsonValue } from '../lib/envelope.ts'
+import type { OutScope } from './out-file.ts'
 
 /** The process streams a command may reach, as three functions. */
 export interface Io {
@@ -93,6 +94,12 @@ export interface CommandEntry {
    * every Bash call in a session (#273).
    */
   readonly load: () => Promise<CommandHandler>
+  /**
+   * The calls that take `--out <file>`, which `run.ts` applies
+   * (`out-file.ts`). Absent: no call takes it, and the command gets the flag
+   * as an argument.
+   */
+  readonly out?: OutScope
 }
 
 /** Standard input, as the descriptor number a hook's JSON arrives on. */

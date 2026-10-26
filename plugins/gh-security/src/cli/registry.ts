@@ -25,8 +25,9 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'build-dispatches': {
     description:
-      'Build the Workflow args for the approved groups: build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+      'Build the Workflow args for the approved groups: build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>... [--out <file>]',
     load: async () => (await import('../subcommands/build-dispatches.ts')).buildDispatchesCommand,
+    out: 'every call',
   },
   'check-advisories': {
     description:
@@ -65,32 +66,39 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'merge-envelopes': {
     description:
-      'Merge the prepare-checkout answers of one or more checkouts, and rank all their groups: merge-envelopes <envelope.json>...',
+      'Merge the prepare-checkout answers of one or more checkouts, and rank all their groups: merge-envelopes <envelope.json>... [--out <file>]',
     load: async () => (await import('../subcommands/merge-envelopes.ts')).mergeEnvelopesCommand,
+    out: 'every call',
   },
   'pr-status': {
-    description: 'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>...',
+    description:
+      'Read the state of pull requests: pr-status [--env-prefix <prefix>] <pr-url>... [--out <file>]',
     load: async () => (await import('../subcommands/pr-status.ts')).prStatusCommand,
+    out: 'every call',
   },
   'preflight-repo': {
     description:
-      'Prepare one repository for dispatch: exclude the worktrees, detect the tree, probe its registry: preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>',
+      'Prepare one repository for dispatch: exclude the worktrees, detect the tree, probe its registry: preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root> [--out <file>]',
     load: async () => (await import('../subcommands/preflight-repo.ts')).preflightRepoCommand,
+    out: 'every call',
   },
   'prepare-checkout': {
     description:
-      'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root>',
+      'Resolve one checkout, then discover and classify its alert groups: prepare-checkout [--env-prefix <prefix>] <root> [--out <file>]',
     load: async () => (await import('../subcommands/prepare-checkout.ts')).prepareCheckoutCommand,
+    out: 'every call',
   },
   'reap-batch': {
     description:
-      'Verify the pull request of each workflow entry, reap it only when it is open, and report each: reap-batch <results.json>',
+      'Verify the pull request of each workflow entry, reap it only when it is open, and report each: reap-batch <results.json> [--out <file>]',
     load: async () => (await import('../subcommands/reap-batch.ts')).reapBatchCommand,
+    out: 'every call',
   },
   'render-pr': {
     description:
-      'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+      'Render the commit message, PR body, labels and PR of one fix group: render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] | render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] | render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] | render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
     load: async () => (await import('../subcommands/render-pr.ts')).renderPrCommand,
+    out: ['commit-msg', 'body'],
   },
   'render-pr-status': {
     description:
@@ -108,8 +116,9 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   },
   'summarize-run': {
     description:
-      'Write the phase 7 summary of a resolve-alerts run from the workflow result, the reap reports and the exclusions: summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
+      'Write the phase 7 summary of a resolve-alerts run from the workflow result, the reap reports and the exclusions: summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>] [--out <file>]',
     load: async () => (await import('../subcommands/summarize-run.ts')).summarizeRunCommand,
+    out: 'every call',
   },
   version: {
     description: 'Print the installed plugin version',

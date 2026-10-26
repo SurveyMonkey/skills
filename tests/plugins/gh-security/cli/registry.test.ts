@@ -88,7 +88,7 @@ describe('the discovery entries', () => {
   it.each([
     [
       'build-dispatches',
-      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>... [--out <file>]',
     ],
     [
       'check-advisories',
@@ -104,10 +104,13 @@ describe('the discovery entries', () => {
       'discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] [--stdin] <owner/repo>',
     ],
     ['discover-repos', 'discover-repos [<path>]'],
-    ['merge-envelopes', 'merge-envelopes <envelope.json>...'],
-    ['preflight-repo', 'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'],
-    ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
-    ['reap-batch', 'reap-batch <results.json>'],
+    ['merge-envelopes', 'merge-envelopes <envelope.json>... [--out <file>]'],
+    [
+      'preflight-repo',
+      'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root> [--out <file>]',
+    ],
+    ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root> [--out <file>]'],
+    ['reap-batch', 'reap-batch <results.json> [--out <file>]'],
     [
       'summarize-run',
       'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
@@ -123,8 +126,8 @@ describe('the render-pr entry', () => {
   })
 
   it.each([
-    'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> |',
-    'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] |',
+    'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] |',
+    'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] |',
     'render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] |',
     'render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
   ])('describes the usage %s', (usage) => {
@@ -174,5 +177,27 @@ describe('the pin-audit driver entry', () => {
     'audit-pins together --work <dir>',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['audit-pins']?.description).toContain(usage)
+  })
+})
+
+describe('the calls that take --out (#346)', () => {
+  // Each command whose answer a later command reads, and no other. A
+  // command missing here would leave the model to copy its answer by hand.
+  it('opts in exactly the commands and the render-pr verbs whose answer a later command reads', () => {
+    const scopes = Object.fromEntries(
+      Object.entries(COMMANDS)
+        .filter(([, entry]) => entry.out !== undefined)
+        .map(([name, entry]) => [name, entry.out]),
+    )
+    expect(scopes).toEqual({
+      'build-dispatches': 'every call',
+      'merge-envelopes': 'every call',
+      'pr-status': 'every call',
+      'preflight-repo': 'every call',
+      'prepare-checkout': 'every call',
+      'reap-batch': 'every call',
+      'render-pr': ['commit-msg', 'body'],
+      'summarize-run': 'every call',
+    })
   })
 })
