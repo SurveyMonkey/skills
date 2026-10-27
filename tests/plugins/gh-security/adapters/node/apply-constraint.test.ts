@@ -1844,12 +1844,12 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     expect(manifestAfter(CHILD, msRange, git).overrides).toEqual({ debug: { 'ms@^2': MS } })
   })
 
-  // npm reads an empty spec as `*`, which can match `ms@^2`. The range rules
-  // of the pass do not read an empty spec, so the pass refuses.
+  // npm reads the spec `x` as the range `*`, which can match `ms@^2`. The
+  // pass reads only a spec that starts as a range does, so it refuses.
   it.each([
     ['a tag', 'latest'],
     ['a git edge with a range that the range rules cannot read', `${MS_GIT}#semver:latest`],
-    ['an empty spec', ''],
+    ['the wildcard x', 'x'],
   ])('refuses a child key beside an edge of %s, and names it', (_title, spec) => {
     const odd = both(rule({ debug: { 'ms@^2': '2.1.2' } }), debugEdge(spec))
     expect(refusalOf(CHILD, msRange, odd)).toBe(
@@ -2074,8 +2074,11 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
 
   // An `npm:` value of another package is no pin of the package, so it has
   // no floor on the line, and the call refuses it.
-  it('refuses a bare pair that names another package, and names it', () => {
-    const fork = rule({ debug: { ms: 'npm:@example-org/ms-fork@2.1.1' } })
+  it.each([
+    ['', {}],
+    [' before a key that serves each copy', { 'debug@>=3 <5': { ms: '2.1.1' } }],
+  ])('refuses a bare pair that names another package%s, and names it', (_title, later) => {
+    const fork = rule({ debug: { ms: 'npm:@example-org/ms-fork@2.1.1' }, ...later })
     expect(refusalOf(SUPERSEDED, msRange, fork)).toBe(
       BARE_PIN(
         '{"parent":"debug","value":"npm:@example-org/ms-fork@2.1.1","parent_also_override_placed":false}',
