@@ -148,14 +148,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" preflight-repo --fallback-pa
 
 Use `preflight-<n>.json` for repo `n`. `<package>` is the top-ranked approved package of that
 repo. Add `--env-prefix "<env_prefix>"` when the repo has one. The command writes the worktree
-exclude, detects the package manager, and probes the registry with one retry. A non-zero exit, or an answer with `ok: false`, excludes every
-group of that repo: report the `probe_package`, the `stderr`, the `cause` (`auth` is the one
-case where the remedy is your login flow for that registry) and that a new run probes again. A non-null
-`exclude_error` is not fatal: report it and dispatch anyway. There is no proceed-anyway machinery:
-a user who wants to dispatch past a failed probe says so in conversation.
+exclude, detects the package manager, and probes the registry with one retry. A non-zero exit, or
+an answer with `ok: false`, excludes every group of that repo: report the `probe_package`, the
+`stderr`, the `cause` (`auth` is the one case where the remedy is your login flow for that
+registry) and that a new run probes again. A non-null `exclude_error` is not fatal: report it
+and dispatch anyway. There is no proceed-anyway machinery: a user who wants to dispatch past a failed probe says so in conversation.
 
 On a non-zero exit, the file holds the JSON that the command wrote on stdout: `{"error": ...}`,
-with an `exclude_error` when the probe failed. Phase 7 reads each file.
+with an `exclude_error` when the probe failed. Phase 7 reads each file. An error that starts
+`preflight-repo: cannot write --out` or `preflight-repo: --out` means that the command wrote no
+file: report it, exclude the repo, and give phase 7 no word for it.
 
 ## Phase 6: Dispatch the fix workflow
 
@@ -217,11 +219,11 @@ Agents for the same repo share its repository-global git state, so while any age
 Write the Workflow tool's result (`result` and `logs`) to `<run>/workflow.json`. Then:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" summarize-run --workflow <run>/workflow.json --reports <run>/reports.json --discovery <run>/merged.json --args <run>/args.json <repo_root>=<run>/preflight-1.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" summarize-run --workflow <run>/workflow.json --reports <run>/reports.json --discovery <run>/merged.json --args <run>/args.json <checkout>=<run>/preflight-1.json
 ```
 
-Add one `<repo_root>=<run>/preflight-<n>.json` word for each file of phase 5, with the
-`checkout` of that repo as `merged.json` spells it.
+Add one `<checkout>=<run>/preflight-<n>.json` word for each file of phase 5. `<checkout>` is the
+`checkout` of that repo, as `merged.json` spells it.
 
 Show its `markdown` verbatim, and tell the story around it: what shipped, what is still open and
 why, and what the user does next. The summary describes the whole approved batch, and when the
@@ -250,7 +252,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" pr-status --out <run>/pr-sta
 ```
 
 Use `pr-status-<n>.json` for repo `n`. Pass each `success` `pr_url` of that repo. A non-zero exit
-still carries a full report. Then name every file:
+still carries a full report. An error that starts `pr-status: cannot write --out` means that the
+command wrote no file: report it, and leave that file out. Then name every file:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" render-pr-status --results <run>/results.json <run>/pr-status-1.json
@@ -274,8 +277,8 @@ and when the user declines to resume an interrupted run:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/gh-security.ts" remove-run <run>
 ```
 
-A `no such directory` failure means that no command of the run wrote a file: there is nothing to
-remove.
+A `no such directory` failure for the `<run>` of this run means that nothing wrote a file under
+it: there is nothing to remove. Check the path first: a wrong `<stamp>` gives the same failure.
 
 Also remove `.gh-security-dispatch/` when phase 6 made it. When the working directory is a
 checkout, it is an untracked directory in the user's tree.

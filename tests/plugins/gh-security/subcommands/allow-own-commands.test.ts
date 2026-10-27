@@ -219,6 +219,7 @@ describe('the calls that the prompts prescribe (#346)', () => {
     '<run>': RUN,
     '<work>': WORK,
     '<repo_root>': '/Users/example/src/octo/app',
+    '<checkout>': '/Users/example/src/octo/app',
     '<package>': '@example/pkg',
     '<cap>': '4',
     '<repo>': 'octo/app',

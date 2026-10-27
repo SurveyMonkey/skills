@@ -140,8 +140,9 @@ git -C <work>/fix commit -F <work>/commit-msg.txt
 git -C <work>/fix push -u origin <branch_name>
 ```
 
-A non-zero exit from `commit-msg` or `body` puts its `{"error": ...}` in the `--out` file, and
-on stdout. Then fail, with the error quoted: phase `push` for `commit-msg`, phase `pr` for `body`.
+A non-zero exit from `commit-msg` or `body` puts its `{"error": ...}` on stdout, and in the
+`--out` file when the command could write it. Then fail, with the stdout error quoted: phase
+`push` for `commit-msg`, phase `pr` for `body`.
 
 **The repository's own commit and push hooks are the repository's, and they run.** Never bypass
 one (`--no-verify`, `HUSKY=0`, `LEFTHOOK=0`). Never edit code, tests or configuration to satisfy a
