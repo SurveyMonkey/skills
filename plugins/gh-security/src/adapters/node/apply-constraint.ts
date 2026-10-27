@@ -46,7 +46,9 @@
 // One is such a key that also comes first for a copy whose child is on
 // another major line. Another is a pin in that key on another line.
 //
-// Each refusal of the read passes comes before the first write. The three
+// Each refusal of the read passes comes before the first write. The write
+// pass works on the document in memory, and its refusals (#354, #355) come
+// before the first write too. The three
 // writes are in the order of node.sh: pnpm-workspace.yaml, then
 // package.json, then package-lock.json. As in node.sh, a later step can
 // fail after a write: for example the read back of pnpm-workspace.yaml, or
@@ -87,7 +89,7 @@ import { invalidationOf } from './lockfile-invalidation.ts'
 import { isRecord, NO_DOCUMENT, readManifest } from './manifest.ts'
 import { type NpmLock, readNpmLock } from './npm-lock.ts'
 import { type Placement, placementRefusal, placementsOf, tightenedRules } from './npm-placement.ts'
-import { type QualifiedKeys, qualifiedKeysOf } from './npm-qualified-keys.ts'
+import { childEdgesOf, type QualifiedKeys, qualifiedKeysOf } from './npm-qualified-keys.ts'
 import { writePass } from './override-pass.ts'
 import {
   bareConflict,
@@ -259,6 +261,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
           parents,
           qualifiers,
           placements,
+          keysByParent: lookup.keysByParent,
           pkg,
           range,
         }),
@@ -268,7 +271,7 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
     qualifiers = found.qualifiers
   }
   if (location === 'overrides' && qualifiers.size > 0) {
-    const conflict = bareConflict(qualifiers, placements, manifest, pkg, range)
+    const conflict = bareConflict(qualifiers, placements, manifest, pkg, range, lookup.keysByParent)
     if (conflict !== null) throw new Error(conflict.error)
   }
   const indent = indentOf(readFileSync(manifestPath, 'utf8'))
@@ -285,8 +288,12 @@ const run = (tree: Tree<NodeDetection>, request: ConstraintRequest): ApplyConstr
       placements,
       qualifiedKeys,
       tightened,
+      // Only an npm write under a parent reads the edges, and the lockfile
+      // is read by then (#354).
+      childEdges: (parent, key) => childEdgesOf(npmLock(), parent, key),
     }),
   )
+  if (pass.refusal !== null) throw new Error(pass.refusal.error)
   let output = pass.manifest
   if (workspace) {
     writeWorkspaceOverrides(root, workspaceMap(pass.manifest))

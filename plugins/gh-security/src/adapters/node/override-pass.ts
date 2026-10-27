@@ -19,6 +19,14 @@
 //     places takes the nested write inside each rule that places it (#147).
 //     A version-qualified npm parent key that npm matches first for a copy
 //     takes the write for that copy, as a rule does (#333).
+//   - Inside each npm target key, a child key `<pkg>@<selector>` that npm
+//     matches first for the copy takes the write (#354). A plain key after
+//     it has no effect. The pass refuses a child key that npm can match,
+//     when the lockfile cannot show it, and a child key with a value that is
+//     not a text on the line.
+//   - A bare npm parent key that holds an entry this call does not write
+//     stays first for each copy, so the qualified keys after it have no
+//     effect. The pass refuses it (#355).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
@@ -30,6 +38,7 @@
 //
 // This file ships. It imports nothing outside the plugin.
 
+import { type Failure, failed } from '../../lib/envelope.ts'
 import { rangeFloorMajor } from '../../semver/ranges.ts'
 import type { ApplyConstraintAnswer, PinValue } from '../adapter.ts'
 import type { NodeDetection } from './detect.ts'
@@ -40,6 +49,7 @@ import {
   getPath,
   has,
   or,
+  render,
   setPath,
   split,
   startsWith,
@@ -50,8 +60,13 @@ import {
 import { stripSelector, yarnKey } from './list-pins.ts'
 import { isRecord } from './manifest.ts'
 import type { Placement } from './npm-placement.ts'
-import type { QualifiedKeys } from './npm-qualified-keys.ts'
-import type { Qualifiers } from './parent-qualifiers.ts'
+import {
+  type ChildEdge,
+  type QualifiedKeys,
+  type SelectorKey,
+  scanKeys,
+} from './npm-qualified-keys.ts'
+import { pinFloor, type Qualifiers, writeKeysOf } from './parent-qualifiers.ts'
 
 type Written = ApplyConstraintAnswer['written'][number]
 
@@ -74,13 +89,29 @@ export type PassQuery = {
   readonly qualifiedKeys: ReadonlyMap<string, QualifiedKeys>
   /** The rule paths that a tighten moves. */
   readonly tightened: readonly (readonly string[])[]
+  /** The edges into the package from the copies of a parent, under a declared key (#354). */
+  readonly childEdges: (parent: string, key: string) => readonly ChildEdge[]
 }
 
-/** What the pass gives: the new manifest, and the entries it wrote and removed. */
+/**
+ * What the pass gives: the new manifest, and the entries it wrote and
+ * removed. A refusal comes with the manifest as it was and no entries. The
+ * caller writes no file for it.
+ */
 export type PassResult = {
   readonly manifest: unknown
   readonly written: readonly Written[]
   readonly superseded: readonly Superseded[]
+  readonly refusal: Failure | null
+}
+
+/** The stop of the pass for a refusal. `writePass` catches it. */
+class Refused extends Error {
+  readonly failure: Failure
+  constructor(failure: Failure) {
+    super(failure.error)
+    this.failure = failure
+  }
 }
 
 /**
@@ -105,11 +136,24 @@ const plus = (text: string, value: string | null): string => text + (value ?? ''
 
 /** The write pass over `manifest`. It throws where jq stops. */
 export const writePass = (input: unknown, query: PassQuery): PassResult => {
+  try {
+    return passOver(input, query)
+  } catch (error) {
+    if (!(error instanceof Refused)) throw error
+    return { manifest: input, written: [], superseded: [], refusal: error.failure }
+  }
+}
+
+const passOver = (input: unknown, query: PassQuery): PassResult => {
   const { location, pkg, range, qualifiers, placements } = query
   let manifest = input
   const written: Written[] = []
   const superseded: Superseded[] = []
   const alias = `npm:${pkg}@${range}`
+  const target = rangeFloorMajor(range)
+
+  /** The pin value is on the major line of the range. */
+  const onLine = (value: unknown): boolean => target !== null && pinFloor(value) === target
 
   const note = (parent: string | null, path: readonly string[], value: unknown): void => {
     written.push({ parent, path, value: value as PinValue })
@@ -157,8 +201,92 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     putOverride(null, key, key === pkg ? range : alias)
   }
 
+  /**
+   * The child keys of `key` with a selector inside the object at `path`
+   * (#354). npm uses the first child key for the package whose selector
+   * matches the edge into the copy, and a plain key matches each edge. The
+   * scan reads each edge from a copy of the parent, as `scanKeys` reads an
+   * edge into a parent. It gives the child keys that take the write, and if
+   * the plain key takes it too. A child key that takes the write must hold a
+   * text on the line of the range. Any other child key that npm can match
+   * stops the pass with a refusal.
+   */
+  const childWrite = (
+    parent: string,
+    path: readonly string[],
+    key: string,
+  ): { readonly into: readonly string[]; readonly plain: boolean } => {
+    const container = getPath(get(manifest, 'overrides'), path)
+    const own = isRecord(container)
+      ? Object.keys(container).flatMap((each) => {
+          const { name, selector } = stripSelector(each)
+          return name === key ? [{ key: each, selector }] : []
+        })
+      : []
+    const plainAt = own.findIndex(({ selector }) => selector === null)
+    const before = plainAt < 0 ? own : own.slice(0, plainAt)
+    if (before.length === 0) return { into: [], plain: true }
+    const edges = query.childEdges(parent, key)
+    const into = new Set<string>()
+    let plain = edges.length === 0
+    for (const edge of edges) {
+      const { first, unsure } = edge.range
+        ? scanKeys(own, edge.cver, edge.spec)
+        : { first: null, unsure: [(before[0] as SelectorKey).key] }
+      if (unsure.length > 0) {
+        const detail = [{ parent, path, key: unsure[0] }]
+        throw new Refused(
+          failed(
+            `apply_constraint: cannot scope '${pkg}': npm can match a pre-existing version-qualified child key for the package inside the override key of its parent through an edge into the copy, and the lockfile cannot show which key it matches: ${render(detail, null)}. So neither a constraint inside that child key nor a plain key beside it can be shown to take effect (issue #354), so nothing was written; reconcile the existing override by hand.`,
+          ),
+        )
+      }
+      if (first === null) plain = true
+      else into.add(first)
+    }
+    for (const child of into) {
+      const current = (container as Readonly<Record<string, unknown>>)[child]
+      if (typeof current === 'string' && onLine(current)) continue
+      const detail = [{ parent, path, key: child, value: current }]
+      throw new Refused(
+        failed(
+          `apply_constraint: a pre-existing version-qualified child key for '${pkg}' inside the override key of its parent is the first key that npm matches for the copy, and its value is not a text on the same major line: ${render(detail, null)}. A plain key beside it has no effect, and overwriting the value would strip that line's protection (issues #354 and #132), so nothing was written; reconcile the existing override by hand.`,
+        ),
+      )
+    }
+    return { into: [...into], plain }
+  }
+
+  /** Write `value` into each child key of `into` in the object at `path`, and report a changed value. */
+  const putChildren = (
+    parent: string,
+    path: readonly string[],
+    into: readonly string[],
+    value: string,
+  ): void => {
+    for (const child of into) {
+      const previous = getPath(get(manifest, 'overrides'), [...path, child])
+      if (!equal(previous, value)) {
+        superseded.push({
+          parent,
+          path: ['overrides', ...path, child],
+          value: previous as PinValue,
+        })
+      }
+      manifest = withKey(
+        manifest,
+        'overrides',
+        setPath(get(manifest, 'overrides'), [...path, child], value),
+      )
+      note(parent, ['overrides', ...path, child], value)
+    }
+  }
+
   /** One nested npm entry, under the bare parent key or a qualified `parent@<sel>` key. */
   const putNested = (parent: string, outer: string, key: string, value: string): void => {
+    const { into, plain } = childWrite(parent, [outer], key)
+    putChildren(parent, [outer], into, value)
+    if (!plain) return
     const overrides = or(get(manifest, 'overrides'), {})
     const current = or(get(overrides, outer), {})
     const base = typeof current === 'string' ? {} : current
@@ -172,7 +300,8 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
    * with a value that is not an object keeps it under the `"."` key, and
    * that entry is marked `preserved`: it quotes a value that was there. A
    * different pin for the package inside the rule is superseded, and
-   * reported. A pin on another line was refused before this pass.
+   * reported. A pin on another line was refused before this pass. A child
+   * key with a selector that npm matches first takes the write (#354).
    */
   const putRuleNested = (
     parent: string,
@@ -180,6 +309,9 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     key: string,
     value: string,
   ): void => {
+    const { into, plain } = childWrite(parent, rule, key)
+    putChildren(parent, rule, into, value)
+    if (!plain) return
     let overrides = get(manifest, 'overrides')
     const current = getPath(overrides, rule)
     if (!isRecord(current)) {
@@ -253,8 +385,11 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     }
     const existing = query.qualifiedKeys.get(parent)
     if (existing !== undefined) {
-      // A bare pair after the keys has no effect when they serve each copy on the line.
-      if (existing.supersedeBare) supersedePair(parent, key)
+      // A bare pair after the keys has no effect when they serve each copy on
+      // the line. A pair on another line stays (#355).
+      if (existing.supersedeBare && onLine(get(get(get(manifest, 'overrides'), parent), key))) {
+        supersedePair(parent, key)
+      }
       for (const outer of existing.keys) putRuleNested(parent, [outer], key, value)
       if (!existing.rest) return
     }
@@ -262,8 +397,23 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
       putNested(parent, parent, key, value)
       return
     }
-    // npm matches a bare pair for this parent first, so beside it the
-    // qualified keys are inert. Only a pair on the same line gets here.
+    // npm matches a bare key for this parent first, so beside it the
+    // qualified keys are inert. Only a pair on the same line gets here. The
+    // pass removes each pair of the call. A bare key that holds any other
+    // entry stays, so the pass refuses (#355).
+    const bare = get(or(get(manifest, 'overrides'), {}), parent)
+    const writeKeys = writeKeysOf(query.keysByParent, parent, pkg)
+    const others = isRecord(bare)
+      ? Object.keys(bare).filter((each) => !writeKeys.includes(each))
+      : []
+    if (others.length > 0) {
+      const detail = [{ parent, keys: others }]
+      throw new Refused(
+        failed(
+          `apply_constraint: cannot scope '${pkg}': the bare override key of a parent that this call must version-qualify holds entries that this call does not write: ${render(detail, null)}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+        ),
+      )
+    }
     supersedePair(parent, key)
     for (const qualifier of qualified) {
       putNested(parent, `${parent}@${qualifier}`, key, value)
@@ -277,7 +427,6 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
    * key with `>` and a yarn key with a parent pin another package.
    */
   const coveringKeys = (): string[] => {
-    const target = rangeFloorMajor(range)
     return entriesOf(or(getPath(manifest, CONTAINER[location]), {}))
       .filter(([, value]) => typeof value === 'string')
       .map(([key]) => key)
@@ -314,11 +463,10 @@ export const writePass = (input: unknown, query: PassQuery): PassResult => {
     for (const key of query.rootKeys) putRoot(key)
   } else {
     for (const parent of query.parents) {
-      const keys = query.keysByParent.get(parent) ?? []
-      for (const key of keys.length === 0 ? [pkg] : keys) {
+      for (const key of writeKeysOf(query.keysByParent, parent, pkg)) {
         putScoped(parent, key, key === pkg ? range : alias)
       }
     }
   }
-  return { manifest, written, superseded }
+  return { manifest, written, superseded, refusal: null }
 }

@@ -33,8 +33,17 @@
 // first key has no selector, or that no key matches, takes the normal write.
 //
 // When the qualified keys serve each normal copy on the line, a bare pair
-// after them has no effect. The pass supersedes a pair on the line, and
-// reports it. A pair on another line stays as it is.
+// after them has no effect. The write pass supersedes each pair of the call
+// on the line, and reports it. A pair on another line stays as it is.
+//
+// The write pass removes a bare key that holds only pairs of the call on the
+// line, when the parent has qualifiers (#355). npm then matches the next key
+// for the parent. So the scan skips that bare key, and a later qualified key
+// can take the write. A real npm 11.19.0 run showed this: after the bare key
+// went, `debug@^3` was the first key of debug 3.2.7.
+//
+// `scanKeys` also reads the child keys inside a target key of the write
+// (#354). `childEdgesOf` gives the edges for it.
 //
 // Five refusals, each before any write, for a parent with a qualified key:
 //
@@ -57,7 +66,7 @@ import { stripSelector } from './list-pins.ts'
 import { isRecord } from './manifest.ts'
 import { candidatesOf, declarationsOf, lastSegment, type NpmLock, resolveFrom } from './npm-lock.ts'
 import type { Placement } from './npm-placement.ts'
-import { MISSING, type Qualifiers } from './parent-qualifiers.ts'
+import { MISSING, pinFloor, type Qualifiers, writeKeysOf } from './parent-qualifiers.ts'
 import { satisfiesAll } from './validate.ts'
 
 /** The qualified keys of the manifest that serve the copies of one parent. */
@@ -66,7 +75,10 @@ export type QualifiedKeys = {
   readonly keys: readonly string[]
   /** Some normal copy of the parent on the line still needs the normal write. */
   readonly rest: boolean
-  /** A bare pair for the package, on the line, that the keys make inert. */
+  /**
+   * The keys serve each normal copy on the line, so a bare pair after them
+   * has no effect. The write pass supersedes each such pair on the line.
+   */
   readonly supersedeBare: boolean
 }
 
@@ -78,6 +90,8 @@ export type QualifiedKeyQuery = {
   readonly parents: readonly string[]
   readonly qualifiers: Qualifiers
   readonly placements: ReadonlyMap<string, Placement>
+  /** The keys that each parent declares the package under. */
+  readonly keysByParent: ReadonlyMap<string, readonly string[]>
   readonly pkg: string
   readonly range: string
 }
@@ -164,6 +178,72 @@ export const specsInto = (lock: NpmLock, path: string): readonly unknown[] =>
       .map(([, spec]) => spec),
   )
 
+/**
+ * One edge from a copy of a parent into the package (#354). `spec` is the
+ * declared spec: the `#semver:` range of a git spec, or the text. `range` is
+ * true when the range rules can read it. An `npm:` alias spec is not a range
+ * here, so the write pass refuses a child key beside it. `cver` is the
+ * version of the child copy.
+ */
+export type ChildEdge = { readonly spec: string; readonly range: boolean; readonly cver: string }
+
+/**
+ * The edges into the package under the declared key `name`, from each copy
+ * of `parent` in the lockfile.
+ */
+export const childEdgesOf = (lock: NpmLock, parent: string, name: string): readonly ChildEdge[] => {
+  return lock.entries
+    .filter(([path]) => lastSegment(path) === parent)
+    .flatMap(([path, entry]) =>
+      declarationsOf(entry).flatMap(([key, specifier]): ChildEdge[] => {
+        if (key !== name || typeof specifier !== 'string') return []
+        const git = gitRangeOf(specifier.trim())
+        const spec = git ?? specifier
+        const cver = [
+          ...candidatesOf(path, key).map((each) =>
+            or(get(lock.byKey.get(each) ?? null, 'version'), null),
+          ),
+          MISSING,
+        ].find((each) => each !== null)
+        return [
+          {
+            spec,
+            range: LOOKS_RANGE.test(spec.trim()) && (git === null || rangeParseable(git)),
+            cver: toText(cver),
+          },
+        ]
+      }),
+    )
+}
+
+/** One key of the override block, and its selector, or null for a bare key. */
+export type SelectorKey = { readonly key: string; readonly selector: string | null }
+
+/** The first key that an edge matches, and the keys before it that npm can also match. */
+export type FirstKey = { readonly first: string | null; readonly unsure: readonly string[] }
+
+/**
+ * The first key of `own` that one edge spec matches, for a copy at `pver`,
+ * and the unsure keys before it. A bare key ends the scan with no first key:
+ * npm matches it for each edge.
+ */
+export const scanKeys = (own: readonly SelectorKey[], pver: string, spec: string): FirstKey => {
+  const exact = exactOf(spec)
+  const sure = exact !== null || admits(pver, spec)
+  const unsure: string[] = []
+  for (const { key, selector } of own) {
+    if (selector === null) return { first: null, unsure }
+    if (exact !== null) {
+      if (admits(exact, selector)) return { first: key, unsure }
+      continue
+    }
+    if (sure && admits(pver, selector)) return { first: key, unsure }
+    const one = exactOf(selector)
+    if (!(sure && one !== null && !admits(one, spec))) unsure.push(key)
+  }
+  return { first: null, unsure }
+}
+
 /** One normal copy of a parent, and where the write for it goes. */
 type Copy = {
   readonly pver: string
@@ -202,28 +282,24 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       const { name, selector } = stripSelector(key)
       return name === parent ? [{ key, selector }] : []
     })
-    if (own.every(({ selector }) => selector === null)) continue
     const quals = qualifiers.get(parent) ?? []
+    const bare = or(get(overrides, parent), null)
+    // The write pass removes a bare key that holds only pairs of this call on
+    // the line, for a parent with qualifiers (#355). npm then matches the
+    // next key, so the scan skips the bare key.
+    const writeKeys = writeKeysOf(query.keysByParent, parent, pkg)
+    const removed =
+      quals.length > 0 &&
+      isRecord(bare) &&
+      Object.keys(bare).length > 0 &&
+      Object.entries(bare).every(
+        ([key, value]) => writeKeys.includes(key) && pinFloor(value) === target && target !== null,
+      )
+    const scanned = removed ? own.filter(({ selector }) => selector !== null) : own
+    if (scanned.every(({ selector }) => selector === null)) continue
     /** The qualifier of the normal write for a copy on the line. */
     const intendedOf = (version: string): string | undefined =>
       quals.length === 0 ? '' : quals.find((each) => admits(version, each))
-    /** The first key that one edge spec matches, and the unsure keys before it. */
-    const scan = (pver: string, spec: string): Pick<Copy, 'first' | 'unsure'> => {
-      const exact = exactOf(spec)
-      const sure = exact !== null || admits(pver, spec)
-      const unsure: string[] = []
-      for (const { key, selector } of own) {
-        if (selector === null) return { first: null, unsure }
-        if (exact !== null) {
-          if (admits(exact, selector)) return { first: key, unsure }
-          continue
-        }
-        if (sure && admits(pver, selector)) return { first: key, unsure }
-        const one = exactOf(selector)
-        if (!(sure && one !== null && !admits(one, spec))) unsure.push(key)
-      }
-      return { first: null, unsure }
-    }
     // Each copy of the parent that declares the package, as `npm_copy_rows` reads it.
     const copies: Copy[] = lock.entries
       .filter(([path]) => lastSegment(path) === parent)
@@ -254,7 +330,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
         })
         const specs = edges.map(({ text, git }) => git ?? text)
         const readable = specs.filter((spec) => LOOKS_RANGE.test(spec.trim()))
-        const found = readable.map((spec) => scan(version, spec))
+        const found = readable.map((spec) => scanKeys(scanned, version, spec))
         const firsts = unique(found.map(({ first }) => first))
         return {
           pver: version,
@@ -331,12 +407,10 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       ({ intended, first }) => intended !== undefined && first === null,
     )
     const rest = unserved.length > 0
-    const bare = or(get(overrides, parent), null)
     keys.set(parent, {
       keys: qualified.filter((key) => served.includes(key)),
       rest,
-      supersedeBare:
-        !rest && isRecord(bare) && Object.hasOwn(bare, pkg) && !otherLine(bare[pkg], target),
+      supersedeBare: !rest,
     })
     // A qualifier that reaches no unserved copy would write a key with no effect.
     const kept = quals.filter((each) => unserved.some(({ intended }) => intended === each))

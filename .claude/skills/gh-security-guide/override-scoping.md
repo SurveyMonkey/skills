@@ -97,6 +97,23 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   beside such a copy. It also refuses a key that comes first for a copy whose child is on
   another line. It refuses a key that holds a pin on another line.
 
+  The same first-key rule applies inside a key. A target key of the write can hold a child key
+  with a selector, such as `"debug": {"ms@^2": "2.1.2"}`. npm then uses `ms@^2` for an edge that
+  it matches, and a plain `ms` key after it has no effect (npm 11.19.0, issue #354). So the
+  call writes inside the first child key that matches the edge into the copy, for a bare, a
+  served and a placing key alike. The value must be a text on the line of the call. An exact
+  selector outside the edge, such as `ms@1.0.0` for `^2.1.1`, does not match, and the plain key
+  takes the write. The call refuses a child key that npm can match but the lockfile cannot
+  show, such as `ms@2.1.1` beside a copy at 2.1.2: npm then applied neither key.
+
+  Two composed shapes are decided before any write (issue #355). The call removes a bare pair
+  for a parent that it qualifies. When that empties the bare key, npm matches the next key for
+  the parent, such as `debug@^3`. So the call scans the keys as if the bare key were not there,
+  and writes inside a later key that comes first. When the bare key holds another entry, it
+  stays first for each copy, and the new qualified keys have no effect. The call refuses that
+  bare key and names it. The check for a bare pair on another line also reads each alias key
+  that the parent declares the package under, such as `babylon7` for `npm:babylon@^7`.
+
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
   such a node to the rule that placed it, so a top-level key never matches it, qualified or bare,

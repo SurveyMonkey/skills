@@ -313,12 +313,38 @@ export const qualifiersOf = (
 }
 
 /**
+ * The keys that the write pass writes for `parent`: the keys that the parent
+ * declares the package under, or the package when the lockfile holds none.
+ */
+export const writeKeysOf = (
+  keysByParent: ReadonlyMap<string, readonly string[]>,
+  parent: string,
+  pkg: string,
+): readonly string[] => {
+  const keys = keysByParent.get(parent) ?? []
+  return keys.length === 0 ? [pkg] : keys
+}
+
+/**
+ * The floor major of a pin value. An `npm:<name>@<range>` value gives the
+ * floor of its range. The floor is null when the value has none.
+ */
+export const pinFloor = (value: unknown): number | null => {
+  const text = toText(value)
+  return rangeFloorMajor(text.startsWith('npm:') ? text.slice(text.lastIndexOf('@') + 1) : text)
+}
+
+/**
  * `bare_conflict`: a bare nested key of the manifest, for a parent that
  * this call qualifies, on another major line. A delete of that key strips
  * the protection of its line. If the key stays, the qualified keys do
  * nothing: npm matches the bare key first. So the call refuses (#132). A
  * key on the same line is no conflict: the write removes it, and reports it
  * as superseded.
+ *
+ * The pass reads the pair of the package, and then the pair of each alias
+ * key that the parent declares the package under (#355). The write removes
+ * an alias pair too. The detail of an alias pair names its key.
  */
 export const bareConflict = (
   qualifiers: Qualifiers,
@@ -326,21 +352,27 @@ export const bareConflict = (
   manifest: unknown,
   pkg: string,
   range: string,
+  keysByParent: ReadonlyMap<string, readonly string[]>,
 ): Failure | null => {
   const target = rangeFloorMajor(range)
   const overrides = or(get(manifest, 'overrides'), {})
   const conflict = [...qualifiers.keys()]
     .sort((a, b) => Number(a > b) - Number(a < b))
-    .map((parent) => ({ parent, value: or(get(overrides, parent), null) }))
-    .find(({ value }) => {
-      if (!isRecord(value) || !Object.hasOwn(value, pkg)) return false
-      const floor = rangeFloorMajor(toText(value[pkg]))
+    .flatMap((parent) => {
+      const value = or(get(overrides, parent), null)
+      const aliases = writeKeysOf(keysByParent, parent, pkg).filter((key) => key !== pkg)
+      return [pkg, ...aliases].map((key) => ({ parent, key, value }))
+    })
+    .find(({ key, value }) => {
+      if (!isRecord(value) || !Object.hasOwn(value, key)) return false
+      const floor = pinFloor(value[key])
       return floor === null || target === null || floor !== target
     })
   if (conflict === undefined) return null
   const detail = {
     parent: conflict.parent,
-    value: (conflict.value as Readonly<Record<string, unknown>>)[pkg],
+    ...(conflict.key === pkg ? {} : { key: conflict.key }),
+    value: (conflict.value as Readonly<Record<string, unknown>>)[conflict.key],
     parent_also_override_placed: placements.has(conflict.parent),
   }
   return failed(
