@@ -32,8 +32,9 @@ purpose: the driver decides them, and the agent is what maps them onto a result 
 them.
 
 `RUN` is the run directory, `${CLAUDE_PLUGIN_DATA}/runs/<stamp>`. Each command whose answer a
-later command reads writes it there with `--out`, and `remove-run` removes the directory at the
-end. Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
+later command reads writes it there with `--out`. `remove-run` removes the directory at the end,
+and at each stop before it (`SKILL.md`); the diagram shows only the last one.
+Rounded nodes end the run. Diamonds are branches; diamonds labelled **ask** are where the user
 decides, and nothing dispatches without one. The ask sites are phase 3's how-much, phase 4's batch
 approval, and phase 8's offer of the groups declined at phase 3. Phase 1 asks nothing: scope is the
 checkouts on disk, read by `discover-repos`, and nothing is ever cloned

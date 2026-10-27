@@ -27,8 +27,8 @@
 //                `{error}` alone means none. A failed call and its exclude
 //                error give one line each. With no such word, the registry
 //                preflight excluded no repository, and no answer has an
-//                `exclude_error`. The words are words and not a flag, so the
-//                allow hook passes each one (`cli.md`).
+//                `exclude_error`. Each file is a word of its own, so the
+//                model writes no aggregate file with the Write tool.
 //   --args       optional. The Workflow `args`, `{cap, dispatches}`. Give it
 //                for a run that was interrupted. Each entry then names a
 //                dispatch by its `repo` and `branch_name`, and a dispatch with
@@ -97,9 +97,10 @@
 //       Last, each preflight answer with an `exclude_error`, `ok` or not, is
 //       one line with the repository and the error.
 //
-// `--out <file>` writes the answer to the file too (`cli/out-file.ts`).
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// `{"error": ...}` there (`cli/out-file.ts`).
 //
-// The command fails, with exit 1, before it writes anything, in these cases:
+// The command fails, with exit 1, before it writes a summary, in these cases:
 //   - a bad command line: an option it does not know, or a required flag
 //     that is missing,
 //   - a word that is not `<checkout>=<file>` with neither part empty, or two

@@ -39,7 +39,7 @@ import { failed, ok } from '../lib/envelope.ts'
 
 const USAGE = 'usage: gh-security remove-run <dir>'
 
-/** The names of the four parents of a run directory, nearest last: `plugins/data/<id>/runs`. */
+/** True when the parents of the path are `plugins/data/<id>/runs`. The `<id>` can have any name. */
 const isRunPath = (path: string): boolean => {
   const runs = dirname(path)
   const data = dirname(dirname(runs))

@@ -289,7 +289,8 @@
 //         where `cd` needed it.
 //
 // `fix-group score --out <file>` writes the answer of `score` to the file
-// too, and a failed phase writes its report there (`cli/out-file.ts`).
+// too. A failure writes its report, or its `{"error": ...}`, there
+// (`cli/out-file.ts`).
 // `run.ts` takes the flag out before this handler runs. The other phases do
 // not take it: no later command reads their answer (#346).
 //

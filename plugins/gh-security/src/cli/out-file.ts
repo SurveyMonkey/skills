@@ -13,7 +13,7 @@
 //   - A failure that carries a report (`failedReport`) writes its report to
 //     the file. Any other failure, a throw included, writes its
 //     `{"error": ...}` envelope. The exit status does not change.
-//   - The command makes the parent directories of the file, and replaces a
+//   - `writeOut` makes the parent directories of the file, and replaces a
 //     file that is there.
 //   - A file that cannot be written is a failure of the command: exit 1, and
 //     `{"error": "<command>: cannot write --out <file>: <reason>"}` on stdout

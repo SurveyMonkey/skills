@@ -26,8 +26,8 @@
 // `create` reads the title from the first line of `--title-file`, the commit
 // message that `commit-msg --out` wrote (ruling 5 of round 9 on #346). A `\r`
 // at the end of the line is not part of the title. A first line that is
-// empty, or only white space, is an error. `--title` is gone: a title has
-// spaces, so the allow hook could never pass it, and no prompt passes it.
+// empty, or only white space, is an error. There is no `--title`: a title
+// has spaces, so the allow hook could not pass it.
 //
 // `labels` and `create` run `gh label create` and `gh pr create`, through
 // the `gh` client (`lib/gh.ts`). `create` never passes `--draft`: a PR opens

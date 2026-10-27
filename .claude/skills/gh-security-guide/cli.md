@@ -63,12 +63,13 @@ file, so the model never copies an answer with the Write tool, and no call needs
 `src/cli/out-file.ts` is the one writer. `run.ts` applies it to each call that the registry entry
 opts in (`out`). Those calls are `prepare-checkout`, `merge-envelopes`, `preflight-repo`,
 `build-dispatches`, `reap-batch`, `summarize-run` and `pr-status`. They are also
-`render-pr commit-msg`, `render-pr body` and `fix-group score`. `run.ts` takes the flag out before the handler runs. The file gets
-the bytes that stdout gets, and stdout does not change. A failure with a report writes the report
-to the file. Any other failure, a throw included, writes its `{"error": ...}` envelope. The parent
-directories are made. A file that cannot be written is exit 1, with
-`{"error": "<command>: cannot write --out <file>: <reason>"}` in place of the answer. `--out`
-with no file, or twice, fails before the command runs. A command that does not opt in gets the
+`render-pr commit-msg`, `render-pr body` and `fix-group score`. `run.ts` takes the flag out
+before the handler runs. The file gets the bytes that stdout gets, and stdout does not change. A
+failure with a report writes the report to the file. Any other failure, a throw included, writes
+its `{"error": ...}` envelope. `writeOut` makes the parent directories. When it cannot write the
+file, the command exits 1, with `{"error": "<command>: cannot write --out <file>: <reason>"}` in
+place of the answer, and writes no file. `--out` with no file, or twice, fails before the command
+runs, and writes no file. A command that does not opt in gets the
 flag as an argument, and its own parser refuses it.
 `render-pr create` reads its title from the first line of `--title-file`, the commit message
 that `commit-msg --out` wrote. A title has spaces, so no `--title` value could pass the allow hook.

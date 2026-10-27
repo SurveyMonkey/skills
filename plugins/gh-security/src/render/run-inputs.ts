@@ -471,11 +471,11 @@ export type Preflight =
 
 /**
  * The preflight answers: from the `checkout` of a kept checkout to the answer
- * of `preflight-repo` for it (`summarize-run` reads one file for each), or to its failure `{error}` or `{error,
- * exclude_error}`. An entry is kept
- * when the checkout was excluded, the call failed, or the answer has an
- * `exclude_error`. An answer with `ok` true and no `exclude_error` is
- * dropped. The order of the file stays.
+ * of `preflight-repo` for it, or to its failure `{error}` or `{error,
+ * exclude_error}`. `summarize-run` gives one checkout for each file. An
+ * entry is kept when the checkout was excluded, the call failed, or the
+ * answer has an `exclude_error`. An answer with `ok` true and no
+ * `exclude_error` is dropped. The order of the object stays.
  */
 export const preflightsOf = (value: unknown, kept: readonly Checkout[]): readonly Preflight[] => {
   const file = record(value, 'the file')
