@@ -182,6 +182,14 @@ describe('remove-run', () => {
       },
     ],
     [
+      'a directory under the plugin data that is not under runs',
+      () => {
+        const other = join(dirname(runs), 'worktrees', 'r1')
+        mkdirSync(other, { recursive: true })
+        return other
+      },
+    ],
+    [
       'a runs directory under plugins that is not under data',
       () => {
         const other = join(scratch, 'plugins', 'cache', 'x', 'runs', 'r1')
