@@ -1243,6 +1243,23 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
   })
 
+  /** nx declares smol-toml only through the alias key `toml`. */
+  const tomlAlias = lockEdit((packages) => {
+    ;(packages['node_modules/nx'] as Json).dependencies = { toml: 'npm:smol-toml@1.6.1' }
+    packages['node_modules/toml'] = { name: 'smol-toml', version: '1.6.1' }
+  })
+
+  it.each([
+    ['supersedes an on-line', 'npm:smol-toml@^1.7.1', {}],
+    ['keeps an off-line', 'npm:smol-toml@^0.5.0', { nx: { toml: 'npm:smol-toml@^0.5.0' } }],
+  ])('%s alias pair of a bare key after the key', (_title, pair, kept) => {
+    const setup = both(tomlAlias, rule({ 'nx@22.7.7': { axios: AXIOS }, nx: { toml: pair } }))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@22.7.7': { axios: AXIOS, toml: `npm:smol-toml@${SMOL}` },
+      ...kept,
+    })
+  })
+
   it('refuses a pin on another line inside the key, and names the key', () => {
     const pinned = rule({ 'nx@22.7.7': { axios: AXIOS, 'smol-toml': '^0.9.0' } })
     expect(refusalOf(QUALIFIED, smolToml, pinned)).toBe(
@@ -1861,6 +1878,26 @@ describe('npm constraint goes into a qualified child key that npm matches first 
   })
 
   // Green when written: no child key, so the write is the plain key.
+  it.fails('refuses a child key with a value that names another package, and names it', () => {
+    const fork = 'npm:@example-org/ms-fork@2.1.2'
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': fork } }))).toBe(
+      CHILD_PIN(`[{"parent":"debug","path":["debug"],"key":"ms@^2","value":"${fork}"}]`),
+    )
+  })
+
+  // With no edge that the lockfile can show, no key is shown to take effect.
+  it.fails('refuses a child key when no copy of the parent has a text edge into the package', () => {
+    const odd = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        ;(packages['node_modules/debug'] as Json).dependencies = { ms: 5 }
+      }),
+    )
+    expect(refusalOf(CHILD, msRange, odd)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
+  })
+
   it('writes the plain key when the parent key holds no child key for the package', () => {
     expect(
       manifestAfter(CHILD, msRange, rule({ debug: { minimist: '^1.2.8' } })).overrides,
@@ -1887,6 +1924,9 @@ const SUPERSEDED = 'npm-superseded-bare-pair'
 
 const BARE_KEPT = (detail: string): string =>
   `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${detail}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
+
+const BARE_PIN = (detail: string): string =>
+  `apply_constraint: a pre-existing bare override for 'ms' under a parent this call must version-qualify pins a DIFFERENT major line: ${detail}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`
 
 describe('npm write after a superseded bare pair decides each key first (#355)', () => {
   it('writes inside the later qualified key that becomes the first key', () => {
@@ -1921,6 +1961,49 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
   })
 
   // Green when written: the pass removes the bare key, and npm uses the new keys.
+  // A later key that serves each copy ends the pass before the bare key
+  // check. So the scan alone must keep the bare key first here.
+  it.each([
+    ['no entry', {}, '[]'],
+    [
+      'an on-line entry that this call does not write',
+      { ms: '>=2.1.1 <3', other: '^2.0.0' },
+      '["other"]',
+    ],
+  ])('refuses a bare key with %s before a key that serves each copy', (_title, bare, keys) => {
+    const setup = rule({ debug: bare, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_KEPT(`[{"parent":"debug","keys":${keys}}]`),
+    )
+  })
+
+  it('refuses a bare pair on another line before a key that serves each copy', () => {
+    const setup = rule({ debug: { ms: '^1.0.0' }, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_PIN('{"parent":"debug","value":"^1.0.0","parent_also_override_placed":false}'),
+    )
+  })
+
+  // The write is the one of the next example: the pass removes the pair.
+  it('reads the floor of an npm: value of the package in a bare pair', () => {
+    const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' } })
+    expect(manifestAfter(SUPERSEDED, msRange, aliased).overrides).toEqual({
+      'debug@4.1.1': { ms: MS },
+      'debug@3.2.7': { ms: MS },
+    })
+  })
+
+  // An `npm:` value of another package is no pin of the package. Before
+  // #355 the call refused it, as it read no floor.
+  it.fails('refuses a bare pair that names another package, and names it', () => {
+    const fork = rule({ debug: { ms: 'npm:@example-org/ms-fork@2.1.1' } })
+    expect(refusalOf(SUPERSEDED, msRange, fork)).toBe(
+      BARE_PIN(
+        '{"parent":"debug","value":"npm:@example-org/ms-fork@2.1.1","parent_also_override_placed":false}',
+      ),
+    )
+  })
+
   it('writes a qualified key for each copy after a bare key that holds only the pair', () => {
     expect(
       manifestAfter(SUPERSEDED, msRange, rule({ debug: { ms: '>=2.1.1 <3' } })).overrides,
