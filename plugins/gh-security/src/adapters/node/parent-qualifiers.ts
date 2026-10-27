@@ -334,8 +334,8 @@ export const writeKeysOf = (
 export const pinFloor = (value: unknown, pkg: string): number | null => {
   const text = toText(value)
   if (!text.startsWith('npm:')) return rangeFloorMajor(text)
-  const at = text.lastIndexOf('@')
-  return at > 4 && text.slice(4, at) === pkg ? rangeFloorMajor(text.slice(at + 1)) : null
+  const alias = /^npm:(.+)@([^@]*)$/.exec(text)
+  return alias?.[1] === pkg ? rangeFloorMajor(alias[2] as string) : null
 }
 
 /**
