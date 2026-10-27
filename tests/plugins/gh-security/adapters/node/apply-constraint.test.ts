@@ -2043,6 +2043,30 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     )
   })
 
+  // Each debug copy also declares ms under the alias key `ms2`. A plain
+  // range under `ms2` names the package `ms2` (`lib/edge.js:205-224`), so
+  // the scan keeps the bare key, and the call refuses it.
+  it('refuses a plain range under an alias key before a key that serves each copy', () => {
+    const aliased = lockEdit((packages) => {
+      for (const path of [
+        'node_modules/debug',
+        'node_modules/eslint-import-resolver-node/node_modules/debug',
+      ]) {
+        ;(packages[path] as Json).dependencies = { ms: '^2.1.1', ms2: 'npm:ms@^2.1.1' }
+      }
+      packages['node_modules/ms2'] = { name: 'ms', version: '2.1.1' }
+    })
+    const setup = both(
+      aliased,
+      rule({ debug: { ms2: '>=2.1.1 <3' }, 'debug@>=3 <5': { ms: '2.1.1' } }),
+    )
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_PIN(
+        '{"parent":"debug","key":"ms2","value":">=2.1.1 <3","parent_also_override_placed":false}',
+      ),
+    )
+  })
+
   // The write is the one of the next example: the pass removes the pair.
   it('reads the floor of an npm: value of the package in a bare pair', () => {
     const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' } })
