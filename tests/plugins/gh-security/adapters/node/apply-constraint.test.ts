@@ -1944,7 +1944,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 
   // With no edge that the range rules can read, no key is shown to take effect.
   it.each([
-    ['an edge that is not a text', { ms: 5 }],
+    ['an edge that is not a text', { ms: 2 }],
     ['no edge', {}],
   ])('refuses a child key when the copy of the parent has %s into the package', (_title, deps) => {
     const odd = both(
