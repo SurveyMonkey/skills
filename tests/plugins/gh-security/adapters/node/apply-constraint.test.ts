@@ -1960,7 +1960,6 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     )
   })
 
-  // Green when written: the pass removes the bare key, and npm uses the new keys.
   // A later key that serves each copy ends the pass before the bare key
   // check. So the scan alone must keep the bare key first here.
   it.each([
@@ -2004,6 +2003,26 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     )
   })
 
+  // A range with no floor has no line, so the bare pair is no pair on the
+  // line, and the scan keeps the bare key.
+  it('refuses a bare pair with no floor for a range with no floor', () => {
+    const setup = rule({ debug: { ms: 'latest' }, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, ['ms', '*', 'debug'], setup)).toBe(
+      BARE_PIN('{"parent":"debug","value":"latest","parent_also_override_placed":false}'),
+    )
+  })
+
+  // A parent with no qualifier keeps its bare key, which npm matches first
+  // (`getEdgeRule`, `lib/override-set.js:92-93` in arborist 9.9.1).
+  it('writes inside a bare key that comes first for a parent with no qualifier', () => {
+    const setup = rule({ debug: { ms: '>=2.1.1 <3' }, 'debug@^3': { ms: '2.1.1' } })
+    expect(manifestAfter(CHILD, msRange, setup).overrides).toEqual({
+      debug: { ms: MS },
+      'debug@^3': { ms: '2.1.1' },
+    })
+  })
+
+  // Green when written: the pass removes the bare key, and npm uses the new keys.
   it('writes a qualified key for each copy after a bare key that holds only the pair', () => {
     expect(
       manifestAfter(SUPERSEDED, msRange, rule({ debug: { ms: '>=2.1.1 <3' } })).overrides,
