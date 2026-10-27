@@ -184,8 +184,8 @@ export const specsInto = (lock: NpmLock, path: string): readonly unknown[] =>
  * One edge from a copy of a parent into the package (#354). `spec` is the
  * declared spec: the `#semver:` range of a git spec, or the text. `range` is
  * true when the range rules can read it. An `npm:` alias spec is not a range
- * here, so the write pass refuses a child key beside it. `cver` is the
- * version of the child copy.
+ * here, and nor is a spec that is not a text. So the write pass refuses a
+ * child key beside such an edge. `cver` is the version of the child copy.
  */
 export type ChildEdge = { readonly spec: string; readonly range: boolean; readonly cver: string }
 
@@ -198,9 +198,10 @@ export const childEdgesOf = (lock: NpmLock, parent: string, name: string): reado
     .filter(([path]) => lastSegment(path) === parent)
     .flatMap(([path, entry]) =>
       declarationsOf(entry).flatMap(([key, specifier]): ChildEdge[] => {
-        if (key !== name || typeof specifier !== 'string') return []
-        const git = gitRangeOf(specifier.trim())
-        const spec = git ?? specifier
+        if (key !== name) return []
+        const text = typeof specifier === 'string' ? specifier : null
+        const git = text === null ? null : gitRangeOf(text.trim())
+        const spec = git ?? text ?? toText(specifier)
         const cver = [
           ...candidatesOf(path, key).map((each) =>
             or(get(lock.byKey.get(each) ?? null, 'version'), null),
@@ -210,7 +211,10 @@ export const childEdgesOf = (lock: NpmLock, parent: string, name: string): reado
         return [
           {
             spec,
-            range: LOOKS_RANGE.test(spec.trim()) && (git === null || rangeParseable(git)),
+            range:
+              text !== null &&
+              LOOKS_RANGE.test(spec.trim()) &&
+              (git === null || rangeParseable(git)),
             cver: toText(cver),
           },
         ]
@@ -296,7 +300,7 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       Object.keys(bare).length > 0 &&
       Object.entries(bare).every(
         ([key, value]) =>
-          writeKeys.includes(key) && pinFloor(value, pkg) === target && target !== null,
+          writeKeys.includes(key) && pinFloor(value, pkg, key) === target && target !== null,
       )
     const scanned = removed ? own.filter(({ selector }) => selector !== null) : own
     if (scanned.every(({ selector }) => selector === null)) continue

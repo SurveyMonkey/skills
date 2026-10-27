@@ -326,14 +326,17 @@ export const writeKeysOf = (
 }
 
 /**
- * The floor major of a pin value for `pkg`. An `npm:<pkg>@<range>` value
- * gives the floor of its range. An `npm:` value of another package is no
- * pin of `pkg`, so its floor is null. The floor is null when the value has
+ * The floor major of a pin value of `pkg` under the override key `key`. An
+ * `npm:<pkg>@<range>` value gives the floor of its range. An `npm:` value of
+ * another package is no pin of `pkg`, so its floor is null. npm puts the
+ * value in place of the edge spec (`lib/edge.js:205-224` in arborist 9.9.1).
+ * So under an alias key, a value with no `npm:` names the alias as the
+ * package, and its floor is null too. The floor is null when the value has
  * none.
  */
-export const pinFloor = (value: unknown, pkg: string): number | null => {
+export const pinFloor = (value: unknown, pkg: string, key: string): number | null => {
   const text = toText(value)
-  if (!text.startsWith('npm:')) return rangeFloorMajor(text)
+  if (!text.startsWith('npm:')) return key === pkg ? rangeFloorMajor(text) : null
   const alias = /^npm:(.+)@([^@]*)$/.exec(text)
   return alias?.[1] === pkg ? rangeFloorMajor(alias[2] as string) : null
 }
@@ -370,7 +373,7 @@ export const bareConflict = (
     })
     .find(({ key, value }) => {
       if (!isRecord(value) || !Object.hasOwn(value, key)) return false
-      const floor = pinFloor(value[key], pkg)
+      const floor = pinFloor(value[key], pkg, key)
       return floor === null || target === null || floor !== target
     })
   if (conflict === undefined) return null

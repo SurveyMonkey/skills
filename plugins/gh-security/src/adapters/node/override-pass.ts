@@ -156,8 +156,9 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
   const alias = `npm:${pkg}@${range}`
   const target = rangeFloorMajor(range)
 
-  /** The pin value is on the major line of the range. */
-  const onLine = (value: unknown): boolean => target !== null && pinFloor(value, pkg) === target
+  /** The pin value under the key `key` is on the major line of the range. */
+  const onLine = (value: unknown, key: string): boolean =>
+    target !== null && pinFloor(value, pkg, key) === target
 
   const note = (parent: string | null, path: readonly string[], value: unknown): void => {
     written.push({ parent, path, value: value as PinValue })
@@ -253,7 +254,7 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
     }
     for (const child of into) {
       const current = (container as Readonly<Record<string, unknown>>)[child]
-      if (typeof current === 'string' && onLine(current)) continue
+      if (typeof current === 'string' && onLine(current, key)) continue
       const detail = [{ parent, path, key: child, value: current }]
       throw new Refused(
         failed(
@@ -394,7 +395,10 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
     if (existing !== undefined) {
       // A bare pair after the keys has no effect when they serve each copy on
       // the line. A pair on another line stays (#355).
-      if (existing.supersedeBare && onLine(get(get(get(manifest, 'overrides'), parent), key))) {
+      if (
+        existing.supersedeBare &&
+        onLine(get(get(get(manifest, 'overrides'), parent), key), key)
+      ) {
         supersedePair(parent, key)
       }
       for (const outer of existing.keys) putRuleNested(parent, [outer], key, value)
@@ -407,13 +411,15 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
     // npm matches a bare key for this parent before the qualified keys after
     // it, so they are inert. Only a pair on the same line gets here. The
     // pass removes each pair of the call. A bare key that holds any other
-    // entry stays, and so does an empty bare key. So the pass refuses (#355).
+    // entry stays, and so does an empty bare key. npm reads a value that is
+    // not an object as a key with no entry (`lib/override-set.js:9-30`). So
+    // the pass refuses each of these (#355).
     const bare = get(or(get(manifest, 'overrides'), {}), parent)
     const writeKeys = writeKeysOf(query.keysByParent, parent, pkg)
     const others = isRecord(bare)
       ? Object.keys(bare).filter((each) => !writeKeys.includes(each))
       : []
-    if (isRecord(bare) && (others.length > 0 || Object.keys(bare).length === 0)) {
+    if (bare !== null && (!isRecord(bare) || others.length > 0 || Object.keys(bare).length === 0)) {
       const detail = [{ parent, keys: others }]
       throw new Refused(
         failed(

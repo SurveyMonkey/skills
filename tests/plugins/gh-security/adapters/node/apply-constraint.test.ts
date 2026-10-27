@@ -1263,7 +1263,7 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
   // npm puts an override value in place of the edge spec (`lib/edge.js:205-224`
   // in arborist 9.9.1). So a plain range under the alias key names the package
   // `toml`, not smol-toml. It is no pin of smol-toml, and the pass keeps it.
-  it.fails('keeps a plain range of a bare key after the key under the alias key', () => {
+  it('keeps a plain range of a bare key after the key under the alias key', () => {
     const setup = both(tomlAlias, rule({ 'nx@22.7.7': { axios: AXIOS }, nx: { toml: '^1.7.1' } }))
     expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
       'nx@22.7.7': { axios: AXIOS, toml: `npm:smol-toml@${SMOL}` },
@@ -1893,7 +1893,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 
   // A lockfile entry can hold a spec that is not a text. The pass cannot
   // read that edge, so a second copy with such an edge makes it refuse.
-  it.fails('refuses a child key when one copy of the parent has an edge that is not a text', () => {
+  it('refuses a child key when one copy of the parent has an edge that is not a text', () => {
     const odd = both(
       rule({ debug: { 'ms@^2': '2.1.2' } }),
       lockEdit((packages) => {
@@ -1942,12 +1942,15 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     )
   })
 
-  // With no edge that the lockfile can show, no key is shown to take effect.
-  it('refuses a child key when no copy of the parent has a text edge into the package', () => {
+  // With no edge that the range rules can read, no key is shown to take effect.
+  it.each([
+    ['an edge that is not a text', { ms: 5 }],
+    ['no edge', {}],
+  ])('refuses a child key when the copy of the parent has %s into the package', (_title, deps) => {
     const odd = both(
       rule({ debug: { 'ms@^2': '2.1.2' } }),
       lockEdit((packages) => {
-        ;(packages['node_modules/debug'] as Json).dependencies = { ms: 5 }
+        ;(packages['node_modules/debug'] as Json).dependencies = deps
       }),
     )
     expect(refusalOf(CHILD, msRange, odd)).toBe(
@@ -2063,9 +2066,12 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
   // npm reads an array or a number value of a bare key as an empty key
   // (`lib/override-set.js:9-30` in arborist 9.9.1). Real runs: such a bare
   // key before `debug@4.1.1` and `debug@3.2.7` kept ms at 2.1.1 for each.
-  it.fails.each([
+  // npm reads a text value as the pin of the parent itself, with no child
+  // key (`lib/override-set.js:10-12`). That key stays first too.
+  it.each([
     ['an array', []],
     ['a number', 5],
+    ['a text', '>=3.2.7'],
   ])('refuses a bare key with %s value, which stays first, and names it', (_title, bare) => {
     expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
       BARE_KEPT('[{"parent":"debug","keys":[]}]'),
@@ -2135,7 +2141,7 @@ describe('npm bare alias pin on another major line (#355)', () => {
   // A real run with no lockfile: `"babylon7": ">=6.18.0 <7"` under `metro`
   // made npm fetch the package `babylon7`, and it stopped with E404. So that
   // value is no pin of babylon (`lib/edge.js:205-224` in arborist 9.9.1).
-  it.fails('refuses a plain range under the alias key, which names another package', () => {
+  it('refuses a plain range under the alias key, which names another package', () => {
     const plain = rule({ metro: { babylon7: '>=6.18.0 <7' } })
     expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'], plain)).toBe(
       `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":">=6.18.0 <7","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
