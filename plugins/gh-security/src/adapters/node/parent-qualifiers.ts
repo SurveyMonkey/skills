@@ -342,9 +342,9 @@ export const pinFloor = (value: unknown): number | null => {
  * key on the same line is no conflict: the write removes it, and reports it
  * as superseded.
  *
- * The pass reads the pair of the package, and then the pair of each alias
- * key that the parent declares the package under (#355). The write removes
- * an alias pair too. The detail of an alias pair names its key.
+ * It reads the pair of the package first. Then it reads the pair of each
+ * alias key that the parent declares the package under (#355). The write
+ * removes an alias pair too. The detail of an alias pair names its key.
  */
 export const bareConflict = (
   qualifiers: Qualifiers,

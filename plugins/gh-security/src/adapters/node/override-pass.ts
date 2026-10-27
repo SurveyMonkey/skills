@@ -21,12 +21,12 @@
 //     takes the write for that copy, as a rule does (#333).
 //   - Inside each npm target key, a child key `<pkg>@<selector>` that npm
 //     matches first for the copy takes the write (#354). A plain key after
-//     it has no effect. The pass refuses a child key that npm can match,
-//     when the lockfile cannot show it, and a child key with a value that is
-//     not a text on the line.
-//   - A bare npm parent key that holds an entry this call does not write
-//     stays first for each copy, so the qualified keys after it have no
-//     effect. The pass refuses it (#355).
+//     it has no effect. The pass refuses a child key that npm can match
+//     when the lockfile cannot show it. It also refuses a matched child key
+//     whose value is not a text on the line.
+//   - A bare npm parent key can hold an entry that this call does not
+//     write. That key stays first for each copy, so the qualified keys
+//     after it have no effect. The pass refuses it (#355).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
@@ -203,8 +203,8 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
 
   /**
    * The child keys of `key` with a selector inside the object at `path`
-   * (#354). npm uses the first child key for the package whose selector
-   * matches the edge into the copy, and a plain key matches each edge. The
+   * (#354). npm uses the first child key whose selector matches the edge
+   * into the copy. A plain key matches each edge. The
    * scan reads each edge from a copy of the parent, as `scanKeys` reads an
    * edge into a parent. It gives the child keys that take the write, and if
    * the plain key takes it too. A child key that takes the write must hold a
@@ -400,17 +400,17 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
     // npm matches a bare key for this parent first, so beside it the
     // qualified keys are inert. Only a pair on the same line gets here. The
     // pass removes each pair of the call. A bare key that holds any other
-    // entry stays, so the pass refuses (#355).
+    // entry stays, and so does an empty bare key. So the pass refuses (#355).
     const bare = get(or(get(manifest, 'overrides'), {}), parent)
     const writeKeys = writeKeysOf(query.keysByParent, parent, pkg)
     const others = isRecord(bare)
       ? Object.keys(bare).filter((each) => !writeKeys.includes(each))
       : []
-    if (others.length > 0) {
+    if (isRecord(bare) && (others.length > 0 || Object.keys(bare).length === 0)) {
       const detail = [{ parent, keys: others }]
       throw new Refused(
         failed(
-          `apply_constraint: cannot scope '${pkg}': the bare override key of a parent that this call must version-qualify holds entries that this call does not write: ${render(detail, null)}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+          `apply_constraint: cannot scope '${pkg}': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${render(detail, null)}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
         ),
       )
     }

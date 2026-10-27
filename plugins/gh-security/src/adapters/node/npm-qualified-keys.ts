@@ -36,14 +36,16 @@
 // after them has no effect. The write pass supersedes each pair of the call
 // on the line, and reports it. A pair on another line stays as it is.
 //
-// The write pass removes a bare key that holds only pairs of the call on the
-// line, when the parent has qualifiers (#355). npm then matches the next key
-// for the parent. So the scan skips that bare key, and a later qualified key
+// For a parent with qualifiers, the write pass removes a bare key with only
+// on-line pairs of the call (#355). npm then matches the next key for the
+// parent. So the scan skips that bare key, and a later qualified key
 // can take the write. A real npm 11.19.0 run showed this: after the bare key
 // went, `debug@^3` was the first key of debug 3.2.7.
 //
 // `scanKeys` also reads the child keys inside a target key of the write
-// (#354). `childEdgesOf` gives the edges for it.
+// (#354). `childEdgesOf` gives the edges for it. It reads each copy of the
+// parent, also a copy on another line. So the write pass can refuse a child
+// key for a copy that the target key does not serve.
 //
 // Five refusals, each before any write, for a parent with a qualified key:
 //
@@ -284,9 +286,9 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
     })
     const quals = qualifiers.get(parent) ?? []
     const bare = or(get(overrides, parent), null)
-    // The write pass removes a bare key that holds only pairs of this call on
-    // the line, for a parent with qualifiers (#355). npm then matches the
-    // next key, so the scan skips the bare key.
+    // For a parent with qualifiers, the write pass removes a bare key with
+    // only on-line pairs of this call (#355). npm then matches the next key,
+    // so the scan skips the bare key.
     const writeKeys = writeKeysOf(query.keysByParent, parent, pkg)
     const removed =
       quals.length > 0 &&

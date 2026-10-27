@@ -1882,10 +1882,11 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 //   - A bare `debug` key that holds `supports-color` before the two qualified
 //     keys kept ms at 2.1.1. After them, ms moved to 2.1.3.
 //   - The two qualified keys alone: ms 2.1.3 for each.
+//   - An empty bare `debug` key before them kept ms at 2.1.1.
 const SUPERSEDED = 'npm-superseded-bare-pair'
 
 const BARE_KEPT = (detail: string): string =>
-  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify holds entries that this call does not write: ${detail}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
+  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${detail}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
 
 describe('npm write after a superseded bare pair decides each key first (#355)', () => {
   it('writes inside the later qualified key that becomes the first key', () => {
@@ -1908,6 +1909,14 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
   ])('refuses a bare key that holds %s, which stays first, and names it', (_title, bare) => {
     expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
       BARE_KEPT('[{"parent":"debug","keys":["supports-color"]}]'),
+    )
+  })
+
+  // A real run: an empty bare `debug` key before the two qualified keys kept
+  // ms at 2.1.1 for each copy.
+  it('refuses an empty bare key, which stays first, and names it', () => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: {} }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":[]}]'),
     )
   })
 
@@ -3225,7 +3234,7 @@ describe('the routes that no spec example takes', () => {
       manifest.overrides = { minimatch: { 'brace-expansion': '>=5.0.6 <6', other: '1' } }
     })
     expect(refusalOf('npm-cross-line', [...BRACE, 'minimatch'], pair)).toBe(
-      `apply_constraint: cannot scope 'brace-expansion': the bare override key of a parent that this call must version-qualify holds entries that this call does not write: [{"parent":"minimatch","keys":["other"]}]. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+      `apply_constraint: cannot scope 'brace-expansion': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: [{"parent":"minimatch","keys":["other"]}]. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
     )
   })
 
