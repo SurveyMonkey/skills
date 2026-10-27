@@ -71,6 +71,14 @@ file, the command exits 1, with `{"error": "<command>: cannot write --out <file>
 place of the answer, and writes no file. `--out` with no file, or twice, fails before the command
 runs, and writes no file. A command that does not opt in gets the
 flag as an argument, and its own parser refuses it.
+**A file flag names only a run or a work directory** (ruling 16 on #346). An `--out` file, and
+the `--title-file` and `--body-file` of `render-pr create`, must be under one of two roots:
+`plugins/data/<id>/runs/<run>/` or `<repo>/.claude/worktrees/<leaf>/` (`src/run-paths.ts`). The
+path is a plain absolute path, with no `.`, `..` or empty segment and no `/` at its end. Its real
+path is under a root: links are resolved, so a linked parent that leads outside is refused, and
+so is a final link that leads nowhere. A path that fails is refused by name, before any write or
+read. The `<checkout>=<file>` words of `summarize-run` are inputs, and the rule does not cover
+them.
 `render-pr create` reads its title from the first line of `--title-file`, the commit message
 that `commit-msg --out` wrote. A title has spaces, so no `--title` value could pass the allow hook.
 `remove-run <dir>` removes the run directory of `resolve-alerts`,
@@ -110,6 +118,9 @@ Validation is of the whole command, never a substring: chaining, command substit
 redirection, a pipe, backgrounding, a subshell, a leading `cd` or environment assignment, an
 unknown subcommand, a different plugin root, and the entry point appearing inside a longer command
 all get no decision, which leaves the normal permission prompt exactly as it was.
+A file flag (`--out`, `--title-file`, `--body-file`) whose value fails the rule above also gets
+no decision. The hook reads the text only, and cannot resolve the tree of the user. So a `..`, a
+relative path, a `/` at the end, or a flag with no value gets no decision too.
 
 **The decision is only ever an allow, and an allow never overrides a deny.** A user's own deny or
 ask rule still wins, and this hook has no way to block anything: what it does not recognise it

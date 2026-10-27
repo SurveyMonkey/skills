@@ -19,6 +19,13 @@
 // subcommand, and every remaining token is drawn from one explicit character
 // set that contains no shell metacharacter. Anything else returns nothing.
 //
+// **A file flag names a run or work directory** (ruling 16 on #346). The value
+// of each `--out`, `--title-file` and `--body-file` must be a plain absolute
+// path under `plugins/data/<id>/runs/<run>/` or `.claude/worktrees/<leaf>/`
+// (`run-paths.ts`). The hook reads the text only. A `..`, `.` or empty
+// segment, a relative path, a `/` at the end, or a flag with no value gets no
+// decision. The command then resolves links before it writes or reads.
+//
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `url`.
 
@@ -26,6 +33,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { CommandContext, CommandResult } from '../cli/command.ts'
 import { ok } from '../lib/envelope.ts'
+import { isPlainPath, isUnderRunOrWork } from '../run-paths.ts'
 
 /** The hook output a `PreToolUse` hook writes to allow a tool call. */
 export type AllowDecision = {
@@ -81,6 +89,21 @@ export const UNSAFE_ARGUMENT = /[^A-Za-z0-9._:/@=+,-]/
 
 const isSafeArgument = (argument: string): boolean => !UNSAFE_ARGUMENT.test(argument)
 
+/** The flags whose value is a file that a command writes, or reads and publishes (ruling 16). */
+export const FILE_FLAGS: readonly string[] = ['--out', '--title-file', '--body-file']
+
+/**
+ * True when each file flag has a value that is a plain absolute path under a
+ * run or work directory, read as text (`run-paths.ts`). The hook does not
+ * resolve links: the command does that before it writes or reads.
+ */
+const fileFlagsConfined = (args: readonly string[]): boolean =>
+  args.every((argument, index) => {
+    if (!FILE_FLAGS.includes(argument)) return true
+    const value = args[index + 1] ?? ''
+    return isPlainPath(value) && isUnderRunOrWork(value)
+  })
+
 /** The Bash command a hook input carries, or nothing when it carries none. */
 const bashCommandOf = (input: unknown): string | undefined => {
   if (typeof input !== 'object' || input === null) return undefined
@@ -119,6 +142,7 @@ export const allowOwnCommands = (
   if (named !== entry && named !== `"${entry}"`) return undefined
   if (subcommand === undefined || !commandNames.includes(subcommand)) return undefined
   if (!args.every(isSafeArgument)) return undefined
+  if (!fileFlagsConfined(args)) return undefined
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',

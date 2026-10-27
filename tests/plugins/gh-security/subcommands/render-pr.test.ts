@@ -2233,17 +2233,25 @@ describe('labels', () => {
   })
 })
 
+/**
+ * A work directory, as `fix-group setup` makes it: `create` reads its title
+ * file and its body file only under one (ruling 16).
+ */
+const WORK = join(scratch, 'repo', '.claude', 'worktrees', 'fix-dependabot-lodash-4x')
+mkdirSync(join(WORK, 'a-directory'), { recursive: true })
+
 /** A title file with this text, as `render-pr commit-msg --out` writes one. */
 let titles = 0
 const titleFile = (text: string): string => {
   titles += 1
-  const file = join(scratch, `title-${titles}.txt`)
+  const file = join(WORK, `title-${titles}.txt`)
   writeFileSync(file, text)
   return file
 }
 
 describe('create', () => {
-  const body = fixture('expected-body-scoped.md')
+  const body = join(WORK, 'pr-body.md')
+  writeFileSync(body, readFileSync(fixture('expected-body-scoped.md')))
   // A commit message: the title is its first line (ruling 5 of round 9).
   const title = titleFile(
     'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x\n\nThe body of the commit.\n',
@@ -2372,6 +2380,29 @@ describe('create', () => {
     }
   })
 
+  it('refuses a title file outside the run and work directories, and reads it not (ruling 16)', async () => {
+    const ran = await create([...base.slice(0, 4), '--title-file', '/etc/hosts', ...base.slice(6)])
+    expect({ result: ran.result, calls: ran.calls }).toEqual({
+      result: failure(
+        '--title-file /etc/hosts is not under a run directory (plugins/data/<id>/runs/<run>/) or a work directory (<repo>/.claude/worktrees/<leaf>/)',
+      ),
+      calls: [],
+    })
+  })
+
+  it('refuses a body file outside the run and work directories, and reads it not (ruling 16)', async () => {
+    // Not a fixture path: this checkout can itself be a work directory.
+    const outside = join(scratch, 'outside-body.md')
+    writeFileSync(outside, 'secret\n')
+    const ran = await create([...base.slice(0, 6), '--body-file', outside, ...base.slice(8)])
+    expect({ result: ran.result, calls: ran.calls }).toEqual({
+      result: failure(
+        `--body-file ${outside} is not under a run directory (plugins/data/<id>/runs/<run>/) or a work directory (<repo>/.claude/worktrees/<leaf>/)`,
+      ),
+      calls: [],
+    })
+  })
+
   it('refuses the old --title flag, which no prompt may pass', async () => {
     const ran = await create([...base, '--title', 't'])
     expect(ran.result).toEqual(failure("create: unknown option '--title'"))
@@ -2463,8 +2494,8 @@ describe('create', () => {
     ],
     [
       'a title file that is missing',
-      ['--repo', REPO, '--head', 'h', '--title-file', fixture('nope.txt'), '--band', 'low'],
-      `--title-file: no such file: ${fixture('nope.txt')}`,
+      ['--repo', REPO, '--head', 'h', '--title-file', join(WORK, 'nope.txt'), '--band', 'low'],
+      `--title-file: no such file: ${join(WORK, 'nope.txt')}`,
     ],
     [
       'an empty title file',
@@ -2491,16 +2522,27 @@ describe('create', () => {
         '--title-file',
         t,
         '--body-file',
-        fixture('nope.md'),
+        join(WORK, 'nope.md'),
         '--band',
         'low',
       ],
-      `--body-file: no such file: ${fixture('nope.md')}`,
+      `--body-file: no such file: ${join(WORK, 'nope.md')}`,
     ],
     [
       'a body file that is a directory',
-      ['--repo', REPO, '--head', 'h', '--title-file', t, '--body-file', FX, '--band', 'low'],
-      `--body-file: no such file: ${FX}`,
+      [
+        '--repo',
+        REPO,
+        '--head',
+        'h',
+        '--title-file',
+        t,
+        '--body-file',
+        join(WORK, 'a-directory'),
+        '--band',
+        'low',
+      ],
+      `--body-file: no such file: ${join(WORK, 'a-directory')}`,
     ],
     [
       'no band',

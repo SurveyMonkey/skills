@@ -7,7 +7,15 @@
 // `src/cli/out-file.ts`: the file holds the bytes that stdout holds, stdout
 // is unchanged, and a write that fails is a failure that names the file.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -40,9 +48,13 @@ const capturing = () => {
 }
 
 let scratch = ''
+/** A run directory under the scratch directory: the one root that `--out` may name, with a work directory (ruling 16). */
+let run = ''
 
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), 'gh-security-out-file-'))
+  run = join(scratch, 'plugins', 'data', 'gh-security-x', 'runs', 'r1')
+  mkdirSync(run, { recursive: true })
 })
 
 afterEach(() => {
@@ -76,7 +88,7 @@ describe('--out on each command whose answer a later command reads', () => {
     '%s writes its answer to the file and to stdout, and never sees the flag',
     async (name, rest) => {
       const seen = substitute(name, () => ({ outcome: 'ok', value: { answer: 1 } }))
-      const file = join(scratch, 'answer.json')
+      const file = join(run, 'answer.json')
       const { io, written } = capturing()
       expect(await runCli([name, ...rest, '--out', file], {}, io)).toBe(0)
       expect({
@@ -95,7 +107,7 @@ describe('--out on each command whose answer a later command reads', () => {
     const seen = substitute('fix-group', () =>
       failedReport('fix-group: score failure: no why', { status: 'failure', phase: 'score' }, 3),
     )
-    const file = join(scratch, 'work', 'ready-for-pr.json')
+    const file = join(scratch, 'repo', '.claude', 'worktrees', 'fix-x', 'ready-for-pr.json')
     const { io } = capturing()
     expect(await runCli(['fix-group', 'score', '--work', '/w', '--out', file], {}, io)).toBe(3)
     expect({ file: readFileSync(file, 'utf8'), seen }).toEqual({
@@ -111,7 +123,7 @@ describe('--out on each command whose answer a later command reads', () => {
         context.io.stdout('fix(deps): a title\n\nThe body.\n')
         return undefined
       })
-      const file = join(scratch, 'text.txt')
+      const file = join(run, 'text.txt')
       const { io, written } = capturing()
       expect(await runCli(['render-pr', verb, '--repo', 'octo/app', '--out', file], {}, io)).toBe(0)
       expect({ file: readFileSync(file, 'utf8'), written: written(), seen }).toEqual({
@@ -124,7 +136,7 @@ describe('--out on each command whose answer a later command reads', () => {
 
   it('takes the flag before the other arguments too', async () => {
     const seen = substitute('merge-envelopes', () => ({ outcome: 'ok', value: [] }))
-    const file = join(scratch, 'merged.json')
+    const file = join(run, 'merged.json')
     const { io } = capturing()
     expect(await runCli(['merge-envelopes', '--out', file, '/run/a.json'], {}, io)).toBe(0)
     expect({ file: readFileSync(file, 'utf8'), seen }).toEqual({
@@ -135,7 +147,16 @@ describe('--out on each command whose answer a later command reads', () => {
 
   it('makes the parent directories of the file', async () => {
     substitute('reap-batch', () => ({ outcome: 'ok', value: { reaped: true } }))
-    const file = join(scratch, 'plugins', 'data', 'gh-security-x', 'runs', 'r1', 'reports.json')
+    const file = join(
+      scratch,
+      'plugins',
+      'data',
+      'gh-security-x',
+      'runs',
+      'r2',
+      'nested',
+      'reports.json',
+    )
     const { io } = capturing()
     expect(await runCli(['reap-batch', '/run/results.json', '--out', file], {}, io)).toBe(0)
     expect(readFileSync(file, 'utf8')).toBe('{"reaped":true}\n')
@@ -143,7 +164,7 @@ describe('--out on each command whose answer a later command reads', () => {
 
   it('replaces a file that is already there', async () => {
     substitute('pr-status', () => ({ outcome: 'ok', value: { prs: [] } }))
-    const file = join(scratch, 'pr-status-1.json')
+    const file = join(run, 'pr-status-1.json')
     writeFileSync(file, 'an older and much longer answer\n')
     const { io } = capturing()
     expect(await runCli(['pr-status', 'u', '--out', file], {}, io)).toBe(0)
@@ -159,7 +180,7 @@ describe('--out on a failure', () => {
         exclude_error: 'locked',
       }),
     )
-    const file = join(scratch, 'preflight-1.json')
+    const file = join(run, 'preflight-1.json')
     const { io, written } = capturing()
     expect(await runCli(['preflight-repo', '/repo', '--out', file], {}, io)).toBe(1)
     expect({ file: readFileSync(file, 'utf8'), written: written() }).toEqual({
@@ -172,7 +193,7 @@ describe('--out on a failure', () => {
   })
 
   it('writes the report of the real pr-status, which reports and fails', async () => {
-    const file = join(scratch, 'pr-status-1.json')
+    const file = join(run, 'pr-status-1.json')
     const { io, written } = capturing()
     expect(await runCli(['pr-status', 'not-a-url', '--out', file], {}, io)).toBe(1)
     expect({ file: readFileSync(file, 'utf8'), stdout: written().stdout }).toEqual({
@@ -183,7 +204,7 @@ describe('--out on a failure', () => {
 
   it('writes the error envelope of a failure that has no report', async () => {
     substitute('build-dispatches', () => ({ outcome: 'failed', error: 'no envelope' }))
-    const file = join(scratch, 'args.json')
+    const file = join(run, 'args.json')
     const { io, written } = capturing()
     expect(await runCli(['build-dispatches', '--out', file], {}, io)).toBe(1)
     expect({ file: readFileSync(file, 'utf8'), written: written() }).toEqual({
@@ -194,7 +215,7 @@ describe('--out on a failure', () => {
 
   it('writes the error envelope of a render-pr text verb that fails, and no text', async () => {
     substitute('render-pr', () => ({ outcome: 'failed', error: '--state requires a file' }))
-    const file = join(scratch, 'commit-msg.txt')
+    const file = join(run, 'commit-msg.txt')
     const { io, written } = capturing()
     expect(await runCli(['render-pr', 'commit-msg', '--out', file], {}, io)).toBe(1)
     expect({ file: readFileSync(file, 'utf8'), stdout: written().stdout }).toEqual({
@@ -207,7 +228,7 @@ describe('--out on a failure', () => {
     substitute('summarize-run', () => {
       throw new Error('boom')
     })
-    const file = join(scratch, 'summary.json')
+    const file = join(run, 'summary.json')
     const { io } = capturing()
     expect(await runCli(['summarize-run', '--out', file], {}, io)).toBe(1)
     expect(readFileSync(file, 'utf8')).toBe('{"error":"summarize-run: boom"}\n')
@@ -218,7 +239,7 @@ describe('--out that cannot be written', () => {
   // A parent that is a regular file: no directory can be made under it, on
   // any platform and for any user.
   const blocked = () => {
-    const parent = join(scratch, 'a-file')
+    const parent = join(run, 'a-file')
     writeFileSync(parent, '')
     return join(parent, 'answer.json')
   }
@@ -250,7 +271,7 @@ describe('--out that cannot be written', () => {
 
   it('fails when the file is a directory', async () => {
     substitute('reap-batch', () => ({ outcome: 'ok', value: [] }))
-    const file = join(scratch, 'a-directory')
+    const file = join(run, 'a-directory')
     mkdirSync(file)
     const { io, written } = capturing()
     expect(await runCli(['reap-batch', 'r.json', '--out', file], {}, io)).toBe(1)
@@ -323,5 +344,40 @@ describe('takeOut', () => {
 
   it('reads a verb list against an empty command line as no verb', () => {
     expect(takeOut([], ['body'])).toEqual({ outcome: 'ok', value: { out: null, args: [] } })
+  })
+})
+
+describe('--out outside the run and work directories (ruling 16)', () => {
+  it('refuses a run path whose parent is a link that leads outside, and writes nothing', async () => {
+    const seen = substitute('reap-batch', () => ({ outcome: 'ok', value: [] }))
+    mkdirSync(join(scratch, 'outside'))
+    symlinkSync(join(scratch, 'outside'), join(run, 'linked'))
+    const file = join(run, 'linked', 'reports.json')
+    const { io } = capturing()
+    expect(await runCli(['reap-batch', 'r.json', '--out', file], {}, io)).toBe(1)
+    expect({ exists: existsSync(join(scratch, 'outside', 'reports.json')), seen }).toEqual({
+      exists: false,
+      seen: [],
+    })
+  })
+
+  it('writes into a work directory', async () => {
+    substitute('fix-group', () => ({ outcome: 'ok', value: { status: 'ready_for_pr' } }))
+    const file = join(scratch, 'repo', '.claude', 'worktrees', 'fix-x', 'ready-for-pr.json')
+    const { io } = capturing()
+    expect(await runCli(['fix-group', 'score', '--work', '/w', '--out', file], {}, io)).toBe(0)
+    expect(readFileSync(file, 'utf8')).toBe('{"status":"ready_for_pr"}\n')
+  })
+
+  it('refuses a path outside them, and writes nothing', async () => {
+    const seen = substitute('merge-envelopes', () => ({ outcome: 'ok', value: { merged: true } }))
+    const file = join(scratch, 'x.json')
+    const { io, written } = capturing()
+    expect(await runCli(['merge-envelopes', '/run/a.json', '--out', file], {}, io)).toBe(1)
+    expect({ exists: existsSync(file), seen, stdout: written().stdout }).toEqual({
+      exists: false,
+      seen: [],
+      stdout: `${JSON.stringify({ error: `merge-envelopes: --out ${file} is not under a run directory (plugins/data/<id>/runs/<run>/) or a work directory (<repo>/.claude/worktrees/<leaf>/)` })}\n`,
+    })
   })
 })

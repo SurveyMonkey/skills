@@ -306,3 +306,58 @@ describe('the calls that the prompts prescribe (#346)', () => {
     expect(allowOwnCommands(hookInput(command), ENTRY, commandNames)).toBeUndefined()
   })
 })
+
+// Ruling 16 on #346: a file flag passes only under a run or work directory.
+describe('the file flags (ruling 16)', () => {
+  const RUN = '/Users/example/.claude/plugins/data/gh-security-skills/runs/20261026T190000Z'
+  const decideReal = (command: string) => allowOwnCommands(hookInput(command), ENTRY, commandNames)
+
+  it('gives no decision for --out into the settings of the user', () => {
+    expect(
+      decideReal(
+        `node ${ENTRY} merge-envelopes --out /Users/example/.claude/settings.json ${RUN}/a.json`,
+      ),
+    ).toBeUndefined()
+  })
+})
+
+describe('each file flag, read as text by the hook (ruling 16)', () => {
+  const RUN = '/Users/example/.claude/plugins/data/gh-security-skills/runs/20261026T190000Z'
+  const WORK = '/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-lodash-4x'
+  const decideReal = (args: string) =>
+    allowOwnCommands(hookInput(`node ${ENTRY} render-pr ${args}`), ENTRY, commandNames)
+
+  it.each([
+    ['--out in a run', `commit-msg --out ${RUN}/commit-msg.txt`],
+    ['--out in a work directory', `commit-msg --out ${WORK}/commit-msg.txt`],
+    ['--title-file in a work directory', `create --title-file ${WORK}/commit-msg.txt`],
+    ['--body-file in a run', `create --body-file ${RUN}/pr-body.md`],
+  ])('allows %s', (_case, args) => {
+    expect(decideReal(args)?.hookSpecificOutput.permissionDecision).toBe('allow')
+  })
+
+  it.each([
+    ['--out outside', `commit-msg --out /Users/example/.claude/settings.json`],
+    ['--title-file outside', 'create --title-file /etc/hosts'],
+    ['--body-file outside', 'create --body-file /Users/example/.ssh/config'],
+    ['a .. segment', `commit-msg --out ${RUN}/../../../../settings.json`],
+    ['a .. segment that stays in the run', `commit-msg --out ${RUN}/x/../a.json`],
+    ['a . segment', `commit-msg --out ${RUN}/./a.json`],
+    ['an empty segment', `commit-msg --out ${RUN}//a.json`],
+    ['a relative path', 'commit-msg --out runs/20261026T190000Z/a.json'],
+    ['a / at the end', `commit-msg --out ${RUN}/a/`],
+    ['the run directory itself', `commit-msg --out ${RUN}`],
+    ['a flag with no value', 'commit-msg --out'],
+    ['a second file flag outside', `create --title-file ${WORK}/t.txt --body-file /etc/hosts`],
+  ])('gives no decision for %s', (_case, args) => {
+    expect(decideReal(args)).toBeUndefined()
+  })
+
+  it('leaves the <checkout>= words of summarize-run, which are inputs, as they were', () => {
+    const command = `node ${ENTRY} summarize-run --workflow ${RUN}/workflow.json --reports ${RUN}/reports.json --discovery ${RUN}/merged.json /Users/example/src/octo/app=/Users/example/elsewhere/preflight-1.json`
+    expect(
+      allowOwnCommands(hookInput(command), ENTRY, commandNames)?.hookSpecificOutput
+        .permissionDecision,
+    ).toBe('allow')
+  })
+})

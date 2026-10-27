@@ -15,6 +15,7 @@ import {
   renderJson,
   thrownText,
 } from '../lib/envelope.ts'
+import { confinementProblem } from '../run-paths.ts'
 import type { CommandResult, FailedReport, Io } from './command.ts'
 import { takeOut, writeOut } from './out-file.ts'
 import { COMMANDS, commandNames } from './registry.ts'
@@ -136,6 +137,13 @@ export const runCli = async (
   const split = takeOut(parsed.args, entry.out)
   if (split.outcome !== 'ok') return refuse(split.error)
   const { out, args } = split.value
+  if (out !== null) {
+    // `reap.ts` loads only for a call with `--out`. Each Bash call of a
+    // session loads this file for the allow hook, which needs no `reap.ts`.
+    const { resolvePhysical } = await import('../reap.ts')
+    const problem = confinementProblem('--out', out, resolvePhysical)
+    if (problem !== null) return refuse(problem)
+  }
   // With `--out`, the text that a command writes itself waits here. It goes
   // to stdout only after the file is written (`out-file.ts`).
   let text = ''

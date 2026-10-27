@@ -22,6 +22,11 @@
 //   - `--out` with no value, an empty value or a value that starts with `-`,
 //     or `--out` twice, is a failure before the command runs. No file is
 //     written.
+//   - The file must be under a run directory or a work directory
+//     (`run-paths.ts`, ruling 16). `run.ts` checks its real path before the
+//     command runs. Any other path is a failure before the command runs:
+//     `{"error": "<command>: --out <file> is not under ..."}`, and no file
+//     is written.
 //
 // This file ships. It imports nothing outside the plugin, and nothing from
 // node beyond `fs` and `path`.

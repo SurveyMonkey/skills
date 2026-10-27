@@ -32,21 +32,13 @@
 // node beyond `fs` and `path`.
 
 import { lstatSync, realpathSync, rmSync } from 'node:fs'
-import { basename, dirname, isAbsolute } from 'node:path'
+import { isAbsolute } from 'node:path'
 
 import type { CommandContext, CommandHandler, CommandResult } from '../cli/command.ts'
 import { failed, ok } from '../lib/envelope.ts'
+import { isRunDirectory } from '../run-paths.ts'
 
 const USAGE = 'usage: gh-security remove-run <dir>'
-
-/** True when the parents of the path are `plugins/data/<id>/runs`. The `<id>` can have any name. */
-const isRunPath = (path: string): boolean => {
-  const runs = dirname(path)
-  const data = dirname(dirname(runs))
-  return (
-    basename(runs) === 'runs' && basename(data) === 'data' && basename(dirname(data)) === 'plugins'
-  )
-}
 
 /** The handler. */
 export const removeRun = (context: CommandContext): CommandResult => {
@@ -61,7 +53,8 @@ export const removeRun = (context: CommandContext): CommandResult => {
   if (stat.isSymbolicLink()) return refuse('a symbolic link, not a run directory')
   if (!stat.isDirectory()) return refuse('not a directory')
   const real = realpathSync(given)
-  if (!isRunPath(real)) return refuse('not a run directory, plugins/data/<id>/runs/<run>', real)
+  if (!isRunDirectory(real))
+    return refuse('not a run directory, plugins/data/<id>/runs/<run>', real)
   try {
     rmSync(real, { recursive: true })
   } catch (error) {

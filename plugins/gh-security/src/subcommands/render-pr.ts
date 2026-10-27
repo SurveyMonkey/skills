@@ -75,9 +75,11 @@ import { type Envelope, failed, ok } from '../lib/envelope.ts'
 import { createGhClient, type GhClient, type GhClientOptions, GhError } from '../lib/gh.ts'
 import { type Runner, run } from '../lib/process.ts'
 import { withoutBom } from '../merge-risk/score.ts'
+import { resolvePhysical } from '../reap.ts'
 import { commitMessage } from '../render/commit-message.ts'
 import { prBody } from '../render/pr-body.ts'
 import { readBodyInputs, readCommitInputs } from '../render/pr-inputs.ts'
+import { confinementProblem } from '../run-paths.ts'
 
 const USAGE = 'usage: gh-security render-pr <commit-msg|body|labels|create> [options]'
 
@@ -312,6 +314,13 @@ const create = async (
   if (repository === '') return failed('create requires --repo')
   const head = flagOf(options, '--head')
   if (head === '') return failed('create requires --head')
+  // Ruling 16: `create` publishes the text of both files, so each is under a
+  // run or work directory before any read (`run-paths.ts`).
+  for (const flag of ['--title-file', '--body-file']) {
+    const given = flagOf(options, flag)
+    const problem = given === '' ? null : confinementProblem(flag, given, resolvePhysical)
+    if (problem !== null) return failed(problem)
+  }
   const titleFile = needFile('--title-file', flagOf(options, '--title-file'))
   if (titleFile.outcome !== 'ok') return titleFile
   const title = titleOf(titleFile.value)
