@@ -1,0 +1,14 @@
+{
+  "name": "npm-alias-pin-other-line",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "metro": "0.24.7",
+    "react-native": "0.54.0-rc.3"
+  },
+  "overrides": {
+    "metro": {
+      "babylon7": "npm:babylon@7.0.0-beta.40"
+    }
+  }
+}

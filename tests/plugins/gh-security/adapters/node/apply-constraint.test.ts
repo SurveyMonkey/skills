@@ -1687,6 +1687,200 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
   })
 })
 
+// The specimen of #354. Two real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile. The first had a
+// top-level `"ms": "2.1.1"` override, and the second had none, so the lock
+// kept ms 2.1.1. A third run, with the manifest as it is, wrote the lockfile
+// of the fixture. eslint-import-resolver-node 0.3.9 declares debug at
+// `^3.2.7`, and debug 3.2.7 declares ms at `^2.1.1`. The `ms@^2` child key
+// gave ms 2.1.2. The runs on this tree, for each target key of the write:
+//
+//   - `"ms@^2": ">=2.1.3 <3"` gave ms 2.1.3.
+//   - `"ms@^2": "2.1.2"` and then `"ms": ">=2.1.3 <3"` kept ms at 2.1.2.
+//   - `"ms@1.0.0": "1.0.0"` and then `"ms": ">=2.1.3 <3"` gave ms 2.1.3.
+//   - `"ms@2.1.1": "2.1.1"`, alone or with the plain key after it, kept ms
+//     at 2.1.2.
+//
+// The target keys were the bare `debug` key, a served `debug@^3` key, and a
+// rule that places debug under eslint-import-resolver-node.
+const CHILD = 'npm-qualified-child-key'
+
+const MS = '>=2.1.3 <3'
+
+/** The target key of the write, and the setup that puts `child` into it. */
+type ChildTarget = readonly [string, readonly string[], (child: Json) => Setup]
+
+const CHILD_TARGETS: readonly ChildTarget[] = [
+  ['the bare parent key', ['debug'], (child) => rule({ debug: child })],
+  ['a served qualified parent key', ['debug@^3'], (child) => rule({ 'debug@^3': child })],
+  [
+    'a rule that places the parent',
+    ['eslint-import-resolver-node', 'debug'],
+    (child) => rule({ 'eslint-import-resolver-node': { debug: { '.': '3.2.7', ...child } } }),
+  ],
+]
+
+/** The override block with `child` at `path`, as the setup of a target writes it. */
+const blockWith = (path: readonly string[], child: Json): Json => {
+  const [head, ...rest] = path as [string, ...string[]]
+  if (rest.length === 0) return { [head]: child }
+  return { [head]: { [rest[0] as string]: { '.': '3.2.7', ...child } } }
+}
+
+const CHILD_UNSURE = (detail: string): string =>
+  `apply_constraint: cannot scope 'ms': npm can match a pre-existing version-qualified child key for the package inside the override key of its parent through an edge into the copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside that child key nor a plain key beside it can be shown to take effect (issue #354), so nothing was written; reconcile the existing override by hand.`
+
+const CHILD_PIN = (detail: string): string =>
+  `apply_constraint: a pre-existing version-qualified child key for 'ms' inside the override key of its parent is the first key that npm matches for the copy, and its value is not a text on the same major line: ${detail}. A plain key beside it has no effect, and overwriting the value would strip that line's protection (issues #354 and #132), so nothing was written; reconcile the existing override by hand.`
+
+describe('npm constraint goes into a qualified child key that npm matches first (#354)', () => {
+  // Red first: `it.fails` until the fix of #354, because the pre-commit hook
+  // refuses a red commit.
+  it.fails.each(CHILD_TARGETS)('writes into the ms@^2 child key of %s', (_title, path, setup) => {
+    const { envelope, dir } = apply(CHILD, msRange, setup({ 'ms@^2': '2.1.2' }))
+    const { written, superseded_keys } = answerOf(envelope)
+    expect({
+      overrides: readJson(dir, 'package.json').overrides,
+      written: written.filter(({ preserved }) => preserved !== true),
+      superseded: superseded_keys,
+    }).toEqual({
+      overrides: blockWith(path, { 'ms@^2': MS }),
+      written: [{ parent: 'debug', path: ['overrides', ...path, 'ms@^2'], value: MS }],
+      superseded: [{ parent: 'debug', path: ['overrides', ...path, 'ms@^2'], value: '2.1.2' }],
+    })
+  })
+
+  // Green when written: the pass already writes the plain key after the child.
+  it.each(CHILD_TARGETS)(
+    'writes the plain key beside an ms@1.0.0 child key of %s, which npm skips',
+    (_title, path, setup) => {
+      const child = { 'ms@1.0.0': '1.0.0' }
+      expect(manifestAfter(CHILD, msRange, setup(child)).overrides).toEqual(
+        blockWith(path, { ...child, ms: MS }),
+      )
+    },
+  )
+
+  it.fails.each(CHILD_TARGETS)(
+    'refuses an ms@2.1.1 child key of %s, which npm can match, and names it',
+    (_title, path, setup) => {
+      expect(refusalOf(CHILD, msRange, setup({ 'ms@2.1.1': '2.1.1' }))).toBe(
+        CHILD_UNSURE(`[{"parent":"debug","path":${JSON.stringify(path)},"key":"ms@2.1.1"}]`),
+      )
+    },
+  )
+
+  // npm wrote the plain key for this child key in the real run. The pass
+  // cannot show that `^1` and the edge `^2.1.1` do not intersect, so it
+  // refuses.
+  it.fails('refuses an ms@^1 child key, as the pass cannot read the intersection', () => {
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^1': '1.0.0' } }))).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^1"}]'),
+    )
+  })
+
+  it.fails.each([
+    ['a pin on another major line', '^1.0.0'],
+    ['an object value', { '.': '2.1.2' }],
+  ])('refuses an ms@^2 child key that npm matches first, with %s', (_title, value) => {
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': value } }))).toBe(
+      CHILD_PIN(
+        `[{"parent":"debug","path":["debug"],"key":"ms@^2","value":${JSON.stringify(value)}}]`,
+      ),
+    )
+  })
+
+  // Green when written: a plain key before the child key is first (real run).
+  it('writes into a plain key that comes before the child key', () => {
+    const before = rule({ debug: { ms: '>=2.1.2 <3', 'ms@^2': '2.1.2' } })
+    expect(manifestAfter(CHILD, msRange, before).overrides).toEqual({
+      debug: { ms: MS, 'ms@^2': '2.1.2' },
+    })
+  })
+
+  // Green when written: no child key, so the write is the plain key.
+  it('writes the plain key when the parent key holds no child key for the package', () => {
+    expect(
+      manifestAfter(CHILD, msRange, rule({ debug: { minimist: '^1.2.8' } })).overrides,
+    ).toEqual({ debug: { minimist: '^1.2.8', ms: MS } })
+  })
+})
+
+// The specimen of #355, shape 1. Two real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile. The first had a
+// top-level `"ms": "2.1.1"` override. The second, with the manifest as it is,
+// wrote the lockfile of the fixture. debug 4.1.1 and debug 3.2.7 each declare
+// ms at `^2.1.1`, and each resolves ms 2.1.1. The bare `debug` key comes
+// first, so npm does not use `debug@^3`. The runs on this tree:
+//
+//   - The write before #355: `debug@^3` with its pin, then `debug@4.1.1` and
+//     `debug@3.2.7` with `>=2.1.3 <3`. debug 3.2.7 kept ms at 2.1.1, as
+//     `debug@^3` is now its first key.
+//   - `debug@^3` with `>=2.1.3 <3`, then `debug@4.1.1`: ms 2.1.3 for each.
+//   - A bare `debug` key that holds `supports-color` before the two qualified
+//     keys kept ms at 2.1.1. After them, ms moved to 2.1.3.
+//   - The two qualified keys alone: ms 2.1.3 for each.
+const SUPERSEDED = 'npm-superseded-bare-pair'
+
+const BARE_KEPT = (detail: string): string =>
+  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify holds entries that this call does not write: ${detail}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
+
+describe('npm write after a superseded bare pair decides each key first (#355)', () => {
+  // Red first: `it.fails` until the fix of #355, because the pre-commit hook
+  // refuses a red commit.
+  it.fails('writes inside the later qualified key that becomes the first key', () => {
+    const { envelope, dir } = apply(SUPERSEDED, msRange)
+    expect({
+      overrides: readJson(dir, 'package.json').overrides,
+      superseded: answerOf(envelope).superseded_keys,
+    }).toEqual({
+      overrides: { 'debug@^3': { ms: MS }, 'debug@4.1.1': { ms: MS } },
+      superseded: [
+        { parent: 'debug', path: ['overrides', 'debug@^3', 'ms'], value: '2.1.1' },
+        { parent: 'debug', path: ['overrides', 'debug', 'ms'], value: '>=2.1.1 <3' },
+      ],
+    })
+  })
+
+  it.fails.each([
+    ['a pair and another entry', { ms: '>=2.1.1 <3', 'supports-color': '8.1.1' }],
+    ['another entry only', { 'supports-color': '8.1.1' }],
+  ])('refuses a bare key that holds %s, which stays first, and names it', (_title, bare) => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":["supports-color"]}]'),
+    )
+  })
+
+  // Green when written: the pass removes the bare key, and npm uses the new keys.
+  it('writes a qualified key for each copy after a bare key that holds only the pair', () => {
+    expect(
+      manifestAfter(SUPERSEDED, msRange, rule({ debug: { ms: '>=2.1.1 <3' } })).overrides,
+    ).toEqual({ 'debug@4.1.1': { ms: MS }, 'debug@3.2.7': { ms: MS } })
+  })
+})
+
+// The specimen of #355, shape 2. A real `npm install --package-lock-only
+// --ignore-scripts` of npm 11.19.0 wrote the lockfile, for the manifest as it
+// is. The fixture keeps the root, metro, react-native, babylon and babylon7
+// entries of that lockfile, each as npm wrote it. The root declares metro at
+// 0.24.7, and react-native 0.54.0-rc.3 declares metro at `^0.25.1`. metro
+// 0.25.1 declares babylon at `^6.18.0` and babylon7 at
+// `npm:babylon@^7.0.0-beta`. The pin under the bare `metro` key gave babylon7
+// 7.0.0-beta.40. The write before #355 removed that pin and wrote the two
+// qualified keys, each with `babylon7` at `npm:babylon@>=6.18.0 <7`. That run
+// moved babylon7 to 6.18.0, across its major line.
+const ALIAS_PIN = 'npm-alias-pin-other-line'
+
+describe('npm bare alias pin on another major line (#355)', () => {
+  // Red first: `it.fails` until the fix of #355, because the pre-commit hook
+  // refuses a red commit.
+  it.fails('refuses to remove the alias pin, and names the parent and the alias key', () => {
+    expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'])).toBe(
+      `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":"npm:babylon@7.0.0-beta.40","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+    )
+  })
+})
+
 describe('npm placement detection is grounded in the lockfile', () => {
   it.each([
     ['the rule root is absent from the lockfile', { 'unrelated-pkg': { nx: '^22' } }],

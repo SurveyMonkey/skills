@@ -1,0 +1,13 @@
+{
+  "name": "npm-qualified-child-key",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "eslint-import-resolver-node": "0.3.9"
+  },
+  "overrides": {
+    "debug": {
+      "ms@^2": "2.1.2"
+    }
+  }
+}
