@@ -23,10 +23,13 @@
 //     matches first for the copy takes the write (#354). A plain key after
 //     it has no effect. The pass refuses a child key that npm can match
 //     when the lockfile cannot show which key npm matches. It also refuses
-//     a matched child key whose value is not a text on the line.
+//     a child key when the lockfile shows no edge that the range rules can
+//     read. It refuses a matched child key whose value is not a text on
+//     the line.
 //   - A bare npm parent key can hold an entry that this call does not
-//     write, or no entry. That key stays before the new qualified keys, so
-//     they have no effect. The pass refuses it (#355).
+//     write, no entry, or a value that is not an object. That key stays
+//     before each qualified key of the parent, so those keys have no
+//     effect. The pass refuses it (#355).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
@@ -213,8 +216,8 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
    * each edge. The scan reads each edge from a copy of the parent, as
    * `scanKeys` reads an edge into a parent. A child key that takes the
    * write must hold a text on the line of the range. Any other child key
-   * that npm can match stops the pass with a refusal. So does a parent
-   * with no edge that the lockfile can show.
+   * that npm can match stops the pass with a refusal. So does an edge that
+   * the range rules cannot read, or no edge at all.
    */
   const childWrite = (
     parent: string,

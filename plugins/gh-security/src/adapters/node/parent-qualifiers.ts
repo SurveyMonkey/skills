@@ -348,7 +348,7 @@ export const pinFloor = (value: unknown, pkg: string, key: string): number | nul
  * nothing: npm matches the bare key first. So the call refuses (#132). A
  * key on the same line is no conflict here: the write removes it, and
  * reports it as superseded. The write pass refuses a bare key that keeps
- * another entry (#355).
+ * another entry, no entry, or a value that is not an object (#355).
  *
  * It reads the pair of the package first. Then it reads the pair of each
  * alias key that the parent declares the package under (#355). The write

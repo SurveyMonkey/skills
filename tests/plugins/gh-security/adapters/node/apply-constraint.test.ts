@@ -1934,7 +1934,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     })
   })
 
-  // Green when written: no child key, so the write is the plain key.
+  // An `npm:` value of another package has no line, so the call refuses it.
   it('refuses a child key with a value that names another package, and names it', () => {
     const fork = 'npm:@example-org/ms-fork@2.1.2'
     expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': fork } }))).toBe(
@@ -1958,6 +1958,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     )
   })
 
+  // Green when written: no child key, so the write is the plain key.
   it('writes the plain key when the parent key holds no child key for the package', () => {
     expect(
       manifestAfter(CHILD, msRange, rule({ debug: { minimist: '^1.2.8' } })).overrides,
@@ -1973,8 +1974,8 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 // first, so npm does not use `debug@^3`. The runs on this tree:
 //
 //   - `debug@^3` with its pin, then `debug@4.1.1` and `debug@3.2.7` with
-//     `>=2.1.3 <3`, as a write that keeps `debug@^3` gives: debug 3.2.7
-//     kept ms at 2.1.1, as `debug@^3` is its first key.
+//     `>=2.1.3 <3`. A write that keeps `debug@^3` gives these keys. debug
+//     3.2.7 kept ms at 2.1.1, as `debug@^3` is its first key.
 //   - `debug@^3` with `>=2.1.3 <3`, then `debug@4.1.1`: ms 2.1.3 for each.
 //   - A bare `debug` key that holds `supports-color` before the two qualified
 //     keys kept ms at 2.1.1. After them, ms moved to 2.1.3.
@@ -2020,8 +2021,8 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     )
   })
 
-  // A later key that serves each copy ends the pass before the bare key
-  // check. So the scan alone must keep the bare key first here.
+  // A later key that serves each copy ends the write for the parent before
+  // the bare key check. So the scan alone must keep the bare key first here.
   it.each([
     ['no entry', {}, '[]'],
     [
@@ -2067,7 +2068,8 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     )
   })
 
-  // The write is the one of the next example: the pass removes the pair.
+  // The write is the one of the last example of this block: the pass
+  // removes the pair.
   it('reads the floor of an npm: value of the package in a bare pair', () => {
     const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' } })
     expect(manifestAfter(SUPERSEDED, msRange, aliased).overrides).toEqual({
@@ -2150,9 +2152,9 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
 // 0.24.7, and react-native 0.54.0-rc.3 declares metro at `^0.25.1`. metro
 // 0.25.1 declares babylon at `^6.18.0` and babylon7 at
 // `npm:babylon@^7.0.0-beta`. The pin under the bare `metro` key gave babylon7
-// 7.0.0-beta.40. A run of the output that removes that pin and writes the
-// two qualified keys, each with `babylon7` at `npm:babylon@>=6.18.0 <7`,
-// moved babylon7 to 6.18.0, across its major line. So the call refuses.
+// 7.0.0-beta.40. One run removed that pin and wrote the two qualified keys,
+// each with `babylon7` at `npm:babylon@>=6.18.0 <7`. babylon7 then moved to
+// 6.18.0, across its major line. So the call refuses.
 const ALIAS_PIN = 'npm-alias-pin-other-line'
 
 describe('npm bare alias pin on another major line (#355)', () => {

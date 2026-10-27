@@ -105,17 +105,20 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   call refuses. An exact selector outside the edge, such as `ms@1.0.0` for `^2.1.1`, does not
   match. Then the plain key takes the write. The call refuses a child key when npm can match it
   and the lockfile cannot show which key npm matches. An example is `ms@2.1.1` beside a copy at
-  2.1.2: npm then applied neither key.
+  2.1.2: npm then applied neither key. The call also refuses a child key when the lockfile shows
+  no edge into the package that the range rules can read.
 
   Two composed shapes are decided before any write (issue #355). The call removes a bare pair
   for a parent that it qualifies. When the bare key then holds nothing, the call removes it. npm
   then matches the next key for the parent, such as `debug@^3`. So the call scans the keys as if
   the bare key were not there. It writes inside a later key that comes first. A bare key that
-  holds another entry stays before the new qualified keys, and so does an empty bare key. The new
-  keys then have no effect, so the call refuses that bare key and names it. The check for a bare
-  pair on another line also reads each alias key of the parent, such as `babylon7` for
-  `npm:babylon@^7`. An `npm:` value of another package is no pin of the package. It has no line,
-  so the call refuses it.
+  holds another entry stays before each qualified key of the parent. So does an empty bare key,
+  and a bare key with a value that is not an object. Those keys then have no effect, so the call
+  refuses that bare key and names it. The check for a bare pair on another line also reads each
+  alias key of the parent, such as `babylon7` for `npm:babylon@^7`. An `npm:` value of another
+  package is no pin of the package. Under an alias key, a value with no `npm:` is no pin either:
+  npm reads it as a spec of the alias name, and fetched `babylon7` with E404 in a real run. Such
+  a value has no line. For a parent that the call qualifies, the call refuses it.
 
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
