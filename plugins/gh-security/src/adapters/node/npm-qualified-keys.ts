@@ -295,7 +295,8 @@ export const qualifiedKeysOf = (query: QualifiedKeyQuery): QualifiedKeyResult | 
       isRecord(bare) &&
       Object.keys(bare).length > 0 &&
       Object.entries(bare).every(
-        ([key, value]) => writeKeys.includes(key) && pinFloor(value) === target && target !== null,
+        ([key, value]) =>
+          writeKeys.includes(key) && pinFloor(value, pkg) === target && target !== null,
       )
     const scanned = removed ? own.filter(({ selector }) => selector !== null) : own
     if (scanned.every(({ selector }) => selector === null)) continue

@@ -1715,8 +1715,8 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
   })
 })
 
-// The specimen of #354. Two real `npm install --package-lock-only
-// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile. The first had a
+// The specimen of #354. Three real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile, in turn. The first had a
 // top-level `"ms": "2.1.1"` override, and the second had none, so the lock
 // kept ms 2.1.1. A third run, with the manifest as it is, wrote the lockfile
 // of the fixture. eslint-import-resolver-node 0.3.9 declares debug at
@@ -1798,9 +1798,9 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     },
   )
 
-  // npm wrote the plain key for this child key in the real run. The pass
-  // cannot show that `^1` and the edge `^2.1.1` do not intersect, so it
-  // refuses.
+  // On the tree before the third run, npm skipped `ms@^1` and applied the
+  // plain key after it. The pass cannot show that `^1` and the edge
+  // `^2.1.1` do not intersect, so it refuses.
   it('refuses an ms@^1 child key, as the pass cannot read the intersection', () => {
     expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^1': '1.0.0' } }))).toBe(
       CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^1"}]'),
@@ -1869,7 +1869,8 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     })
   })
 
-  // Green when written: a plain key before the child key is first (real run).
+  // Green when written: a plain key before the child key is first. A real
+  // run of the output, on the tree before the third run, gave ms 2.1.3.
   it('writes into a plain key that comes before the child key', () => {
     const before = rule({ debug: { ms: '>=2.1.2 <3', 'ms@^2': '2.1.2' } })
     expect(manifestAfter(CHILD, msRange, before).overrides).toEqual({
@@ -1878,7 +1879,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
   })
 
   // Green when written: no child key, so the write is the plain key.
-  it.fails('refuses a child key with a value that names another package, and names it', () => {
+  it('refuses a child key with a value that names another package, and names it', () => {
     const fork = 'npm:@example-org/ms-fork@2.1.2'
     expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': fork } }))).toBe(
       CHILD_PIN(`[{"parent":"debug","path":["debug"],"key":"ms@^2","value":"${fork}"}]`),
@@ -1886,7 +1887,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
   })
 
   // With no edge that the lockfile can show, no key is shown to take effect.
-  it.fails('refuses a child key when no copy of the parent has a text edge into the package', () => {
+  it('refuses a child key when no copy of the parent has a text edge into the package', () => {
     const odd = both(
       rule({ debug: { 'ms@^2': '2.1.2' } }),
       lockEdit((packages) => {
@@ -1912,9 +1913,9 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 // ms at `^2.1.1`, and each resolves ms 2.1.1. The bare `debug` key comes
 // first, so npm does not use `debug@^3`. The runs on this tree:
 //
-//   - The write before #355: `debug@^3` with its pin, then `debug@4.1.1` and
-//     `debug@3.2.7` with `>=2.1.3 <3`. debug 3.2.7 kept ms at 2.1.1, as
-//     `debug@^3` is now its first key.
+//   - `debug@^3` with its pin, then `debug@4.1.1` and `debug@3.2.7` with
+//     `>=2.1.3 <3`, as a write that keeps `debug@^3` gives: debug 3.2.7
+//     kept ms at 2.1.1, as `debug@^3` is its first key.
 //   - `debug@^3` with `>=2.1.3 <3`, then `debug@4.1.1`: ms 2.1.3 for each.
 //   - A bare `debug` key that holds `supports-color` before the two qualified
 //     keys kept ms at 2.1.1. After them, ms moved to 2.1.3.
@@ -1923,7 +1924,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
 const SUPERSEDED = 'npm-superseded-bare-pair'
 
 const BARE_KEPT = (detail: string): string =>
-  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${detail}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
+  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${detail}. npm matches that bare key before each qualified key after it, so such a key has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
 
 const BARE_PIN = (detail: string): string =>
   `apply_constraint: a pre-existing bare override for 'ms' under a parent this call must version-qualify pins a DIFFERENT major line: ${detail}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`
@@ -1992,9 +1993,9 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     })
   })
 
-  // An `npm:` value of another package is no pin of the package. Before
-  // #355 the call refused it, as it read no floor.
-  it.fails('refuses a bare pair that names another package, and names it', () => {
+  // An `npm:` value of another package is no pin of the package, so it has
+  // no floor on the line, and the call refuses it.
+  it('refuses a bare pair that names another package, and names it', () => {
     const fork = rule({ debug: { ms: 'npm:@example-org/ms-fork@2.1.1' } })
     expect(refusalOf(SUPERSEDED, msRange, fork)).toBe(
       BARE_PIN(
@@ -2037,9 +2038,9 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
 // 0.24.7, and react-native 0.54.0-rc.3 declares metro at `^0.25.1`. metro
 // 0.25.1 declares babylon at `^6.18.0` and babylon7 at
 // `npm:babylon@^7.0.0-beta`. The pin under the bare `metro` key gave babylon7
-// 7.0.0-beta.40. The write before #355 removed that pin and wrote the two
-// qualified keys, each with `babylon7` at `npm:babylon@>=6.18.0 <7`. That run
-// moved babylon7 to 6.18.0, across its major line.
+// 7.0.0-beta.40. A run of the output that removes that pin and writes the
+// two qualified keys, each with `babylon7` at `npm:babylon@>=6.18.0 <7`,
+// moved babylon7 to 6.18.0, across its major line. So the call refuses.
 const ALIAS_PIN = 'npm-alias-pin-other-line'
 
 describe('npm bare alias pin on another major line (#355)', () => {
@@ -3336,7 +3337,7 @@ describe('the routes that no spec example takes', () => {
       manifest.overrides = { minimatch: { 'brace-expansion': '>=5.0.6 <6', other: '1' } }
     })
     expect(refusalOf('npm-cross-line', [...BRACE, 'minimatch'], pair)).toBe(
-      `apply_constraint: cannot scope 'brace-expansion': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: [{"parent":"minimatch","keys":["other"]}]. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+      `apply_constraint: cannot scope 'brace-expansion': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: [{"parent":"minimatch","keys":["other"]}]. npm matches that bare key before each qualified key after it, so such a key has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
     )
   })
 

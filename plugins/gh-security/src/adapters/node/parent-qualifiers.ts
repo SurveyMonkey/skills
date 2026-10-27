@@ -326,12 +326,16 @@ export const writeKeysOf = (
 }
 
 /**
- * The floor major of a pin value. An `npm:<name>@<range>` value gives the
- * floor of its range. The floor is null when the value has none.
+ * The floor major of a pin value for `pkg`. An `npm:<pkg>@<range>` value
+ * gives the floor of its range. An `npm:` value of another package is no
+ * pin of `pkg`, so its floor is null. The floor is null when the value has
+ * none.
  */
-export const pinFloor = (value: unknown): number | null => {
+export const pinFloor = (value: unknown, pkg: string): number | null => {
   const text = toText(value)
-  return rangeFloorMajor(text.startsWith('npm:') ? text.slice(text.lastIndexOf('@') + 1) : text)
+  if (!text.startsWith('npm:')) return rangeFloorMajor(text)
+  const at = text.lastIndexOf('@')
+  return at > 4 && text.slice(4, at) === pkg ? rangeFloorMajor(text.slice(at + 1)) : null
 }
 
 /**
@@ -339,8 +343,9 @@ export const pinFloor = (value: unknown): number | null => {
  * this call qualifies, on another major line. A delete of that key strips
  * the protection of its line. If the key stays, the qualified keys do
  * nothing: npm matches the bare key first. So the call refuses (#132). A
- * key on the same line is no conflict: the write removes it, and reports it
- * as superseded.
+ * key on the same line is no conflict here: the write removes it, and
+ * reports it as superseded. The write pass refuses a bare key that keeps
+ * another entry (#355).
  *
  * It reads the pair of the package first. Then it reads the pair of each
  * alias key that the parent declares the package under (#355). The write
@@ -365,7 +370,7 @@ export const bareConflict = (
     })
     .find(({ key, value }) => {
       if (!isRecord(value) || !Object.hasOwn(value, key)) return false
-      const floor = pinFloor(value[key])
+      const floor = pinFloor(value[key], pkg)
       return floor === null || target === null || floor !== target
     })
   if (conflict === undefined) return null

@@ -22,11 +22,11 @@
 //   - Inside each npm target key, a child key `<pkg>@<selector>` that npm
 //     matches first for the copy takes the write (#354). A plain key after
 //     it has no effect. The pass refuses a child key that npm can match
-//     when the lockfile cannot show it. It also refuses a matched child key
-//     whose value is not a text on the line.
+//     when the lockfile cannot show which key npm matches. It also refuses
+//     a matched child key whose value is not a text on the line.
 //   - A bare npm parent key can hold an entry that this call does not
-//     write. That key stays first for each copy, so the qualified keys
-//     after it have no effect. The pass refuses it (#355).
+//     write, or no entry. That key stays before the new qualified keys, so
+//     they have no effect. The pass refuses it (#355).
 //   - `tightenBare` moves each bare key that covers the major line of the
 //     range, and the rule pins of `tightenedRules` (#104, #147). With
 //     nothing to move, it writes the plain key.
@@ -62,6 +62,7 @@ import { isRecord } from './manifest.ts'
 import type { Placement } from './npm-placement.ts'
 import {
   type ChildEdge,
+  type FirstKey,
   type QualifiedKeys,
   type SelectorKey,
   scanKeys,
@@ -134,7 +135,10 @@ const CONTAINER: Readonly<Record<NodeDetection['override_location'], readonly st
 /** jq's `+` of a text and a value: null adds nothing. */
 const plus = (text: string, value: string | null): string => text + (value ?? '')
 
-/** The write pass over `manifest`. It throws where jq stops. */
+/**
+ * The write pass over `input`. It throws where jq stops. A refusal comes
+ * back in `refusal`, not as a throw.
+ */
 export const writePass = (input: unknown, query: PassQuery): PassResult => {
   try {
     return passOver(input, query)
@@ -153,7 +157,7 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
   const target = rangeFloorMajor(range)
 
   /** The pin value is on the major line of the range. */
-  const onLine = (value: unknown): boolean => target !== null && pinFloor(value) === target
+  const onLine = (value: unknown): boolean => target !== null && pinFloor(value, pkg) === target
 
   const note = (parent: string | null, path: readonly string[], value: unknown): void => {
     written.push({ parent, path, value: value as PinValue })
@@ -202,14 +206,14 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
   }
 
   /**
-   * The child keys of `key` with a selector inside the object at `path`
-   * (#354). npm uses the first child key whose selector matches the edge
-   * into the copy. A plain key matches each edge. The
-   * scan reads each edge from a copy of the parent, as `scanKeys` reads an
-   * edge into a parent. It gives the child keys that take the write, and if
-   * the plain key takes it too. A child key that takes the write must hold a
-   * text on the line of the range. Any other child key that npm can match
-   * stops the pass with a refusal.
+   * The child keys of `key` in the object at `path` that take the write,
+   * and if the plain key takes it too (#354). npm uses the first child key
+   * whose selector matches the edge into the copy. A plain key matches
+   * each edge. The scan reads each edge from a copy of the parent, as
+   * `scanKeys` reads an edge into a parent. A child key that takes the
+   * write must hold a text on the line of the range. Any other child key
+   * that npm can match stops the pass with a refusal. So does a parent
+   * with no edge that the lockfile can show.
    */
   const childWrite = (
     parent: string,
@@ -226,13 +230,16 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
     const plainAt = own.findIndex(({ selector }) => selector === null)
     const before = plainAt < 0 ? own : own.slice(0, plainAt)
     if (before.length === 0) return { into: [], plain: true }
+    // An edge that the range rules cannot read, or no edge at all, shows no key.
+    const unread: FirstKey = { first: null, unsure: [(before[0] as SelectorKey).key] }
     const edges = query.childEdges(parent, key)
+    const scans =
+      edges.length === 0
+        ? [unread]
+        : edges.map((edge) => (edge.range ? scanKeys(own, edge.cver, edge.spec) : unread))
     const into = new Set<string>()
-    let plain = edges.length === 0
-    for (const edge of edges) {
-      const { first, unsure } = edge.range
-        ? scanKeys(own, edge.cver, edge.spec)
-        : { first: null, unsure: [(before[0] as SelectorKey).key] }
+    let plain = false
+    for (const { first, unsure } of scans) {
       if (unsure.length > 0) {
         const detail = [{ parent, path, key: unsure[0] }]
         throw new Refused(
@@ -397,8 +404,8 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
       putNested(parent, parent, key, value)
       return
     }
-    // npm matches a bare key for this parent first, so beside it the
-    // qualified keys are inert. Only a pair on the same line gets here. The
+    // npm matches a bare key for this parent before the qualified keys after
+    // it, so they are inert. Only a pair on the same line gets here. The
     // pass removes each pair of the call. A bare key that holds any other
     // entry stays, and so does an empty bare key. So the pass refuses (#355).
     const bare = get(or(get(manifest, 'overrides'), {}), parent)
@@ -410,7 +417,7 @@ const passOver = (input: unknown, query: PassQuery): PassResult => {
       const detail = [{ parent, keys: others }]
       throw new Refused(
         failed(
-          `apply_constraint: cannot scope '${pkg}': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${render(detail, null)}. npm matches that bare key first for each copy of the parent, so a qualified key after it has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+          `apply_constraint: cannot scope '${pkg}': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${render(detail, null)}. npm matches that bare key before each qualified key after it, so such a key has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
         ),
       )
     }
