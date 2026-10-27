@@ -1232,6 +1232,45 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     }).toEqual({ overrides, superseded })
   })
 
+  it('supersedes the pair of a bare key after the key, and keeps its other entry', () => {
+    const bare = rule({
+      'nx@22.7.7': { axios: AXIOS },
+      nx: { 'smol-toml': '>=1.7.1 <2', minimist: '^1.2.8' },
+    })
+    expect(manifestAfter(QUALIFIED, smolToml, bare).overrides).toEqual({
+      'nx@22.7.7': { axios: AXIOS, 'smol-toml': SMOL },
+      nx: { minimist: '^1.2.8' },
+    })
+  })
+
+  /** nx declares smol-toml only through the alias key `toml`. */
+  const tomlAlias = lockEdit((packages) => {
+    ;(packages['node_modules/nx'] as Json).dependencies = { toml: 'npm:smol-toml@1.6.1' }
+    packages['node_modules/toml'] = { name: 'smol-toml', version: '1.6.1' }
+  })
+
+  it.each([
+    ['supersedes an on-line', 'npm:smol-toml@^1.7.1', {}],
+    ['keeps an off-line', 'npm:smol-toml@^0.5.0', { nx: { toml: 'npm:smol-toml@^0.5.0' } }],
+  ])('%s alias pair of a bare key after the key', (_title, pair, kept) => {
+    const setup = both(tomlAlias, rule({ 'nx@22.7.7': { axios: AXIOS }, nx: { toml: pair } }))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@22.7.7': { axios: AXIOS, toml: `npm:smol-toml@${SMOL}` },
+      ...kept,
+    })
+  })
+
+  // npm puts an override value in place of the edge spec (`lib/edge.js:205-224`
+  // in arborist 9.9.1). So a plain range under the alias key names the package
+  // `toml`, not smol-toml. It is no pin of smol-toml, and the pass keeps it.
+  it('keeps a plain range of a bare key after the key under the alias key', () => {
+    const setup = both(tomlAlias, rule({ 'nx@22.7.7': { axios: AXIOS }, nx: { toml: '^1.7.1' } }))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@22.7.7': { axios: AXIOS, toml: `npm:smol-toml@${SMOL}` },
+      nx: { toml: '^1.7.1' },
+    })
+  })
+
   it('refuses a pin on another line inside the key, and names the key', () => {
     const pinned = rule({ 'nx@22.7.7': { axios: AXIOS, 'smol-toml': '^0.9.0' } })
     expect(refusalOf(QUALIFIED, smolToml, pinned)).toBe(
@@ -1683,6 +1722,481 @@ describe('npm constraint goes inside a qualified key for a git edge with a semve
   it('refuses a key beside an edge from a home directory with a #semver: part', () => {
     expect(refusalOf(GIT_EDGE, msRange, rootDebug('~/debug#semver:^4.4.0'))).toBe(
       UNSURE('[{"parent":"debug","key":"debug@4","versions":["4.4.3"]}]', 'ms'),
+    )
+  })
+})
+
+// The specimen of #354. Three real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile, in turn. The first had a
+// top-level `"ms": "2.1.1"` override, and the second had none, so the lock
+// kept ms 2.1.1. A third run, with the manifest as it is, wrote the lockfile
+// of the fixture. eslint-import-resolver-node 0.3.9 declares debug at
+// `^3.2.7`, and debug 3.2.7 declares ms at `^2.1.1`. The `ms@^2` child key
+// gave ms 2.1.2. The runs on this tree, for each target key of the write:
+//
+//   - `"ms@^2": ">=2.1.3 <3"` gave ms 2.1.3.
+//   - `"ms@^2": "2.1.2"` and then `"ms": ">=2.1.3 <3"` kept ms at 2.1.2.
+//   - `"ms@1.0.0": "1.0.0"` and then `"ms": ">=2.1.3 <3"` gave ms 2.1.3.
+//   - `"ms@2.1.1": "2.1.1"`, alone or with the plain key after it, kept ms
+//     at 2.1.2.
+//
+// The target keys were the bare `debug` key, a served `debug@^3` key, and a
+// rule that places debug under eslint-import-resolver-node.
+const CHILD = 'npm-qualified-child-key'
+
+const MS = '>=2.1.3 <3'
+
+const MS_GIT = 'git+https://github.com/vercel/ms.git'
+
+/** The target key of the write, and the setup that puts `child` into it. */
+type ChildTarget = readonly [string, readonly string[], (child: Json) => Setup]
+
+const CHILD_TARGETS: readonly ChildTarget[] = [
+  ['the bare parent key', ['debug'], (child) => rule({ debug: child })],
+  ['a served qualified parent key', ['debug@^3'], (child) => rule({ 'debug@^3': child })],
+  [
+    'a rule that places the parent',
+    ['eslint-import-resolver-node', 'debug'],
+    (child) => rule({ 'eslint-import-resolver-node': { debug: { '.': '3.2.7', ...child } } }),
+  ],
+]
+
+/** The override block with `child` at `path`, as the setup of a target writes it. */
+const blockWith = (path: readonly string[], child: Json): Json => {
+  const [head, ...rest] = path as [string, ...string[]]
+  if (rest.length === 0) return { [head]: child }
+  return { [head]: { [rest[0] as string]: { '.': '3.2.7', ...child } } }
+}
+
+const CHILD_UNSURE = (detail: string): string =>
+  `apply_constraint: cannot scope 'ms': npm can match a pre-existing version-qualified child key for the package inside the override key of its parent through an edge into the copy, and the lockfile cannot show which key it matches: ${detail}. So neither a constraint inside that child key nor a plain key beside it can be shown to take effect (issue #354), so nothing was written; reconcile the existing override by hand.`
+
+const CHILD_PIN = (detail: string): string =>
+  `apply_constraint: a pre-existing version-qualified child key for 'ms' inside the override key of its parent is the first key that npm matches for the copy, and its value is not a text on the same major line: ${detail}. A plain key beside it has no effect, and overwriting the value would strip that line's protection (issues #354 and #132), so nothing was written; reconcile the existing override by hand.`
+
+describe('npm constraint goes into a qualified child key that npm matches first (#354)', () => {
+  it.each(CHILD_TARGETS)('writes into the ms@^2 child key of %s', (_title, path, setup) => {
+    const { envelope, dir } = apply(CHILD, msRange, setup({ 'ms@^2': '2.1.2' }))
+    const { written, superseded_keys } = answerOf(envelope)
+    expect({
+      overrides: readJson(dir, 'package.json').overrides,
+      written: written.filter(({ preserved }) => preserved !== true),
+      superseded: superseded_keys,
+    }).toEqual({
+      overrides: blockWith(path, { 'ms@^2': MS }),
+      written: [{ parent: 'debug', path: ['overrides', ...path, 'ms@^2'], value: MS }],
+      superseded: [{ parent: 'debug', path: ['overrides', ...path, 'ms@^2'], value: '2.1.2' }],
+    })
+  })
+
+  // Green when written: the pass already writes the plain key after the child.
+  it.each(CHILD_TARGETS)(
+    'writes the plain key beside an ms@1.0.0 child key of %s, which npm skips',
+    (_title, path, setup) => {
+      const child = { 'ms@1.0.0': '1.0.0' }
+      expect(manifestAfter(CHILD, msRange, setup(child)).overrides).toEqual(
+        blockWith(path, { ...child, ms: MS }),
+      )
+    },
+  )
+
+  it.each(CHILD_TARGETS)(
+    'refuses an ms@2.1.1 child key of %s, which npm can match, and names it',
+    (_title, path, setup) => {
+      expect(refusalOf(CHILD, msRange, setup({ 'ms@2.1.1': '2.1.1' }))).toBe(
+        CHILD_UNSURE(`[{"parent":"debug","path":${JSON.stringify(path)},"key":"ms@2.1.1"}]`),
+      )
+    },
+  )
+
+  // On the tree before the third run, npm skipped `ms@^1` and applied the
+  // plain key after it. The pass cannot show that `^1` and the edge
+  // `^2.1.1` do not intersect, so it refuses.
+  it('refuses an ms@^1 child key, as the pass cannot read the intersection', () => {
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^1': '1.0.0' } }))).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^1"}]'),
+    )
+  })
+
+  it.each([
+    ['a pin on another major line', '^1.0.0'],
+    ['an object value', { '.': '2.1.2' }],
+    ['a number value', 2],
+  ])('refuses an ms@^2 child key that npm matches first, with %s', (_title, value) => {
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': value } }))).toBe(
+      CHILD_PIN(
+        `[{"parent":"debug","path":["debug"],"key":"ms@^2","value":${JSON.stringify(value)}}]`,
+      ),
+    )
+  })
+
+  /** debug 3.2.7 declares ms as `spec` in the lockfile. */
+  const debugEdge = (spec: string): Setup =>
+    lockEdit((packages) => {
+      ;(packages['node_modules/debug'] as Json).dependencies = { ms: spec }
+    })
+
+  // npm matches a key for a git edge through its `#semver:` range
+  // (`getEdgeRule`, `lib/override-set.js:103-109` in arborist 9.9.1, and the
+  // real runs of #359). The pass reads a child key the same way.
+  it('writes into the child key for a git edge with a semver range', () => {
+    const git = both(rule({ debug: { 'ms@^2': '2.1.2' } }), debugEdge(`${MS_GIT}#semver:^2.1.1`))
+    expect(manifestAfter(CHILD, msRange, git).overrides).toEqual({ debug: { 'ms@^2': MS } })
+  })
+
+  // npm reads the spec `x` as the range `*`, which can match `ms@^2`. The
+  // pass reads only a spec that starts as a range does, so it refuses.
+  it.each([
+    ['a tag', 'latest'],
+    ['a git edge with a range that the range rules cannot read', `${MS_GIT}#semver:latest`],
+    ['the wildcard x', 'x'],
+  ])('refuses a child key beside an edge of %s, and names it', (_title, spec) => {
+    const odd = both(rule({ debug: { 'ms@^2': '2.1.2' } }), debugEdge(spec))
+    expect(refusalOf(CHILD, msRange, odd)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
+  })
+
+  it('reads past a declaration of another key, and one that is not a text', () => {
+    const odd = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        ;(packages['node_modules/debug'] as Json).dependencies = {
+          weird: 5,
+          other: 'latest',
+          ms: '^2.1.1',
+        }
+      }),
+    )
+    expect(manifestAfter(CHILD, msRange, odd).overrides).toEqual({ debug: { 'ms@^2': MS } })
+  })
+
+  it('reads the edges from the copies of the parent only', () => {
+    const other = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        ;(packages['node_modules/resolve'] as Json).dependencies = { ms: 'latest' }
+      }),
+    )
+    expect(manifestAfter(CHILD, msRange, other).overrides).toEqual({ debug: { 'ms@^2': MS } })
+  })
+
+  // A plain key that comes first matches each edge (`getEdgeRule`,
+  // `lib/override-set.js:92-93` in arborist 9.9.1). So an edge that the pass
+  // cannot read does not stop that write.
+  it('writes into a plain key that comes first beside an edge of a tag', () => {
+    const tag = both(rule({ debug: { ms: '>=2.1.2 <3', 'ms@^2': '2.1.2' } }), debugEdge('latest'))
+    expect(manifestAfter(CHILD, msRange, tag).overrides).toEqual({
+      debug: { ms: MS, 'ms@^2': '2.1.2' },
+    })
+  })
+
+  // A lockfile entry can hold a spec that is not a text. The pass cannot
+  // read that edge, so a second copy with such an edge makes it refuse.
+  it('refuses a child key when one copy of the parent has an edge that is not a text', () => {
+    const odd = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        packages['node_modules/resolve/node_modules/debug'] = {
+          version: '3.2.7',
+          dependencies: { ms: 5 },
+        }
+      }),
+    )
+    expect(refusalOf(CHILD, msRange, odd)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
+  })
+
+  // npm reads the range of an `npm:` alias edge. The pass does not, so it
+  // refuses a child key beside such an edge.
+  it('refuses a child key beside an npm: alias edge, and names it', () => {
+    const aliased = both(rule({ debug: { 'ms@^2': '2.1.2' } }), debugEdge('npm:ms@^2.1.1'))
+    expect(refusalOf(CHILD, msRange, aliased)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
+  })
+
+  it('reports no supersede for a child key that holds the range already', () => {
+    const { superseded_keys, written } = answer(CHILD, msRange, rule({ debug: { 'ms@^2': MS } }))
+    expect({ superseded_keys, written }).toEqual({
+      superseded_keys: [],
+      written: [{ parent: 'debug', path: ['overrides', 'debug', 'ms@^2'], value: MS }],
+    })
+  })
+
+  // Green when written: a plain key before the child key is first. A real
+  // run of the output, on the tree before the third run, gave ms 2.1.3.
+  it('writes into a plain key that comes before the child key', () => {
+    const before = rule({ debug: { ms: '>=2.1.2 <3', 'ms@^2': '2.1.2' } })
+    expect(manifestAfter(CHILD, msRange, before).overrides).toEqual({
+      debug: { ms: MS, 'ms@^2': '2.1.2' },
+    })
+  })
+
+  // An `npm:` value of another package has no line, so the call refuses it.
+  it('refuses a child key with a value that names another package, and names it', () => {
+    const fork = 'npm:@example-org/ms-fork@2.1.2'
+    expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': fork } }))).toBe(
+      CHILD_PIN(`[{"parent":"debug","path":["debug"],"key":"ms@^2","value":"${fork}"}]`),
+    )
+  })
+
+  // With no edge that the range rules can read, no key is shown to take effect.
+  it.each([
+    ['an edge that is not a text', { ms: 2 }],
+    ['no edge', {}],
+  ])('refuses a child key when the copy of the parent has %s into the package', (_title, deps) => {
+    const odd = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        ;(packages['node_modules/debug'] as Json).dependencies = deps
+      }),
+    )
+    expect(refusalOf(CHILD, msRange, odd)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
+  })
+
+  // Green when written: no child key, so the write is the plain key.
+  it('writes the plain key when the parent key holds no child key for the package', () => {
+    expect(
+      manifestAfter(CHILD, msRange, rule({ debug: { minimist: '^1.2.8' } })).overrides,
+    ).toEqual({ debug: { minimist: '^1.2.8', ms: MS } })
+  })
+})
+
+// The specimen of #355, shape 1. Two real `npm install --package-lock-only
+// --ignore-scripts` runs of npm 11.19.0 wrote the lockfile. The first had a
+// top-level `"ms": "2.1.1"` override. The second, with the manifest as it is,
+// wrote the lockfile of the fixture. debug 4.1.1 and debug 3.2.7 each declare
+// ms at `^2.1.1`, and each resolves ms 2.1.1. The bare `debug` key comes
+// first, so npm does not use `debug@^3`. The runs on this tree:
+//
+//   - `debug@^3` with its pin, then `debug@4.1.1` and `debug@3.2.7` with
+//     `>=2.1.3 <3`. A write that keeps `debug@^3` gives these keys. debug
+//     3.2.7 kept ms at 2.1.1, as `debug@^3` is its first key.
+//   - `debug@^3` with `>=2.1.3 <3`, then `debug@4.1.1`: ms 2.1.3 for each.
+//   - A bare `debug` key that holds `supports-color` before the two qualified
+//     keys kept ms at 2.1.1. After them, ms moved to 2.1.3.
+//   - The two qualified keys alone: ms 2.1.3 for each.
+//   - An empty bare `debug` key before them kept ms at 2.1.1.
+const SUPERSEDED = 'npm-superseded-bare-pair'
+
+const BARE_KEPT = (detail: string): string =>
+  `apply_constraint: cannot scope 'ms': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: ${detail}. npm matches that bare key before each qualified key after it, so such a key has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`
+
+const BARE_PIN = (detail: string): string =>
+  `apply_constraint: a pre-existing bare override for 'ms' under a parent this call must version-qualify pins a DIFFERENT major line: ${detail}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`
+
+describe('npm write after a superseded bare pair decides each key first (#355)', () => {
+  it('writes inside the later qualified key that becomes the first key', () => {
+    const { envelope, dir } = apply(SUPERSEDED, msRange)
+    expect({
+      overrides: readJson(dir, 'package.json').overrides,
+      superseded: answerOf(envelope).superseded_keys,
+    }).toEqual({
+      overrides: { 'debug@^3': { ms: MS }, 'debug@4.1.1': { ms: MS } },
+      superseded: [
+        { parent: 'debug', path: ['overrides', 'debug@^3', 'ms'], value: '2.1.1' },
+        { parent: 'debug', path: ['overrides', 'debug', 'ms'], value: '>=2.1.1 <3' },
+      ],
+    })
+  })
+
+  it.each([
+    ['a pair and another entry', { ms: '>=2.1.1 <3', 'supports-color': '8.1.1' }],
+    ['another entry only', { 'supports-color': '8.1.1' }],
+  ])('refuses a bare key that holds %s, which stays first, and names it', (_title, bare) => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":["supports-color"]}]'),
+    )
+  })
+
+  // A real run: an empty bare `debug` key before the two qualified keys kept
+  // ms at 2.1.1 for each copy.
+  it('refuses an empty bare key, which stays first, and names it', () => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: {} }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":[]}]'),
+    )
+  })
+
+  // A later key that serves each copy ends the write for the parent before
+  // the bare key check. So the scan alone must keep the bare key first here.
+  it.each([
+    ['no entry', {}, '[]'],
+    [
+      'an on-line entry that this call does not write',
+      { ms: '>=2.1.1 <3', other: '^2.0.0' },
+      '["other"]',
+    ],
+  ])('refuses a bare key with %s before a key that serves each copy', (_title, bare, keys) => {
+    const setup = rule({ debug: bare, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_KEPT(`[{"parent":"debug","keys":${keys}}]`),
+    )
+  })
+
+  it('refuses a bare pair on another line before a key that serves each copy', () => {
+    const setup = rule({ debug: { ms: '^1.0.0' }, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_PIN('{"parent":"debug","value":"^1.0.0","parent_also_override_placed":false}'),
+    )
+  })
+
+  // Each debug copy also declares ms under the alias key `ms2`. A plain
+  // range under `ms2` names the package `ms2` (`lib/edge.js:205-224`), so
+  // the scan keeps the bare key, and the call refuses it.
+  it('refuses a plain range under an alias key before a key that serves each copy', () => {
+    const aliased = lockEdit((packages) => {
+      for (const path of [
+        'node_modules/debug',
+        'node_modules/eslint-import-resolver-node/node_modules/debug',
+      ]) {
+        ;(packages[path] as Json).dependencies = { ms: '^2.1.1', ms2: 'npm:ms@^2.1.1' }
+      }
+      packages['node_modules/ms2'] = { name: 'ms', version: '2.1.1' }
+    })
+    const setup = both(
+      aliased,
+      rule({ debug: { ms2: '>=2.1.1 <3' }, 'debug@>=3 <5': { ms: '2.1.1' } }),
+    )
+    expect(refusalOf(SUPERSEDED, msRange, setup)).toBe(
+      BARE_PIN(
+        '{"parent":"debug","key":"ms2","value":">=2.1.1 <3","parent_also_override_placed":false}',
+      ),
+    )
+  })
+
+  // The write is the one of the last example of this block: the pass
+  // removes the pair.
+  it('reads the floor of an npm: value of the package in a bare pair', () => {
+    const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' } })
+    expect(manifestAfter(SUPERSEDED, msRange, aliased).overrides).toEqual({
+      'debug@4.1.1': { ms: MS },
+      'debug@3.2.7': { ms: MS },
+    })
+  })
+
+  // Real runs: this input kept ms at 2.1.1 for each copy. The write gave
+  // 2.1.3 for each. A write that keeps `debug@^3` at 2.1.1 before
+  // `debug@3.2.7` kept debug 3.2.7 at ms 2.1.1.
+  it('skips a bare key with an npm: pair of the package before a later key', () => {
+    const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' }, 'debug@^3': { ms: '2.1.1' } })
+    expect(manifestAfter(SUPERSEDED, msRange, aliased).overrides).toEqual({
+      'debug@^3': { ms: MS },
+      'debug@4.1.1': { ms: MS },
+    })
+  })
+
+  // npm reads an array or a number value of a bare key as an empty key
+  // (`lib/override-set.js:9-30` in arborist 9.9.1). Real runs: such a bare
+  // key before `debug@4.1.1` and `debug@3.2.7` kept ms at 2.1.1 for each.
+  // npm reads a text value as the pin of the parent itself, with no child
+  // key (`lib/override-set.js:10-12`). That key stays first too.
+  it.each([
+    ['an array', []],
+    ['a number', 5],
+    ['a text', '>=3.2.7'],
+  ])('refuses a bare key with %s value, which stays first, and names it', (_title, bare) => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":[]}]'),
+    )
+  })
+
+  // An `npm:` value of another package is no pin of the package, so it has
+  // no floor on the line, and the call refuses it.
+  it.each([
+    ['', {}],
+    [' before a key that serves each copy', { 'debug@>=3 <5': { ms: '2.1.1' } }],
+  ])('refuses a bare pair that names another package%s, and names it', (_title, later) => {
+    const fork = rule({ debug: { ms: 'npm:@example-org/ms-fork@2.1.1' }, ...later })
+    expect(refusalOf(SUPERSEDED, msRange, fork)).toBe(
+      BARE_PIN(
+        '{"parent":"debug","value":"npm:@example-org/ms-fork@2.1.1","parent_also_override_placed":false}',
+      ),
+    )
+  })
+
+  // A range with no floor has no line, so the bare pair is no pair on the
+  // line, and the scan keeps the bare key.
+  it('refuses a bare pair with no floor for a range with no floor', () => {
+    const setup = rule({ debug: { ms: 'latest' }, 'debug@>=3 <5': { ms: '2.1.1' } })
+    expect(refusalOf(SUPERSEDED, ['ms', '*', 'debug'], setup)).toBe(
+      BARE_PIN('{"parent":"debug","value":"latest","parent_also_override_placed":false}'),
+    )
+  })
+
+  // A parent with no qualifier keeps its bare key, which npm matches first
+  // (`getEdgeRule`, `lib/override-set.js:92-93` in arborist 9.9.1).
+  it('writes inside a bare key that comes first for a parent with no qualifier', () => {
+    const setup = rule({ debug: { ms: '>=2.1.1 <3' }, 'debug@^3': { ms: '2.1.1' } })
+    expect(manifestAfter(CHILD, msRange, setup).overrides).toEqual({
+      debug: { ms: MS },
+      'debug@^3': { ms: '2.1.1' },
+    })
+  })
+
+  // Green when written: the pass removes the bare key, and npm uses the new keys.
+  it('writes a qualified key for each copy after a bare key that holds only the pair', () => {
+    expect(
+      manifestAfter(SUPERSEDED, msRange, rule({ debug: { ms: '>=2.1.1 <3' } })).overrides,
+    ).toEqual({ 'debug@4.1.1': { ms: MS }, 'debug@3.2.7': { ms: MS } })
+  })
+})
+
+// The specimen of #355, shape 2. A real `npm install --package-lock-only
+// --ignore-scripts` of npm 11.19.0 wrote the lockfile, for the manifest as it
+// is. The fixture keeps the root, metro, react-native, babylon and babylon7
+// entries of that lockfile, each as npm wrote it. The root declares metro at
+// 0.24.7, and react-native 0.54.0-rc.3 declares metro at `^0.25.1`. metro
+// 0.25.1 declares babylon at `^6.18.0` and babylon7 at
+// `npm:babylon@^7.0.0-beta`. The pin under the bare `metro` key gave babylon7
+// 7.0.0-beta.40. One run removed that pin and wrote the two qualified keys,
+// each with `babylon7` at `npm:babylon@>=6.18.0 <7`. babylon7 then moved to
+// 6.18.0, across its major line. So the call refuses.
+const ALIAS_PIN = 'npm-alias-pin-other-line'
+
+describe('npm bare alias pin on another major line (#355)', () => {
+  it('refuses to remove the alias pin, and names the parent and the alias key', () => {
+    expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'])).toBe(
+      `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":"npm:babylon@7.0.0-beta.40","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+    )
+  })
+
+  // A real run with no lockfile: `"babylon7": ">=6.18.0 <7"` under `metro`
+  // made npm fetch the package `babylon7`, and it stopped with E404. So that
+  // value is no pin of babylon (`lib/edge.js:205-224` in arborist 9.9.1).
+  it('refuses a plain range under the alias key, which names another package', () => {
+    const plain = rule({ metro: { babylon7: '>=6.18.0 <7' } })
+    expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'], plain)).toBe(
+      `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":">=6.18.0 <7","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+    )
+  })
+
+  // Real runs: this input, and the write, each gave babylon 6.18.0 and
+  // babylon7 6.18.0 under metro 0.25.1.
+  it('removes a bare key that holds only on-line pairs of the call, also an alias pair', () => {
+    const R = '>=6.18.0 <7'
+    const pairs = rule({ metro: { babylon: R, babylon7: `npm:babylon@${R}` } })
+    const keys = { babylon: R, babylon7: `npm:babylon@${R}` }
+    expect(manifestAfter(ALIAS_PIN, ['babylon', R, 'metro'], pairs).overrides).toEqual({
+      'metro@0.24.7': keys,
+      'metro@0.25.1': keys,
+    })
+  })
+
+  // The pass removes a bare key with only an alias pair on the line. So
+  // `metro@^0.25` becomes the first key of metro 0.25.1, whose babylon7 is
+  // on another line, and the call refuses that key (#333).
+  it('skips a bare key with only an on-line alias pair before a later key', () => {
+    const R = '>=6.18.0 <7'
+    const pairs = rule({
+      metro: { babylon7: `npm:babylon@${R}` },
+      'metro@^0.25': { babylon: '6.18.0', babylon7: 'npm:babylon@6.18.0' },
+    })
+    expect(refusalOf(ALIAS_PIN, ['babylon', R, 'metro'], pairs)).toBe(
+      `apply_constraint: cannot scope 'babylon' on this line: a pre-existing version-qualified override key for its parent is the first key that npm matches for copies on this line and for copies whose 'babylon' is on other major lines: [{"parent":"metro","key":"metro@^0.25","other_line_versions":["0.25.1"]}]. A constraint inside that key would move those lines across their major boundary, and a new key after it has no effect on the copies it matches (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
     )
   })
 })
@@ -2965,15 +3479,16 @@ describe('the routes that no spec example takes', () => {
     )
   })
 
-  it('keeps the other keys of a superseded bare pair', () => {
+  // The bare key keeps its other entry, so npm matches it first and the
+  // qualified keys would have no effect (#355, the runs of the
+  // npm-superseded-bare-pair specimen).
+  it('refuses a bare pair with another key, as the bare key stays first', () => {
     const pair = manifestEdit((manifest) => {
       manifest.overrides = { minimatch: { 'brace-expansion': '>=5.0.6 <6', other: '1' } }
     })
-    expect(manifestAfter('npm-cross-line', [...BRACE, 'minimatch'], pair).overrides).toEqual({
-      minimatch: { other: '1' },
-      'minimatch@^10.2.5': { 'brace-expansion': '>=5.0.9 <6' },
-      'minimatch@10.0.3': { 'brace-expansion': '>=5.0.9 <6' },
-    })
+    expect(refusalOf('npm-cross-line', [...BRACE, 'minimatch'], pair)).toBe(
+      `apply_constraint: cannot scope 'brace-expansion': the bare override key of a parent that this call must version-qualify stays after the write, as it holds no entry or an entry that this call does not write: [{"parent":"minimatch","keys":["other"]}]. npm matches that bare key before each qualified key after it, so such a key has no effect, and a key before it would drop those entries for the copies that it matches (issue #355), so nothing was written; reconcile the existing override by hand.`,
+    )
   })
 
   it('places past a declaration that is not a text, and one that resolves to no entry', () => {

@@ -97,6 +97,29 @@ throwaway worktree of a real repository, and against Yarn's `reduceDependency` h
   beside such a copy. It also refuses a key that comes first for a copy whose child is on
   another line. It refuses a key that holds a pin on another line.
 
+  The same first-key rule applies inside a key. A target key of the write can hold a child key
+  with a selector, such as `"debug": {"ms@^2": "2.1.2"}`. npm then uses `ms@^2` for an edge that
+  it matches, and a plain `ms` key after it has no effect (npm 11.19.0, issue #354). So the
+  call writes inside the first child key that matches the edge into the copy. This applies to a
+  bare, a served and a placing key. The value must be a text on the line of the call, else the
+  call refuses. An exact selector outside the edge, such as `ms@1.0.0` for `^2.1.1`, does not
+  match. Then the plain key takes the write. The call refuses a child key when npm can match it
+  and the lockfile cannot show which key npm matches. An example is `ms@2.1.1` beside a copy at
+  2.1.2: npm then applied neither key. The call also refuses a child key when the lockfile shows
+  no edge into the package that the range rules can read.
+
+  Two composed shapes are decided before any write (issue #355). The call removes a bare pair
+  for a parent that it qualifies. When the bare key then holds nothing, the call removes it. npm
+  then matches the next key for the parent, such as `debug@^3`. So the call scans the keys as if
+  the bare key were not there. It writes inside a later key that comes first. A bare key that
+  holds another entry stays before each qualified key of the parent. So does an empty bare key,
+  and a bare key with a value that is not an object. Those keys then have no effect, so the call
+  refuses that bare key and names it. The check for a bare pair on another line also reads each
+  alias key of the parent, such as `babylon7` for `npm:babylon@^7`. An `npm:` value of another
+  package is no pin of the package. Under an alias key, a value with no `npm:` is no pin either:
+  npm reads it as a spec of the alias name, and fetched `babylon7` with E404 in a real run. Such
+  a value has no line. For a parent that the call qualifies, the call refuses it.
+
   One shape sits outside that whole top-level algorithm: an override-placed parent, one a
   pre-existing rule names as a child key of another rule (`{"A": {"B": "<range>"}}`). npm scopes
   such a node to the rule that placed it, so a top-level key never matches it, qualified or bare,
