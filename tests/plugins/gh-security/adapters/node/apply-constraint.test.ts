@@ -1260,6 +1260,17 @@ describe('npm constraint goes inside a qualified key that matches the parent', (
     })
   })
 
+  // npm puts an override value in place of the edge spec (`lib/edge.js:205-224`
+  // in arborist 9.9.1). So a plain range under the alias key names the package
+  // `toml`, not smol-toml. It is no pin of smol-toml, and the pass keeps it.
+  it.fails('keeps a plain range of a bare key after the key under the alias key', () => {
+    const setup = both(tomlAlias, rule({ 'nx@22.7.7': { axios: AXIOS }, nx: { toml: '^1.7.1' } }))
+    expect(manifestAfter(QUALIFIED, smolToml, setup).overrides).toEqual({
+      'nx@22.7.7': { axios: AXIOS, toml: `npm:smol-toml@${SMOL}` },
+      nx: { toml: '^1.7.1' },
+    })
+  })
+
   it('refuses a pin on another line inside the key, and names the key', () => {
     const pinned = rule({ 'nx@22.7.7': { axios: AXIOS, 'smol-toml': '^0.9.0' } })
     expect(refusalOf(QUALIFIED, smolToml, pinned)).toBe(
@@ -1810,6 +1821,7 @@ describe('npm constraint goes into a qualified child key that npm matches first 
   it.each([
     ['a pin on another major line', '^1.0.0'],
     ['an object value', { '.': '2.1.2' }],
+    ['a number value', 2],
   ])('refuses an ms@^2 child key that npm matches first, with %s', (_title, value) => {
     expect(refusalOf(CHILD, msRange, rule({ debug: { 'ms@^2': value } }))).toBe(
       CHILD_PIN(
@@ -1832,9 +1844,12 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     expect(manifestAfter(CHILD, msRange, git).overrides).toEqual({ debug: { 'ms@^2': MS } })
   })
 
+  // npm reads an empty spec as `*`, which can match `ms@^2`. The range rules
+  // of the pass do not read an empty spec, so the pass refuses.
   it.each([
     ['a tag', 'latest'],
     ['a git edge with a range that the range rules cannot read', `${MS_GIT}#semver:latest`],
+    ['an empty spec', ''],
   ])('refuses a child key beside an edge of %s, and names it', (_title, spec) => {
     const odd = both(rule({ debug: { 'ms@^2': '2.1.2' } }), debugEdge(spec))
     expect(refusalOf(CHILD, msRange, odd)).toBe(
@@ -1846,10 +1861,51 @@ describe('npm constraint goes into a qualified child key that npm matches first 
     const odd = both(
       rule({ debug: { 'ms@^2': '2.1.2' } }),
       lockEdit((packages) => {
-        ;(packages['node_modules/debug'] as Json).dependencies = { weird: 5, ms: '^2.1.1' }
+        ;(packages['node_modules/debug'] as Json).dependencies = {
+          weird: 5,
+          other: 'latest',
+          ms: '^2.1.1',
+        }
       }),
     )
     expect(manifestAfter(CHILD, msRange, odd).overrides).toEqual({ debug: { 'ms@^2': MS } })
+  })
+
+  it('reads the edges from the copies of the parent only', () => {
+    const other = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        ;(packages['node_modules/resolve'] as Json).dependencies = { ms: 'latest' }
+      }),
+    )
+    expect(manifestAfter(CHILD, msRange, other).overrides).toEqual({ debug: { 'ms@^2': MS } })
+  })
+
+  // A plain key that comes first matches each edge (`getEdgeRule`,
+  // `lib/override-set.js:92-93` in arborist 9.9.1). So an edge that the pass
+  // cannot read does not stop that write.
+  it('writes into a plain key that comes first beside an edge of a tag', () => {
+    const tag = both(rule({ debug: { ms: '>=2.1.2 <3', 'ms@^2': '2.1.2' } }), debugEdge('latest'))
+    expect(manifestAfter(CHILD, msRange, tag).overrides).toEqual({
+      debug: { ms: MS, 'ms@^2': '2.1.2' },
+    })
+  })
+
+  // A lockfile entry can hold a spec that is not a text. The pass cannot
+  // read that edge, so a second copy with such an edge makes it refuse.
+  it.fails('refuses a child key when one copy of the parent has an edge that is not a text', () => {
+    const odd = both(
+      rule({ debug: { 'ms@^2': '2.1.2' } }),
+      lockEdit((packages) => {
+        packages['node_modules/resolve/node_modules/debug'] = {
+          version: '3.2.7',
+          dependencies: { ms: 5 },
+        }
+      }),
+    )
+    expect(refusalOf(CHILD, msRange, odd)).toBe(
+      CHILD_UNSURE('[{"parent":"debug","path":["debug"],"key":"ms@^2"}]'),
+    )
   })
 
   // npm reads the range of an `npm:` alias edge. The pass does not, so it
@@ -1993,6 +2049,29 @@ describe('npm write after a superseded bare pair decides each key first (#355)',
     })
   })
 
+  // Real runs: this input kept ms at 2.1.1 for each copy. The write gave
+  // 2.1.3 for each. A write that keeps `debug@^3` at 2.1.1 before
+  // `debug@3.2.7` kept debug 3.2.7 at ms 2.1.1.
+  it('skips a bare key with an npm: pair of the package before a later key', () => {
+    const aliased = rule({ debug: { ms: 'npm:ms@>=2.1.1 <3' }, 'debug@^3': { ms: '2.1.1' } })
+    expect(manifestAfter(SUPERSEDED, msRange, aliased).overrides).toEqual({
+      'debug@^3': { ms: MS },
+      'debug@4.1.1': { ms: MS },
+    })
+  })
+
+  // npm reads an array or a number value of a bare key as an empty key
+  // (`lib/override-set.js:9-30` in arborist 9.9.1). Real runs: such a bare
+  // key before `debug@4.1.1` and `debug@3.2.7` kept ms at 2.1.1 for each.
+  it.fails.each([
+    ['an array', []],
+    ['a number', 5],
+  ])('refuses a bare key with %s value, which stays first, and names it', (_title, bare) => {
+    expect(refusalOf(SUPERSEDED, msRange, rule({ debug: bare }))).toBe(
+      BARE_KEPT('[{"parent":"debug","keys":[]}]'),
+    )
+  })
+
   // An `npm:` value of another package is no pin of the package, so it has
   // no floor on the line, and the call refuses it.
   it('refuses a bare pair that names another package, and names it', () => {
@@ -2047,6 +2126,42 @@ describe('npm bare alias pin on another major line (#355)', () => {
   it('refuses to remove the alias pin, and names the parent and the alias key', () => {
     expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'])).toBe(
       `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":"npm:babylon@7.0.0-beta.40","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+    )
+  })
+
+  // A real run with no lockfile: `"babylon7": ">=6.18.0 <7"` under `metro`
+  // made npm fetch the package `babylon7`, and it stopped with E404. So that
+  // value is no pin of babylon (`lib/edge.js:205-224` in arborist 9.9.1).
+  it.fails('refuses a plain range under the alias key, which names another package', () => {
+    const plain = rule({ metro: { babylon7: '>=6.18.0 <7' } })
+    expect(refusalOf(ALIAS_PIN, ['babylon', '>=6.18.0 <7', 'metro'], plain)).toBe(
+      `apply_constraint: a pre-existing bare override for 'babylon' under a parent this call must version-qualify pins a DIFFERENT major line: {"parent":"metro","key":"babylon7","value":">=6.18.0 <7","parent_also_override_placed":false}. Deleting it would strip that line's protection and keeping it would leave the qualified keys inert (npm matches the bare key first), so nothing was written; reconcile the existing override by hand (issue #132). When parent_also_override_placed is true, that parent additionally has override-placed copies this fix would have served by nesting inside their placing rule (issue #147).`,
+    )
+  })
+
+  // Real runs: this input, and the write, each gave babylon 6.18.0 and
+  // babylon7 6.18.0 under metro 0.25.1.
+  it('removes a bare key that holds only on-line pairs of the call, also an alias pair', () => {
+    const R = '>=6.18.0 <7'
+    const pairs = rule({ metro: { babylon: R, babylon7: `npm:babylon@${R}` } })
+    const keys = { babylon: R, babylon7: `npm:babylon@${R}` }
+    expect(manifestAfter(ALIAS_PIN, ['babylon', R, 'metro'], pairs).overrides).toEqual({
+      'metro@0.24.7': keys,
+      'metro@0.25.1': keys,
+    })
+  })
+
+  // The pass removes a bare key with only an alias pair on the line. So
+  // `metro@^0.25` becomes the first key of metro 0.25.1, whose babylon7 is
+  // on another line, and the call refuses that key (#333).
+  it('skips a bare key with only an on-line alias pair before a later key', () => {
+    const R = '>=6.18.0 <7'
+    const pairs = rule({
+      metro: { babylon7: `npm:babylon@${R}` },
+      'metro@^0.25': { babylon: '6.18.0', babylon7: 'npm:babylon@6.18.0' },
+    })
+    expect(refusalOf(ALIAS_PIN, ['babylon', R, 'metro'], pairs)).toBe(
+      `apply_constraint: cannot scope 'babylon' on this line: a pre-existing version-qualified override key for its parent is the first key that npm matches for copies on this line and for copies whose 'babylon' is on other major lines: [{"parent":"metro","key":"metro@^0.25","other_line_versions":["0.25.1"]}]. A constraint inside that key would move those lines across their major boundary, and a new key after it has no effect on the copies it matches (issues #333 and #132), so nothing was written; reconcile the existing override by hand.`,
     )
   })
 })
