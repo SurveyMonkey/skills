@@ -30,6 +30,10 @@
 // group before it starts (`validateArgs`), so a refusal here is a file that
 // the workflow did not write.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { readFileSync } from 'node:fs'

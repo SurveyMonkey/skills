@@ -1,7 +1,8 @@
 // The CLI: parse, dispatch, render, exit. Nothing else happens here, because
 // a command is an exported handler and the entry point is a thin registry
 // over those handlers (issue #216's decision comment). Everything below is
-// what a spawned process has left to cover.
+// what a spawned process has left to cover. `--out <file>` is applied here,
+// for each command whose registry entry opts in (`out-file.ts`).
 //
 // This file ships. It imports nothing outside the plugin.
 
@@ -14,7 +15,9 @@ import {
   renderJson,
   thrownText,
 } from '../lib/envelope.ts'
+import { confinementProblem } from '../run-paths.ts'
 import type { CommandResult, FailedReport, Io } from './command.ts'
+import { takeOut, writeOut } from './out-file.ts'
 import { COMMANDS, commandNames } from './registry.ts'
 
 export const USAGE = 'usage: gh-security <command> [args]'
@@ -129,10 +132,39 @@ export const runCli = async (
       exitCode: exitCodeFor(envelope),
     })
   }
+  const refuse = (message: string): ExitCode =>
+    emit(io, renderJson(failed(`${parsed.command}: ${message}`)))
+  const split = takeOut(parsed.args, entry.out)
+  if (split.outcome !== 'ok') return refuse(split.error)
+  const { out, args } = split.value
+  if (out !== null) {
+    // `reap.ts` loads only for a call with `--out`. Each Bash call of a
+    // session loads this file for the allow hook, which needs no `reap.ts`.
+    const { resolvePhysical } = await import('../reap.ts')
+    const problem = confinementProblem('--out', out, resolvePhysical)
+    if (problem !== null) return refuse(problem)
+  }
+  // With `--out`, the text that a command writes itself waits here. It goes
+  // to stdout only after the file is written (`out-file.ts`).
+  let text = ''
+  const commandIo: Io =
+    out === null
+      ? io
+      : {
+          ...io,
+          stdout: (chunk) => {
+            text += chunk
+          },
+        }
   const result = await settle(parsed.command, async () => {
     const handler = await entry.load()
-    return handler({ args: parsed.args, env, io, commandNames })
+    return handler({ args, env, io: commandIo, commandNames })
   })
-  if (result === undefined) return EXIT_CODES.ok
-  return emit(io, render(result))
+  const rendered = result === undefined ? undefined : render(result)
+  if (out !== null) {
+    const problem = writeOut(out, rendered === undefined ? text : `${text}${rendered.stdout}\n`)
+    if (problem !== null) return refuse(problem)
+    if (text !== '') io.stdout(text)
+  }
+  return rendered === undefined ? EXIT_CODES.ok : emit(io, rendered)
 }

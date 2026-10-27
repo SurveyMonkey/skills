@@ -2233,15 +2233,37 @@ describe('labels', () => {
   })
 })
 
+/**
+ * A work directory, as `fix-group setup` makes it: `create` reads its title
+ * file and its body file only under one (ruling 16).
+ */
+const WORK = join(scratch, 'repo', '.claude', 'worktrees', 'fix-dependabot-lodash-4x')
+mkdirSync(join(WORK, 'a-directory'), { recursive: true })
+
+/** A title file with this text, as `render-pr commit-msg --out` writes one. */
+let titles = 0
+const titleFile = (text: string): string => {
+  titles += 1
+  const file = join(WORK, `title-${titles}.txt`)
+  writeFileSync(file, text)
+  return file
+}
+
 describe('create', () => {
-  const body = fixture('expected-body-scoped.md')
+  const body = join(WORK, 'pr-body.md')
+  writeFileSync(body, readFileSync(fixture('expected-body-scoped.md')))
+  // A commit message: the title is its first line (ruling 5 of round 9).
+  const title = titleFile(
+    'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x\n\nThe body of the commit.\n',
+  )
+  const t = titleFile('t\n')
   const base = [
     '--repo',
     REPO,
     '--head',
     'fix/dependabot-lodash-4x',
-    '--title',
-    'fix(deps): resolve 2 Dependabot alert(s) for lodash 4.x',
+    '--title-file',
+    title,
     '--body-file',
     body,
     '--band',
@@ -2312,21 +2334,78 @@ describe('create', () => {
     ])
   })
 
-  it('passes a title and a head that have non-ASCII text, a leading dash and a line break, as one word each', async () => {
+  it('passes a title and a head that have non-ASCII text and a leading dash, as one word each', async () => {
     const ran = await create([
       '--repo',
       REPO,
       '--head',
       'fix/ünï-日本',
-      '--title',
-      '--x\nrésolu 🚀',
+      '--title-file',
+      titleFile('--x résolu 🚀\nthe rest'),
       '--body-file',
       body,
       '--band',
       'low',
     ])
     expect(ran.calls[0]?.args).toContain('fix/ünï-日本')
-    expect(ran.calls[0]?.args).toContain('--x\nrésolu 🚀')
+    expect(ran.calls[0]?.args).toContain('--x résolu 🚀')
+  })
+
+  it.each([
+    ['a file of one line with no line break', 'fix(deps): one', 'fix(deps): one'],
+    ['a file with Windows line breaks', 'fix(deps): two\r\n\r\nbody\r\n', 'fix(deps): two'],
+  ])('reads the title from %s', async (_case, text, expected) => {
+    const ran = await create([
+      ...base.slice(0, 4),
+      '--title-file',
+      titleFile(text),
+      ...base.slice(6),
+    ])
+    expect(ran.calls[0]?.args.slice(12, 14)).toEqual(['--title', expected])
+  })
+
+  it('refuses a title file that cannot be read, and names the file', async () => {
+    const path = titleFile('fix(deps): x\n')
+    chmodSync(path, 0)
+    try {
+      const ran = await create([...base.slice(0, 4), '--title-file', path, ...base.slice(6)])
+      expect({
+        prefix: (ran.result as { error: string }).error.startsWith(
+          `--title-file: cannot read ${path}: EACCES`,
+        ),
+        calls: ran.calls,
+      }).toEqual({ prefix: true, calls: [] })
+    } finally {
+      chmodSync(path, 0o644)
+    }
+  })
+
+  it('refuses a title file outside the run and work directories, and reads it not (ruling 16)', async () => {
+    const ran = await create([...base.slice(0, 4), '--title-file', '/etc/hosts', ...base.slice(6)])
+    expect({ result: ran.result, calls: ran.calls }).toEqual({
+      result: failure(
+        '--title-file /etc/hosts is not under a run directory (plugins/data/<id>/runs/<run>/) or a work directory (<repo>/.claude/worktrees/<leaf>/)',
+      ),
+      calls: [],
+    })
+  })
+
+  it('refuses a body file outside the run and work directories, and reads it not (ruling 16)', async () => {
+    // Not a fixture path: this checkout can itself be a work directory.
+    const outside = join(scratch, 'outside-body.md')
+    writeFileSync(outside, 'secret\n')
+    const ran = await create([...base.slice(0, 6), '--body-file', outside, ...base.slice(8)])
+    expect({ result: ran.result, calls: ran.calls }).toEqual({
+      result: failure(
+        `--body-file ${outside} is not under a run directory (plugins/data/<id>/runs/<run>/) or a work directory (<repo>/.claude/worktrees/<leaf>/)`,
+      ),
+      calls: [],
+    })
+  })
+
+  it('refuses the old --title flag, which no prompt may pass', async () => {
+    const ran = await create([...base, '--title', 't'])
+    expect(ran.result).toEqual(failure("create: unknown option '--title'"))
   })
 
   it('puts the env prefix in front of gh', async () => {
@@ -2389,30 +2468,48 @@ describe('create', () => {
     )
   })
 
+  const emptyTitle = titleFile('')
+  const blankTitle = titleFile('  \nfix(deps): later')
+
   it.each([
     [
       'no repo',
-      ['--head', 'h', '--title', 't', '--body-file', body, '--band', 'low'],
+      ['--head', 'h', '--title-file', t, '--body-file', body, '--band', 'low'],
       'create requires --repo',
     ],
     [
       'no head',
-      ['--repo', REPO, '--title', 't', '--body-file', body, '--band', 'low'],
+      ['--repo', REPO, '--title-file', t, '--body-file', body, '--band', 'low'],
       'create requires --head',
     ],
     [
-      'no title',
+      'no title file',
       ['--repo', REPO, '--head', 'h', '--body-file', body, '--band', 'low'],
-      'create requires --title',
+      '--title-file requires a file',
     ],
     [
-      'an empty title',
-      ['--repo', REPO, '--head', 'h', '--title', '', '--body-file', body, '--band', 'low'],
-      '--title requires a value',
+      'an empty title file value',
+      ['--repo', REPO, '--head', 'h', '--title-file', '', '--body-file', body, '--band', 'low'],
+      '--title-file requires a value',
+    ],
+    [
+      'a title file that is missing',
+      ['--repo', REPO, '--head', 'h', '--title-file', join(WORK, 'nope.txt'), '--band', 'low'],
+      `--title-file: no such file: ${join(WORK, 'nope.txt')}`,
+    ],
+    [
+      'an empty title file',
+      ['--repo', REPO, '--head', 'h', '--title-file', emptyTitle, '--body-file', body],
+      `--title-file: the first line of ${emptyTitle} is empty`,
+    ],
+    [
+      'a title file whose first line is blank',
+      ['--repo', REPO, '--head', 'h', '--title-file', blankTitle, '--body-file', body],
+      `--title-file: the first line of ${blankTitle} is empty`,
     ],
     [
       'no body file',
-      ['--repo', REPO, '--head', 'h', '--title', 't', '--band', 'low'],
+      ['--repo', REPO, '--head', 'h', '--title-file', t, '--band', 'low'],
       '--body-file requires a file',
     ],
     [
@@ -2422,33 +2519,44 @@ describe('create', () => {
         REPO,
         '--head',
         'h',
-        '--title',
-        't',
+        '--title-file',
+        t,
         '--body-file',
-        fixture('nope.md'),
+        join(WORK, 'nope.md'),
         '--band',
         'low',
       ],
-      `--body-file: no such file: ${fixture('nope.md')}`,
+      `--body-file: no such file: ${join(WORK, 'nope.md')}`,
     ],
     [
       'a body file that is a directory',
-      ['--repo', REPO, '--head', 'h', '--title', 't', '--body-file', FX, '--band', 'low'],
-      `--body-file: no such file: ${FX}`,
+      [
+        '--repo',
+        REPO,
+        '--head',
+        'h',
+        '--title-file',
+        t,
+        '--body-file',
+        join(WORK, 'a-directory'),
+        '--band',
+        'low',
+      ],
+      `--body-file: no such file: ${join(WORK, 'a-directory')}`,
     ],
     [
       'no band',
-      ['--repo', REPO, '--head', 'h', '--title', 't', '--body-file', body],
+      ['--repo', REPO, '--head', 'h', '--title-file', t, '--body-file', body],
       "create: --band must be low, medium, or high, got ''",
     ],
     [
       'an unknown band',
-      ['--repo', REPO, '--head', 'h', '--title', 't', '--body-file', body, '--band', 'critical'],
+      ['--repo', REPO, '--head', 'h', '--title-file', t, '--body-file', body, '--band', 'critical'],
       "create: --band must be low, medium, or high, got 'critical'",
     ],
     [
       'a band that is a built-in name',
-      ['--repo', REPO, '--head', 'h', '--title', 't', '--body-file', body, '--band', 'toString'],
+      ['--repo', REPO, '--head', 'h', '--title-file', t, '--body-file', body, '--band', 'toString'],
       "create: --band must be low, medium, or high, got 'toString'",
     ],
   ])('refuses %s, and starts no child', async (_name, args, error) => {
@@ -2463,10 +2571,10 @@ describe('create', () => {
       failure('create requires --head'),
     )
     expect((await create(['--repo', REPO, '--head', 'h', '--band', 'low'])).result).toEqual(
-      failure('create requires --title'),
+      failure('--title-file requires a file'),
     )
     expect(
-      (await create(['--repo', REPO, '--head', 'h', '--title', 't', '--band', 'nope'])).result,
+      (await create(['--repo', REPO, '--head', 'h', '--title-file', t, '--band', 'nope'])).result,
     ).toEqual(failure('--body-file requires a file'))
   })
 })

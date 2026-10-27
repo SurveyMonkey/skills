@@ -7,9 +7,12 @@
 // the rows and the repository names in the arguments are fictitious; the real
 // installed location is asserted on its own.
 
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import type { CommandContext } from '#gh-security/cli/command.ts'
+import { commandNames } from '#gh-security/cli/registry.ts'
 import {
   allowOwnCommands,
   allowOwnCommandsCommand,
@@ -17,7 +20,7 @@ import {
   ENTRY_PATH,
   UNSAFE_ARGUMENT,
 } from '#gh-security/subcommands/allow-own-commands.ts'
-import { pluginFile } from '#harness/paths.ts'
+import { PLUGIN_ROOT_PLACEHOLDER, pluginFile } from '#harness/paths.ts'
 
 const GH_SECURITY_ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 
@@ -196,5 +199,165 @@ describe('the allow-own-commands subcommand', () => {
     ['empty stdin', ''],
   ])('gives no decision for %s', (_case, stdin) => {
     expect(allowOwnCommandsCommand(contextFor(stdin))).toBeUndefined()
+  })
+})
+
+// #346: every CLI call that a prompt prescribes passes the hook, so nothing
+// prompts inside an unattended run. Each call is read from the prompt file,
+// one line of a `bash` fence, so a changed call is the call tested. Each
+// placeholder is then given a literal value of the shape the model writes.
+// The `<run>` value is the run directory of ruling 4: `${CLAUDE_PLUGIN_DATA}`
+// is substituted in the Markdown as `~/.claude/plugins/data/<id>/`, as an
+// absolute path (the plugins reference, "Environment variables").
+describe('the calls that the prompts prescribe (#346)', () => {
+  const RUN = '/Users/example/.claude/plugins/data/gh-security-skills/runs/20261026T190000Z'
+  const WORK = '/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-lodash-4x'
+  const VALUES: Readonly<Record<string, string>> = {
+    [`${PLUGIN_ROOT_PLACEHOLDER}${ENTRY_PATH}`]: ENTRY,
+    '<cli>': ENTRY,
+    '<cwd>': '/Users/example/src',
+    '<run>': RUN,
+    '<work>': WORK,
+    '<repo_root>': '/Users/example/src/octo/app',
+    '<checkout>': '/Users/example/src/octo/app',
+    '<package>': '@example/pkg',
+    '<cap>': '4',
+    '<repo>': 'octo/app',
+    '<branch_name>': 'fix/dependabot-example-pkg-4x',
+    '<pr-url>': 'https://github.com/octo/app/pull/12',
+    '<nwo>': 'octo/app',
+    '<band>': 'low',
+    '<default_branch>': 'main',
+    '<group file>':
+      '/private/tmp/claude-501/session/scratchpad/octo-app-fix-dependabot-lodash-4x.json',
+  }
+
+  /** Each line of a `bash` fence of a prompt that runs this CLI. */
+  const callsIn = (file: string, start: string): string[] => {
+    const calls: string[] = []
+    let fenced = false
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.startsWith('```')) fenced = line === '```bash'
+      else if (fenced && line.startsWith(start)) calls.push(line)
+    }
+    return calls
+  }
+
+  /** The call with each placeholder given its value. */
+  const literal = (call: string): string =>
+    Object.entries(VALUES).reduce((text, [name, value]) => text.replaceAll(name, value), call)
+
+  const SKILL = pluginFile('gh-security', 'skills', 'resolve-alerts', 'SKILL.md')
+  const AGENT = pluginFile('gh-security', 'agents', 'fix-dependency.md')
+  const prescribed = [
+    ...callsIn(SKILL, `node "${PLUGIN_ROOT_PLACEHOLDER}${ENTRY_PATH}" `).map(
+      (call) => ['resolve-alerts', call] as const,
+    ),
+    ...callsIn(AGENT, 'node <cli> ').map((call) => ['fix-dependency', call] as const),
+  ]
+
+  it('finds each call of the two prompts', () => {
+    // An empty or a short list would pass every row below. Each name is a
+    // call shape: a command, or a verb of one.
+    expect(
+      prescribed.map(([prompt, call]) => `${prompt}: ${call.split(' ').slice(2, 4).join(' ')}`),
+    ).toEqual([
+      'resolve-alerts: discover-repos <cwd>',
+      'resolve-alerts: prepare-checkout --out',
+      'resolve-alerts: merge-envelopes --out',
+      'resolve-alerts: preflight-repo --fallback-package',
+      'resolve-alerts: build-dispatches --envelope',
+      'resolve-alerts: reap-batch --out',
+      'resolve-alerts: summarize-run --workflow',
+      'resolve-alerts: pr-status --out',
+      'resolve-alerts: render-pr-status --results',
+      'resolve-alerts: remove-run <run>',
+      'fix-dependency: fix-group setup',
+      'fix-dependency: fix-group classify',
+      'fix-dependency: fix-group baseline',
+      'fix-dependency: fix-group apply',
+      'fix-dependency: fix-group score',
+      'fix-dependency: render-pr commit-msg',
+      'fix-dependency: render-pr labels',
+      'fix-dependency: render-pr body',
+      'fix-dependency: render-pr create',
+      'fix-dependency: fix-group cleanup',
+    ])
+  })
+
+  it.each(prescribed)('allows the %s call %s', (_prompt, call) => {
+    const command = literal(call)
+    expect(command).not.toMatch(/<[^>]*>/)
+    expect(allowOwnCommands(hookInput(command), ENTRY, commandNames)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: expect.stringContaining(`${ENTRY} ${call.split(' ')[2]} `),
+      },
+    })
+  })
+
+  // The redirection and the quoted title that #346 removed. Each still gets
+  // no decision, which is why the prompts do not use them.
+  it.each([
+    [`node ${ENTRY} render-pr commit-msg --state ${WORK}/s.json > ${WORK}/commit-msg.txt`],
+    [`node ${ENTRY} render-pr create --repo octo/app --title "fix(deps): a title"`],
+  ])('gives no decision for the old shape %s', (command) => {
+    expect(allowOwnCommands(hookInput(command), ENTRY, commandNames)).toBeUndefined()
+  })
+})
+
+// Ruling 16 on #346: a file flag passes only under a run or work directory.
+describe('the file flags (ruling 16)', () => {
+  const RUN = '/Users/example/.claude/plugins/data/gh-security-skills/runs/20261026T190000Z'
+  const decideReal = (command: string) => allowOwnCommands(hookInput(command), ENTRY, commandNames)
+
+  it('gives no decision for --out into the settings of the user', () => {
+    expect(
+      decideReal(
+        `node ${ENTRY} merge-envelopes --out /Users/example/.claude/settings.json ${RUN}/a.json`,
+      ),
+    ).toBeUndefined()
+  })
+})
+
+describe('each file flag, read as text by the hook (ruling 16)', () => {
+  const RUN = '/Users/example/.claude/plugins/data/gh-security-skills/runs/20261026T190000Z'
+  const WORK = '/Users/example/src/octo/app/.claude/worktrees/fix-dependabot-lodash-4x'
+  const decideReal = (args: string) =>
+    allowOwnCommands(hookInput(`node ${ENTRY} render-pr ${args}`), ENTRY, commandNames)
+
+  it.each([
+    ['--out in a run', `commit-msg --out ${RUN}/commit-msg.txt`],
+    ['--out in a work directory', `commit-msg --out ${WORK}/commit-msg.txt`],
+    ['--title-file in a work directory', `create --title-file ${WORK}/commit-msg.txt`],
+    ['--body-file in a run', `create --body-file ${RUN}/pr-body.md`],
+  ])('allows %s', (_case, args) => {
+    expect(decideReal(args)?.hookSpecificOutput.permissionDecision).toBe('allow')
+  })
+
+  it.each([
+    ['--out outside', `commit-msg --out /Users/example/.claude/settings.json`],
+    ['--title-file outside', 'create --title-file /etc/hosts'],
+    ['--body-file outside', 'create --body-file /Users/example/.ssh/config'],
+    ['a .. segment', `commit-msg --out ${RUN}/../../../../settings.json`],
+    ['a .. segment that stays in the run', `commit-msg --out ${RUN}/x/../a.json`],
+    ['a . segment', `commit-msg --out ${RUN}/./a.json`],
+    ['an empty segment', `commit-msg --out ${RUN}//a.json`],
+    ['a relative path', 'commit-msg --out runs/20261026T190000Z/a.json'],
+    ['a / at the end', `commit-msg --out ${RUN}/a/`],
+    ['the run directory itself', `commit-msg --out ${RUN}`],
+    ['a flag with no value', 'commit-msg --out'],
+    ['a second file flag outside', `create --title-file ${WORK}/t.txt --body-file /etc/hosts`],
+  ])('gives no decision for %s', (_case, args) => {
+    expect(decideReal(args)).toBeUndefined()
+  })
+
+  it('leaves the <checkout>= words of summarize-run, which are inputs, as they were', () => {
+    const command = `node ${ENTRY} summarize-run --workflow ${RUN}/workflow.json --reports ${RUN}/reports.json --discovery ${RUN}/merged.json /Users/example/src/octo/app=/Users/example/elsewhere/preflight-1.json`
+    expect(
+      allowOwnCommands(hookInput(command), ENTRY, commandNames)?.hookSpecificOutput
+        .permissionDecision,
+    ).toBe('allow')
   })
 })

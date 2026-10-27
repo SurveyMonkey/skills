@@ -288,6 +288,12 @@
 //       - Resolution needs no search permission on the directory itself,
 //         where `cd` needed it.
 //
+// `fix-group score --out <file>` writes the answer of `score` to the file
+// too. A failure writes its report, or its `{"error": ...}`, there
+// (`cli/out-file.ts`).
+// `run.ts` takes the flag out before this handler runs. The other phases do
+// not take it: no later command reads their answer (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { selectAdapter } from '../adapters/registry.ts'

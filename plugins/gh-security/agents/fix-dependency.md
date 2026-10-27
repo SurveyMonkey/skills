@@ -86,7 +86,7 @@ node <cli> fix-group setup --group-json <group file> --repo-root <repo_root> --d
 node <cli> fix-group classify --work <work>
 node <cli> fix-group baseline --work <work>
 node <cli> fix-group apply --work <work>
-node <cli> fix-group score --work <work>
+node <cli> fix-group score --work <work> --out <work>/ready-for-pr.json
 ```
 
 `setup` answers `work`. Use that literal path as `<work>` from then on, and remove the scratchpad
@@ -126,21 +126,23 @@ file. Each step answers JSON on stdout:
 
 ## Phase 6: Commit, push, open the PR
 
-Write the `ready_for_pr` answer to `<work>/ready-for-pr.json` and `group` to `<work>/group.json`.
-**On a `lockfile-refresh` there is nothing to commit**: skip `add`, `commit-msg` and `commit`,
-push the drift commit, and use the title
-`fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x`.
+`score --out` wrote the `ready_for_pr` answer to `<work>/ready-for-pr.json`. Write `group` to
+`<work>/group.json`. **On a `lockfile-refresh` there is nothing to commit**: skip `add`,
+`commit-msg` and `commit`, and push the drift commit. Write the title
+`fix(deps): resolve <N> Dependabot alert(s) for <package> <major_line>.x` to
+`<work>/commit-msg.txt` for `create`.
 Otherwise stage `pnpm-workspace.yaml` too when `override_file` names it:
 
 ```bash
 git -C <work>/fix add package.json <lockfile>
-node <cli> render-pr commit-msg --state <work>/ready-for-pr.json --group-json <work>/group.json --repo <nwo> > <work>/commit-msg.txt
+node <cli> render-pr commit-msg --state <work>/ready-for-pr.json --group-json <work>/group.json --repo <nwo> --out <work>/commit-msg.txt
 git -C <work>/fix commit -F <work>/commit-msg.txt
 git -C <work>/fix push -u origin <branch_name>
 ```
 
-A non-zero exit from `commit-msg` or `body` puts its `{"error": ...}` in the file. Then fail,
-with the error quoted: phase `push` for `commit-msg`, phase `pr` for `body`.
+A non-zero exit from `commit-msg` or `body` puts its `{"error": ...}` on stdout, and in the
+`--out` file when the command could write it. Then fail, with the stdout error quoted: phase
+`push` for `commit-msg`, phase `pr` for `body`.
 
 **The repository's own commit and push hooks are the repository's, and they run.** Never bypass
 one (`--no-verify`, `HUSKY=0`, `LEFTHOOK=0`). Never edit code, tests or configuration to satisfy a
@@ -158,8 +160,8 @@ label that a CLAUDE.md in your context requires as `--label`, to `labels` and to
 
 ```bash
 node <cli> render-pr labels --repo <nwo> --band <band>
-node <cli> render-pr body --state <work>/ready-for-pr.json --group-json <work>/group.json --repo <nwo> > <work>/pr-body.md
-node <cli> render-pr create --repo <nwo> --head <branch_name> --band <band> --title "<first line of commit-msg.txt>" --body-file <work>/pr-body.md
+node <cli> render-pr body --state <work>/ready-for-pr.json --group-json <work>/group.json --repo <nwo> --out <work>/pr-body.md
+node <cli> render-pr create --repo <nwo> --head <branch_name> --band <band> --title-file <work>/commit-msg.txt --body-file <work>/pr-body.md
 ```
 
 `body` refuses, rather than inventing prose, when a note it needs is missing:

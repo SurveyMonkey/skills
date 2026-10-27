@@ -85,6 +85,10 @@
 //     not the stderr of git. git can write a warning on success, and the
 //     cause is then the output.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { statSync } from 'node:fs'

@@ -49,6 +49,10 @@
 //   - a prefix for a path that is not a kept checkout, or a prefix with no
 //     word in it.
 //
+// `--out <file>` writes the answer to the file too, and a failure writes its
+// report or its `{"error": ...}` there (`cli/out-file.ts`). `run.ts` takes
+// the flag out before this handler runs (#346).
+//
 // This file ships. It imports nothing outside the plugin.
 
 import { readFileSync } from 'node:fs'

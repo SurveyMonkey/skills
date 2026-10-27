@@ -3,7 +3,9 @@
 // Markdown is written by hand from `resolve-alerts` SKILL.md phase 8 ("what
 // that check state is worth") and from the contract in the header of the
 // command. `spec/fixtures/render-pr-status/pull-317.json` is a real answer of
-// `pr-status`, saved from a run on a pull request of this repository. The
+// `pr-status`, saved from a run on a pull request of this repository.
+// `pull-317-results.json` beside it is written by hand: one Workflow entry
+// that gives that PR the band Medium, in the shape of `fix-groups.mjs`. The
 // other names are fictitious. This command has no bash original, so there is
 // no parity run.
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -20,7 +22,7 @@ import { createSandbox } from '#harness/sandbox.ts'
 const ENTRY = pluginFile('gh-security', 'scripts', 'gh-security.ts')
 const DIR = join(FIXTURES_ROOT, 'render-pr-status')
 
-const USAGE = 'usage: gh-security render-pr-status --bands <bands.json> <report.json>...'
+const USAGE = 'usage: gh-security render-pr-status --results <results.json> <report.json>...'
 
 const context = (args: readonly string[]): CommandContext => ({
   args,
@@ -72,13 +74,27 @@ const entry = (repo: string, number: number, overrides: Record<string, unknown> 
   ...overrides,
 })
 
-const bandsOf = (...pairs: [string, string | null][]) => Object.fromEntries(pairs)
+/**
+ * The Workflow entries of `results.json`, one for each PR and its band, as
+ * `fix-groups.mjs` returns them: a band is the `risk.band` of a success, and
+ * a result with no score has `risk` null. Only `pr_url` and `risk` are read.
+ */
+const resultsOf = (...pairs: [string, string | null][]) =>
+  pairs.map(([prUrl, band], index) => ({
+    dispatch: { group: { package: `pkg-${index}`, major_line: '1' }, repo: 'octo/app' },
+    result: {
+      status: band === null ? 'failure' : 'success',
+      pr_url: prUrl,
+      risk: band === null ? null : { band, score: 3, f4: 0, f5: 0 },
+    },
+    mispaired: false,
+  }))
 
 const HEADER = '| PR | Merge risk | Checks | Merge state |\n| --- | --- | --- | --- |\n'
 
 describe('a real answer of pr-status', () => {
   it('renders one table, with the pending count and the notes of the state', () => {
-    expect(markdown(render(['--bands', 'pull-317-bands.json', 'pull-317.json']))).toBe(
+    expect(markdown(render(['--results', 'pull-317-results.json', 'pull-317.json']))).toBe(
       '## SurveyMonkey/skills\n\n' +
         HEADER +
         '| https://github.com/SurveyMonkey/skills/pull/317 | Medium | pending (13 of 15 finished) | BLOCKED |\n\n' +
@@ -92,9 +108,9 @@ describe('the check state', () => {
   const only = (overrides: Record<string, unknown>, band: string | null = 'Low') => {
     const dir = filesOf({
       'a.json': { prs: [entry('octo/app', 1, overrides)] },
-      'bands.json': bandsOf([url('octo/app', 1), band]),
+      'results.json': resultsOf([url('octo/app', 1), band]),
     })
-    return markdown(render(['--bands', 'bands.json', 'a.json'], dir))
+    return markdown(render(['--results', 'results.json', 'a.json'], dir))
   }
 
   it('shows none, and says that no check has reported yet', () => {
@@ -144,9 +160,9 @@ describe('the merge state', () => {
   const only = (overrides: Record<string, unknown>) => {
     const dir = filesOf({
       'a.json': { prs: [entry('octo/app', 1, overrides)] },
-      'bands.json': bandsOf([url('octo/app', 1), 'High']),
+      'results.json': resultsOf([url('octo/app', 1), 'High']),
     })
-    return markdown(render(['--bands', 'bands.json', 'a.json'], dir))
+    return markdown(render(['--results', 'results.json', 'a.json'], dir))
   }
   const notes = (text: string) => text.split('## What the states are worth\n\n')[1]
 
@@ -200,9 +216,9 @@ describe('an entry that pr-status could not read', () => {
           { url: url('octo/app', 2), error: 'gh: Could not\r\nresolve\nto a PullRequest | 404' },
         ],
       },
-      'bands.json': bandsOf([url('octo/app', 1), 'Low'], [url('octo/app', 2), 'High']),
+      'results.json': resultsOf([url('octo/app', 1), 'Low'], [url('octo/app', 2), 'High']),
     })
-    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+    expect(markdown(render(['--results', 'results.json', 'a.json'], dir))).toBe(
       '## octo/app\n\n' +
         HEADER +
         '| https://github.com/octo/app/pull/1 | Low | passed | CLEAN |\n' +
@@ -220,9 +236,9 @@ describe('an entry that pr-status could not read', () => {
       'a.json': {
         prs: [entry('octo/app', 1), { url: 'octo/app#2', error: 'not a GitHub pull request URL' }],
       },
-      'bands.json': bandsOf([url('octo/app', 1), 'Low'], ['octo/app#2', null]),
+      'results.json': resultsOf([url('octo/app', 1), 'Low'], ['octo/app#2', null]),
     })
-    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+    expect(markdown(render(['--results', 'results.json', 'a.json'], dir))).toBe(
       '## octo/app\n\n' +
         HEADER +
         '| https://github.com/octo/app/pull/1 | Low | passed | CLEAN |\n\n' +
@@ -243,13 +259,13 @@ describe('an entry that pr-status could not read', () => {
           entry('octo/app', 1),
         ],
       },
-      'bands.json': bandsOf(
+      'results.json': resultsOf(
         ['octo/app#2', null],
         ['octo|app#3', null],
         [url('octo/app', 1), 'Low'],
       ),
     })
-    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+    expect(markdown(render(['--results', 'results.json', 'a.json'], dir))).toBe(
       '## not a pull request URL\n\n' +
         HEADER +
         '| octo/app#2 | not scored | not read: not a GitHub pull request URL | - |\n' +
@@ -267,9 +283,9 @@ describe('a report with no entry that pr-status could read', () => {
   it('has a table and no notes on the states', () => {
     const dir = filesOf({
       'a.json': { prs: [{ url: url('octo/app', 2), error: 'gh: not found' }] },
-      'bands.json': bandsOf([url('octo/app', 2), 'High']),
+      'results.json': resultsOf([url('octo/app', 2), 'High']),
     })
-    expect(markdown(render(['--bands', 'bands.json', 'a.json'], dir))).toBe(
+    expect(markdown(render(['--results', 'results.json', 'a.json'], dir))).toBe(
       '## octo/app\n\n' +
         HEADER +
         '| https://github.com/octo/app/pull/2 | High | not read: gh: not found | - |\n',
@@ -283,7 +299,7 @@ describe('the repositories', () => {
       'app.json': { prs: [entry('octo/app', 1), entry('octo/app', 3)] },
       'web.json': { prs: [entry('octo/web', 7, { merge_state: 'BLOCKED' })] },
       'more-app.json': { prs: [entry('octo/app', 9)] },
-      'bands.json': bandsOf(
+      'results.json': resultsOf(
         [url('octo/app', 1), 'Low'],
         [url('octo/app', 3), 'Medium'],
         [url('octo/app', 9), 'High'],
@@ -293,7 +309,7 @@ describe('the repositories', () => {
 
   it('gives one table for each repository, in the order of first appearance, and names a repository with several PRs together', () => {
     const text = markdown(
-      render(['--bands', 'bands.json', 'app.json', 'web.json', 'more-app.json'], two()),
+      render(['--results', 'results.json', 'app.json', 'web.json', 'more-app.json'], two()),
     )
     expect(text).toBe(
       '## octo/app\n\n' +
@@ -315,9 +331,9 @@ describe('the repositories', () => {
   it('says nothing of a shared block for a repository with one PR', () => {
     const dir = filesOf({
       'web.json': { prs: [entry('octo/web', 7)] },
-      'bands.json': bandsOf([url('octo/web', 7), 'Low']),
+      'results.json': resultsOf([url('octo/web', 7), 'Low']),
     })
-    expect(markdown(render(['--bands', 'bands.json', 'web.json'], dir))).not.toContain(
+    expect(markdown(render(['--results', 'results.json', 'web.json'], dir))).not.toContain(
       'same overrides block',
     )
   })
@@ -325,31 +341,33 @@ describe('the repositories', () => {
 
 describe('the refusals', () => {
   const good = { prs: [entry('octo/app', 1)] }
-  const bands = bandsOf([url('octo/app', 1), 'Low'])
+  const results = resultsOf([url('octo/app', 1), 'Low'])
 
-  const fails = (files: Record<string, unknown>, args = ['--bands', 'bands.json', 'a.json']) =>
-    message(render(args, filesOf({ 'bands.json': bands, 'a.json': good, ...files })))
+  const fails = (files: Record<string, unknown>, args = ['--results', 'results.json', 'a.json']) =>
+    message(render(args, filesOf({ 'results.json': results, 'a.json': good, ...files })))
 
   it.each([
     ['no option and no file', []],
-    ['no file', ['--bands', 'bands.json']],
-    ['no --bands', ['a.json']],
+    ['no file', ['--results', 'results.json']],
+    ['no --results', ['a.json']],
   ])('refuses %s with the usage', (_name, args) => {
     expect(message(render(args))).toBe(USAGE)
   })
 
   it('refuses an option that it does not have', () => {
-    expect(render(['--env-prefix', 'x', '--bands', 'bands.json', 'a.json'])?.outcome).toBe('failed')
+    expect(render(['--env-prefix', 'x', '--results', 'results.json', 'a.json'])?.outcome).toBe(
+      'failed',
+    )
   })
 
   it('refuses a file that cannot be read', () => {
-    expect(fails({}, ['--bands', 'bands.json', 'nope.json'])).toMatch(
+    expect(fails({}, ['--results', 'results.json', 'nope.json'])).toMatch(
       /^render-pr-status: cannot read nope\.json: /,
     )
   })
 
-  it('refuses a bands file that cannot be read', () => {
-    expect(fails({}, ['--bands', 'nope.json', 'a.json'])).toMatch(
+  it('refuses a results file that cannot be read', () => {
+    expect(fails({}, ['--results', 'nope.json', 'a.json'])).toMatch(
       /^render-pr-status: cannot read nope\.json: /,
     )
   })
@@ -358,8 +376,8 @@ describe('the refusals', () => {
     expect(fails({ 'a.json': 'not json' })).toBe('render-pr-status: a.json is not JSON')
   })
 
-  it('refuses a bands file that is not JSON', () => {
-    expect(fails({ 'bands.json': '{' })).toBe('render-pr-status: bands.json is not JSON')
+  it('refuses a results file that is not JSON', () => {
+    expect(fails({ 'results.json': '{' })).toBe('render-pr-status: results.json is not JSON')
   })
 
   it.each([
@@ -478,35 +496,88 @@ describe('the refusals', () => {
   })
 
   it('refuses a PR that two entries give', () => {
-    expect(fails({ 'b.json': good }, ['--bands', 'bands.json', 'a.json', 'b.json'])).toBe(
+    expect(fails({ 'b.json': good }, ['--results', 'results.json', 'a.json', 'b.json'])).toBe(
       `render-pr-status: the PR ${url('octo/app', 1)} is in two entries`,
     )
   })
 
   it.each([
-    ['a list', []],
+    ['an object', {}],
     ['null', null],
-  ])('refuses a bands file that is %s', (_name, content) => {
-    expect(fails({ 'bands.json': content })).toBe(
-      'render-pr-status: bands.json is not a JSON object',
+  ])('refuses a results file that is %s', (_name, content) => {
+    expect(fails({ 'results.json': content })).toBe(
+      'render-pr-status: results.json is not a list of workflow entries',
     )
   })
 
-  it.each([['low'], [3], ['']])('refuses the band %j', (band) => {
-    expect(fails({ 'bands.json': { [url('octo/app', 1)]: band } })).toBe(
-      `render-pr-status: bands.json gives ${url('octo/app', 1)} a band that is not Low, Medium, High or null`,
+  it.each([
+    ['not an object', 5],
+    ['an object with no result', { dispatch: {} }],
+    ['an entry whose result is not an object or null', { result: 'success' }],
+  ])('refuses an entry that is %s', (_name, element) => {
+    expect(fails({ 'results.json': [element] })).toBe(
+      'render-pr-status: results.json[0] has no result that is an object or null',
     )
   })
 
-  it('refuses a PR that the bands file lacks', () => {
-    expect(fails({ 'bands.json': {} })).toBe(
-      `render-pr-status: bands.json has no band for ${url('octo/app', 1)}`,
+  it.each([
+    ['risk that is not an object', 'Low'],
+    ['a band that is not one of the three', { band: 'low' }],
+    ['no band', { score: 3 }],
+  ])('refuses a result with a PR and %s', (_name, risk) => {
+    expect(fails({ 'results.json': [{ result: { pr_url: url('octo/app', 1), risk } }] })).toBe(
+      'render-pr-status: results.json[0].result.risk is not null or an object with a band of Low, Medium, High',
     )
   })
 
-  it('refuses a band for a PR that no report has', () => {
-    expect(fails({ 'bands.json': { ...bands, [url('octo/app', 2)]: 'Low' } })).toBe(
-      `render-pr-status: bands.json names ${url('octo/app', 2)}, which no report has`,
+  it('refuses a PR that two results give', () => {
+    expect(
+      fails({
+        'results.json': resultsOf([url('octo/app', 1), 'Low'], [url('octo/app', 1), 'High']),
+      }),
+    ).toBe(`render-pr-status: results.json gives ${url('octo/app', 1)} in two results`)
+  })
+})
+
+describe('the band of each PR, from the results (#346)', () => {
+  const good = { prs: [entry('octo/app', 1)] }
+  const rowFor = (results: unknown) =>
+    markdown(
+      render(
+        ['--results', 'results.json', 'a.json'],
+        filesOf({ 'results.json': results, 'a.json': good }),
+      ),
+    )
+      .split('\n')
+      .find((line) => line.startsWith(`| ${url('octo/app', 1)} `))
+
+  it('shows the band of the result that opened the PR', () => {
+    expect(rowFor(resultsOf([url('octo/app', 1), 'High']))).toBe(
+      `| ${url('octo/app', 1)} | High | passed | CLEAN |`,
+    )
+  })
+
+  it('shows a result with a null risk as not scored', () => {
+    expect(rowFor(resultsOf([url('octo/app', 1), null]))).toBe(
+      `| ${url('octo/app', 1)} | not scored | passed | CLEAN |`,
+    )
+  })
+
+  it('shows a PR that no result names as not scored', () => {
+    expect(rowFor(resultsOf([url('octo/app', 9), 'Low']))).toBe(
+      `| ${url('octo/app', 1)} | not scored | passed | CLEAN |`,
+    )
+  })
+
+  it.each([
+    ['a null result', { dispatch: {}, result: null, mispaired: false }],
+    [
+      'a result with no PR',
+      { dispatch: {}, result: { status: 'failure', pr_url: null, risk: null } },
+    ],
+  ])('reads %s as no PR', (_name, element) => {
+    expect(rowFor([element, ...resultsOf([url('octo/app', 1), 'Medium'])])).toBe(
+      `| ${url('octo/app', 1)} | Medium | passed | CLEAN |`,
     )
   })
 })
@@ -514,7 +585,7 @@ describe('the refusals', () => {
 describe('the entry point', () => {
   it('reads the files from the current directory of the process', () => {
     const result = renderPrStatusCommand(
-      context(['--bands', join(DIR, 'pull-317-bands.json'), join(DIR, 'pull-317.json')]),
+      context(['--results', join(DIR, 'pull-317-results.json'), join(DIR, 'pull-317.json')]),
     )
     expect(markdown(result as CommandResult)).toContain('## SurveyMonkey/skills')
   })
@@ -528,7 +599,7 @@ describe('the process', () => {
     })
 
   it('writes the Markdown as one JSON field on stdout with exit 0', async () => {
-    const result = await spawnCli(['--bands', 'pull-317-bands.json', 'pull-317.json'])
+    const result = await spawnCli(['--results', 'pull-317-results.json', 'pull-317.json'])
     expect(result.status).toBe(0)
     expect((JSON.parse(result.stdout) as { markdown: string }).markdown).toContain(
       '| https://github.com/SurveyMonkey/skills/pull/317 | Medium | pending (13 of 15 finished) | BLOCKED |',

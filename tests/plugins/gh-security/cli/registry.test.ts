@@ -21,6 +21,7 @@ import { mergeEnvelopesCommand } from '#gh-security/subcommands/merge-envelopes.
 import { preflightRepoCommand } from '#gh-security/subcommands/preflight-repo.ts'
 import { prepareCheckoutCommand } from '#gh-security/subcommands/prepare-checkout.ts'
 import { reapBatchCommand } from '#gh-security/subcommands/reap-batch.ts'
+import { removeRunCommand } from '#gh-security/subcommands/remove-run.ts'
 import { renderPrCommand } from '#gh-security/subcommands/render-pr.ts'
 import { renderPrStatusCommand } from '#gh-security/subcommands/render-pr-status.ts'
 import { scoreMergeRiskCommand } from '#gh-security/subcommands/score-merge-risk.ts'
@@ -56,6 +57,7 @@ describe('the registry', () => {
       "import('../subcommands/preflight-repo.ts')",
       "import('../subcommands/prepare-checkout.ts')",
       "import('../subcommands/reap-batch.ts')",
+      "import('../subcommands/remove-run.ts')",
       "import('../subcommands/render-pr.ts')",
       "import('../subcommands/render-pr-status.ts')",
       "import('../subcommands/score-merge-risk.ts')",
@@ -79,6 +81,7 @@ describe('the discovery entries', () => {
     ['preflight-repo', preflightRepoCommand],
     ['prepare-checkout', prepareCheckoutCommand],
     ['reap-batch', reapBatchCommand],
+    ['remove-run', removeRunCommand],
     ['render-pr-status', renderPrStatusCommand],
     ['summarize-run', summarizeRunCommand],
   ])('loads the handler of %s', async (name, handler) => {
@@ -88,7 +91,7 @@ describe('the discovery entries', () => {
   it.each([
     [
       'build-dispatches',
-      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>...',
+      'build-dispatches --envelope <merged.json> --cap <n> [--env-prefixes <prefixes.json>] <repo>:<branch_name>... [--out <file>]',
     ],
     [
       'check-advisories',
@@ -104,13 +107,17 @@ describe('the discovery entries', () => {
       'discover-alerts [--env-prefix <prefix>] [--branch-style slash|flat] [--stdin] <owner/repo>',
     ],
     ['discover-repos', 'discover-repos [<path>]'],
-    ['merge-envelopes', 'merge-envelopes <envelope.json>...'],
-    ['preflight-repo', 'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root>'],
-    ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root>'],
-    ['reap-batch', 'reap-batch <results.json>'],
+    ['merge-envelopes', 'merge-envelopes <envelope.json>... [--out <file>]'],
+    [
+      'preflight-repo',
+      'preflight-repo [--env-prefix <prefix>] [--fallback-package <pkg>] <root> [--out <file>]',
+    ],
+    ['prepare-checkout', 'prepare-checkout [--env-prefix <prefix>] <root> [--out <file>]'],
+    ['reap-batch', 'reap-batch <results.json> [--out <file>]'],
+    ['remove-run', 'remove-run <dir>'],
     [
       'summarize-run',
-      'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--preflight <preflights.json>] [--args <args.json>]',
+      'summarize-run --workflow <workflow.json> --reports <reports.json> --discovery <merged.json> [--args <args.json>] [<checkout>=<preflight.json>]... [--out <file>]',
     ],
   ])('describes %s with its usage', (name, usage) => {
     expect(COMMANDS[name]?.description).toContain(usage)
@@ -123,10 +130,10 @@ describe('the render-pr entry', () => {
   })
 
   it.each([
-    'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> |',
-    'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] |',
+    'render-pr commit-msg --state <file> --group-json <file> --repo <nwo> [--out <file>] |',
+    'render-pr body --state <file> --group-json <file> --repo <nwo> [--collateral-note <file>] [--global-override-note <file>] [--out <file>] |',
     'render-pr labels --repo <nwo> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>] |',
-    'render-pr create --repo <nwo> --head <branch> --title <text> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
+    'render-pr create --repo <nwo> --head <branch> --title-file <file> --body-file <file> --band <low|medium|high> [--label <name>]... [--env-prefix <prefix>]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['render-pr']?.description).toContain(usage)
   })
@@ -154,7 +161,7 @@ describe('the fix driver entry', () => {
     'fix-group classify --work <dir>',
     'fix-group baseline --work <dir>',
     'fix-group apply --work <dir>',
-    'fix-group score --work <dir>',
+    'fix-group score --work <dir> [--out <file>] |',
     'fix-group cleanup --work <dir> [--pushed]',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['fix-group']?.description).toContain(usage)
@@ -174,5 +181,28 @@ describe('the pin-audit driver entry', () => {
     'audit-pins together --work <dir>',
   ])('describes the usage %s', (usage) => {
     expect(COMMANDS['audit-pins']?.description).toContain(usage)
+  })
+})
+
+describe('the calls that take --out (#346)', () => {
+  // Each command whose answer a later command reads, and no other. A
+  // command missing here would leave the model to copy its answer by hand.
+  it('opts in exactly the commands and the verbs whose answer a later command reads', () => {
+    const scopes = Object.fromEntries(
+      Object.entries(COMMANDS)
+        .filter(([, entry]) => entry.out !== undefined)
+        .map(([name, entry]) => [name, entry.out]),
+    )
+    expect(scopes).toEqual({
+      'build-dispatches': 'every call',
+      'fix-group': ['score'],
+      'merge-envelopes': 'every call',
+      'pr-status': 'every call',
+      'preflight-repo': 'every call',
+      'prepare-checkout': 'every call',
+      'reap-batch': 'every call',
+      'render-pr': ['commit-msg', 'body'],
+      'summarize-run': 'every call',
+    })
   })
 })
